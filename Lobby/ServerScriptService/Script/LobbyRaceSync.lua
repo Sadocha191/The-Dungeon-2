@@ -15,12 +15,17 @@ local RerollRaceResponse = remoteFolder:WaitForChild("RerollRaceResponse")
 -- równolegle ustawić atrybut Race na graczu.
 local function wrapResponseEvent(ev: RemoteEvent, extractRace: (any) -> (string?))
 	local original = ev.FireClient
-	ev.FireClient = function(self, player: Player, payload: any)
-		local race = extractRace(payload)
+	ev.FireClient = function(self, player: Player, ...)
+		local args = { ... }
+		local race = nil
+		for _, arg in ipairs(args) do
+			race = extractRace(arg)
+			if race then break end
+		end
 		if typeof(race) == "string" and race ~= "" then
 			player:SetAttribute("Race", race)
 		end
-		return original(self, player, payload)
+		return original(self, player, table.unpack(args))
 	end
 end
 
