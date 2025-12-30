@@ -1,7 +1,7 @@
 -- PlayerData (ServerScriptService) - globalny profil (bez armora)
 
 local DataStoreService = game:GetService("DataStoreService")
-local store = DataStoreService:GetDataStore("GlobalProfile_v4")
+local store = DataStoreService:GetDataStore("GlobalPlayerProgress_v1")
 
 local PlayerData = {}
 PlayerData._cache = {}
@@ -14,6 +14,8 @@ local function defaultProfile()
 		xp = 0,
 		nextXp = 120,
 		coins = 0,
+		upgradePoints = 0,
+		upgrades = { dmg = 0, speed = 0, jump = 0 },
 
 		-- Combat stats
 		damage = 18,          -- base dmg (melee)
@@ -27,6 +29,13 @@ local function defaultProfile()
 		unlockBow = true,
 		unlockWand = true,
 	}
+end
+
+local function clampInt(x)
+	x = tonumber(x) or 0
+	x = math.floor(x)
+	if x < 0 then x = 0 end
+	return x
 end
 
 function PlayerData.Get(plr)
@@ -44,19 +53,29 @@ function PlayerData.Get(plr)
 		for k,v in pairs(saved) do
 			data[k] = v
 		end
+		if typeof(saved.upgrades) == "table" then
+			data.upgrades = data.upgrades or { dmg = 0, speed = 0, jump = 0 }
+			data.upgrades.dmg = clampInt(saved.upgrades.dmg)
+			data.upgrades.speed = clampInt(saved.upgrades.speed)
+			data.upgrades.jump = clampInt(saved.upgrades.jump)
+		end
 	end
 
 	-- sanity
-	data.level = math.max(1, math.floor(tonumber(data.level) or 1))
-	data.xp = math.max(0, math.floor(tonumber(data.xp) or 0))
-	data.nextXp = math.max(50, math.floor(tonumber(data.nextXp) or 120))
-	data.coins = math.max(0, math.floor(tonumber(data.coins) or 0))
+	data.level = math.max(1, clampInt(data.level))
+	data.xp = math.max(0, clampInt(data.xp))
+	data.nextXp = math.max(50, clampInt(data.nextXp) or 120)
+	data.coins = math.max(0, clampInt(data.coins))
+	data.upgradePoints = clampInt(data.upgradePoints)
+	if typeof(data.upgrades) ~= "table" then
+		data.upgrades = { dmg = 0, speed = 0, jump = 0 }
+	end
 
-	data.damage = math.max(1, math.floor(tonumber(data.damage) or 18))
+	data.damage = math.max(1, clampInt(data.damage) or 18)
 	data.fireChance = math.clamp(tonumber(data.fireChance) or 0, 0, 0.9)
-	data.fireDps = math.max(0, math.floor(tonumber(data.fireDps) or 0))
-	data.multiShot = math.clamp(math.floor(tonumber(data.multiShot) or 0), 0, 6)
-	data.ricochet = math.clamp(math.floor(tonumber(data.ricochet) or 0), 0, 4)
+	data.fireDps = math.max(0, clampInt(data.fireDps) or 0)
+	data.multiShot = math.clamp(clampInt(data.multiShot), 0, 6)
+	data.ricochet = math.clamp(clampInt(data.ricochet), 0, 4)
 	data.attackSpeed = math.clamp(tonumber(data.attackSpeed) or 1.0, 0.6, 2.0)
 
 	data.unlockBow = data.unlockBow ~= false

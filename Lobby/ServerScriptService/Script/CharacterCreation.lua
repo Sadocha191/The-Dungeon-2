@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local ProfilesManager = require(ServerScriptService:WaitForChild("ProfilesManager"))
+local Races = require(ReplicatedStorage:WaitForChild("Races"))
 
 local remotes = ReplicatedStorage:WaitForChild("RemoteEvents")
 local CreateReq = remotes:WaitForChild("CreateProfileRequest")
@@ -15,6 +16,30 @@ local RerollRes = remotes:WaitForChild("RerollRaceResponse")
 
 local lastCall: {[number]: number} = {}
 local COOLDOWN = 0.8
+
+local CARDS_COUNT = 45
+local TARGET_INDEX = CARDS_COUNT - 6
+
+local function buildRollPreview(className: string, finalRace: string?)
+	if typeof(className) ~= "string" then
+		className = "Default"
+	end
+
+	local sequence = table.create(CARDS_COUNT)
+	for i = 1, CARDS_COUNT do
+		if i == TARGET_INDEX and typeof(finalRace) == "string" then
+			sequence[i] = finalRace
+		else
+			sequence[i] = Races.RollForClass(className)
+		end
+	end
+
+	return {
+		sequence = sequence,
+		cardsCount = CARDS_COUNT,
+		targetIndex = TARGET_INDEX,
+	}
+end
 
 local function canCall(player)
 	local now = os.clock()
@@ -36,13 +61,26 @@ CreateReq.OnServerEvent:Connect(function(player: Player, className)
 	end
 
 	local ok, payload = ProfilesManager.CreateProfile(player, picked)
-	CreateRes:FireClient(player, ok, payload)
+	local response = {
+		ok = ok,
+		error = (ok and nil or payload),
+		profile = ok and payload or nil,
+		race = (ok and payload and payload.Race) or nil,
+		rollPreview = ok and buildRollPreview(picked, payload and payload.Race) or nil,
+	}
+	CreateRes:FireClient(player, response)
 end)
 
 RerollReq.OnServerEvent:Connect(function(player: Player)
 	if not canCall(player) then return end
 	local ok, payload = ProfilesManager.RerollRaceOnce(player)
-	RerollRes:FireClient(player, ok, payload)
+	local response = {
+		ok = ok,
+		error = (ok and nil or payload),
+		profile = ok and payload or nil,
+		race = (ok and payload and payload.Race) or nil,
+	}
+	RerollRes:FireClient(player, response)
 end)
 
 print("[CharacterCreation] Server READY")

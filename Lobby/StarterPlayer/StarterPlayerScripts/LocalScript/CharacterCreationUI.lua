@@ -325,6 +325,7 @@ end
 local rolling = false
 local createdOnce = false
 local finalRace: string? = nil
+local rollPreview: any = nil
 
 local function setCurrentRaceText(raceName: string)
 	current.Text = ("Aktualna rasa: %s"):format(raceName)
@@ -341,31 +342,48 @@ local function waitForNonZeroSize(frame: GuiObject, maxFrames: number)
 	return frame.AbsoluteSize.X > 50
 end
 
-local function playCaseAnimation(targetRace: string, chances)
+local function buildDeterministicSequence(chances, cardsCount: number)
+	local sequence = table.create(cardsCount)
+	if typeof(chances) ~= "table" or #chances == 0 then
+		for i = 1, cardsCount do
+			sequence[i] = "Human"
+		end
+		return sequence
+	end
+
+	for i = 1, cardsCount do
+		local idx = ((i - 1) % #chances) + 1
+		sequence[i] = chances[idx].name
+	end
+	return sequence
+end
+
+local function playCaseAnimation(targetRace: string, chances, preview)
 	clearStrip()
 
 	-- WAŻNE: poczekaj aż layout się policzy
 	waitForNonZeroSize(stripClip, 60)
 	local visibleW = stripClip.AbsoluteSize.X
 
-	local cardsCount = 45
-	local targetIndex = cardsCount - 6
+	local cardsCount = (typeof(preview) == "table" and tonumber(preview.cardsCount)) or 45
+	local targetIndex = (typeof(preview) == "table" and tonumber(preview.targetIndex)) or (cardsCount - 6)
+	local sequence = nil
 
-	local function weightedPick()
-		local total = 0
-		for _, r in ipairs(chances) do total += r.p end
-		local roll = math.random() * total
-		local acc = 0
-		for _, r in ipairs(chances) do
-			acc += r.p
-			if roll <= acc then return r.name end
+	if typeof(preview) == "table" then
+		if typeof(preview.sequence) == "table" then
+			sequence = preview.sequence
+		elseif typeof(preview[1]) == "string" then
+			sequence = preview
 		end
-		return chances[#chances].name
+	end
+
+	if not sequence or #sequence == 0 then
+		sequence = buildDeterministicSequence(chances, cardsCount)
 	end
 
 	local x = 0
 	for i = 1, cardsCount do
-		local name = (i == targetIndex) and targetRace or weightedPick()
+		local name = (i == targetIndex) and targetRace or sequence[i] or targetRace
 		local card = makeCard(name)
 		card.Position = UDim2.fromOffset(x, 0)
 		card.Parent = strip
@@ -392,6 +410,7 @@ local function openUI()
 	finalRace = nil
 	rollBtn.Active = true
 	rollBtn.Text = "Losuj"
+	rollPreview = nil
 
 	local cls = getClassName()
 	local chances = buildChancesForClass(cls)
@@ -439,8 +458,13 @@ end)
 if CreateProfileResponse and CreateProfileResponse:IsA("RemoteEvent") then
 	CreateProfileResponse.OnClientEvent:Connect(function(payload)
 		if not gui.Enabled then return end
-		if typeof(payload) == "table" and typeof(payload.race) == "string" then
+		if typeof(payload) ~= "table" then return end
+
+		if typeof(payload.race) == "string" then
 			plr:SetAttribute("Race", payload.race)
+		end
+		if typeof(payload.rollPreview) == "table" then
+			rollPreview = payload.rollPreview
 		end
 	end)
 end
@@ -470,7 +494,7 @@ rollBtn.MouseButton1Click:Connect(function()
 	end
 
 	if typeof(finalRace) == "string" then
-		playCaseAnimation(finalRace, chances)
+		playCaseAnimation(finalRace, chances, rollPreview)
 		createdOnce = true
 		rollBtn.Visible = false
 		okBtn.Visible = true

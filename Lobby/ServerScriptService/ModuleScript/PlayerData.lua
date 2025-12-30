@@ -21,6 +21,18 @@ local function defaultData()
 		coins = 0,
 		upgradePoints = 0,
 		upgrades = { dmg = 0, speed = 0, jump = 0 },
+
+		-- Combat stats (dla dungeona; trzymamy wspólny zapis)
+		damage = 18,
+		fireChance = 0.00,
+		fireDps = 0,
+		multiShot = 0,
+		ricochet = 0,
+		attackSpeed = 1.00,
+
+		-- Unlocks (weapon)
+		unlockBow = true,
+		unlockWand = true,
 	}
 end
 
@@ -55,6 +67,32 @@ function PlayerData.Get(plr: Player)
 			data.upgrades.jump = clampInt(loaded.upgrades.jump)
 		end
 
+		if loaded.damage ~= nil then
+			data.damage = clampInt(loaded.damage)
+		end
+		if loaded.fireChance ~= nil then
+			data.fireChance = math.clamp(tonumber(loaded.fireChance) or 0, 0, 0.9)
+		end
+		if loaded.fireDps ~= nil then
+			data.fireDps = clampInt(loaded.fireDps)
+		end
+		if loaded.multiShot ~= nil then
+			data.multiShot = math.clamp(math.floor(tonumber(loaded.multiShot) or 0), 0, 6)
+		end
+		if loaded.ricochet ~= nil then
+			data.ricochet = math.clamp(math.floor(tonumber(loaded.ricochet) or 0), 0, 4)
+		end
+		if loaded.attackSpeed ~= nil then
+			data.attackSpeed = math.clamp(tonumber(loaded.attackSpeed) or 1.0, 0.6, 2.0)
+		end
+
+		if loaded.unlockBow ~= nil then
+			data.unlockBow = loaded.unlockBow ~= false
+		end
+		if loaded.unlockWand ~= nil then
+			data.unlockWand = loaded.unlockWand ~= false
+		end
+
 		if data.level < 1 then data.level = 1 end
 		if data.nextXp < 50 then data.nextXp = 120 end
 	end
@@ -84,6 +122,15 @@ function PlayerData.Save(plr: Player)
 		coins = data.coins,
 		upgradePoints = data.upgradePoints,
 		upgrades = data.upgrades,
+
+		damage = data.damage,
+		fireChance = data.fireChance,
+		fireDps = data.fireDps,
+		multiShot = data.multiShot,
+		ricochet = data.ricochet,
+		attackSpeed = data.attackSpeed,
+		unlockBow = data.unlockBow,
+		unlockWand = data.unlockWand,
 	}
 
 	local ok = pcall(function()
@@ -108,7 +155,7 @@ function PlayerData.Reset(plr: Player)
 end
 
 function PlayerData.RollNextXp(level: number)
-	return 110 + (level - 1) * 55
+	return 120 + (level - 1) * 70
 end
 
 return PlayerData
