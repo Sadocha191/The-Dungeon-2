@@ -159,7 +159,7 @@ local function header(parent: Instance, text: string)
 end
 
 header(infoPanel, "Informacje")
-header(centerPanel, "Losowanie (jak skrzynka)")
+header(centerPanel, "Losowanie")
 header(chancePanel, "Szanse na rasy")
 
 local infoText = Instance.new("TextLabel")
@@ -332,6 +332,41 @@ local function setCurrentRaceText(raceName: string)
 	current.TextColor3 = colorOfRace(raceName)
 end
 
+local function setDefaultInfoText()
+	infoText.Text = "Kliknij Losuj aby stworzyć postać.\nMożesz to zrobić tylko raz."
+end
+
+local function setRaceInfoText(raceName: string)
+	local def = Races.Defs[raceName]
+	if not def then
+		setDefaultInfoText()
+		return
+	end
+
+	local lines = {}
+	if typeof(def.desc) == "string" and def.desc ~= "" then
+		table.insert(lines, def.desc)
+	end
+
+	local buffs = def.buffs
+	if typeof(buffs) == "table" and #buffs > 0 then
+		table.insert(lines, "")
+		table.insert(lines, "Buffy:")
+		for _, buff in ipairs(buffs) do
+			if typeof(buff) == "string" then
+				table.insert(lines, ("• %s"):format(buff))
+			end
+		end
+	end
+
+	if #lines == 0 then
+		setDefaultInfoText()
+		return
+	end
+
+	infoText.Text = table.concat(lines, "\n")
+end
+
 local function waitForNonZeroSize(frame: GuiObject, maxFrames: number)
 	for _ = 1, maxFrames do
 		if frame.AbsoluteSize.X > 50 and frame.AbsoluteSize.Y > 20 then
@@ -397,7 +432,7 @@ local function playCaseAnimation(targetRace: string, chances, preview)
 
 	strip.Position = UDim2.fromOffset(pointerX + 80, 0)
 
-	local tween = TweenService:Create(strip, TweenInfo.new(2.8, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+	local tween = TweenService:Create(strip, TweenInfo.new(4.0, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
 		Position = UDim2.fromOffset(targetOffset, 0)
 	})
 	tween:Play()
@@ -424,10 +459,17 @@ local function openUI()
 		createdOnce = true
 		rollBtn.Visible = false
 		okBtn.Visible = true
+		if typeof(r) == "string" and r ~= "" then
+			setRaceInfoText(r)
+		else
+			setDefaultInfoText()
+		end
 	else
 		createdOnce = false
 		rollBtn.Visible = true
 		okBtn.Visible = false
+		setCurrentRaceText("-")
+		setDefaultInfoText()
 	end
 
 	clearStrip()
@@ -446,13 +488,11 @@ plr:GetAttributeChangedSignal("Race"):Connect(function()
 	if not gui.Enabled then return end
 	local r = plr:GetAttribute("Race")
 	if typeof(r) ~= "string" or r == "" then return end
-	setCurrentRaceText(r)
 	if rolling then
-		finalRace = r
-		rolling = false
-		rollBtn.Visible = false
-		okBtn.Visible = true
+		return
 	end
+	setCurrentRaceText(r)
+	setRaceInfoText(r)
 end)
 
 if CreateProfileResponse and CreateProfileResponse:IsA("RemoteEvent") then
@@ -484,7 +524,7 @@ rollBtn.MouseButton1Click:Connect(function()
 	-- czekamy na final race z serwera
 	local start = os.clock()
 	local before = plr:GetAttribute("Race")
-	while os.clock() - start < 6 do
+	while os.clock() - start < 8 do
 		local now = plr:GetAttribute("Race")
 		if typeof(now) == "string" and now ~= "" and now ~= before then
 			finalRace = now
@@ -495,6 +535,8 @@ rollBtn.MouseButton1Click:Connect(function()
 
 	if typeof(finalRace) == "string" then
 		playCaseAnimation(finalRace, chances, rollPreview)
+		setCurrentRaceText(finalRace)
+		setRaceInfoText(finalRace)
 		createdOnce = true
 		rollBtn.Visible = false
 		okBtn.Visible = true
