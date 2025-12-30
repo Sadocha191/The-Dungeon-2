@@ -2,13 +2,12 @@
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
-local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local plr = Players.LocalPlayer
 local PauseState = ReplicatedStorage:WaitForChild("PauseState")
 
-local LOBBY_PLACE_ID = 123456789 -- UZUPEŁNIJ
+local returnToLobby = ReplicatedStorage:WaitForChild("ReturnToLobby")
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "EKeyMenu"
@@ -87,5 +86,5 @@ end)
 btnClose.MouseButton1Click:Connect(close)
 
 btnLobby.MouseButton1Click:Connect(function()
-	TeleportService:Teleport(LOBBY_PLACE_ID, plr)
+	returnToLobby:FireServer()
 end)
