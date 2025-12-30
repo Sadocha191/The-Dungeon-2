@@ -3,12 +3,26 @@
 -- ZMIANA: TeleportData zawiera Profile + StarterWeaponName
 
 local TeleportService = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local ProfilesManager = require(ServerScriptService:WaitForChild("ProfilesManager"))
 local PlayerStateStore = require(ServerScriptService:WaitForChild("PlayerStateStore"))
+local Levels = require(ReplicatedStorage:WaitForChild("Levels"))
 
-local LEVEL1_PLACE_ID = 82864046258949
+local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
+
+local function ensureRemote(name: string): RemoteEvent
+	local ev = remoteEvents:FindFirstChild(name)
+	if ev and ev:IsA("RemoteEvent") then return ev end
+	ev = Instance.new("RemoteEvent")
+	ev.Name = name
+	ev.Parent = remoteEvents
+	return ev
+end
+
+local OpenLevelSelect = ensureRemote("OpenLevelSelect")
+local RequestLevelTeleport = ensureRemote("RequestLevelTeleport")
 
 local portalModel = workspace:WaitForChild("Portal")
 local portalPart = portalModel:WaitForChild("PortalTeleport")
@@ -16,21 +30,31 @@ local portalPart = portalModel:WaitForChild("PortalTeleport")
 local prompt = portalPart:FindFirstChildOfClass("ProximityPrompt")
 if not prompt then
 	prompt = Instance.new("ProximityPrompt")
-	prompt.ActionText = "Wejdź do Level 1"
 	prompt.ObjectText = "Portal"
 	prompt.HoldDuration = 0
 	prompt.MaxActivationDistance = 10
 	prompt.RequiresLineOfSight = false
 	prompt.Parent = portalPart
 end
+prompt.ActionText = "Wybierz poziom"
 
+local lastOpen: {[number]: number} = {}
 local lastTp: {[number]: number} = {}
-local COOLDOWN = 2.0
+local OPEN_COOLDOWN = 0.6
+local TP_COOLDOWN = 2.0
 
-local function canCall(player: Player): boolean
+local function canOpen(player: Player): boolean
+	local now = os.clock()
+	local last = lastOpen[player.UserId] or 0
+	if (now - last) < OPEN_COOLDOWN then return false end
+	lastOpen[player.UserId] = now
+	return true
+end
+
+local function canTeleport(player: Player): boolean
 	local now = os.clock()
 	local last = lastTp[player.UserId] or 0
-	if (now - last) < COOLDOWN then return false end
+	if (now - last) < TP_COOLDOWN then return false end
 	lastTp[player.UserId] = now
 	return true
 end
@@ -79,10 +103,7 @@ local function findWeaponName(player: Player): string?
 	return nil
 end
 
-prompt.Triggered:Connect(function(player: Player)
-	if not canCall(player) then return end
-	if not distanceOk(player) then return end
-
+local function tryTeleport(player: Player, placeId: number)
 	local profile = ProfilesManager.GetActiveProfile(player)
 	if not profile then
 		return
@@ -111,12 +132,32 @@ prompt.Triggered:Connect(function(player: Player)
 	options:SetTeleportData(tdata)
 
 	local ok, err = pcall(function()
-		TeleportService:TeleportAsync(LEVEL1_PLACE_ID, {player}, options)
+		TeleportService:TeleportAsync(placeId, {player}, options)
 	end)
 
 	if not ok then
 		warn("[PortalToLevel1] TeleportAsync failed:", err)
 	end
+end
+
+prompt.Triggered:Connect(function(player: Player)
+	if not canOpen(player) then return end
+	if not distanceOk(player) then return end
+	OpenLevelSelect:FireClient(player)
 end)
 
-print("[PortalToLevel1] Ready ->", LEVEL1_PLACE_ID)
+RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: string)
+	if typeof(levelKey) ~= "string" then return end
+	if not canTeleport(player) then return end
+	if not distanceOk(player) then return end
+
+	local entry = Levels.GetByKey(levelKey)
+	if not entry or typeof(entry.placeId) ~= "number" then
+		warn("[PortalToLevel1] Unknown level key:", levelKey)
+		return
+	end
+
+	tryTeleport(player, entry.placeId)
+end)
+
+print("[PortalToLevel1] Ready -> Level selector")

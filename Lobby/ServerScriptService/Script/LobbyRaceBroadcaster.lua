@@ -11,7 +11,7 @@ local ProfilesManager = require(ServerScriptService:WaitForChild("ProfilesManage
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 
 -- >>> DOPASUJ do długości Twojej animacji losowania rasy (sekundy)
-local ROLL_DURATION = 3.5
+local ROLL_DURATION = 4.0
 
 local function ensureRemote(name: string): RemoteEvent
 	local ev = remoteEvents:FindFirstChild(name)
