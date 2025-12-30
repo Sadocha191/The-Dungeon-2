@@ -1,5 +1,4 @@
--- DropService.server.lua (ServerScriptService)
--- Orby XP i monet + przyciąganie (jedna pętla Heartbeat)
+-- DropService.server.lua (ServerScriptService) - orby + dalekie przyciąganie
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -13,6 +12,9 @@ if not dropsFolder then
 end
 
 local active = {} -- [part] = {type="xp"/"coins", amount=number, born=number}
+
+local PULL_RADIUS = 60 -- było za mało
+local PICKUP_DIST = 2.2
 
 local function nearestAlivePlayer(pos: Vector3)
 	local bestPlr, bestDist = nil, math.huge
@@ -41,32 +43,22 @@ local function makeOrb(kind: "xp"|"coins", amount: number, pos: Vector3)
 	p.CanCollide = false
 	p.CanQuery = false
 	p.Anchored = true
-	p.Transparency = 0
 	p.CFrame = CFrame.new(pos + Vector3.new(0, 1.2, 0))
 	p.Parent = dropsFolder
 
 	active[p] = {type = kind, amount = math.max(1, math.floor(amount)), born = time()}
-	Debris:AddItem(p, 16) -- po 16s znika
-
+	Debris:AddItem(p, 18)
 	return p
 end
 
--- API: wołane przez WaveController
 function _G.SpawnDropsAt(pos: Vector3, xp: number, coins: number)
-	-- lekki rozrzut
 	local function jitter()
-		return Vector3.new((math.random()-0.5)*2.0, 0, (math.random()-0.5)*2.0)
+		return Vector3.new((math.random()-0.5)*2.6, 0, (math.random()-0.5)*2.6)
 	end
-
-	if xp and xp > 0 then
-		makeOrb("xp", xp, pos + jitter())
-	end
-	if coins and coins > 0 then
-		makeOrb("coins", coins, pos + jitter())
-	end
+	if xp and xp > 0 then makeOrb("xp", xp, pos + jitter()) end
+	if coins and coins > 0 then makeOrb("coins", coins, pos + jitter()) end
 end
 
--- jedna pętla update (bez per-orb tasków)
 RunService.Heartbeat:Connect(function(dt)
 	for orb,meta in pairs(active) do
 		if not orb or not orb.Parent then
@@ -77,10 +69,8 @@ RunService.Heartbeat:Connect(function(dt)
 		local plr, dist = nearestAlivePlayer(orb.Position)
 		local age = time() - meta.born
 
-		-- jeśli nikt żywy -> powoli opada/znika
 		if not plr then
-			orb.CFrame = orb.CFrame:Lerp(orb.CFrame + Vector3.new(0, -0.05, 0), 0.12)
-			if age > 14 then
+			if age > 16 then
 				orb:Destroy()
 				active[orb] = nil
 			end
@@ -91,31 +81,21 @@ RunService.Heartbeat:Connect(function(dt)
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
 		if not hrp then continue end
 
-		-- przyciąganie od 28 studów
-		local pullRadius = 28
-		if dist <= 2.0 then
-			-- zebrane
+		if dist <= PICKUP_DIST then
 			if _G.AwardPlayer then
-				if meta.type == "xp" then
-					_G.AwardPlayer(plr, meta.amount, 0)
-				else
-					_G.AwardPlayer(plr, 0, meta.amount)
-				end
+				if meta.type == "xp" then _G.AwardPlayer(plr, meta.amount, 0)
+				else _G.AwardPlayer(plr, 0, meta.amount) end
 			end
 			orb:Destroy()
 			active[orb] = nil
 			continue
 		end
 
-		local targetPos = orb.Position
-		if dist <= pullRadius then
-			targetPos = hrp.Position + Vector3.new(0, 1.6, 0)
-			local alpha = math.clamp(dt * 10, 0, 1) -- płynnie, bez “teleportów”
-			orb.CFrame = CFrame.new(orb.Position:Lerp(targetPos, alpha))
-		else
-			-- idle “float”
-			local bob = math.sin(time()*2.4) * 0.03
-			orb.CFrame = orb.CFrame + Vector3.new(0, bob, 0)
+		-- smooth pull from far
+		if dist <= PULL_RADIUS then
+			local target = hrp.Position + Vector3.new(0, 1.6, 0)
+			local alpha = math.clamp(dt * 12, 0, 1)
+			orb.CFrame = CFrame.new(orb.Position:Lerp(target, alpha))
 		end
 	end
 end)
