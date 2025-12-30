@@ -22,4 +22,6 @@ local function ensureRemote(name: string): RemoteEvent
 end
 
 ensureRemote("OpenCharacterCreation")
+ensureRemote("OpenLevelSelect")
+ensureRemote("LevelSelectRequest")
 print("[SetupRemotes] OpenCharacterCreation ready")

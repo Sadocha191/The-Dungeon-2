@@ -4,11 +4,22 @@
 
 local TeleportService = game:GetService("TeleportService")
 local ServerScriptService = game:GetService("ServerScriptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ProfilesManager = require(ServerScriptService:WaitForChild("ProfilesManager"))
 local PlayerStateStore = require(ServerScriptService:WaitForChild("PlayerStateStore"))
 
 local LEVEL1_PLACE_ID = 82864046258949
+local LEVELS = {
+	{
+		id = LEVEL1_PLACE_ID,
+		name = "Level 1",
+	},
+}
+
+local remoteFolder = ReplicatedStorage:WaitForChild("RemoteEvents")
+local openLevelSelect = remoteFolder:WaitForChild("OpenLevelSelect")
+local levelSelectRequest = remoteFolder:WaitForChild("LevelSelectRequest")
 
 local portalModel = workspace:WaitForChild("Portal")
 local portalPart = portalModel:WaitForChild("PortalTeleport")
@@ -16,7 +27,7 @@ local portalPart = portalModel:WaitForChild("PortalTeleport")
 local prompt = portalPart:FindFirstChildOfClass("ProximityPrompt")
 if not prompt then
 	prompt = Instance.new("ProximityPrompt")
-	prompt.ActionText = "Wejdź do Level 1"
+	prompt.ActionText = "Wybierz poziom"
 	prompt.ObjectText = "Portal"
 	prompt.HoldDuration = 0
 	prompt.MaxActivationDistance = 10
@@ -26,6 +37,8 @@ end
 
 local lastTp: {[number]: number} = {}
 local COOLDOWN = 2.0
+local pendingSelect: {[number]: number} = {}
+local SELECT_TIMEOUT = 15.0
 
 local function canCall(player: Player): boolean
 	local now = os.clock()
@@ -53,32 +66,68 @@ local function sanitizeProfile(profile: any)
 	}
 end
 
-prompt.Triggered:Connect(function(player: Player)
-	if not canCall(player) then return end
-	if not distanceOk(player) then return end
-
+local function buildTeleportData(player: Player)
 	local profile = ProfilesManager.GetActiveProfile(player)
 	if not profile then
-		return
+		return nil
 	end
 
 	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
 	if not state.StarterWeaponClaimed or typeof(state.StarterWeaponName) ~= "string" then
 		-- wymuszamy broń przed wejściem do dungeona
-		return
+		return nil
 	end
 
-	local tdata = {
+	return {
 		Profile = sanitizeProfile(profile),
 		StarterWeaponName = state.StarterWeaponName, -- ✅
 		FromPlace = game.PlaceId,
 	}
+end
+
+local function isLevelAvailable(placeId: number): boolean
+	for _, level in ipairs(LEVELS) do
+		if level.id == placeId then
+			return true
+		end
+	end
+	return false
+end
+
+prompt.Triggered:Connect(function(player: Player)
+	if not canCall(player) then return end
+	if not distanceOk(player) then return end
+
+	local tdata = buildTeleportData(player)
+	if not tdata then
+		return
+	end
+
+	pendingSelect[player.UserId] = os.clock()
+	openLevelSelect:FireClient(player, LEVELS)
+end)
+
+levelSelectRequest.OnServerEvent:Connect(function(player: Player, placeId: any)
+	if typeof(placeId) ~= "number" then return end
+	if not isLevelAvailable(placeId) then return end
+	if not distanceOk(player) then return end
+
+	local pendingAt = pendingSelect[player.UserId]
+	if not pendingAt or (os.clock() - pendingAt) > SELECT_TIMEOUT then
+		return
+	end
+	pendingSelect[player.UserId] = nil
+
+	local tdata = buildTeleportData(player)
+	if not tdata then
+		return
+	end
 
 	local options = Instance.new("TeleportOptions")
 	options:SetTeleportData(tdata)
 
 	local ok, err = pcall(function()
-		TeleportService:TeleportAsync(LEVEL1_PLACE_ID, {player}, options)
+		TeleportService:TeleportAsync(placeId, {player}, options)
 	end)
 
 	if not ok then
