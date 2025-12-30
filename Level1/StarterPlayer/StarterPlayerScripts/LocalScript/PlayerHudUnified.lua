@@ -1,28 +1,19 @@
--- LOCALSCRIPT: PlayerHudLobby.client.lua
--- GDZIE: StarterPlayer/StarterPlayerScripts/PlayerHudLobby (LocalScript)
--- CO: HUD (monety + nick/lvl/rasa + HP/EXP) + auto-hide gdy istnieje ScreenGui z atrybutem Modal=true i Enabled=true
+-- PlayerHudUnified.client.lua (StarterPlayerScripts) - HUD gracza (bez fal, bez armora)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local TextService = game:GetService("TextService")
-local RunService = game:GetService("RunService")
 
 local plr = Players.LocalPlayer
 local pg = plr:WaitForChild("PlayerGui")
 
--- Progress
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local PlayerProgressEvent = remotes:WaitForChild("PlayerProgressEvent")
 
--- Race updates (opcjonalnie)
-local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
-local RaceUpdated = remoteEvents:FindFirstChild("RaceUpdated")
-
 local gui = Instance.new("ScreenGui")
-gui.Name = "PlayerHudGui_Lobby"
+gui.Name = "PlayerHudUnified"
 gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = false
 gui.Parent = pg
 
 -- Coins (left)
@@ -43,12 +34,11 @@ coinsText.Size = UDim2.new(1, 0, 1, 0)
 coinsText.Font = Enum.Font.GothamBold
 coinsText.TextSize = 14
 coinsText.TextXAlignment = Enum.TextXAlignment.Left
-coinsText.TextYAlignment = Enum.TextYAlignment.Center
 coinsText.TextColor3 = Color3.fromRGB(245, 245, 245)
 coinsText.Text = "Monety: 0"
 coinsText.Parent = coinsBox
 
--- Name + level + race (right) - autosize width
+-- Name (right)
 local nameBox = Instance.new("Frame")
 nameBox.AnchorPoint = Vector2.new(1, 0)
 nameBox.Position = UDim2.new(1, -18, 0, 18)
@@ -68,10 +58,15 @@ nameText.Size = UDim2.new(1, 0, 1, 0)
 nameText.Font = Enum.Font.GothamBold
 nameText.TextSize = 14
 nameText.TextXAlignment = Enum.TextXAlignment.Right
-nameText.TextYAlignment = Enum.TextYAlignment.Center
 nameText.TextColor3 = Color3.fromRGB(245, 245, 245)
-nameText.Text = plr.Name .. " • Lv. 1 • Rasa: -"
+nameText.Text = plr.Name .. " • Lv. 1"
 nameText.Parent = nameBox
+
+local function autoSizeNameBox()
+	local bounds = TextService:GetTextSize(nameText.Text, nameText.TextSize, nameText.Font, Vector2.new(2000, 2000))
+	local w = math.clamp(bounds.X + 28, 200, 520)
+	nameBox.Size = UDim2.fromOffset(w, 38)
+end
 
 -- Bottom bars
 local bottom = Instance.new("Frame")
@@ -93,6 +88,7 @@ local function makeBar(labelText, fillColor)
 	wrap.BorderSizePixel = 0
 	wrap.Parent = bottom
 	Instance.new("UICorner", wrap).CornerRadius = UDim.new(0, 14)
+
 	local p = Instance.new("UIPadding", wrap)
 	p.PaddingLeft = UDim.new(0, 12); p.PaddingRight = UDim.new(0, 12)
 	p.PaddingTop = UDim.new(0, 6); p.PaddingBottom = UDim.new(0, 6)
@@ -138,36 +134,28 @@ end
 local function bindCharacter(char: Model)
 	local hum = char:WaitForChild("Humanoid", 5)
 	if not hum then return end
+
 	local function refresh()
 		local maxHp = math.max(1, hum.MaxHealth)
 		local cur = math.clamp(hum.Health, 0, maxHp)
-		hpLabel.Text = ("HP: %d/%d"):format(math.floor(cur + 0.5), math.floor(maxHp + 0.5))
+		hpLabel.Text = ("HP: %d/%d"):format(math.floor(cur+0.5), math.floor(maxHp+0.5))
 		tweenFill(hpFill, cur / maxHp)
 	end
 	refresh()
 	hum.HealthChanged:Connect(refresh)
 end
+
 if plr.Character then bindCharacter(plr.Character) end
 plr.CharacterAdded:Connect(bindCharacter)
 
 local level, xp, nextXp, coins = 1, 0, 120, 0
-local race = tostring(plr:GetAttribute("Race") or "-")
-
-local function autoSizeNameBox()
-	local bounds = TextService:GetTextSize(nameText.Text, nameText.TextSize, nameText.Font, Vector2.new(2000, 2000))
-	local targetW = math.clamp(bounds.X + 28, 200, 520)
-	nameBox.Size = UDim2.fromOffset(targetW, 38)
-end
 
 local function render()
-	race = tostring(plr:GetAttribute("Race") or race or "-")
-	nameText.Text = ("%s • Lv. %d • Rasa: %s"):format(plr.Name, level, race)
+	nameText.Text = ("%s • Lv. %d"):format(plr.Name, level)
 	coinsText.Text = ("Monety: %d"):format(coins)
-
 	local n = math.max(1, nextXp)
 	xpLabel.Text = ("EXP: %d/%d"):format(xp, n)
 	tweenFill(xpFill, xp / n)
-
 	autoSizeNameBox()
 end
 
@@ -180,36 +168,4 @@ PlayerProgressEvent.OnClientEvent:Connect(function(payload)
 	render()
 end)
 
-if RaceUpdated and RaceUpdated:IsA("RemoteEvent") then
-	RaceUpdated.OnClientEvent:Connect(function(payload)
-		if typeof(payload) == "table" and typeof(payload.race) == "string" then
-			plr:SetAttribute("Race", payload.race)
-		end
-	end)
-end
-
-plr:GetAttributeChangedSignal("Race"):Connect(render)
-
--- AUTO-HIDE: jeśli jakikolwiek ScreenGui ma Modal=true i Enabled=true, chowamy HUD
-local function anyModalOpen(): boolean
-	for _, inst in ipairs(pg:GetChildren()) do
-		if inst:IsA("ScreenGui") and inst.Enabled then
-			if inst:GetAttribute("Modal") == true then
-				return true
-			end
-		end
-	end
-	return false
-end
-
-local lastHidden = false
-RunService.RenderStepped:Connect(function()
-	local hide = anyModalOpen()
-	if hide ~= lastHidden then
-		gui.Enabled = not hide
-		lastHidden = hide
-	end
-end)
-
 render()
-print("[PlayerHudLobby] Ready (auto-hide on Modal)")
