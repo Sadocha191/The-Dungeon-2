@@ -1,4 +1,4 @@
--- ProgressService.server.lua (ServerScriptService)
+-- ProgressService.server.lua (ServerScriptService) - zgodny z PlayerData (nowy profil)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,11 +7,25 @@ local Debris = game:GetService("Debris")
 local PhysicsService = game:GetService("PhysicsService")
 
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
-local PauseState = ReplicatedStorage:WaitForChild("PauseState")
+
+-- Ensure PauseState exists
+local PauseState = ReplicatedStorage:FindFirstChild("PauseState")
+if not PauseState then
+	PauseState = Instance.new("BoolValue")
+	PauseState.Name = "PauseState"
+	PauseState.Value = false
+	PauseState.Parent = ReplicatedStorage
+end
 PauseState.Value = false
 
 -- Remotes
-local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+if not remotes then
+	remotes = Instance.new("Folder")
+	remotes.Name = "Remotes"
+	remotes.Parent = ReplicatedStorage
+end
+
 local function getRemote(name: string)
 	local r = remotes:FindFirstChild(name)
 	if not r then
@@ -26,7 +40,7 @@ local PlayerProgressEvent = getRemote("PlayerProgressEvent")
 local UpgradeEvent = getRemote("UpgradeEvent")
 local WeaponEvent = getRemote("WeaponEvent")
 
--- Collision groups
+-- Collision groups (player vs mobs no-collide)
 local PLAYERS_GROUP = "Players"
 local MOBS_GROUP = "Mobs"
 pcall(function() PhysicsService:CreateCollisionGroup(PLAYERS_GROUP) end)
@@ -44,16 +58,18 @@ end
 -- Tools
 local WeaponTemplates = ReplicatedStorage:WaitForChild("WeaponTemplates")
 
-local function giveLoadout(plr)
+local function giveLoadout(plr: Player)
 	local d = PlayerData.Get(plr)
 	local backpack = plr:WaitForChild("Backpack")
 
-	local function give(toolName)
+	local function give(toolName: string)
 		for _,x in ipairs(backpack:GetChildren()) do
 			if x:IsA("Tool") and x.Name == toolName then return end
 		end
 		local src = WeaponTemplates:FindFirstChild(toolName)
-		if src then src:Clone().Parent = backpack end
+		if src and src:IsA("Tool") then
+			src:Clone().Parent = backpack
+		end
 	end
 
 	give("Sword")
@@ -61,72 +77,48 @@ local function giveLoadout(plr)
 	if d.unlockWand then give("Wand") end
 end
 
--- ===== HUD push =====
-local function pushProgress(plr)
+-- HUD push
+local function pushProgress(plr: Player)
 	local d = PlayerData.Get(plr)
 	PlayerProgressEvent:FireClient(plr, {
-		type="progress",
-		level=d.level, xp=d.xp, nextXp=d.nextXp,
-		coins=d.coins,
+		type = "progress",
+		level = d.level,
+		xp = d.xp,
+		nextXp = d.nextXp,
+		coins = d.coins,
 	})
 end
 
--- ===== Upgrades (wracają) =====
-local pending = {} -- [uid] = {token, choices}
+-- ===== Upgrades: proste (dmg/speed/jump) =====
+local pending = {} -- [uid] = {token=string, choices=table}
 
-local RAR = {
-	Common={w=60, c=Color3.fromRGB(210,210,210), mult=1.0},
-	Rare={w=28, c=Color3.fromRGB(90,170,255), mult=1.4},
-	Epic={w=10, c=Color3.fromRGB(190,120,255), mult=2.0},
-	Legendary={w=2, c=Color3.fromRGB(255,180,60), mult=3.0},
-}
-
-local POOL = {
-	{ id="DMG", name="Obrażenia", stat="DMG", base=6 },
-	{ id="ASPD", name="Szybkość ataku", stat="Atk Speed", base=0.12 },
-	{ id="MULTI", name="Multi-shot", stat="Pociski", base=1 },
-	{ id="FIRE", name="Podpalenie", stat="Fire DPS", base=6 },
-	{ id="FCH", name="Szansa podp.", stat="Fire %", base=0.10 },
-}
-
-local function rollRarity()
-	local sum=0; for _,r in pairs(RAR) do sum += r.w end
-	local x = math.random()*sum
-	local a=0
-	for name,r in pairs(RAR) do
-		a += r.w
-		if x <= a then return name, r.c, r.mult end
-	end
-	return "Common", RAR.Common.c, RAR.Common.mult
+local function mkChoice(id, title, desc)
+	return { id=id, title=title, desc=desc }
 end
 
-local function pick3()
-	local pool = table.clone(POOL)
+local function rollChoices()
+	-- minimalnie na teraz (żeby działało pewnie)
+	local pool = {
+		mkChoice("DMG", "Obrażenia +", "+4 dmg na stałe"),
+		mkChoice("SPEED", "Prędkość +", "+1 WalkSpeed na stałe"),
+		mkChoice("JUMP", "Skok +", "+2 JumpPower na stałe"),
+	}
+	-- losuj 3 bez powtórzeń
 	local out = {}
-	for i=1,3 do
-		local idx = math.random(1,#pool)
-		local u = pool[idx]
-		table.remove(pool, idx)
-
-		local rn, col, mult = rollRarity()
-		local val
-		if u.id == "ASPD" or u.id == "FCH" then
-			val = math.floor((u.base*mult)*100)/100
-		else
-			val = math.floor(u.base*mult)
-		end
-
-		out[i] = {id=u.id, name=u.name, stat=u.stat, value=val, rarity=rn, color=col}
+	while #out < 3 do
+		local idx = math.random(1, #pool)
+		out[#out+1] = table.remove(pool, idx)
 	end
 	return out
 end
 
-local function openUpgrade(plr)
+local function openUpgrade(plr: Player)
 	local token = ("%d_%d"):format(plr.UserId, math.floor(os.clock()*1000))
-	local choices = pick3()
-	pending[plr.UserId] = {token=token, choices=choices}
+	local choices = rollChoices()
+	pending[plr.UserId] = { token = token, choices = choices }
+
 	PauseState.Value = true
-	UpgradeEvent:FireClient(plr, {type="SHOW", token=token, choices=choices})
+	UpgradeEvent:FireClient(plr, { type="SHOW", token=token, choices=choices })
 end
 
 UpgradeEvent.OnServerEvent:Connect(function(plr, payload)
@@ -135,69 +127,79 @@ UpgradeEvent.OnServerEvent:Connect(function(plr, payload)
 	if not st or payload.token ~= st.token then return end
 
 	local picked = tostring(payload.id or "")
-	local choice
-	for _,c in ipairs(st.choices) do
-		if c.id == picked then choice = c break end
-	end
-	if not choice then return end
-
 	local d = PlayerData.Get(plr)
 
 	if picked == "DMG" then
-		d.damage = math.max(25, (d.damage or 25) + choice.value)
-	elseif picked == "ASPD" then
-		d.attackSpeed = math.clamp((d.attackSpeed or 1.0) + choice.value, 0.7, 2.0)
-	elseif picked == "MULTI" then
-		d.multiShot = math.clamp((d.multiShot or 0) + choice.value, 0, 6)
-	elseif picked == "FIRE" then
-		d.fireDps = math.min(60, (d.fireDps or 0) + choice.value)
-	elseif picked == "FCH" then
-		d.fireChance = math.clamp((d.fireChance or 0) + choice.value, 0, 0.9)
+		d.damage = math.max(1, (tonumber(d.damage) or 18) + 4)
+		d.upgrades.dmg = (d.upgrades.dmg or 0) + 1
+	elseif picked == "SPEED" then
+		d.upgrades.speed = (d.upgrades.speed or 0) + 1
+	elseif picked == "JUMP" then
+		d.upgrades.jump = (d.upgrades.jump or 0) + 1
+	else
+		return
 	end
 
 	pending[plr.UserId] = nil
 	PauseState.Value = false
 
 	PlayerData.MarkDirty(plr)
-	pushProgress(plr)
 	PlayerData.Save(plr, false)
+	pushProgress(plr)
+
+	-- reaplikuj movement po wybraniu
+	local c = plr.Character
+	local hum = c and c:FindFirstChildOfClass("Humanoid")
+	if hum then
+		local baseSpeed = 24
+		hum.WalkSpeed = baseSpeed + (d.upgrades.speed or 0) * 1
+		-- JumpPower vs JumpHeight zależy co masz ustawione w grze:
+		hum.JumpPower = 50 + (d.upgrades.jump or 0) * 2
+	end
 end)
 
-local function checkLevelUp(plr)
+-- ===== Award from drops / kills =====
+local function checkLevelUp(plr: Player)
 	local d = PlayerData.Get(plr)
 	local leveled = false
+
 	while d.xp >= d.nextXp do
 		d.xp -= d.nextXp
 		d.level += 1
 		d.nextXp = PlayerData.RollNextXp(d.level)
 		leveled = true
 	end
+
 	if leveled then
 		PlayerData.MarkDirty(plr)
+		PlayerData.Save(plr, false)
 		pushProgress(plr)
 		openUpgrade(plr)
 	end
 end
 
--- ===== Award (orby zbierają, a to dopisuje) =====
 function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	if not plr or not plr.Parent then return end
 	local d = PlayerData.Get(plr)
+
 	d.xp += math.max(0, math.floor(xp or 0))
 	d.coins += math.max(0, math.floor(coins or 0))
+
 	PlayerData.MarkDirty(plr)
+	PlayerData.Save(plr, false)
 	pushProgress(plr)
+
 	checkLevelUp(plr)
 end
 
--- ===== Combat =====
-local function getStats(plr)
+-- ===== Combat stats =====
+local function getStats(plr: Player)
 	local d = PlayerData.Get(plr)
-	local dmg = math.max(30, tonumber(d.damage) or 30)
+	local dmg = math.max(10, tonumber(d.damage) or 18)
 	local multi = math.clamp(tonumber(d.multiShot) or 0, 0, 6)
 	local fch = math.clamp(tonumber(d.fireChance) or 0, 0, 0.9)
 	local fdps = math.max(0, tonumber(d.fireDps) or 0)
-	local aspd = math.clamp(tonumber(d.attackSpeed) or 1.0, 0.7, 2.0)
+	local aspd = math.clamp(tonumber(d.attackSpeed) or 1.0, 0.6, 2.0)
 	return dmg, multi, fch, fdps, aspd
 end
 
@@ -216,7 +218,6 @@ local function applyBurn(h: Humanoid, dps: number, seconds: number)
 	end)
 end
 
--- Sword AoE: większy zasięg + promień
 local function swordAoE(center: Vector3, radius: number, damage: number, fireChance: number, fireDps: number)
 	local enf = enemiesFolder()
 	if not enf then return end
@@ -234,7 +235,6 @@ local function swordAoE(center: Vector3, radius: number, damage: number, fireCha
 	end
 end
 
--- Projectile: ray + overlap hitbox (pewnie trafia)
 local function overlapHit(pos: Vector3, radius: number, ignore: {Instance})
 	local params = OverlapParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
@@ -244,7 +244,9 @@ local function overlapHit(pos: Vector3, radius: number, ignore: {Instance})
 		local model = p:FindFirstAncestorOfClass("Model")
 		if model and model.Parent == enemiesFolder() then
 			local hum = model:FindFirstChildOfClass("Humanoid")
-			if hum and hum.Health > 0 then return hum end
+			if hum and hum.Health > 0 then
+				return hum
+			end
 		end
 	end
 	return nil
@@ -256,9 +258,9 @@ local function spawnProjectile(plr: Player, origin: Vector3, dir: Vector3, speed
 	p.Shape = Enum.PartType.Ball
 	p.Material = Enum.Material.Neon
 	p.Color = Color3.fromRGB(180, 220, 255)
-	p.Anchored = true
 	p.CanCollide = false
 	p.CanQuery = false
+	p.Anchored = true
 	p.CFrame = CFrame.new(origin)
 	p.Parent = workspace
 	Debris:AddItem(p, life)
@@ -322,7 +324,6 @@ WeaponEvent.OnServerEvent:Connect(function(plr, payload)
 
 	local tool = char:FindFirstChildOfClass("Tool")
 	if not tool then return end
-
 	local wType = tool:GetAttribute("WeaponType")
 	if typeof(wType) ~= "string" then return end
 
@@ -330,19 +331,16 @@ WeaponEvent.OnServerEvent:Connect(function(plr, payload)
 
 	if payload.action == "MELEE" and wType == "Melee" then
 		local now = os.clock()
-		local cd = 0.48 / aspd
+		local cd = 0.50 / aspd
 		if swingCd[plr.UserId] and (now - swingCd[plr.UserId]) < cd then return end
 		swingCd[plr.UserId] = now
 
-		-- większy range: centrum dalej + większy radius
 		local center = hrp.Position + hrp.CFrame.LookVector * 7
 		swordAoE(center, 9.0, dmg, fch, fdps)
 
 	elseif payload.action == "SHOOT" and (wType == "Bow" or wType == "Wand") then
 		local aim = payload.aim
 		if typeof(aim) ~= "Vector3" then return end
-
-		-- POZWÓL strzelać do tyłu: brak dot-check
 		if (aim - hrp.Position).Magnitude > 700 then return end
 
 		local now = os.clock()
@@ -370,8 +368,9 @@ WeaponEvent.OnServerEvent:Connect(function(plr, payload)
 	end
 end)
 
--- Player baseline speed: gracz szybszy od mobów
+-- baseline movement (player faster than mobs)
 local BASE_PLAYER_SPEED = 24
+local BASE_JUMP_POWER = 50
 
 Players.PlayerAdded:Connect(function(plr)
 	PlayerData.Get(plr)
@@ -380,11 +379,14 @@ Players.PlayerAdded:Connect(function(plr)
 	plr.CharacterAdded:Connect(function(char)
 		PauseState.Value = false
 		task.wait(0.1)
+
 		setCharacterGroup(char)
 
+		local d = PlayerData.Get(plr)
 		local hum = char:FindFirstChildOfClass("Humanoid")
 		if hum then
-			hum.WalkSpeed = BASE_PLAYER_SPEED
+			hum.WalkSpeed = BASE_PLAYER_SPEED + (d.upgrades.speed or 0) * 1
+			hum.JumpPower = BASE_JUMP_POWER + (d.upgrades.jump or 0) * 2
 		end
 
 		task.wait(0.15)
