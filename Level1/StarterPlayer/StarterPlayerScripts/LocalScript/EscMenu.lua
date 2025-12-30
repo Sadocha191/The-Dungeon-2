@@ -2,9 +2,9 @@
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
-local TeleportService = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local LOBBY_PLACE_ID = 72651938611811 -- ← WPISZ
+local returnToLobby = ReplicatedStorage:WaitForChild("ReturnToLobby")
 
 local plr = Players.LocalPlayer
 local gui = Instance.new("ScreenGui", plr.PlayerGui)
@@ -28,5 +28,5 @@ UserInputService.InputBegan:Connect(function(i, gp)
 end)
 
 btn.MouseButton1Click:Connect(function()
-	TeleportService:Teleport(LOBBY_PLACE_ID, plr)
+	returnToLobby:FireServer()
 end)

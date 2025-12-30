@@ -2,6 +2,7 @@
 
 local DataStoreService = game:GetService("DataStoreService")
 local store = DataStoreService:GetDataStore("GlobalPlayerProgress_v1")
+local legacyStore = DataStoreService:GetDataStore("GlobalProfile_v4")
 
 local PlayerData = {}
 PlayerData._cache = {}
@@ -58,6 +59,24 @@ function PlayerData.Get(plr)
 			data.upgrades.dmg = clampInt(saved.upgrades.dmg)
 			data.upgrades.speed = clampInt(saved.upgrades.speed)
 			data.upgrades.jump = clampInt(saved.upgrades.jump)
+		end
+	else
+		local legacyOk, legacySaved = pcall(function()
+			return legacyStore:GetAsync(tostring(uid))
+		end)
+		if legacyOk and typeof(legacySaved) == "table" then
+			for k,v in pairs(legacySaved) do
+				data[k] = v
+			end
+			if typeof(legacySaved.upgrades) == "table" then
+				data.upgrades = data.upgrades or { dmg = 0, speed = 0, jump = 0 }
+				data.upgrades.dmg = clampInt(legacySaved.upgrades.dmg)
+				data.upgrades.speed = clampInt(legacySaved.upgrades.speed)
+				data.upgrades.jump = clampInt(legacySaved.upgrades.jump)
+			end
+			pcall(function()
+				store:SetAsync(tostring(uid), data)
+			end)
 		end
 	end
 
