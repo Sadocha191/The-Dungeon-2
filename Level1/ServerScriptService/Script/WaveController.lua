@@ -8,12 +8,7 @@ local PhysicsService = game:GetService("PhysicsService")
 local PauseState = ReplicatedStorage:WaitForChild("PauseState")
 local ORC_TEMPLATE = ReplicatedStorage:WaitForChild("Enemies"):WaitForChild("Orc")
 
-local WaveStatusEvent = ReplicatedStorage:FindFirstChild("WaveStatusEvent")
-if not WaveStatusEvent then
-	WaveStatusEvent = Instance.new("RemoteEvent")
-	WaveStatusEvent.Name = "WaveStatusEvent"
-	WaveStatusEvent.Parent = ReplicatedStorage
-end
+local WaveStatusEvent = ReplicatedStorage:WaitForChild("WaveStatusEvent")
 
 local function broadcast(payload)
 	for _,plr in ipairs(Players:GetPlayers()) do
@@ -25,28 +20,28 @@ local function waitIfPaused()
 	while PauseState.Value do task.wait(0.05) end
 end
 
--- ===== KONFIG =====
+-- ===== KONFIG (łatwiej) =====
 local PREP_TIME = 5
 local TOTAL_WAVES = 8
 local BETWEEN_WAVES_COUNTDOWN = 5
 
-local START_COUNT = 20
-local COUNT_ADD_PER_WAVE = 4
-local MAX_ALIVE_ON_MAP = 12
-local WAVE_DURATION = 28
+local START_COUNT = 18
+local COUNT_ADD_PER_WAVE = 3
+local MAX_ALIVE_ON_MAP = 10
+local WAVE_DURATION = 30
 
--- easier scaling
-local BASE_HP = 65
-local BASE_DAMAGE = 7
-local BASE_SPEED = 16
-local HP_GROWTH_PER_WAVE = 0.26
-local DMG_GROWTH_PER_WAVE = 0.16
-local SPEED_GROWTH_PER_WAVE = 0.10
-local SPEED_CAP = 28
+-- Moby WOLNIEJSZE niż gracz (gracz = 24)
+local BASE_HP = 55
+local BASE_DAMAGE = 6
+local BASE_SPEED = 14
+local HP_GROWTH_PER_WAVE = 0.20
+local DMG_GROWTH_PER_WAVE = 0.12
+local SPEED_GROWTH_PER_WAVE = 0.06
+local SPEED_CAP = 22
 
--- spawn safe
-local SPAWN_RING_MIN = 35
-local SPAWN_RING_MAX = 70
+-- Spawn safe
+local SPAWN_RING_MIN = 40
+local SPAWN_RING_MAX = 75
 local SPAWN_RAY_START_Y = 140
 local GROUND_RAY_DIST = 800
 local MAX_SPAWN_TRIES = 40
@@ -54,13 +49,13 @@ local MAX_GROUND_SLOPE_DEG = 35
 local CLEARANCE_PADDING = Vector3.new(2, 1, 2)
 
 -- AI
-local THINK_INTERVAL = 0.11
-local PATH_RECALC = 0.55
-local LOS_DIRECT_CHASE = 95
-local DIRECT_UPDATE_DT = 0.30
-local WAYPOINT_TIMEOUT = 1.0
+local THINK_INTERVAL = 0.12
+local PATH_RECALC = 0.65
+local LOS_DIRECT_CHASE = 90
+local DIRECT_UPDATE_DT = 0.35
+local WAYPOINT_TIMEOUT = 1.1
 local ATTACK_RANGE = 4
-local ATTACK_COOLDOWN = 1.25
+local ATTACK_COOLDOWN = 1.35
 
 local KILL_BELOW_Y = -25
 local TELEPORT_IF_FAR = 420
@@ -127,10 +122,7 @@ local function getClosestLivingCharacter(fromPos: Vector3)
 		local h = c and c:FindFirstChildOfClass("Humanoid")
 		if hrp and h and h.Health > 0 then
 			local d = (hrp.Position - fromPos).Magnitude
-			if d < bestDist then
-				bestDist = d
-				bestChar = c
-			end
+			if d < bestDist then bestDist = d; bestChar = c end
 		end
 	end
 	return bestChar, bestDist
@@ -211,7 +203,28 @@ local function getSafeSpawnCFrame(modelForSize: Model)
 	return CFrame.new(base + Vector3.new(SPAWN_RING_MIN, 8, 0))
 end
 
--- hp bar (small)
+local function clearAllMobs()
+	for _,m in ipairs(ENEMIES_FOLDER:GetChildren()) do
+		m:Destroy()
+	end
+end
+
+local function hasLOS(fromPos: Vector3, toPos: Vector3, ignoreList: {Instance})
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = ignoreList
+	return workspace:Raycast(fromPos, (toPos-fromPos), params) == nil
+end
+
+local function computeWaypoints(fromPos: Vector3, toPos: Vector3)
+	local path = PathfindingService:CreatePath(PATH_PARAMS)
+	local ok = pcall(function() path:ComputeAsync(fromPos, toPos) end)
+	if not ok then return nil end
+	if path.Status ~= Enum.PathStatus.Success then return nil end
+	return path:GetWaypoints()
+end
+
+-- HP bar mały
 local function attachHpBar(model: Model, hum: Humanoid)
 	for _,d in ipairs(model:GetDescendants()) do
 		if d:IsA("BillboardGui") and d.Name == "HPBillboard" then d:Destroy() end
@@ -263,29 +276,28 @@ local function attachHpBar(model: Model, hum: Humanoid)
 	end)
 end
 
-local function hasLOS(fromPos: Vector3, toPos: Vector3, ignoreList: {Instance})
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = ignoreList
-	return workspace:Raycast(fromPos, (toPos-fromPos), params) == nil
-end
-
-local function computeWaypoints(fromPos: Vector3, toPos: Vector3)
-	local path = PathfindingService:CreatePath(PATH_PARAMS)
-	local ok = pcall(function() path:ComputeAsync(fromPos, toPos) end)
-	if not ok then return nil end
-	if path.Status ~= Enum.PathStatus.Success then return nil end
-	return path:GetWaypoints()
-end
-
-local function clearAllMobs()
-	for _,m in ipairs(ENEMIES_FOLDER:GetChildren()) do
-		m:Destroy()
+-- MOB “slot offset” => nie idą w jednej linii
+local function offsetGoal(targetPos: Vector3, orc: Model)
+	local angle = orc:GetAttribute("SlotAngle")
+	local radius = orc:GetAttribute("SlotRadius")
+	if typeof(angle) ~= "number" then
+		angle = math.random() * math.pi * 2
+		orc:SetAttribute("SlotAngle", angle)
 	end
+	if typeof(radius) ~= "number" then
+		radius = 6 + math.random()*6
+		orc:SetAttribute("SlotRadius", radius)
+	end
+	return targetPos + Vector3.new(math.cos(angle)*radius, 0, math.sin(angle)*radius)
 end
 
--- spawn orc
-local function spawnOrc(hp, dmg, spd, onKill)
+local function dropsForWave(wave: number)
+	local xp = math.floor(10 + (wave-1)*4 + math.random(0,4))
+	local coins = math.floor(2 + (wave-1)*1.0 + math.random(0,2))
+	return xp, coins
+end
+
+local function spawnOrc(hp, dmg, spd, wave, onKill)
 	local orc = ORC_TEMPLATE:Clone()
 	orc.Parent = ENEMIES_FOLDER
 	setMobGroup(orc)
@@ -305,17 +317,18 @@ local function spawnOrc(hp, dmg, spd, onKill)
 	attachHpBar(orc, hum)
 
 	local killed = false
-	local function markKill()
+	local function markKill(pos: Vector3)
 		if killed then return end
 		killed = true
-		if onKill then onKill(root.Position) end
+		if onKill then onKill(pos) end
 		task.defer(function()
 			if orc and orc.Parent then orc:Destroy() end
 		end)
 	end
-	hum.Died:Connect(markKill)
+
+	hum.Died:Connect(function() markKill(root.Position) end)
 	orc.AncestryChanged:Connect(function(_, parent)
-		if parent == nil then markKill() end
+		if parent == nil then markKill(root.Position) end
 	end)
 
 	task.spawn(function()
@@ -365,9 +378,10 @@ local function spawnOrc(hp, dmg, spd, onKill)
 				continue
 			end
 
+			local targetPos = offsetGoal(targetRoot.Position, orc)
 			local dist = (targetRoot.Position - root.Position).Magnitude
+
 			if dist > TELEPORT_IF_FAR then
-				-- NIE teleportujemy do gracza (spawnkill), tylko respawnujemy w bezpiecznym ring
 				root.CFrame = getSafeSpawnCFrame(orc)
 				waypoints = nil
 				currentGoal = nil
@@ -384,8 +398,8 @@ local function spawnOrc(hp, dmg, spd, onKill)
 				waypoints = nil
 				if (now - lastDirect) >= DIRECT_UPDATE_DT then
 					lastDirect = now
-					hum:MoveTo(targetRoot.Position)
-					currentGoal = targetRoot.Position
+					hum:MoveTo(targetPos)
+					currentGoal = targetPos
 					goalSetAt = now
 				end
 				continue
@@ -393,7 +407,7 @@ local function spawnOrc(hp, dmg, spd, onKill)
 
 			if (not waypoints) or (now - lastPath >= PATH_RECALC) then
 				lastPath = now
-				waypoints = computeWaypoints(root.Position, targetRoot.Position)
+				waypoints = computeWaypoints(root.Position, targetPos)
 				wpIndex = 2
 				currentGoal = nil
 				if waypoints and #waypoints >= 2 then
@@ -418,13 +432,7 @@ local function spawnOrc(hp, dmg, spd, onKill)
 	return orc
 end
 
-local function dropsForWave(wave: number)
-	local xp = math.floor(10 + (wave-1)*5 + math.random(0,5))
-	local coins = math.floor(2 + (wave-1)*1.2 + math.random(0,2))
-	return xp, coins
-end
-
--- MAIN
+-- ===== MAIN =====
 task.spawn(function()
 	while #Players:GetPlayers() == 0 do task.wait(1) end
 
@@ -448,9 +456,7 @@ task.spawn(function()
 		end
 
 		local hp,dmg,spd,total = makeWaveStats(wave)
-		local killed = 0
-		local alive = 0
-		local spawned = 0
+		local killed, alive, spawned = 0,0,0
 		local remaining = total
 
 		broadcast({type="waveStart", wave=wave, totalWaves=TOTAL_WAVES, totalToKill=total, remaining=remaining})
@@ -464,18 +470,16 @@ task.spawn(function()
 			end
 		end
 
-		local spawnInterval = math.max(0.16, WAVE_DURATION / math.max(1,total))
+		local spawnInterval = math.max(0.20, WAVE_DURATION / math.max(1,total))
 		local nextSpawnAt = time()
 
 		while killed < total do
 			waitIfPaused()
 			task.wait(0.15)
 
-			-- jeśli wszyscy martwi => kasuj moby i daj 3s oddechu po respawnie (anti-spawnkill)
 			if not anyPlayersAlive() then
 				clearAllMobs()
 				alive = 0
-				-- czekaj aż ktoś wróci do życia
 				while not anyPlayersAlive() do task.wait(0.25) end
 				for t=3,1,-1 do
 					waitIfPaused()
@@ -489,25 +493,15 @@ task.spawn(function()
 			while spawned < total and alive < MAX_ALIVE_ON_MAP and now >= nextSpawnAt do
 				local xpDrop, coinDrop = dropsForWave(wave)
 
-				local orc = spawnOrc(hp,dmg,spd,function(pos)
+				local orc = spawnOrc(hp,dmg,spd,wave,function(pos)
 					killed += 1
 					remaining = math.max(0, total-killed)
 					alive = math.max(0, alive-1)
 					pushUi(false)
 
-					-- nagroda dla najbliższego żywego
-					local bestPlr, bestDist = nil, math.huge
-					for _,plr in ipairs(Players:GetPlayers()) do
-						local c = plr.Character
-						local hrp = c and c:FindFirstChild("HumanoidRootPart")
-						local hh = c and c:FindFirstChildOfClass("Humanoid")
-						if hrp and hh and hh.Health > 0 then
-							local d0 = (hrp.Position - pos).Magnitude
-							if d0 < bestDist then bestDist = d0; bestPlr = plr end
-						end
-					end
-					if bestPlr and _G.AwardPlayer then
-						_G.AwardPlayer(bestPlr, xpDrop, coinDrop)
+					-- SPAWN ORBÓW (zamiast dawać od razu)
+					if _G.SpawnDropsAt then
+						_G.SpawnDropsAt(pos, xpDrop, coinDrop)
 					end
 				end)
 
