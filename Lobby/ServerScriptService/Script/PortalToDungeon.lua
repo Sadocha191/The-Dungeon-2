@@ -53,6 +53,32 @@ local function sanitizeProfile(profile: any)
 	}
 end
 
+local function isWeaponTool(inst: Instance): boolean
+	return inst:IsA("Tool") and typeof(inst:GetAttribute("WeaponType")) == "string"
+end
+
+local function findWeaponName(player: Player): string?
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if backpack then
+		for _, inst in ipairs(backpack:GetChildren()) do
+			if isWeaponTool(inst) then return inst.Name end
+		end
+	end
+	local char = player.Character
+	if char then
+		for _, inst in ipairs(char:GetChildren()) do
+			if isWeaponTool(inst) then return inst.Name end
+		end
+	end
+	local starterGear = player:FindFirstChild("StarterGear")
+	if starterGear then
+		for _, inst in ipairs(starterGear:GetChildren()) do
+			if isWeaponTool(inst) then return inst.Name end
+		end
+	end
+	return nil
+end
+
 prompt.Triggered:Connect(function(player: Player)
 	if not canCall(player) then return end
 	if not distanceOk(player) then return end
@@ -64,8 +90,15 @@ prompt.Triggered:Connect(function(player: Player)
 
 	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
 	if not state.StarterWeaponClaimed or typeof(state.StarterWeaponName) ~= "string" then
-		-- wymuszamy broń przed wejściem do dungeona
-		return
+		local weaponName = findWeaponName(player)
+		if typeof(weaponName) == "string" and weaponName ~= "" then
+			PlayerStateStore.SetStarterWeaponClaimed(player, weaponName)
+			state = PlayerStateStore.Get(player) or state
+		else
+			-- wymuszamy broń przed wejściem do dungeona
+			warn("[PortalToLevel1] Missing starter weapon for", player.Name)
+			return
+		end
 	end
 
 	local tdata = {
