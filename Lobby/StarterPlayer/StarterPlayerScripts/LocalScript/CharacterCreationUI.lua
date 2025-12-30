@@ -159,13 +159,13 @@ local function header(parent: Instance, text: string)
 end
 
 header(infoPanel, "Informacje")
-header(centerPanel, "Losowanie (jak skrzynka)")
+header(centerPanel, "Losowanie")
 header(chancePanel, "Szanse na rasy")
 
 local infoText = Instance.new("TextLabel")
 infoText.BackgroundTransparency = 1
 infoText.Position = UDim2.fromOffset(12, 52)
-infoText.Size = UDim2.new(1, -24, 1, -80)
+infoText.Size = UDim2.new(1, -24, 0, 90)
 infoText.Font = Enum.Font.Gotham
 infoText.TextSize = 18
 infoText.TextXAlignment = Enum.TextXAlignment.Left
@@ -174,6 +174,32 @@ infoText.TextColor3 = Color3.fromRGB(220, 220, 220)
 infoText.TextWrapped = true
 infoText.Text = "Kliknij Losuj aby stworzyć postać.\nMożesz to zrobić tylko raz."
 infoText.Parent = infoPanel
+
+local buffsHeader = Instance.new("TextLabel")
+buffsHeader.BackgroundTransparency = 1
+buffsHeader.Position = UDim2.fromOffset(12, 150)
+buffsHeader.Size = UDim2.new(1, -24, 0, 26)
+buffsHeader.Font = Enum.Font.GothamBold
+buffsHeader.TextSize = 20
+buffsHeader.TextXAlignment = Enum.TextXAlignment.Left
+buffsHeader.TextColor3 = Color3.fromRGB(245, 245, 245)
+buffsHeader.Text = "Buffy postaci"
+buffsHeader.Visible = false
+buffsHeader.Parent = infoPanel
+
+local buffsText = Instance.new("TextLabel")
+buffsText.BackgroundTransparency = 1
+buffsText.Position = UDim2.fromOffset(12, 180)
+buffsText.Size = UDim2.new(1, -24, 1, -200)
+buffsText.Font = Enum.Font.Gotham
+buffsText.TextSize = 18
+buffsText.TextXAlignment = Enum.TextXAlignment.Left
+buffsText.TextYAlignment = Enum.TextYAlignment.Top
+buffsText.TextColor3 = Color3.fromRGB(220, 220, 220)
+buffsText.TextWrapped = true
+buffsText.Text = ""
+buffsText.Visible = false
+buffsText.Parent = infoPanel
 
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.fromOffset(140, 40)
@@ -327,9 +353,42 @@ local createdOnce = false
 local finalRace: string? = nil
 local rollPreview: any = nil
 
-local function setCurrentRaceText(raceName: string)
+local function setBuffsText(raceName: string?)
+	if typeof(raceName) ~= "string" or raceName == "" or raceName == "-" then
+		buffsHeader.Visible = false
+		buffsText.Visible = false
+		buffsText.Text = ""
+		return
+	end
+
+	local def = Races.Defs[raceName]
+	local buffs = def and def.buffs
+	local lines = {}
+
+	if typeof(buffs) == "table" and #buffs > 0 then
+		for _, buff in ipairs(buffs) do
+			table.insert(lines, "• " .. tostring(buff))
+		end
+	else
+		table.insert(lines, "Brak buffów.")
+	end
+
+	buffsHeader.Visible = true
+	buffsText.Visible = true
+	buffsText.Text = table.concat(lines, "\n")
+end
+
+local function setRaceDisplay(raceName: string?)
+	if typeof(raceName) ~= "string" or raceName == "" or raceName == "-" then
+		current.Text = "Aktualna rasa: -"
+		current.TextColor3 = Color3.fromRGB(245,245,245)
+		setBuffsText(nil)
+		return
+	end
+
 	current.Text = ("Aktualna rasa: %s"):format(raceName)
 	current.TextColor3 = colorOfRace(raceName)
+	setBuffsText(raceName)
 end
 
 local function waitForNonZeroSize(frame: GuiObject, maxFrames: number)
@@ -397,7 +456,7 @@ local function playCaseAnimation(targetRace: string, chances, preview)
 
 	strip.Position = UDim2.fromOffset(pointerX + 80, 0)
 
-	local tween = TweenService:Create(strip, TweenInfo.new(2.8, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+	local tween = TweenService:Create(strip, TweenInfo.new(4.0, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
 		Position = UDim2.fromOffset(targetOffset, 0)
 	})
 	tween:Play()
@@ -416,18 +475,18 @@ local function openUI()
 	local chances = buildChancesForClass(cls)
 	rebuildChancesUI(chances)
 
-	local r = plr:GetAttribute("Race")
-	setCurrentRaceText(typeof(r) == "string" and r or "-")
-
 	local hasChar = plr:GetAttribute("HasCharacter")
 	if hasChar == true then
 		createdOnce = true
 		rollBtn.Visible = false
 		okBtn.Visible = true
+		local r = plr:GetAttribute("Race")
+		setRaceDisplay(typeof(r) == "string" and r or "-")
 	else
 		createdOnce = false
 		rollBtn.Visible = true
 		okBtn.Visible = false
+		setRaceDisplay(nil)
 	end
 
 	clearStrip()
@@ -446,13 +505,11 @@ plr:GetAttributeChangedSignal("Race"):Connect(function()
 	if not gui.Enabled then return end
 	local r = plr:GetAttribute("Race")
 	if typeof(r) ~= "string" or r == "" then return end
-	setCurrentRaceText(r)
 	if rolling then
 		finalRace = r
-		rolling = false
-		rollBtn.Visible = false
-		okBtn.Visible = true
+		return
 	end
+	setRaceDisplay(r)
 end)
 
 if CreateProfileResponse and CreateProfileResponse:IsA("RemoteEvent") then
@@ -460,9 +517,6 @@ if CreateProfileResponse and CreateProfileResponse:IsA("RemoteEvent") then
 		if not gui.Enabled then return end
 		if typeof(payload) ~= "table" then return end
 
-		if typeof(payload.race) == "string" then
-			plr:SetAttribute("Race", payload.race)
-		end
 		if typeof(payload.rollPreview) == "table" then
 			rollPreview = payload.rollPreview
 		end
@@ -495,7 +549,9 @@ rollBtn.MouseButton1Click:Connect(function()
 
 	if typeof(finalRace) == "string" then
 		playCaseAnimation(finalRace, chances, rollPreview)
+		rolling = false
 		createdOnce = true
+		setRaceDisplay(finalRace)
 		rollBtn.Visible = false
 		okBtn.Visible = true
 	else
