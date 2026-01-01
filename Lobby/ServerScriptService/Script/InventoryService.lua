@@ -62,9 +62,15 @@ local function equipWeapon(player: Player, weaponName: string): boolean
 		clearWeaponTools(starterGear)
 	end
 
-	template:Clone().Parent = backpack
+	local function clonePrepared(parent: Instance)
+		local clone = template:Clone()
+		WeaponCatalog.PrepareTool(clone)
+		clone.Parent = parent
+	end
+
+	clonePrepared(backpack)
 	if starterGear then
-		template:Clone().Parent = starterGear
+		clonePrepared(starterGear)
 	end
 
 	PlayerStateStore.SetEquippedWeaponName(player, weaponName)

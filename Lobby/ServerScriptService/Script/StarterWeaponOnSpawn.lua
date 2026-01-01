@@ -80,12 +80,16 @@ local function giveTool(player: Player, toolName: string): boolean
 	end
 
 	if not containerHasTool(backpack, toolName) then
-		template:Clone().Parent = backpack
+		local clone = template:Clone()
+		WeaponCatalog.PrepareTool(clone)
+		clone.Parent = backpack
 	end
 
 	local starterGear = player:FindFirstChild("StarterGear") or player:WaitForChild("StarterGear", 10)
 	if starterGear and not containerHasTool(starterGear, toolName) then
-		template:Clone().Parent = starterGear
+		local clone = template:Clone()
+		WeaponCatalog.PrepareTool(clone)
+		clone.Parent = starterGear
 	end
 
 	return true

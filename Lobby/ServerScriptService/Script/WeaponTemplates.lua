@@ -163,60 +163,6 @@ local WEAPON_DATA = {
 	},
 }
 
-local function disableLegacyScripts(tool: Tool)
-	for _, inst in ipairs(tool:GetDescendants()) do
-		if inst:IsA("Script") or inst:IsA("LocalScript") then
-			inst.Disabled = true
-		end
-	end
-end
-
-local function normalizeToolParts(tool: Tool)
-	local handle = tool:FindFirstChild("Handle", true)
-	local handlePart: BasePart? = nil
-	if handle and handle:IsA("BasePart") then
-		handlePart = handle
-	else
-		for _, inst in ipairs(tool:GetDescendants()) do
-			if inst:IsA("BasePart") then
-				handlePart = inst
-				inst.Name = "Handle"
-				break
-			end
-		end
-	end
-
-	if handlePart then
-		handlePart.Parent = tool
-		handlePart.Anchored = false
-		handlePart.CanCollide = false
-		handlePart.Massless = true
-	end
-
-	for _, inst in ipairs(tool:GetDescendants()) do
-		if inst:IsA("BasePart") then
-			inst.Anchored = false
-			inst.CanCollide = false
-			inst.Massless = true
-			if handlePart and inst ~= handlePart then
-				local existing = false
-				for _, joint in ipairs(inst:GetChildren()) do
-					if joint:IsA("WeldConstraint") and (joint.Part0 == handlePart or joint.Part1 == handlePart) then
-						existing = true
-						break
-					end
-				end
-				if not existing then
-					local weld = Instance.new("WeldConstraint")
-					weld.Part0 = handlePart
-					weld.Part1 = inst
-					weld.Parent = inst
-				end
-			end
-		end
-	end
-end
-
 local function applyStats(tool: Tool, data)
 	tool.CanBeDropped = false
 	tool.RequiresHandle = true
@@ -245,8 +191,7 @@ for weaponName, data in pairs(WEAPON_DATA) do
 		continue
 	end
 	applyStats(template, data)
-	normalizeToolParts(template)
-	disableLegacyScripts(template)
+	WeaponCatalog.PrepareTool(template)
 	updated += 1
 end
 
