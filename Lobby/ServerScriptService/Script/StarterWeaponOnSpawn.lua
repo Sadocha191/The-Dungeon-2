@@ -2,16 +2,15 @@
 -- GDZIE: ServerScriptService/StarterWeaponOnSpawn.server.lua
 -- CO: daje/odtwarza broń startową bez nadpisywania.
 --     Jeśli gracz ma już broń (WeaponType) -> nic nie robi.
---     Jeśli gracz nie ma broni -> daje tę z DS (StarterWeaponName) albo Rusty Sword.
+--     Jeśli gracz nie ma broni -> daje tę z DS (StarterWeaponName) albo Knight's Oath.
 
 local Players = game:GetService("Players")
-local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerStateStore = require(ServerScriptService:WaitForChild("PlayerStateStore"))
+local WeaponCatalog = require(ServerScriptService:WaitForChild("WeaponCatalog"))
 
-local templates = ServerStorage:WaitForChild("WeaponTemplates")
-local START_WEAPON_NAME = "Rusty Sword"
+local START_WEAPON_NAME = "Knight's Oath"
 
 local function isWeaponTool(inst: Instance): boolean
 	return inst:IsA("Tool") and typeof(inst:GetAttribute("WeaponType")) == "string"
@@ -68,8 +67,8 @@ local function containerHasTool(container: Instance?, toolName: string): boolean
 end
 
 local function giveTool(player: Player, toolName: string): boolean
-	local template = templates:FindFirstChild(toolName)
-	if not template or not template:IsA("Tool") then
+	local template = WeaponCatalog.FindTemplate(toolName)
+	if not template then
 		warn("[StarterWeapon] Missing template:", toolName)
 		return false
 	end
@@ -81,12 +80,16 @@ local function giveTool(player: Player, toolName: string): boolean
 	end
 
 	if not containerHasTool(backpack, toolName) then
-		template:Clone().Parent = backpack
+		local clone = template:Clone()
+		WeaponCatalog.PrepareTool(clone)
+		clone.Parent = backpack
 	end
 
 	local starterGear = player:FindFirstChild("StarterGear") or player:WaitForChild("StarterGear", 10)
 	if starterGear and not containerHasTool(starterGear, toolName) then
-		template:Clone().Parent = starterGear
+		local clone = template:Clone()
+		WeaponCatalog.PrepareTool(clone)
+		clone.Parent = starterGear
 	end
 
 	return true

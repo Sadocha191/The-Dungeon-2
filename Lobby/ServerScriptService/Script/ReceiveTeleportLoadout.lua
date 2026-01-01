@@ -5,16 +5,14 @@
 --     synchronizuje level/coins z Twoim PlayerData
 
 local Players = game:GetService("Players")
-local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
-
-local templates = ServerStorage:WaitForChild("WeaponTemplates")
+local WeaponCatalog = require(ServerScriptService:WaitForChild("WeaponCatalog"))
 
 local function giveTool(player: Player, toolName: string): boolean
-	local template = templates:FindFirstChild(toolName)
-	if not template or not template:IsA("Tool") then
+	local template = WeaponCatalog.FindTemplate(toolName)
+	if not template then
 		warn("[Dungeon] Missing weapon template:", toolName)
 		return false
 	end
@@ -22,9 +20,15 @@ local function giveTool(player: Player, toolName: string): boolean
 	local backpack = player:FindFirstChildOfClass("Backpack")
 	if not backpack then return false end
 
-	template:Clone().Parent = backpack
+	local clone = template:Clone()
+	WeaponCatalog.PrepareTool(clone)
+	clone.Parent = backpack
 	local starterGear = player:FindFirstChild("StarterGear")
-	if starterGear then template:Clone().Parent = starterGear end
+	if starterGear then
+		local starterClone = template:Clone()
+		WeaponCatalog.PrepareTool(starterClone)
+		starterClone.Parent = starterGear
+	end
 	return true
 end
 
