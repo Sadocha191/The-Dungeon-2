@@ -575,6 +575,39 @@ local function buildMeta(item)
 	if item.baseDamage then
 		table.insert(parts, ("DMG: %d"):format(item.baseDamage))
 	end
+	if item.maxLevel then
+		table.insert(parts, ("Max lvl: %d"):format(item.maxLevel))
+	end
+	if typeof(item.stats) == "table" then
+		local statParts = {}
+		if item.stats.HP and item.stats.HP ~= 0 then
+			table.insert(statParts, ("HP: +%d"):format(item.stats.HP))
+		end
+		if item.stats.SPD and item.stats.SPD ~= 0 then
+			table.insert(statParts, ("SPD: +%d%%"):format(item.stats.SPD))
+		end
+		if item.stats.CRIT_RATE and item.stats.CRIT_RATE ~= 0 then
+			table.insert(statParts, ("CRIT_RATE: +%d%%"):format(item.stats.CRIT_RATE))
+		end
+		if item.stats.CRIT_DMG and item.stats.CRIT_DMG ~= 0 then
+			table.insert(statParts, ("CRIT_DMG: +%d%%"):format(item.stats.CRIT_DMG))
+		end
+		if item.stats.LIFESTEAL and item.stats.LIFESTEAL ~= 0 then
+			table.insert(statParts, ("LIFESTEAL: +%d%%"):format(item.stats.LIFESTEAL))
+		end
+		if item.stats.DEF and item.stats.DEF ~= 0 then
+			table.insert(statParts, ("DEF: +%d"):format(item.stats.DEF))
+		end
+		if #statParts > 0 then
+			table.insert(parts, table.concat(statParts, " "))
+		end
+	end
+	if item.passiveName and item.passiveName ~= "" then
+		table.insert(parts, ("Pasyw: %s"):format(item.passiveName))
+	end
+	if item.abilityName and item.abilityName ~= "" then
+		table.insert(parts, ("Umiejętność: %s"):format(item.abilityName))
+	end
 	if #parts > 0 then
 		return table.concat(parts, " • ")
 	end
@@ -595,6 +628,12 @@ local function syncInventory(payload)
 				weaponType = raw.weaponType,
 				baseDamage = raw.baseDamage,
 				sellValue = raw.sellValue,
+				maxLevel = raw.maxLevel,
+				stats = raw.stats,
+				passiveName = raw.passiveName,
+				passiveDescription = raw.passiveDescription,
+				abilityName = raw.abilityName,
+				abilityDescription = raw.abilityDescription,
 				favorite = raw.favorite == true,
 			}
 			entry.meta = raw.meta or buildMeta(entry)
