@@ -1,157 +1,237 @@
 -- SCRIPT: WeaponTemplates.server.lua
 -- GDZIE: ServerScriptService/WeaponTemplates.server.lua (Script)
--- CO: generuje proste modele broni (placeholdery) poprawnie jako Tool/Handle
+-- CO: nakłada statystyki/pasywa na modele broni z ServerStorage/WeaponTemplates
 
-local ServerStorage = game:GetService("ServerStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+local WeaponCatalog = require(ServerScriptService:WaitForChild("WeaponCatalog"))
 
-local folder = ServerStorage:FindFirstChild("WeaponTemplates")
-if not folder then
-	folder = Instance.new("Folder")
-	folder.Name = "WeaponTemplates"
-	folder.Parent = ServerStorage
-else
-	-- czyścimy stare szablony, żeby nie dublować
-	for _, c in ipairs(folder:GetChildren()) do
-		c:Destroy()
+local STAT_KEYS = { "HP", "SPD", "CRIT_RATE", "CRIT_DMG", "LIFESTEAL", "DEF" }
+
+local WEAPON_DATA = {
+	["Knight's Oath"] = {
+		weaponType = "Sword",
+		rarity = "Common",
+		maxLevel = 20,
+		baseDamage = 10,
+		stats = {
+			DEF = 8,
+		},
+		passiveName = "Light Cleave",
+		passiveDescription = "Basic attacks hit up to 2 enemies in a small forward arc. Secondary hit deals 60% damage.",
+	},
+	["Excallion, Blade of Kings"] = {
+		weaponType = "Sword",
+		rarity = "Legendary",
+		maxLevel = 80,
+		baseDamage = 16,
+		stats = {
+			HP = 120,
+			CRIT_RATE = 10,
+			CRIT_DMG = 45,
+			DEF = 18,
+		},
+		abilityName = "Royal Shockwave",
+		abilityDescription = "Every 5th hit releases a shockwave dealing 120% ATK AoE damage. Staggers non-boss enemies.",
+	},
+	["Reaper's Crescent"] = {
+		weaponType = "Scythe",
+		rarity = "Epic",
+		maxLevel = 60,
+		baseDamage = 19,
+		stats = {
+			HP = 90,
+			SPD = 4,
+			LIFESTEAL = 3,
+		},
+		passiveName = "Bleed on Hit",
+		passiveDescription = "Applies Bleed for 3s, stacks up to 5. Each stack deals 12% ATK per second.",
+	},
+	["Harvest of the End"] = {
+		weaponType = "Scythe",
+		rarity = "Legendary",
+		maxLevel = 80,
+		baseDamage = 22,
+		stats = {
+			HP = 140,
+			CRIT_RATE = 8,
+			CRIT_DMG = 55,
+			LIFESTEAL = 5,
+		},
+		abilityName = "Feast on Death",
+		abilityDescription = "On kill: gain +6% damage for 4s per stack. Stacks up to 10 and refreshes on kill.",
+	},
+	["Warden's Halberd"] = {
+		weaponType = "Halberd",
+		rarity = "Rare",
+		maxLevel = 40,
+		baseDamage = 15,
+		stats = {
+			DEF = 14,
+			CRIT_RATE = 6,
+		},
+		passiveName = "Pierce",
+		passiveDescription = "Attacks hit up to 2 enemies in a straight line.",
+	},
+	["Dragonspear Halberd"] = {
+		weaponType = "Halberd",
+		rarity = "Epic",
+		maxLevel = 60,
+		baseDamage = 18,
+		stats = {
+			HP = 80,
+			DEF = 18,
+			CRIT_DMG = 35,
+		},
+		passiveName = "Armor Break",
+		passiveDescription = "Hits reduce enemy DEF by 12% for 3s. Boss effectiveness reduced by 50%.",
+	},
+	["Hunter's Longbow"] = {
+		weaponType = "Bow",
+		rarity = "Common",
+		maxLevel = 20,
+		baseDamage = 9,
+		stats = {
+			CRIT_RATE = 5,
+		},
+		passiveName = "Steady Aim",
+		passiveDescription = "+20% projectile speed and improved accuracy (no damage bonus).",
+	},
+	["Stormwind Recurve"] = {
+		weaponType = "Bow",
+		rarity = "Epic",
+		maxLevel = 60,
+		baseDamage = 12,
+		stats = {
+			SPD = 6,
+			CRIT_RATE = 10,
+			CRIT_DMG = 35,
+		},
+		passiveName = "Split Shot",
+		passiveDescription = "25% chance to split into 2 seeking arrows. Secondary arrows deal 45% damage.",
+	},
+	["Apprentice Arcstaff"] = {
+		weaponType = "Staff",
+		rarity = "Rare",
+		maxLevel = 40,
+		baseDamage = 9,
+		stats = {
+			HP = 70,
+			CRIT_RATE = 7,
+		},
+		passiveName = "Arc Charge",
+		passiveDescription = "Every 4th hit deals +50% ATK magic damage and chains to 1 nearby enemy for 30% damage.",
+	},
+	["Archmage's Worldstaff"] = {
+		weaponType = "Staff",
+		rarity = "Mythical",
+		maxLevel = 100,
+		baseDamage = 15,
+		stats = {
+			HP = 150,
+			SPD = 8,
+			CRIT_RATE = 12,
+			CRIT_DMG = 70,
+		},
+		abilityName = "Reality Bend",
+		abilityDescription = "Every spell gains a random elemental modifier (Burn/Freeze/Shock). Bosses receive 50% reduced duration.",
+	},
+	["Blackpowder Flintlock"] = {
+		weaponType = "Pistol",
+		rarity = "Rare",
+		maxLevel = 40,
+		baseDamage = 18,
+		stats = {
+			CRIT_RATE = 8,
+			DEF = 10,
+		},
+		passiveName = "Armor Crack",
+		passiveDescription = "Reduces enemy DEF by 8% for 2.5s. Boss effectiveness halved.",
+	},
+	["Kingslayer Handcannon"] = {
+		weaponType = "Pistol",
+		rarity = "Legendary",
+		maxLevel = 80,
+		baseDamage = 26,
+		stats = {
+			CRIT_RATE = 6,
+			CRIT_DMG = 90,
+			LIFESTEAL = 3,
+			DEF = 12,
+		},
+		abilityName = "Execution Round",
+		abilityDescription = "First shot after reload/no-shot cooldown always crits and deals +25% bonus damage.",
+	},
+}
+
+local function disableLegacyScripts(tool: Tool)
+	for _, inst in ipairs(tool:GetDescendants()) do
+		if inst:IsA("Script") or inst:IsA("LocalScript") then
+			inst.Disabled = true
+		end
 	end
 end
 
-local function makeHandle(size: Vector3): Part
-	local h = Instance.new("Part")
-	h.Name = "Handle"
-	h.Size = size
-	h.CanCollide = false
-	h.Massless = true
-	h.TopSurface = Enum.SurfaceType.Smooth
-	h.BottomSurface = Enum.SurfaceType.Smooth
+local function normalizeToolParts(tool: Tool)
+	local handle = tool:FindFirstChild("Handle", true)
+	local handlePart: BasePart? = nil
+	if handle and handle:IsA("BasePart") then
+		handlePart = handle
+	else
+		for _, inst in ipairs(tool:GetDescendants()) do
+			if inst:IsA("BasePart") then
+				handlePart = inst
+				inst.Name = "Handle"
+				break
+			end
+		end
+	end
 
-	-- punkt pod efekty / trail / VFX
-	local att = Instance.new("Attachment")
-	att.Name = "VFX"
-	att.Parent = h
+	if handlePart then
+		handlePart.Anchored = false
+		handlePart.CanCollide = false
+		handlePart.Massless = true
+	end
 
-	return h
+	for _, inst in ipairs(tool:GetDescendants()) do
+		if inst:IsA("BasePart") then
+			inst.Anchored = false
+			inst.CanCollide = false
+			inst.Massless = true
+		end
+	end
 end
 
-local function weld(part0: BasePart, part1: BasePart)
-	local w = Instance.new("WeldConstraint")
-	w.Part0 = part0
-	w.Part1 = part1
-	w.Parent = part0
-end
-
-local function makeTool(toolName: string, weaponType: string, baseDamage: number, handleSize: Vector3, extrasBuilder, sellValue: number?)
-	local tool = Instance.new("Tool")
-	tool.Name = toolName
+local function applyStats(tool: Tool, data)
 	tool.CanBeDropped = false
+	tool.RequiresHandle = true
+	tool:SetAttribute("WeaponType", data.weaponType)
+	tool:SetAttribute("BaseDamage", data.baseDamage)
+	tool:SetAttribute("Rarity", data.rarity)
+	tool:SetAttribute("MaxLevel", data.maxLevel)
+	tool:SetAttribute("SellValue", math.max(1, math.floor(data.baseDamage * 3)))
 
-	tool:SetAttribute("WeaponType", weaponType)
-	tool:SetAttribute("BaseDamage", baseDamage)
-	tool:SetAttribute("Rarity", "Common")
-	tool:SetAttribute("SellValue", sellValue or math.max(1, math.floor(baseDamage * 3)))
-
-	local handle = makeHandle(handleSize)
-	handle.Parent = tool
-
-	if extrasBuilder then
-		extrasBuilder(tool, handle)
+	local stats = data.stats or {}
+	for _, key in ipairs(STAT_KEYS) do
+		tool:SetAttribute(key, stats[key] or 0)
 	end
 
-	tool.Parent = folder
+	tool:SetAttribute("PassiveName", data.passiveName or "")
+	tool:SetAttribute("PassiveDescription", data.passiveDescription or "")
+	tool:SetAttribute("AbilityName", data.abilityName or "")
+	tool:SetAttribute("AbilityDescription", data.abilityDescription or "")
 end
 
--- ===== MODELE (placeholdery) =====
+local updated = 0
+for weaponName, data in pairs(WEAPON_DATA) do
+	local template = WeaponCatalog.FindTemplate(weaponName)
+	if not template then
+		warn("[WeaponTemplates] Missing template:", weaponName)
+		continue
+	end
+	applyStats(template, data)
+	normalizeToolParts(template)
+	disableLegacyScripts(template)
+	updated += 1
+end
 
--- Rusty Sword: ostrze + jelec
-makeTool("Rusty Sword", "Sword", 10, Vector3.new(0.3, 3.2, 0.3), function(tool, handle)
-	local blade = Instance.new("Part")
-	blade.Name = "Blade"
-	blade.Size = Vector3.new(0.25, 3.8, 0.18)
-	blade.CanCollide = false
-	blade.Massless = true
-	blade.Parent = tool
-	blade.CFrame = handle.CFrame * CFrame.new(0, 3.0, 0)
-	weld(handle, blade)
-
-	local guard = Instance.new("Part")
-	guard.Name = "Guard"
-	guard.Size = Vector3.new(1.2, 0.2, 0.2)
-	guard.CanCollide = false
-	guard.Massless = true
-	guard.Parent = tool
-	guard.CFrame = handle.CFrame * CFrame.new(0, 1.2, 0)
-	weld(handle, guard)
-end, 30)
-
--- Apprentice Staff: kij + “główka”
-makeTool("Apprentice Staff", "Staff", 8, Vector3.new(0.35, 4.4, 0.35), function(tool, handle)
-	local head = Instance.new("Part")
-	head.Name = "Head"
-	head.Shape = Enum.PartType.Ball
-	head.Size = Vector3.new(0.9, 0.9, 0.9)
-	head.CanCollide = false
-	head.Massless = true
-	head.Parent = tool
-	head.CFrame = handle.CFrame * CFrame.new(0, 2.6, 0)
-	weld(handle, head)
-end, 24)
-
--- Worn Dagger: krótkie ostrze
-makeTool("Worn Dagger", "Dagger", 9, Vector3.new(0.25, 1.7, 0.25), function(tool, handle)
-	local blade = Instance.new("Part")
-	blade.Name = "Blade"
-	blade.Size = Vector3.new(0.18, 2.0, 0.12)
-	blade.CanCollide = false
-	blade.Massless = true
-	blade.Parent = tool
-	blade.CFrame = handle.CFrame * CFrame.new(0, 1.4, 0)
-	weld(handle, blade)
-end, 27)
-
--- Old Spear
-makeTool("Old Spear", "Spear", 10, Vector3.new(0.22, 5.0, 0.22), function(tool, handle)
-	local tip = Instance.new("Part")
-	tip.Name = "Tip"
-	tip.Size = Vector3.new(0.35, 0.8, 0.35)
-	tip.CanCollide = false
-	tip.Massless = true
-	tip.Parent = tool
-	tip.CFrame = handle.CFrame * CFrame.new(0, 3.0, 0)
-	weld(handle, tip)
-end, 30)
-
--- Simple Bow (placeholder: łuk jako 2 “ramiona”)
-makeTool("Simple Bow", "Bow", 8, Vector3.new(0.25, 2.8, 0.25), function(tool, handle)
-	local arm1 = Instance.new("Part")
-	arm1.Name = "Arm1"
-	arm1.Size = Vector3.new(0.2, 1.6, 0.2)
-	arm1.CanCollide = false
-	arm1.Massless = true
-	arm1.Parent = tool
-	arm1.CFrame = handle.CFrame * CFrame.new(0.5, 0.8, 0) * CFrame.Angles(0, 0, math.rad(20))
-	weld(handle, arm1)
-
-	local arm2 = Instance.new("Part")
-	arm2.Name = "Arm2"
-	arm2.Size = Vector3.new(0.2, 1.6, 0.2)
-	arm2.CanCollide = false
-	arm2.Massless = true
-	arm2.Parent = tool
-	arm2.CFrame = handle.CFrame * CFrame.new(0.5, -0.8, 0) * CFrame.Angles(0, 0, math.rad(-20))
-	weld(handle, arm2)
-end, 24)
-
--- Training Mace (kij + kula)
-makeTool("Training Mace", "Mace", 10, Vector3.new(0.35, 3.0, 0.35), function(tool, handle)
-	local head = Instance.new("Part")
-	head.Name = "Head"
-	head.Shape = Enum.PartType.Ball
-	head.Size = Vector3.new(1.0, 1.0, 1.0)
-	head.CanCollide = false
-	head.Massless = true
-	head.Parent = tool
-	head.CFrame = handle.CFrame * CFrame.new(0, 2.1, 0)
-	weld(handle, head)
-end, 30)
-
-print("[WeaponTemplates] Generated:", #folder:GetChildren())
+print("[WeaponTemplates] Applied weapon data:", updated)
