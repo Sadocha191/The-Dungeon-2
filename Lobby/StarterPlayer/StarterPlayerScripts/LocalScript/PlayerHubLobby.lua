@@ -344,21 +344,141 @@ itemsList.BorderSizePixel = 0
 itemsList.CanvasSize = UDim2.fromOffset(0, 0)
 itemsList.Parent = itemsPanel
 
-local itemsLayout = Instance.new("UIListLayout", itemsList)
-itemsLayout.Padding = UDim.new(0, 10)
+local itemsLayout = Instance.new("UIGridLayout", itemsList)
+itemsLayout.CellPadding = UDim2.fromOffset(12, 12)
+itemsLayout.CellSize = UDim2.fromOffset(220, 120)
 itemsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local emptyItemsLabel = Instance.new("TextLabel")
+emptyItemsLabel.BackgroundTransparency = 1
+emptyItemsLabel.Position = UDim2.fromOffset(0, 30)
+emptyItemsLabel.Size = UDim2.new(1, 0, 1, -30)
+emptyItemsLabel.Font = Enum.Font.Gotham
+emptyItemsLabel.TextSize = 14
+emptyItemsLabel.TextColor3 = Color3.fromRGB(160, 160, 160)
+emptyItemsLabel.Text = "Brak broni. Odbierz je z gacha."
+emptyItemsLabel.TextWrapped = true
+emptyItemsLabel.TextXAlignment = Enum.TextXAlignment.Center
+emptyItemsLabel.TextYAlignment = Enum.TextYAlignment.Center
+emptyItemsLabel.Visible = false
+emptyItemsLabel.Parent = itemsPanel
+
+local confirmOverlay = Instance.new("Frame")
+confirmOverlay.Size = UDim2.fromScale(1, 1)
+confirmOverlay.BackgroundColor3 = Color3.fromRGB(8, 8, 10)
+confirmOverlay.BackgroundTransparency = 0.35
+confirmOverlay.BorderSizePixel = 0
+confirmOverlay.Visible = false
+confirmOverlay.Parent = inventoryGui
+
+local confirmPanel = Instance.new("Frame")
+confirmPanel.AnchorPoint = Vector2.new(0.5, 0.5)
+confirmPanel.Position = UDim2.fromScale(0.5, 0.5)
+confirmPanel.Size = UDim2.fromOffset(360, 180)
+confirmPanel.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+confirmPanel.BackgroundTransparency = 0.06
+confirmPanel.BorderSizePixel = 0
+confirmPanel.Parent = confirmOverlay
+Instance.new("UICorner", confirmPanel).CornerRadius = UDim.new(0, 14)
+local confirmStroke = Instance.new("UIStroke", confirmPanel)
+confirmStroke.Color = Color3.fromRGB(40, 40, 48)
+confirmStroke.Thickness = 1
+
+local confirmText = Instance.new("TextLabel")
+confirmText.BackgroundTransparency = 1
+confirmText.Position = UDim2.fromOffset(20, 18)
+confirmText.Size = UDim2.new(1, -40, 0, 60)
+confirmText.Font = Enum.Font.GothamBold
+confirmText.TextSize = 16
+confirmText.TextColor3 = Color3.fromRGB(235, 235, 235)
+confirmText.TextWrapped = true
+confirmText.Text = "Czy na pewno chcesz sprzedać tę broń?"
+confirmText.Parent = confirmPanel
+
+local confirmButtons = Instance.new("Frame")
+confirmButtons.BackgroundTransparency = 1
+confirmButtons.AnchorPoint = Vector2.new(0.5, 1)
+confirmButtons.Position = UDim2.new(0.5, 0, 1, -16)
+confirmButtons.Size = UDim2.new(1, -40, 0, 44)
+confirmButtons.Parent = confirmPanel
+local confirmLayout = Instance.new("UIListLayout", confirmButtons)
+confirmLayout.FillDirection = Enum.FillDirection.Horizontal
+confirmLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+confirmLayout.Padding = UDim.new(0, 12)
+
+local cancelBtn = Instance.new("TextButton")
+cancelBtn.Size = UDim2.fromOffset(120, 40)
+cancelBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 52)
+cancelBtn.BorderSizePixel = 0
+cancelBtn.Font = Enum.Font.GothamBold
+cancelBtn.TextSize = 14
+cancelBtn.TextColor3 = Color3.fromRGB(230, 230, 230)
+cancelBtn.Text = "Anuluj"
+cancelBtn.Parent = confirmButtons
+Instance.new("UICorner", cancelBtn).CornerRadius = UDim.new(0, 10)
+
+local confirmBtn = Instance.new("TextButton")
+confirmBtn.Size = UDim2.fromOffset(140, 40)
+confirmBtn.BackgroundColor3 = Color3.fromRGB(185, 62, 62)
+confirmBtn.BorderSizePixel = 0
+confirmBtn.Font = Enum.Font.GothamBold
+confirmBtn.TextSize = 14
+confirmBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+confirmBtn.Text = "Sprzedaj"
+confirmBtn.Parent = confirmButtons
+Instance.new("UICorner", confirmBtn).CornerRadius = UDim.new(0, 10)
+
+local equippedItemId
+local pendingSellId
+local inventoryItems = {}
+
+local function sortItems(items)
+	table.sort(items, function(a, b)
+		if (a.favorite and not b.favorite) then
+			return true
+		elseif (b.favorite and not a.favorite) then
+			return false
+		end
+		return (a.name or "") < (b.name or "")
+	end)
+end
 
 local function makeItemCard(item)
 	local card = Instance.new("Frame")
-	card.Size = UDim2.new(1, 0, 0, 56)
+	card.Size = UDim2.fromOffset(220, 120)
 	card.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
 	card.BorderSizePixel = 0
 	card.Parent = itemsList
 	Instance.new("UICorner", card).CornerRadius = UDim.new(0, 10)
 
+	local favoriteBtn = Instance.new("TextButton")
+	favoriteBtn.Size = UDim2.fromOffset(22, 22)
+	favoriteBtn.Position = UDim2.fromOffset(8, 8)
+	favoriteBtn.BackgroundColor3 = Color3.fromRGB(34, 34, 44)
+	favoriteBtn.BorderSizePixel = 0
+	favoriteBtn.Font = Enum.Font.GothamBold
+	favoriteBtn.TextSize = 14
+	favoriteBtn.TextColor3 = Color3.fromRGB(255, 214, 102)
+	favoriteBtn.Text = item.favorite and "★" or "☆"
+	favoriteBtn.Parent = card
+	Instance.new("UICorner", favoriteBtn).CornerRadius = UDim.new(0, 6)
+
+	local sellBtn = Instance.new("TextButton")
+	sellBtn.AnchorPoint = Vector2.new(1, 0)
+	sellBtn.Position = UDim2.new(1, -8, 0, 8)
+	sellBtn.Size = UDim2.fromOffset(22, 22)
+	sellBtn.BackgroundColor3 = Color3.fromRGB(44, 34, 34)
+	sellBtn.BorderSizePixel = 0
+	sellBtn.Font = Enum.Font.GothamBold
+	sellBtn.TextSize = 12
+	sellBtn.TextColor3 = Color3.fromRGB(255, 160, 160)
+	sellBtn.Text = "X"
+	sellBtn.Parent = card
+	Instance.new("UICorner", sellBtn).CornerRadius = UDim.new(0, 6)
+
 	local name = Instance.new("TextLabel")
 	name.BackgroundTransparency = 1
-	name.Position = UDim2.fromOffset(12, 8)
+	name.Position = UDim2.fromOffset(12, 36)
 	name.Size = UDim2.new(1, -24, 0, 18)
 	name.Font = Enum.Font.GothamBold
 	name.TextSize = 14
@@ -369,7 +489,7 @@ local function makeItemCard(item)
 
 	local meta = Instance.new("TextLabel")
 	meta.BackgroundTransparency = 1
-	meta.Position = UDim2.fromOffset(12, 28)
+	meta.Position = UDim2.fromOffset(12, 56)
 	meta.Size = UDim2.new(1, -24, 0, 16)
 	meta.Font = Enum.Font.Gotham
 	meta.TextSize = 12
@@ -377,13 +497,46 @@ local function makeItemCard(item)
 	meta.TextColor3 = Color3.fromRGB(180, 180, 180)
 	meta.Text = item.meta or "Pozyskaj z gacha"
 	meta.Parent = card
-end
 
-local starterItems = {
-	{ name = "Miecz treningowy", meta = "Rzadkość: Wspólna • Gacha" },
-	{ name = "Łuk nowicjusza", meta = "Rzadkość: Wspólna • Gacha" },
-	{ name = "Kostur iskier", meta = "Rzadkość: Niepospolita • Gacha" },
-}
+	local valueLabel = Instance.new("TextLabel")
+	valueLabel.BackgroundTransparency = 1
+	valueLabel.Position = UDim2.fromOffset(12, 74)
+	valueLabel.Size = UDim2.new(1, -24, 0, 16)
+	valueLabel.Font = Enum.Font.Gotham
+	valueLabel.TextSize = 12
+	valueLabel.TextXAlignment = Enum.TextXAlignment.Left
+	valueLabel.TextColor3 = Color3.fromRGB(150, 200, 255)
+	valueLabel.Text = ("Wartość: %d monet"):format(item.sellValue or 0)
+	valueLabel.Parent = card
+
+	local equipBtn = Instance.new("TextButton")
+	equipBtn.AnchorPoint = Vector2.new(1, 1)
+	equipBtn.Position = UDim2.new(1, -10, 1, -10)
+	equipBtn.Size = UDim2.fromOffset(90, 28)
+	equipBtn.BackgroundColor3 = item.id == equippedItemId and Color3.fromRGB(60, 140, 255) or Color3.fromRGB(36, 36, 48)
+	equipBtn.BorderSizePixel = 0
+	equipBtn.Font = Enum.Font.GothamBold
+	equipBtn.TextSize = 12
+	equipBtn.TextColor3 = Color3.fromRGB(240, 240, 240)
+	equipBtn.Text = item.id == equippedItemId and "Wyposażona" or "Wyposaż"
+	equipBtn.Parent = card
+	Instance.new("UICorner", equipBtn).CornerRadius = UDim.new(0, 8)
+
+	favoriteBtn.MouseButton1Click:Connect(function()
+		item.favorite = not item.favorite
+		renderInventory(inventoryItems)
+	end)
+
+	sellBtn.MouseButton1Click:Connect(function()
+		pendingSellId = item.id
+		confirmOverlay.Visible = true
+	end)
+
+	equipBtn.MouseButton1Click:Connect(function()
+		equippedItemId = item.id
+		renderInventory(inventoryItems)
+	end)
+end
 
 local function renderInventory(items)
 	for _, child in ipairs(itemsList:GetChildren()) do
@@ -391,11 +544,13 @@ local function renderInventory(items)
 			child:Destroy()
 		end
 	end
+	sortItems(items)
+	emptyItemsLabel.Visible = #items == 0
 	for _, item in ipairs(items) do
 		makeItemCard(item)
 	end
 	task.defer(function()
-		itemsList.CanvasSize = UDim2.fromOffset(0, itemsLayout.AbsoluteContentSize.Y + 6)
+		itemsList.CanvasSize = UDim2.fromOffset(0, itemsLayout.AbsoluteContentSize.Y + 12)
 	end)
 end
 
@@ -409,6 +564,10 @@ end
 
 local function setInventoryVisible(state)
 	inventoryGui.Enabled = state
+	if not state then
+		confirmOverlay.Visible = false
+		pendingSellId = nil
+	end
 	if state then
 		refreshInventoryStats()
 	end
@@ -418,6 +577,28 @@ closeBtn.MouseButton1Click:Connect(function()
 	setInventoryVisible(false)
 end)
 
+cancelBtn.MouseButton1Click:Connect(function()
+	confirmOverlay.Visible = false
+	pendingSellId = nil
+end)
+
+confirmBtn.MouseButton1Click:Connect(function()
+	if pendingSellId then
+		for index, item in ipairs(inventoryItems) do
+			if item.id == pendingSellId then
+				table.remove(inventoryItems, index)
+				break
+			end
+		end
+		if equippedItemId == pendingSellId then
+			equippedItemId = nil
+		end
+	end
+	confirmOverlay.Visible = false
+	pendingSellId = nil
+	renderInventory(inventoryItems)
+end)
+
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
 	if input.KeyCode == Enum.KeyCode.B then
@@ -425,7 +606,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	end
 end)
 
-renderInventory(starterItems)
+renderInventory(inventoryItems)
 
 -- AUTO-HIDE: jeśli jakikolwiek ScreenGui ma Modal=true i Enabled=true, chowamy HUD
 local function anyModalOpen(): boolean
