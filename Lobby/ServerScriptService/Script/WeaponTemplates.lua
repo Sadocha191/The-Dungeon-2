@@ -171,8 +171,39 @@ local function disableLegacyScripts(tool: Tool)
 	end
 end
 
+local function normalizeToolParts(tool: Tool)
+	local handle = tool:FindFirstChild("Handle", true)
+	local handlePart: BasePart? = nil
+	if handle and handle:IsA("BasePart") then
+		handlePart = handle
+	else
+		for _, inst in ipairs(tool:GetDescendants()) do
+			if inst:IsA("BasePart") then
+				handlePart = inst
+				inst.Name = "Handle"
+				break
+			end
+		end
+	end
+
+	if handlePart then
+		handlePart.Anchored = false
+		handlePart.CanCollide = false
+		handlePart.Massless = true
+	end
+
+	for _, inst in ipairs(tool:GetDescendants()) do
+		if inst:IsA("BasePart") then
+			inst.Anchored = false
+			inst.CanCollide = false
+			inst.Massless = true
+		end
+	end
+end
+
 local function applyStats(tool: Tool, data)
 	tool.CanBeDropped = false
+	tool.RequiresHandle = true
 	tool:SetAttribute("WeaponType", data.weaponType)
 	tool:SetAttribute("BaseDamage", data.baseDamage)
 	tool:SetAttribute("Rarity", data.rarity)
@@ -198,6 +229,7 @@ for weaponName, data in pairs(WEAPON_DATA) do
 		continue
 	end
 	applyStats(template, data)
+	normalizeToolParts(template)
 	disableLegacyScripts(template)
 	updated += 1
 end
