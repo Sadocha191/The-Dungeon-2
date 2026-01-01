@@ -2,9 +2,8 @@
 -- GDZIE: ServerScriptService/WeaponTemplates.server.lua (Script)
 -- CO: nakłada statystyki/pasywa na modele broni z ServerStorage/WeaponTemplates
 
-local ServerStorage = game:GetService("ServerStorage")
-
-local templates = ServerStorage:WaitForChild("WeaponTemplates")
+local ServerScriptService = game:GetService("ServerScriptService")
+local WeaponCatalog = require(ServerScriptService:WaitForChild("WeaponCatalog"))
 
 local STAT_KEYS = { "HP", "SPD", "CRIT_RATE", "CRIT_DMG", "LIFESTEAL", "DEF" }
 
@@ -193,13 +192,9 @@ end
 
 local updated = 0
 for weaponName, data in pairs(WEAPON_DATA) do
-	local template = templates:FindFirstChild(weaponName, true)
+	local template = WeaponCatalog.FindTemplate(weaponName)
 	if not template then
 		warn("[WeaponTemplates] Missing template:", weaponName)
-		continue
-	end
-	if not template:IsA("Tool") then
-		warn("[WeaponTemplates] Template is not a Tool:", template:GetFullName())
 		continue
 	end
 	applyStats(template, data)

@@ -4,13 +4,21 @@ local templates = ServerStorage:WaitForChild("WeaponTemplates")
 
 local WeaponCatalog = {}
 
+local function normalizeName(name: string): string
+	return name:gsub("’", "'")
+end
+
 function WeaponCatalog.FindTemplate(weaponName: string): Tool?
 	if typeof(weaponName) ~= "string" or weaponName == "" then
 		return nil
 	end
-	local found = templates:FindFirstChild(weaponName, true)
-	if found and found:IsA("Tool") then
-		return found
+	local normalizedTarget = normalizeName(weaponName)
+	for _, inst in ipairs(templates:GetDescendants()) do
+		if inst:IsA("Tool") then
+			if normalizeName(inst.Name) == normalizedTarget then
+				return inst
+			end
+		end
 	end
 	return nil
 end
