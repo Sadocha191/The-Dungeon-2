@@ -5,16 +5,14 @@
 --     synchronizuje level/coins z Twoim PlayerData
 
 local Players = game:GetService("Players")
-local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
-
-local templates = ServerStorage:WaitForChild("WeaponTemplates")
+local WeaponCatalog = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WeaponCatalog"))
 
 local function giveTool(player: Player, toolName: string): boolean
-	local template = templates:FindFirstChild(toolName)
-	if not template or not template:IsA("Tool") then
+	local template = WeaponCatalog.FindTemplate(toolName)
+	if not template then
 		warn("[Dungeon] Missing weapon template:", toolName)
 		return false
 	end
