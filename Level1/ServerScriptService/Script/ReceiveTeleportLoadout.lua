@@ -12,6 +12,19 @@ local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
 
 local templates = ServerStorage:WaitForChild("WeaponTemplates")
 
+local function isWeaponTool(inst: Instance): boolean
+	return inst:IsA("Tool") and typeof(inst:GetAttribute("WeaponType")) == "string"
+end
+
+local function clearWeaponTools(container: Instance?)
+	if not container then return end
+	for _, inst in ipairs(container:GetChildren()) do
+		if isWeaponTool(inst) then
+			inst:Destroy()
+		end
+	end
+end
+
 local function giveTool(player: Player, toolName: string): boolean
 	local template = templates:FindFirstChild(toolName)
 	if not template or not template:IsA("Tool") then
@@ -22,9 +35,14 @@ local function giveTool(player: Player, toolName: string): boolean
 	local backpack = player:FindFirstChildOfClass("Backpack")
 	if not backpack then return false end
 
+	clearWeaponTools(backpack)
+	clearWeaponTools(player.Character)
 	template:Clone().Parent = backpack
 	local starterGear = player:FindFirstChild("StarterGear")
-	if starterGear then template:Clone().Parent = starterGear end
+	if starterGear then
+		clearWeaponTools(starterGear)
+		template:Clone().Parent = starterGear
+	end
 	return true
 end
 

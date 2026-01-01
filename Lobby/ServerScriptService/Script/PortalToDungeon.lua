@@ -114,6 +114,7 @@ local function tryTeleport(player: Player, placeId: number)
 		local weaponName = findWeaponName(player)
 		if typeof(weaponName) == "string" and weaponName ~= "" then
 			PlayerStateStore.SetStarterWeaponClaimed(player, weaponName)
+			PlayerStateStore.EnsureOwnedWeapon(player, weaponName)
 			state = PlayerStateStore.Get(player) or state
 		else
 			-- wymuszamy broń przed wejściem do dungeona

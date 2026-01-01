@@ -19,6 +19,8 @@ local PlayerProgressEvent = remotes:WaitForChild("PlayerProgressEvent")
 -- Race updates (opcjonalnie)
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local RaceUpdated = remoteEvents:FindFirstChild("RaceUpdated")
+local InventoryAction = remoteEvents:WaitForChild("InventoryAction")
+local InventorySync = remoteEvents:WaitForChild("InventorySync")
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "PlayerHudGui_Lobby"
@@ -430,6 +432,7 @@ Instance.new("UICorner", confirmBtn).CornerRadius = UDim.new(0, 10)
 
 local equippedItemId
 local pendingSellId
+local pendingSellName
 local inventoryItems = {}
 
 local function sortItems(items)
@@ -506,7 +509,7 @@ local function makeItemCard(item)
 	valueLabel.TextSize = 12
 	valueLabel.TextXAlignment = Enum.TextXAlignment.Left
 	valueLabel.TextColor3 = Color3.fromRGB(150, 200, 255)
-	valueLabel.Text = ("Wartość: %d monet"):format(item.sellValue or 0)
+	valueLabel.Text = ("Wartość: %s monet"):format(item.sellValue and tostring(item.sellValue) or "?")
 	valueLabel.Parent = card
 
 	local equipBtn = Instance.new("TextButton")
@@ -523,18 +526,25 @@ local function makeItemCard(item)
 	Instance.new("UICorner", equipBtn).CornerRadius = UDim.new(0, 8)
 
 	favoriteBtn.MouseButton1Click:Connect(function()
-		item.favorite = not item.favorite
-		renderInventory(inventoryItems)
+		InventoryAction:FireServer({
+			type = "favorite",
+			id = item.id,
+			value = not item.favorite,
+		})
 	end)
 
 	sellBtn.MouseButton1Click:Connect(function()
 		pendingSellId = item.id
+		pendingSellName = item.name
+		confirmText.Text = ("Czy na pewno chcesz sprzedać broń \"%s\"?"):format(item.name or "tę broń")
 		confirmOverlay.Visible = true
 	end)
 
 	equipBtn.MouseButton1Click:Connect(function()
-		equippedItemId = item.id
-		renderInventory(inventoryItems)
+		InventoryAction:FireServer({
+			type = "equip",
+			id = item.id,
+		})
 	end)
 end
 
@@ -554,6 +564,49 @@ local function renderInventory(items)
 	end)
 end
 
+local function buildMeta(item)
+	local parts = {}
+	if item.rarity and item.rarity ~= "" then
+		table.insert(parts, ("Rzadkość: %s"):format(item.rarity))
+	end
+	if item.weaponType and item.weaponType ~= "" then
+		table.insert(parts, ("Typ: %s"):format(item.weaponType))
+	end
+	if item.baseDamage then
+		table.insert(parts, ("DMG: %d"):format(item.baseDamage))
+	end
+	if #parts > 0 then
+		return table.concat(parts, " • ")
+	end
+	return "Pozyskaj z gacha"
+end
+
+local function syncInventory(payload)
+	if typeof(payload) ~= "table" or typeof(payload.items) ~= "table" then
+		return
+	end
+	inventoryItems = {}
+	for _, raw in ipairs(payload.items) do
+		if typeof(raw) == "table" then
+			local entry = {
+				id = raw.id or raw.name,
+				name = raw.name or raw.id or "Nieznana broń",
+				rarity = raw.rarity,
+				weaponType = raw.weaponType,
+				baseDamage = raw.baseDamage,
+				sellValue = raw.sellValue,
+				favorite = raw.favorite == true,
+			}
+			entry.meta = raw.meta or buildMeta(entry)
+			table.insert(inventoryItems, entry)
+		end
+	end
+	equippedItemId = payload.equippedId
+	renderInventory(inventoryItems)
+end
+
+InventorySync.OnClientEvent:Connect(syncInventory)
+
 refreshInventoryStats = function()
 	statLevel.Text = ("Poziom: %d"):format(level)
 	statRace.Text = ("Rasa: %s"):format(tostring(plr:GetAttribute("Race") or "-"))
@@ -567,9 +620,11 @@ local function setInventoryVisible(state)
 	if not state then
 		confirmOverlay.Visible = false
 		pendingSellId = nil
+		pendingSellName = nil
 	end
 	if state then
 		refreshInventoryStats()
+		InventoryAction:FireServer({ type = "request" })
 	end
 end
 
@@ -580,23 +635,19 @@ end)
 cancelBtn.MouseButton1Click:Connect(function()
 	confirmOverlay.Visible = false
 	pendingSellId = nil
+	pendingSellName = nil
 end)
 
 confirmBtn.MouseButton1Click:Connect(function()
 	if pendingSellId then
-		for index, item in ipairs(inventoryItems) do
-			if item.id == pendingSellId then
-				table.remove(inventoryItems, index)
-				break
-			end
-		end
-		if equippedItemId == pendingSellId then
-			equippedItemId = nil
-		end
+		InventoryAction:FireServer({
+			type = "sell",
+			id = pendingSellId,
+		})
 	end
 	confirmOverlay.Visible = false
 	pendingSellId = nil
-	renderInventory(inventoryItems)
+	pendingSellName = nil
 end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -606,7 +657,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	end
 end)
 
-renderInventory(inventoryItems)
+InventoryAction:FireServer({ type = "request" })
 
 -- AUTO-HIDE: jeśli jakikolwiek ScreenGui ma Modal=true i Enabled=true, chowamy HUD
 local function anyModalOpen(): boolean

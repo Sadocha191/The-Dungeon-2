@@ -39,6 +39,28 @@ local function hasAnyWeapon(player: Player): boolean
 	return false
 end
 
+local function findWeaponName(player: Player): string?
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if backpack then
+		for _, inst in ipairs(backpack:GetChildren()) do
+			if isWeaponTool(inst) then return inst.Name end
+		end
+	end
+	local char = player.Character
+	if char then
+		for _, inst in ipairs(char:GetChildren()) do
+			if isWeaponTool(inst) then return inst.Name end
+		end
+	end
+	local starterGear = player:FindFirstChild("StarterGear")
+	if starterGear then
+		for _, inst in ipairs(starterGear:GetChildren()) do
+			if isWeaponTool(inst) then return inst.Name end
+		end
+	end
+	return nil
+end
+
 local function containerHasTool(container: Instance?, toolName: string): boolean
 	if not container then return false end
 	local t = container:FindFirstChild(toolName)
@@ -75,6 +97,13 @@ local function ensureWeapon(player: Player)
 
 	-- ✅ jeśli ma już jakąkolwiek broń (np. gacha) -> nic nie rób
 	if hasAnyWeapon(player) then
+		local currentName = findWeaponName(player)
+		if typeof(currentName) == "string" and currentName ~= "" then
+			PlayerStateStore.EnsureOwnedWeapon(player, currentName)
+			if state.StarterWeaponName ~= currentName then
+				PlayerStateStore.SetEquippedWeaponName(player, currentName)
+			end
+		end
 		return
 	end
 
@@ -85,10 +114,8 @@ local function ensureWeapon(player: Player)
 	end
 
 	if giveTool(player, preferred) then
-		-- jeśli nie było flagi, ustaw ją (na przyszłość)
-		if not state.StarterWeaponClaimed then
-			PlayerStateStore.SetStarterWeaponClaimed(player, preferred)
-		end
+		PlayerStateStore.EnsureOwnedWeapon(player, preferred)
+		PlayerStateStore.SetEquippedWeaponName(player, preferred)
 	end
 end
 

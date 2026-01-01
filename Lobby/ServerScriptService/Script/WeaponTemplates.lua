@@ -40,7 +40,7 @@ local function weld(part0: BasePart, part1: BasePart)
 	w.Parent = part0
 end
 
-local function makeTool(toolName: string, weaponType: string, baseDamage: number, handleSize: Vector3, extrasBuilder)
+local function makeTool(toolName: string, weaponType: string, baseDamage: number, handleSize: Vector3, extrasBuilder, sellValue: number?)
 	local tool = Instance.new("Tool")
 	tool.Name = toolName
 	tool.CanBeDropped = false
@@ -48,6 +48,7 @@ local function makeTool(toolName: string, weaponType: string, baseDamage: number
 	tool:SetAttribute("WeaponType", weaponType)
 	tool:SetAttribute("BaseDamage", baseDamage)
 	tool:SetAttribute("Rarity", "Common")
+	tool:SetAttribute("SellValue", sellValue or math.max(1, math.floor(baseDamage * 3)))
 
 	local handle = makeHandle(handleSize)
 	handle.Parent = tool
@@ -80,7 +81,7 @@ makeTool("Rusty Sword", "Sword", 10, Vector3.new(0.3, 3.2, 0.3), function(tool, 
 	guard.Parent = tool
 	guard.CFrame = handle.CFrame * CFrame.new(0, 1.2, 0)
 	weld(handle, guard)
-end)
+end, 30)
 
 -- Apprentice Staff: kij + “główka”
 makeTool("Apprentice Staff", "Staff", 8, Vector3.new(0.35, 4.4, 0.35), function(tool, handle)
@@ -93,7 +94,7 @@ makeTool("Apprentice Staff", "Staff", 8, Vector3.new(0.35, 4.4, 0.35), function(
 	head.Parent = tool
 	head.CFrame = handle.CFrame * CFrame.new(0, 2.6, 0)
 	weld(handle, head)
-end)
+end, 24)
 
 -- Worn Dagger: krótkie ostrze
 makeTool("Worn Dagger", "Dagger", 9, Vector3.new(0.25, 1.7, 0.25), function(tool, handle)
@@ -105,7 +106,7 @@ makeTool("Worn Dagger", "Dagger", 9, Vector3.new(0.25, 1.7, 0.25), function(tool
 	blade.Parent = tool
 	blade.CFrame = handle.CFrame * CFrame.new(0, 1.4, 0)
 	weld(handle, blade)
-end)
+end, 27)
 
 -- Old Spear
 makeTool("Old Spear", "Spear", 10, Vector3.new(0.22, 5.0, 0.22), function(tool, handle)
@@ -117,7 +118,7 @@ makeTool("Old Spear", "Spear", 10, Vector3.new(0.22, 5.0, 0.22), function(tool, 
 	tip.Parent = tool
 	tip.CFrame = handle.CFrame * CFrame.new(0, 3.0, 0)
 	weld(handle, tip)
-end)
+end, 30)
 
 -- Simple Bow (placeholder: łuk jako 2 “ramiona”)
 makeTool("Simple Bow", "Bow", 8, Vector3.new(0.25, 2.8, 0.25), function(tool, handle)
@@ -138,7 +139,7 @@ makeTool("Simple Bow", "Bow", 8, Vector3.new(0.25, 2.8, 0.25), function(tool, ha
 	arm2.Parent = tool
 	arm2.CFrame = handle.CFrame * CFrame.new(0.5, -0.8, 0) * CFrame.Angles(0, 0, math.rad(-20))
 	weld(handle, arm2)
-end)
+end, 24)
 
 -- Training Mace (kij + kula)
 makeTool("Training Mace", "Mace", 10, Vector3.new(0.35, 3.0, 0.35), function(tool, handle)
@@ -151,6 +152,6 @@ makeTool("Training Mace", "Mace", 10, Vector3.new(0.35, 3.0, 0.35), function(too
 	head.Parent = tool
 	head.CFrame = handle.CFrame * CFrame.new(0, 2.1, 0)
 	weld(handle, head)
-end)
+end, 30)
 
 print("[WeaponTemplates] Generated:", #folder:GetChildren())
