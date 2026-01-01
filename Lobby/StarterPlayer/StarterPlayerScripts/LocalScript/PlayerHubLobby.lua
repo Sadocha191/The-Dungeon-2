@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local TextService = game:GetService("TextService")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local plr = Players.LocalPlayer
 local pg = plr:WaitForChild("PlayerGui")
@@ -143,6 +144,9 @@ local function bindCharacter(char: Model)
 		local cur = math.clamp(hum.Health, 0, maxHp)
 		hpLabel.Text = ("HP: %d/%d"):format(math.floor(cur + 0.5), math.floor(maxHp + 0.5))
 		tweenFill(hpFill, cur / maxHp)
+		if inventoryGui and inventoryGui.Enabled and refreshInventoryStats then
+			refreshInventoryStats()
+		end
 	end
 	refresh()
 	hum.HealthChanged:Connect(refresh)
@@ -152,6 +156,8 @@ plr.CharacterAdded:Connect(bindCharacter)
 
 local level, xp, nextXp, coins = 1, 0, 120, 0
 local race = tostring(plr:GetAttribute("Race") or "-")
+local inventoryGui
+local refreshInventoryStats
 
 local function autoSizeNameBox()
 	local bounds = TextService:GetTextSize(nameText.Text, nameText.TextSize, nameText.Font, Vector2.new(2000, 2000))
@@ -169,6 +175,9 @@ local function render()
 	tweenFill(xpFill, xp / n)
 
 	autoSizeNameBox()
+	if inventoryGui and inventoryGui.Enabled and refreshInventoryStats then
+		refreshInventoryStats()
+	end
 end
 
 PlayerProgressEvent.OnClientEvent:Connect(function(payload)
@@ -189,6 +198,234 @@ if RaceUpdated and RaceUpdated:IsA("RemoteEvent") then
 end
 
 plr:GetAttributeChangedSignal("Race"):Connect(render)
+
+-- INVENTORY (Lobby only)
+inventoryGui = Instance.new("ScreenGui")
+inventoryGui.Name = "InventoryGui_Lobby"
+inventoryGui.ResetOnSpawn = false
+inventoryGui.IgnoreGuiInset = true
+inventoryGui.Enabled = false
+inventoryGui:SetAttribute("Modal", true)
+inventoryGui.Parent = pg
+
+local invOverlay = Instance.new("Frame")
+invOverlay.Size = UDim2.fromScale(1, 1)
+invOverlay.BackgroundColor3 = Color3.fromRGB(8, 8, 10)
+invOverlay.BackgroundTransparency = 0.35
+invOverlay.BorderSizePixel = 0
+invOverlay.Parent = inventoryGui
+
+local invPanel = Instance.new("Frame")
+invPanel.AnchorPoint = Vector2.new(0.5, 0.5)
+invPanel.Position = UDim2.fromScale(0.5, 0.5)
+invPanel.Size = UDim2.fromOffset(840, 420)
+invPanel.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+invPanel.BackgroundTransparency = 0.06
+invPanel.BorderSizePixel = 0
+invPanel.Parent = invOverlay
+Instance.new("UICorner", invPanel).CornerRadius = UDim.new(0, 16)
+local invStroke = Instance.new("UIStroke", invPanel)
+invStroke.Color = Color3.fromRGB(40, 40, 48)
+invStroke.Thickness = 1
+
+local invTitle = Instance.new("TextLabel")
+invTitle.BackgroundTransparency = 1
+invTitle.Position = UDim2.fromOffset(24, 16)
+invTitle.Size = UDim2.new(1, -80, 0, 28)
+invTitle.Font = Enum.Font.GothamBold
+invTitle.TextSize = 20
+invTitle.TextColor3 = Color3.fromRGB(245, 245, 245)
+invTitle.TextXAlignment = Enum.TextXAlignment.Left
+invTitle.Text = "Ekwipunek"
+invTitle.Parent = invPanel
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.AnchorPoint = Vector2.new(1, 0)
+closeBtn.Position = UDim2.new(1, -16, 0, 16)
+closeBtn.Size = UDim2.fromOffset(28, 28)
+closeBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+closeBtn.BorderSizePixel = 0
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 14
+closeBtn.TextColor3 = Color3.fromRGB(210, 210, 210)
+closeBtn.Text = "X"
+closeBtn.Parent = invPanel
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 10)
+
+local invBody = Instance.new("Frame")
+invBody.Position = UDim2.fromOffset(20, 56)
+invBody.Size = UDim2.new(1, -40, 1, -76)
+invBody.BackgroundTransparency = 1
+invBody.Parent = invPanel
+
+local invLayout = Instance.new("UIListLayout", invBody)
+invLayout.FillDirection = Enum.FillDirection.Horizontal
+invLayout.Padding = UDim.new(0, 16)
+
+local statsPanel = Instance.new("Frame")
+statsPanel.Size = UDim2.new(0.4, 0, 1, 0)
+statsPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+statsPanel.BackgroundTransparency = 0.08
+statsPanel.BorderSizePixel = 0
+statsPanel.Parent = invBody
+Instance.new("UICorner", statsPanel).CornerRadius = UDim.new(0, 12)
+local statsPad = Instance.new("UIPadding", statsPanel)
+statsPad.PaddingTop = UDim.new(0, 16)
+statsPad.PaddingBottom = UDim.new(0, 16)
+statsPad.PaddingLeft = UDim.new(0, 16)
+statsPad.PaddingRight = UDim.new(0, 16)
+
+local statsTitle = Instance.new("TextLabel")
+statsTitle.BackgroundTransparency = 1
+statsTitle.Size = UDim2.new(1, 0, 0, 20)
+statsTitle.Font = Enum.Font.GothamBold
+statsTitle.TextSize = 16
+statsTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
+statsTitle.TextXAlignment = Enum.TextXAlignment.Left
+statsTitle.Text = "Statystyki gracza"
+statsTitle.Parent = statsPanel
+
+local statsList = Instance.new("Frame")
+statsList.BackgroundTransparency = 1
+statsList.Position = UDim2.fromOffset(0, 30)
+statsList.Size = UDim2.new(1, 0, 1, -30)
+statsList.Parent = statsPanel
+local statsLayout = Instance.new("UIListLayout", statsList)
+statsLayout.Padding = UDim.new(0, 10)
+
+local function makeStatRow(labelText)
+	local row = Instance.new("TextLabel")
+	row.BackgroundTransparency = 1
+	row.Size = UDim2.new(1, 0, 0, 18)
+	row.Font = Enum.Font.Gotham
+	row.TextSize = 14
+	row.TextXAlignment = Enum.TextXAlignment.Left
+	row.TextColor3 = Color3.fromRGB(210, 210, 210)
+	row.Text = labelText
+	row.Parent = statsList
+	return row
+end
+
+local statLevel = makeStatRow("Poziom: -")
+local statRace = makeStatRow("Rasa: -")
+local statCoins = makeStatRow("Monety: -")
+local statHP = makeStatRow("HP: -")
+local statEXP = makeStatRow("EXP: -")
+
+local itemsPanel = Instance.new("Frame")
+itemsPanel.Size = UDim2.new(0.6, 0, 1, 0)
+itemsPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+itemsPanel.BackgroundTransparency = 0.08
+itemsPanel.BorderSizePixel = 0
+itemsPanel.Parent = invBody
+Instance.new("UICorner", itemsPanel).CornerRadius = UDim.new(0, 12)
+local itemsPad = Instance.new("UIPadding", itemsPanel)
+itemsPad.PaddingTop = UDim.new(0, 16)
+itemsPad.PaddingBottom = UDim.new(0, 16)
+itemsPad.PaddingLeft = UDim.new(0, 16)
+itemsPad.PaddingRight = UDim.new(0, 16)
+
+local itemsTitle = Instance.new("TextLabel")
+itemsTitle.BackgroundTransparency = 1
+itemsTitle.Size = UDim2.new(1, 0, 0, 20)
+itemsTitle.Font = Enum.Font.GothamBold
+itemsTitle.TextSize = 16
+itemsTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
+itemsTitle.TextXAlignment = Enum.TextXAlignment.Left
+itemsTitle.Text = "Przedmioty"
+itemsTitle.Parent = itemsPanel
+
+local itemsList = Instance.new("ScrollingFrame")
+itemsList.BackgroundTransparency = 1
+itemsList.Position = UDim2.fromOffset(0, 30)
+itemsList.Size = UDim2.new(1, 0, 1, -30)
+itemsList.ScrollBarThickness = 6
+itemsList.BorderSizePixel = 0
+itemsList.CanvasSize = UDim2.fromOffset(0, 0)
+itemsList.Parent = itemsPanel
+
+local itemsLayout = Instance.new("UIListLayout", itemsList)
+itemsLayout.Padding = UDim.new(0, 10)
+itemsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local function makeItemCard(item)
+	local card = Instance.new("Frame")
+	card.Size = UDim2.new(1, 0, 0, 56)
+	card.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+	card.BorderSizePixel = 0
+	card.Parent = itemsList
+	Instance.new("UICorner", card).CornerRadius = UDim.new(0, 10)
+
+	local name = Instance.new("TextLabel")
+	name.BackgroundTransparency = 1
+	name.Position = UDim2.fromOffset(12, 8)
+	name.Size = UDim2.new(1, -24, 0, 18)
+	name.Font = Enum.Font.GothamBold
+	name.TextSize = 14
+	name.TextXAlignment = Enum.TextXAlignment.Left
+	name.TextColor3 = Color3.fromRGB(245, 245, 245)
+	name.Text = item.name or "Nieznana broń"
+	name.Parent = card
+
+	local meta = Instance.new("TextLabel")
+	meta.BackgroundTransparency = 1
+	meta.Position = UDim2.fromOffset(12, 28)
+	meta.Size = UDim2.new(1, -24, 0, 16)
+	meta.Font = Enum.Font.Gotham
+	meta.TextSize = 12
+	meta.TextXAlignment = Enum.TextXAlignment.Left
+	meta.TextColor3 = Color3.fromRGB(180, 180, 180)
+	meta.Text = item.meta or "Pozyskaj z gacha"
+	meta.Parent = card
+end
+
+local starterItems = {
+	{ name = "Miecz treningowy", meta = "Rzadkość: Wspólna • Gacha" },
+	{ name = "Łuk nowicjusza", meta = "Rzadkość: Wspólna • Gacha" },
+	{ name = "Kostur iskier", meta = "Rzadkość: Niepospolita • Gacha" },
+}
+
+local function renderInventory(items)
+	for _, child in ipairs(itemsList:GetChildren()) do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+	for _, item in ipairs(items) do
+		makeItemCard(item)
+	end
+	task.defer(function()
+		itemsList.CanvasSize = UDim2.fromOffset(0, itemsLayout.AbsoluteContentSize.Y + 6)
+	end)
+end
+
+refreshInventoryStats = function()
+	statLevel.Text = ("Poziom: %d"):format(level)
+	statRace.Text = ("Rasa: %s"):format(tostring(plr:GetAttribute("Race") or "-"))
+	statCoins.Text = ("Monety: %d"):format(coins)
+	statHP.Text = hpLabel.Text
+	statEXP.Text = xpLabel.Text
+end
+
+local function setInventoryVisible(state)
+	inventoryGui.Enabled = state
+	if state then
+		refreshInventoryStats()
+	end
+end
+
+closeBtn.MouseButton1Click:Connect(function()
+	setInventoryVisible(false)
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	if input.KeyCode == Enum.KeyCode.B then
+		setInventoryVisible(not inventoryGui.Enabled)
+	end
+end)
+
+renderInventory(starterItems)
 
 -- AUTO-HIDE: jeśli jakikolwiek ScreenGui ma Modal=true i Enabled=true, chowamy HUD
 local function anyModalOpen(): boolean
