@@ -8,7 +8,7 @@ local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
-local WeaponCatalog = require(ServerScriptService:WaitForChild("WeaponCatalog"))
+local WeaponCatalog = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WeaponCatalog"))
 
 local function giveTool(player: Player, toolName: string): boolean
 	local template = WeaponCatalog.FindTemplate(toolName)
