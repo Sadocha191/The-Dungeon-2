@@ -187,6 +187,7 @@ local function normalizeToolParts(tool: Tool)
 	end
 
 	if handlePart then
+		handlePart.Parent = tool
 		handlePart.Anchored = false
 		handlePart.CanCollide = false
 		handlePart.Massless = true
@@ -197,6 +198,21 @@ local function normalizeToolParts(tool: Tool)
 			inst.Anchored = false
 			inst.CanCollide = false
 			inst.Massless = true
+			if handlePart and inst ~= handlePart then
+				local existing = false
+				for _, joint in ipairs(inst:GetChildren()) do
+					if joint:IsA("WeldConstraint") and (joint.Part0 == handlePart or joint.Part1 == handlePart) then
+						existing = true
+						break
+					end
+				end
+				if not existing then
+					local weld = Instance.new("WeldConstraint")
+					weld.Part0 = handlePart
+					weld.Part1 = inst
+					weld.Parent = inst
+				end
+			end
 		end
 	end
 end
