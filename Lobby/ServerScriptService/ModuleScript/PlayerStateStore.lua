@@ -31,6 +31,8 @@ function Store.Load(player: Player)
 			CreatedOnce = false,
 			StarterWeaponClaimed = false,
 			StarterWeaponName = nil, -- ✅
+			OwnedWeapons = {},
+			FavoriteWeapons = {},
 			Profile = nil,
 		}
 	end
@@ -38,6 +40,12 @@ function Store.Load(player: Player)
 	-- kompatybilność wstecz (jeśli stary zapis)
 	if data.StarterWeaponName == nil then
 		data.StarterWeaponName = nil
+	end
+	if typeof(data.OwnedWeapons) ~= "table" then
+		data.OwnedWeapons = {}
+	end
+	if typeof(data.FavoriteWeapons) ~= "table" then
+		data.FavoriteWeapons = {}
 	end
 
 	cache[uid] = data
@@ -73,6 +81,63 @@ function Store.SetStarterWeaponClaimed(player: Player, weaponName: string)
 	data.StarterWeaponClaimed = true
 	data.StarterWeaponName = weaponName -- ✅
 	Store.Save(player)
+end
+
+function Store.SetEquippedWeaponName(player: Player, weaponName: string?)
+	local data = cache[player.UserId] or Store.Load(player)
+	if typeof(weaponName) == "string" and weaponName ~= "" then
+		data.StarterWeaponClaimed = true
+		data.StarterWeaponName = weaponName
+	else
+		data.StarterWeaponClaimed = false
+		data.StarterWeaponName = nil
+	end
+	Store.Save(player)
+end
+
+function Store.EnsureOwnedWeapon(player: Player, weaponName: string)
+	local data = cache[player.UserId] or Store.Load(player)
+	if typeof(weaponName) ~= "string" or weaponName == "" then return end
+	data.OwnedWeapons = data.OwnedWeapons or {}
+	for _, name in ipairs(data.OwnedWeapons) do
+		if name == weaponName then
+			return
+		end
+	end
+	table.insert(data.OwnedWeapons, weaponName)
+	Store.Save(player)
+end
+
+function Store.RemoveOwnedWeapon(player: Player, weaponName: string)
+	local data = cache[player.UserId] or Store.Load(player)
+	if typeof(weaponName) ~= "string" or weaponName == "" then return end
+	data.OwnedWeapons = data.OwnedWeapons or {}
+	for index, name in ipairs(data.OwnedWeapons) do
+		if name == weaponName then
+			table.remove(data.OwnedWeapons, index)
+			break
+		end
+	end
+	Store.Save(player)
+end
+
+function Store.SetFavoriteWeapon(player: Player, weaponName: string, isFavorite: boolean)
+	local data = cache[player.UserId] or Store.Load(player)
+	if typeof(weaponName) ~= "string" or weaponName == "" then return end
+	data.FavoriteWeapons = data.FavoriteWeapons or {}
+	for index, name in ipairs(data.FavoriteWeapons) do
+		if name == weaponName then
+			if not isFavorite then
+				table.remove(data.FavoriteWeapons, index)
+				Store.Save(player)
+			end
+			return
+		end
+	end
+	if isFavorite then
+		table.insert(data.FavoriteWeapons, weaponName)
+		Store.Save(player)
+	end
 end
 
 Players.PlayerRemoving:Connect(function(player)
