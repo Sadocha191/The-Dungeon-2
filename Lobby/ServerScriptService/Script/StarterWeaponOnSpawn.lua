@@ -8,7 +8,7 @@ local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerStateStore = require(ServerScriptService:WaitForChild("PlayerStateStore"))
-local WeaponCatalog = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WeaponCatalog"))
+local WeaponCatalog = require(ServerScriptService:WaitForChild("WeaponCatalog"))
 
 local START_WEAPON_NAME = "Knight's Oath"
 
