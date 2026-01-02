@@ -10,6 +10,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 
 local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
+local CurrencyService = require(serverModules:WaitForChild("CurrencyService"))
 local WeaponConfigs = require(ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("WeaponConfigs"))
 
 local function findWeaponCatalog(): ModuleScript?
@@ -152,7 +153,14 @@ local function buildItemData(weaponName: string, favorites: {[string]: boolean})
 		item.weaponType = def.weaponType
 		item.rarity = def.rarity
 		item.baseDamage = def.baseDamage
-		item.sellValue = def.sellValue or math.max(1, math.floor((def.baseDamage or 0) * 3))
+		local rarityMultiplier = ({
+			Common = 1,
+			Rare = 1.4,
+			Epic = 1.8,
+			Legendary = 2.4,
+			Mythical = 3,
+		})[def.rarity] or 1
+		item.sellValue = def.sellValue or math.max(1, math.floor((def.baseDamage or 0) * 3 * rarityMultiplier))
 		item.maxLevel = def.maxLevel
 		item.stats = def.stats
 		item.passiveName = def.passiveName
@@ -161,6 +169,19 @@ local function buildItemData(weaponName: string, favorites: {[string]: boolean})
 		item.abilityDescription = def.abilityDescription
 	end
 	return item
+end
+
+local function getSellValue(weaponName: string): number
+	local def = WeaponConfigs.Get(weaponName)
+	if not def then return 0 end
+	local rarityMultiplier = ({
+		Common = 1,
+		Rare = 1.4,
+		Epic = 1.8,
+		Legendary = 2.4,
+		Mythical = 3,
+	})[def.rarity] or 1
+	return def.sellValue or math.max(1, math.floor((def.baseDamage or 0) * 3 * rarityMultiplier))
 end
 
 local function sendInventory(player: Player)
@@ -219,6 +240,10 @@ InventoryAction.OnServerEvent:Connect(function(player: Player, payload: any)
 		if not isOwned(state, weaponName) then return end
 		PlayerStateStore.RemoveOwnedWeapon(player, weaponName)
 		PlayerStateStore.SetFavoriteWeapon(player, weaponName, false)
+		local sellValue = getSellValue(weaponName)
+		if sellValue > 0 then
+			CurrencyService.AddCoins(player, sellValue)
+		end
 		if state.StarterWeaponName == weaponName then
 			PlayerStateStore.SetEquippedWeaponName(player, nil)
 			clearWeaponTools(player:FindFirstChildOfClass("Backpack"))
