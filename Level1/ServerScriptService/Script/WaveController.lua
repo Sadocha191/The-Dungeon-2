@@ -43,13 +43,13 @@ local DROPS_FOLDER = workspace:FindFirstChild("Drops")
 
 -- Collision groups
 local MOBS_GROUP = "Mobs"
-pcall(function() PhysicsService:CreateCollisionGroup(MOBS_GROUP) end)
+pcall(function() PhysicsService:RegisterCollisionGroup(MOBS_GROUP) end)
 PhysicsService:CollisionGroupSetCollidable(MOBS_GROUP, MOBS_GROUP, false)
 
 local function setMobGroup(model: Model)
 	for _, d in ipairs(model:GetDescendants()) do
 		if d:IsA("BasePart") then
-			PhysicsService:SetPartCollisionGroup(d, MOBS_GROUP)
+			d.CollisionGroup = MOBS_GROUP
 		end
 	end
 end

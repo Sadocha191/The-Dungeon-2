@@ -5,12 +5,12 @@
 --     synchronizuje level/coins z Twoim PlayerData
 
 local Players = game:GetService("Players")
-local ServerStorage = game:GetService("ServerStorage")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
 
-local templates = ServerStorage:WaitForChild("WeaponTemplates")
+local templates = ReplicatedStorage:WaitForChild("WeaponTemplates")
 
 local function isWeaponTool(inst: Instance): boolean
 	return inst:IsA("Tool") and typeof(inst:GetAttribute("WeaponType")) == "string"
