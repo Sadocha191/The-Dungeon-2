@@ -78,7 +78,6 @@ Players.PlayerAdded:Connect(function(player: Player)
 	local tdata = joinData and joinData.TeleportData
 
 	if typeof(tdata) ~= "table" then
-		warn("[Dungeon] No TeleportData for", player.Name)
 		return
 	end
 
