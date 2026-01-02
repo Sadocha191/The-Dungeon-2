@@ -33,7 +33,7 @@ end
 
 local WeaponCatalog = require(weaponCatalogModule)
 
-local START_WEAPON_NAME = "Knight's Oath"
+local START_WEAPON_NAME = "Sword"
 
 local function isWeaponTool(inst: Instance): boolean
 	return inst:IsA("Tool") and typeof(inst:GetAttribute("WeaponType")) == "string"
@@ -104,15 +104,8 @@ local function giveTool(player: Player, toolName: string): boolean
 
 	if not containerHasTool(backpack, toolName) then
 		local clone = template:Clone()
-		WeaponCatalog.PrepareTool(clone)
+		WeaponCatalog.PrepareTool(clone, toolName)
 		clone.Parent = backpack
-	end
-
-	local starterGear = player:FindFirstChild("StarterGear") or player:WaitForChild("StarterGear", 10)
-	if starterGear and not containerHasTool(starterGear, toolName) then
-		local clone = template:Clone()
-		WeaponCatalog.PrepareTool(clone)
-		clone.Parent = starterGear
 	end
 
 	return true
@@ -139,7 +132,12 @@ local function ensureWeapon(player: Player)
 		preferred = state.StarterWeaponName
 	end
 
-	if giveTool(player, preferred) then
+	if not giveTool(player, preferred) and preferred ~= START_WEAPON_NAME then
+		preferred = START_WEAPON_NAME
+		giveTool(player, preferred)
+	end
+
+	if preferred == START_WEAPON_NAME or WeaponCatalog.FindTemplate(preferred) then
 		PlayerStateStore.EnsureOwnedWeapon(player, preferred)
 		PlayerStateStore.SetEquippedWeaponName(player, preferred)
 	end

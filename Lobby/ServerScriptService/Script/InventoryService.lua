@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerStateStore = require(ServerScriptService:WaitForChild("PlayerStateStore"))
+local WeaponConfigs = require(ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("WeaponConfigs"))
 
 local function findWeaponCatalog(): ModuleScript?
 	local direct = ServerScriptService:FindFirstChild("WeaponCatalog", true)
@@ -80,21 +81,13 @@ local function equipWeapon(player: Player, weaponName: string): boolean
 	clearWeaponTools(backpack)
 	clearWeaponTools(player.Character)
 
-	local starterGear = player:FindFirstChild("StarterGear") or player:WaitForChild("StarterGear", 10)
-	if starterGear then
-		clearWeaponTools(starterGear)
-	end
-
 	local function clonePrepared(parent: Instance)
 		local clone = template:Clone()
-		WeaponCatalog.PrepareTool(clone)
+		WeaponCatalog.PrepareTool(clone, weaponName)
 		clone.Parent = parent
 	end
 
 	clonePrepared(backpack)
-	if starterGear then
-		clonePrepared(starterGear)
-	end
 
 	PlayerStateStore.SetEquippedWeaponName(player, weaponName)
 	PlayerStateStore.EnsureOwnedWeapon(player, weaponName)
@@ -113,31 +106,23 @@ local function buildFavoriteSet(list: {any}?): {[string]: boolean}
 end
 
 local function buildItemData(weaponName: string, favorites: {[string]: boolean})
-	local template = WeaponCatalog.FindTemplate(weaponName)
 	local item = {
 		id = weaponName,
 		name = weaponName,
 		favorite = favorites[weaponName] == true,
 	}
-	if template and template:IsA("Tool") then
-		local stats = {
-			HP = template:GetAttribute("HP"),
-			SPD = template:GetAttribute("SPD"),
-			CRIT_RATE = template:GetAttribute("CRIT_RATE"),
-			CRIT_DMG = template:GetAttribute("CRIT_DMG"),
-			LIFESTEAL = template:GetAttribute("LIFESTEAL"),
-			DEF = template:GetAttribute("DEF"),
-		}
-		item.weaponType = template:GetAttribute("WeaponType")
-		item.rarity = template:GetAttribute("Rarity")
-		item.baseDamage = template:GetAttribute("BaseDamage")
-		item.sellValue = template:GetAttribute("SellValue")
-		item.maxLevel = template:GetAttribute("MaxLevel")
-		item.stats = stats
-		item.passiveName = template:GetAttribute("PassiveName")
-		item.passiveDescription = template:GetAttribute("PassiveDescription")
-		item.abilityName = template:GetAttribute("AbilityName")
-		item.abilityDescription = template:GetAttribute("AbilityDescription")
+	local def = WeaponConfigs.Get(weaponName)
+	if def then
+		item.weaponType = def.weaponType
+		item.rarity = def.rarity
+		item.baseDamage = def.baseDamage
+		item.sellValue = def.sellValue or math.max(1, math.floor((def.baseDamage or 0) * 3))
+		item.maxLevel = def.maxLevel
+		item.stats = def.stats
+		item.passiveName = def.passiveName
+		item.passiveDescription = def.passiveDescription
+		item.abilityName = def.abilityName
+		item.abilityDescription = def.abilityDescription
 	end
 	return item
 end
@@ -202,8 +187,6 @@ InventoryAction.OnServerEvent:Connect(function(player: Player, payload: any)
 			PlayerStateStore.SetEquippedWeaponName(player, nil)
 			clearWeaponTools(player:FindFirstChildOfClass("Backpack"))
 			clearWeaponTools(player.Character)
-			local starterGear = player:FindFirstChild("StarterGear")
-			clearWeaponTools(starterGear)
 		end
 		sendInventory(player)
 		return

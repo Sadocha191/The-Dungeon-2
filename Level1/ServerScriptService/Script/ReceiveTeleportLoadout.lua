@@ -5,46 +5,33 @@
 --     synchronizuje level/coins z Twoim PlayerData
 
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
-
-local templates = ReplicatedStorage:WaitForChild("WeaponTemplates")
-
-local function isWeaponTool(inst: Instance): boolean
-	return inst:IsA("Tool") and typeof(inst:GetAttribute("WeaponType")) == "string"
-end
-
-local function clearWeaponTools(container: Instance?)
-	if not container then return end
-	for _, inst in ipairs(container:GetChildren()) do
-		if isWeaponTool(inst) then
-			inst:Destroy()
+local function findModule(name: string): ModuleScript?
+	local direct = ServerScriptService:FindFirstChild(name)
+	if direct and direct:IsA("ModuleScript") then
+		return direct
+	end
+	local folder = ServerScriptService:FindFirstChild("ModuleScript")
+		or ServerScriptService:FindFirstChild("ModuleScripts")
+	if folder then
+		local nested = folder:FindFirstChild(name)
+		if nested and nested:IsA("ModuleScript") then
+			return nested
 		end
 	end
+	return nil
 end
 
-local function giveTool(player: Player, toolName: string): boolean
-	local template = templates:FindFirstChild(toolName)
-	if not template or not template:IsA("Tool") then
-		warn("[Dungeon] Missing weapon template:", toolName)
-		return false
-	end
-
-	local backpack = player:FindFirstChildOfClass("Backpack")
-	if not backpack then return false end
-
-	clearWeaponTools(backpack)
-	clearWeaponTools(player.Character)
-	template:Clone().Parent = backpack
-	local starterGear = player:FindFirstChild("StarterGear")
-	if starterGear then
-		clearWeaponTools(starterGear)
-		template:Clone().Parent = starterGear
-	end
-	return true
+local playerDataModule = findModule("PlayerData")
+local weaponServiceModule = findModule("WeaponService")
+if not playerDataModule or not weaponServiceModule then
+	warn("[ReceiveTeleportLoadout] Missing PlayerData/WeaponService module; loadout disabled.")
+	return
 end
+
+local PlayerData = require(playerDataModule)
+local WeaponService = require(weaponServiceModule)
 
 local function applyProfileAttributes(player: Player, profile: any)
 	player:SetAttribute("ProfileId", profile.Id)
@@ -82,9 +69,8 @@ Players.PlayerAdded:Connect(function(player: Player)
 
 	-- ✅ bron
 	player:SetAttribute("StarterWeaponName", weaponName)
-	if not giveTool(player, weaponName) then
-		giveTool(player, "Sword")
-	end
+	WeaponService.SyncLoadoutFromStarter(player)
+	WeaponService.EquipLoadout(player)
 
 	-- ✅ podepnij do Twojego globalnego progresu w dungeon
 	local data = PlayerData.Get(player)
