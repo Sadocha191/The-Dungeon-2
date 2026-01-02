@@ -7,6 +7,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
 local CurrencyService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("CurrencyService"))
+local PlayerStateStore = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerStateStore"))
 
 local remoteFunctions = ReplicatedStorage:FindFirstChild("RemoteFunctions")
 if not remoteFunctions then
@@ -33,7 +34,13 @@ GetInventorySnapshot.OnServerInvoke = function(player)
 	local currencies = CurrencyService.GetBalances(player)
 
 	local weapons = {}
-	for _, weaponId in ipairs(data.Weapons or {}) do
+	local weaponSource = data.Weapons
+	if typeof(weaponSource) ~= "table" or #weaponSource == 0 then
+		local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
+		weaponSource = state.OwnedWeapons
+	end
+
+	for _, weaponId in ipairs(weaponSource or {}) do
 		if typeof(weaponId) == "string" and weaponId ~= "" then
 			table.insert(weapons, { WeaponId = weaponId })
 		end

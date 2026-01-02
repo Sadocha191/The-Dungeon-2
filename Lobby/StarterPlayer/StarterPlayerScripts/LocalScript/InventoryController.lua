@@ -128,12 +128,15 @@ leftColumn.Size = UDim2.new(0, 320, 1, 0)
 leftColumn.BackgroundTransparency = 1
 leftColumn.Parent = body
 
-local playerPanel = Instance.new("Frame")
+local playerPanel = Instance.new("ScrollingFrame")
 playerPanel.Position = UDim2.fromOffset(0, 0)
 playerPanel.Size = UDim2.new(1, 0, 0, 250)
 playerPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
 playerPanel.BackgroundTransparency = 0.08
 playerPanel.BorderSizePixel = 0
+playerPanel.ScrollBarThickness = 6
+playerPanel.CanvasSize = UDim2.fromOffset(0, 0)
+playerPanel.AutomaticCanvasSize = Enum.AutomaticSize.Y
 playerPanel.Parent = leftColumn
 Instance.new("UICorner", playerPanel).CornerRadius = UDim.new(0, 12)
 local playerPad = Instance.new("UIPadding", playerPanel)
@@ -141,6 +144,8 @@ playerPad.PaddingTop = UDim.new(0, 16)
 playerPad.PaddingBottom = UDim.new(0, 16)
 playerPad.PaddingLeft = UDim.new(0, 16)
 playerPad.PaddingRight = UDim.new(0, 16)
+local playerLayout = Instance.new("UIListLayout", playerPanel)
+playerLayout.Padding = UDim.new(0, 6)
 
 local playerName = Instance.new("TextLabel")
 playerName.BackgroundTransparency = 1
@@ -152,23 +157,27 @@ playerName.TextXAlignment = Enum.TextXAlignment.Left
 playerName.Text = "PlayerName • Lv. 1"
 playerName.Parent = playerPanel
 
+local expWrap = Instance.new("Frame")
+expWrap.BackgroundTransparency = 1
+expWrap.Size = UDim2.new(1, 0, 0, 26)
+expWrap.Parent = playerPanel
+
 local expLabel = Instance.new("TextLabel")
 expLabel.BackgroundTransparency = 1
-expLabel.Position = UDim2.fromOffset(0, 26)
 expLabel.Size = UDim2.new(1, 0, 0, 14)
 expLabel.Font = Enum.Font.Gotham
 expLabel.TextSize = 12
 expLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
 expLabel.TextXAlignment = Enum.TextXAlignment.Left
 expLabel.Text = "EXP: 0/0"
-expLabel.Parent = playerPanel
+expLabel.Parent = expWrap
 
 local expBack = Instance.new("Frame")
-expBack.Position = UDim2.fromOffset(0, 44)
+expBack.Position = UDim2.fromOffset(0, 16)
 expBack.Size = UDim2.new(1, 0, 0, 8)
 expBack.BackgroundColor3 = Color3.fromRGB(40, 40, 44)
 expBack.BorderSizePixel = 0
-expBack.Parent = playerPanel
+expBack.Parent = expWrap
 Instance.new("UICorner", expBack).CornerRadius = UDim.new(0, 999)
 
 local expFill = Instance.new("Frame")
@@ -180,7 +189,6 @@ Instance.new("UICorner", expFill).CornerRadius = UDim.new(0, 999)
 
 local raceLabel = Instance.new("TextLabel")
 raceLabel.BackgroundTransparency = 1
-raceLabel.Position = UDim2.fromOffset(0, 64)
 raceLabel.Size = UDim2.new(1, 0, 0, 16)
 raceLabel.Font = Enum.Font.Gotham
 raceLabel.TextSize = 13
@@ -191,7 +199,6 @@ raceLabel.Parent = playerPanel
 
 local buffsTitle = Instance.new("TextLabel")
 buffsTitle.BackgroundTransparency = 1
-buffsTitle.Position = UDim2.fromOffset(0, 88)
 buffsTitle.Size = UDim2.new(1, 0, 0, 16)
 buffsTitle.Font = Enum.Font.GothamBold
 buffsTitle.TextSize = 13
@@ -202,8 +209,7 @@ buffsTitle.Parent = playerPanel
 
 local buffsList = Instance.new("Frame")
 buffsList.BackgroundTransparency = 1
-buffsList.Position = UDim2.fromOffset(0, 108)
-buffsList.Size = UDim2.new(1, 0, 0, 92)
+buffsList.Size = UDim2.new(1, 0, 0, 112)
 buffsList.Parent = playerPanel
 local buffsLayout = Instance.new("UIListLayout", buffsList)
 buffsLayout.Padding = UDim.new(0, 4)
@@ -233,8 +239,6 @@ local buffRows = {
 
 local currenciesFrame = Instance.new("Frame")
 currenciesFrame.BackgroundTransparency = 1
-currenciesFrame.AnchorPoint = Vector2.new(0, 1)
-currenciesFrame.Position = UDim2.new(0, 0, 1, 0)
 currenciesFrame.Size = UDim2.new(1, 0, 0, 34)
 currenciesFrame.Parent = playerPanel
 
