@@ -1,13 +1,13 @@
 -- WeaponSetup.server.lua (ServerScriptService)
 -- Tworzy broń testową jeśli jej nie ma (Sword/Scythe/Halberd/Bow/Staff/Pistol)
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 
-local WeaponTemplates = ReplicatedStorage:FindFirstChild("WeaponTemplates")
+local WeaponTemplates = ServerStorage:FindFirstChild("WeaponTemplates")
 if not WeaponTemplates then
 	WeaponTemplates = Instance.new("Folder")
 	WeaponTemplates.Name = "WeaponTemplates"
-	WeaponTemplates.Parent = ReplicatedStorage
+	WeaponTemplates.Parent = ServerStorage
 end
 
 local function ensureTool(toolName: string, handleSize: Vector3, handleColor: Color3)

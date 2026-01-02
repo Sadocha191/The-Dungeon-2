@@ -1,6 +1,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 
-local templates = ReplicatedStorage:WaitForChild("WeaponTemplates")
+local templates = ServerStorage:WaitForChild("WeaponTemplates")
 local weaponConfigsModule = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	and ReplicatedStorage.ModuleScripts:FindFirstChild("WeaponConfigs")
 local WeaponConfigs = weaponConfigsModule and require(weaponConfigsModule) or nil
