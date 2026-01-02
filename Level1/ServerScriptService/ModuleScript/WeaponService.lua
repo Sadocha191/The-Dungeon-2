@@ -74,6 +74,9 @@ local function applyWeaponStats(tool: Tool, weaponId: string, entry: any)
 		return
 	end
 
+	tool.CanBeDropped = false
+	tool.RequiresHandle = true
+
 	local level = tonumber(entry and (entry.level or entry.Level)) or 1
 	level = math.max(1, math.floor(level))
 
@@ -104,6 +107,42 @@ local function applyWeaponStats(tool: Tool, weaponId: string, entry: any)
 	tool:SetAttribute("AbilityDescription", def.abilityDescription or "")
 end
 
+local function wrapAsTool(container: Instance, weaponId: string): Tool?
+	if container:IsA("Tool") then
+		return container
+	end
+	if not (container:IsA("Folder") or container:IsA("Model")) then
+		return nil
+	end
+
+	local tool = Instance.new("Tool")
+	tool.Name = weaponId
+	tool.RequiresHandle = true
+	tool.CanBeDropped = false
+	tool.Parent = container.Parent
+
+	for _, child in ipairs(container:GetChildren()) do
+		child.Parent = tool
+	end
+	container:Destroy()
+
+	local handle = tool:FindFirstChild("Handle", true)
+	if handle and handle:IsA("BasePart") then
+		handle.Name = "Handle"
+		handle.Parent = tool
+	else
+		for _, inst in ipairs(tool:GetDescendants()) do
+			if inst:IsA("BasePart") then
+				inst.Name = "Handle"
+				inst.Parent = tool
+				break
+			end
+		end
+	end
+
+	return tool
+end
+
 local function cloneTemplate(weaponId: string): Tool?
 	local template = WeaponTemplates:FindFirstChild(weaponId)
 	if not template then
@@ -112,11 +151,12 @@ local function cloneTemplate(weaponId: string): Tool?
 	end
 
 	local clone = template:Clone()
-	if clone:IsA("Tool") then
-		return clone
+	local tool = wrapAsTool(clone, weaponId)
+	if tool then
+		return tool
 	end
 
-	warn("[WeaponService] Template is not a Tool:", weaponId)
+	warn("[WeaponService] Template is not a Tool/Folder/Model:", weaponId)
 	return nil
 end
 
