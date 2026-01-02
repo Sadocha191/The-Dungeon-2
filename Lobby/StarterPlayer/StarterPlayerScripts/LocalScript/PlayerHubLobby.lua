@@ -12,12 +12,10 @@ local UserInputService = game:GetService("UserInputService")
 local plr = Players.LocalPlayer
 local pg = plr:WaitForChild("PlayerGui")
 
--- Progress
-local remotes = ReplicatedStorage:WaitForChild("Remotes")
-local PlayerProgressEvent = remotes:WaitForChild("PlayerProgressEvent")
+local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
+local PlayerProgressEvent = remoteEvents:WaitForChild("PlayerProgressEvent")
 
 -- Race updates (opcjonalnie)
-local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local RaceUpdated = remoteEvents:FindFirstChild("RaceUpdated")
 local InventoryAction = remoteEvents:WaitForChild("InventoryAction")
 local InventorySync = remoteEvents:WaitForChild("InventorySync")
