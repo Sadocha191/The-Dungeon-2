@@ -22,6 +22,14 @@ local function defaultData()
 		upgradePoints = 0,
 		upgrades = { dmg = 0, speed = 0, jump = 0 },
 
+		Currencies = {
+			Coins = 0,
+			WeaponPoints = 0,
+			Tickets = 0,
+		},
+		Pity = {},
+		Weapons = {},
+
 		-- Combat stats (dla dungeona; trzymamy wspólny zapis)
 		damage = 18,
 		fireChance = 0.00,
@@ -60,6 +68,22 @@ function PlayerData.Get(plr: Player)
 		data.nextXp = clampInt(loaded.nextXp)
 		data.coins = clampInt(loaded.coins)
 		data.upgradePoints = clampInt(loaded.upgradePoints)
+
+		if typeof(loaded.Currencies) == "table" then
+			data.Currencies.Coins = clampInt(loaded.Currencies.Coins)
+			data.Currencies.WeaponPoints = clampInt(loaded.Currencies.WeaponPoints)
+			data.Currencies.Tickets = clampInt(loaded.Currencies.Tickets)
+		else
+			data.Currencies.Coins = data.coins
+		end
+		data.coins = data.Currencies.Coins
+
+		if typeof(loaded.Pity) == "table" then
+			data.Pity = loaded.Pity
+		end
+		if typeof(loaded.Weapons) == "table" then
+			data.Weapons = loaded.Weapons
+		end
 
 		if typeof(loaded.upgrades) == "table" then
 			data.upgrades.dmg = clampInt(loaded.upgrades.dmg)
@@ -115,13 +139,19 @@ function PlayerData.Save(plr: Player)
 	PlayerData._saving[uid] = true
 	local data = PlayerData._cache[uid]
 
+	data.Currencies = data.Currencies or { Coins = 0, WeaponPoints = 0, Tickets = 0 }
+	data.Currencies.Coins = clampInt(data.coins)
+
 	local payload = {
 		level = data.level,
 		xp = data.xp,
 		nextXp = data.nextXp,
-		coins = data.coins,
+		coins = data.Currencies.Coins,
 		upgradePoints = data.upgradePoints,
 		upgrades = data.upgrades,
+		Currencies = data.Currencies,
+		Pity = data.Pity,
+		Weapons = data.Weapons,
 
 		damage = data.damage,
 		fireChance = data.fireChance,
