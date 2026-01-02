@@ -37,7 +37,10 @@ local WeaponCatalog = require(weaponCatalogModule)
 
 local START_WEAPON_NAME = "Sword"
 
-local WeaponTemplates = ServerStorage:FindFirstChild("WeaponTemplates")
+local WeaponTemplates = ServerStorage:WaitForChild("WeaponTemplates", 10)
+if not WeaponTemplates then
+	warn("[StarterWeapon] Missing ServerStorage.WeaponTemplates; fallback to WeaponType attributes only.")
+end
 
 local function isWeaponTool(inst: Instance): boolean
 	if not inst:IsA("Tool") then

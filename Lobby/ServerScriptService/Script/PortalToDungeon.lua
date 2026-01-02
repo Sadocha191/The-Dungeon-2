@@ -78,7 +78,10 @@ local function sanitizeProfile(profile: any)
 	}
 end
 
-local WeaponTemplates = ServerStorage:FindFirstChild("WeaponTemplates")
+local WeaponTemplates = ServerStorage:WaitForChild("WeaponTemplates", 10)
+if not WeaponTemplates then
+	warn("[PortalToLevel1] Missing ServerStorage.WeaponTemplates; fallback to WeaponType attributes only.")
+end
 
 local function isWeaponTool(inst: Instance): boolean
 	if not inst:IsA("Tool") then
