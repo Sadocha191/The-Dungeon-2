@@ -19,12 +19,22 @@ local function defaultProfile()
 		upgrades = { dmg = 0, speed = 0, jump = 0 },
 
 		-- Combat stats
-		damage = 18,          -- base dmg (melee)
+		damage = 0,           -- bonus dmg (% -> damage/100)
 		fireChance = 0.00,    -- 0..1
 		fireDps = 0,          -- dmg/sec (DoT)
 		multiShot = 0,        -- dodatkowe pociski (0 = normal)
 		ricochet = 0,         -- liczba odbić pocisku
 		attackSpeed = 1.00,   -- mnożnik szybkości ataku
+		critChance = 0,       -- bonus do crit chance
+		critMult = 0,         -- bonus do crit dmg
+
+		-- Base player stats (always active)
+		baseHP = 100,
+		baseSpeed = 1.0,
+		baseCritRate = 0.05,
+		baseCritDmg = 1.5,
+		baseDefense = 0,
+		baseLifesteal = 0,
 
 		-- Unlock weapons
 		unlockBow = true,
@@ -90,12 +100,21 @@ function PlayerData.Get(plr)
 		data.upgrades = { dmg = 0, speed = 0, jump = 0 }
 	end
 
-	data.damage = math.max(1, clampInt(data.damage) or 18)
+	data.damage = math.max(0, tonumber(data.damage) or 0)
 	data.fireChance = math.clamp(tonumber(data.fireChance) or 0, 0, 0.9)
 	data.fireDps = math.max(0, clampInt(data.fireDps) or 0)
 	data.multiShot = math.clamp(clampInt(data.multiShot), 0, 6)
 	data.ricochet = math.clamp(clampInt(data.ricochet), 0, 4)
 	data.attackSpeed = math.clamp(tonumber(data.attackSpeed) or 1.0, 0.6, 2.0)
+	data.critChance = math.clamp(tonumber(data.critChance) or 0, 0, 0.6)
+	data.critMult = tonumber(data.critMult) or 0
+
+	data.baseHP = math.max(1, clampInt(data.baseHP) or 100)
+	data.baseSpeed = math.clamp(tonumber(data.baseSpeed) or 1.0, 0.5, 2.0)
+	data.baseCritRate = math.clamp(tonumber(data.baseCritRate) or 0.05, 0, 0.6)
+	data.baseCritDmg = math.max(1.0, tonumber(data.baseCritDmg) or 1.5)
+	data.baseDefense = math.max(0, tonumber(data.baseDefense) or 0)
+	data.baseLifesteal = math.clamp(tonumber(data.baseLifesteal) or 0, 0, 0.12)
 
 	data.unlockBow = data.unlockBow ~= false
 	data.unlockWand = data.unlockWand ~= false
