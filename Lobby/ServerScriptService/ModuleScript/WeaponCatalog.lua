@@ -15,6 +15,16 @@ local function normalizeName(name: string): string
 	return normalized
 end
 
+local function findTemplateByName(name: string): Instance?
+	local normalizedTarget = normalizeName(name)
+	for _, inst in ipairs(templates:GetDescendants()) do
+		if normalizeName(inst.Name) == normalizedTarget then
+			return inst
+		end
+	end
+	return nil
+end
+
 local function wrapAsTool(container: Instance): Tool?
 	if container:IsA("Tool") then
 		return container
@@ -136,25 +146,36 @@ function WeaponCatalog.FindTemplate(weaponName: string): Tool?
 	if typeof(weaponName) ~= "string" or weaponName == "" then
 		return nil
 	end
-	local normalizedTarget = normalizeName(weaponName)
-	local fallback: Instance? = nil
-	for _, inst in ipairs(templates:GetDescendants()) do
-		if inst:IsA("Tool") then
-			if normalizeName(inst.Name) == normalizedTarget then
-				WeaponCatalog.PrepareTool(inst)
-				return inst
-			end
-		elseif not fallback and normalizeName(inst.Name) == normalizedTarget then
-			fallback = inst
+	local template = findTemplateByName(weaponName)
+	if template then
+		if template:IsA("Tool") then
+			WeaponCatalog.PrepareTool(template, weaponName)
+			return template
 		end
-	end
-	if fallback then
-		local wrapped = wrapAsTool(fallback)
+		local wrapped = wrapAsTool(template)
 		if wrapped then
-			WeaponCatalog.PrepareTool(wrapped)
+			WeaponCatalog.PrepareTool(wrapped, weaponName)
 			return wrapped
 		end
 	end
+
+	local def = WeaponConfigs and WeaponConfigs.Get and WeaponConfigs.Get(weaponName) or nil
+	local weaponType = def and def.weaponType or nil
+	if weaponType then
+		local fallbackTemplate = findTemplateByName(weaponType)
+		if fallbackTemplate then
+			if fallbackTemplate:IsA("Tool") then
+				WeaponCatalog.PrepareTool(fallbackTemplate, weaponName)
+				return fallbackTemplate
+			end
+			local wrapped = wrapAsTool(fallbackTemplate)
+			if wrapped then
+				WeaponCatalog.PrepareTool(wrapped, weaponName)
+				return wrapped
+			end
+		end
+	end
+
 	return nil
 end
 
