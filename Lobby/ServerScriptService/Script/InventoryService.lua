@@ -249,6 +249,17 @@ Players.PlayerAdded:Connect(function(player: Player)
 		end
 	end
 	if typeof(state.StarterWeaponName) == "string" and state.StarterWeaponName ~= "" then
+		PlayerStateStore.EnsureOwnedWeapon(player, state.StarterWeaponName)
+	end
+	if typeof(state.StarterWeaponName) ~= "string" or state.StarterWeaponName == "" then
+		local detected = findWeaponName(player)
+		if typeof(detected) == "string" and detected ~= "" then
+			PlayerStateStore.EnsureOwnedWeapon(player, detected)
+			PlayerStateStore.SetEquippedWeaponName(player, detected)
+			state = PlayerStateStore.Get(player) or state
+		end
+	end
+	if typeof(state.StarterWeaponName) == "string" and state.StarterWeaponName ~= "" then
 		equipWeapon(player, state.StarterWeaponName)
 	end
 	task.defer(function()

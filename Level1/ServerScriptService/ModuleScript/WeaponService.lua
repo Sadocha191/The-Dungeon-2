@@ -144,10 +144,27 @@ local function wrapAsTool(container: Instance, weaponId: string): Tool?
 	return tool
 end
 
+local function normalizeName(name: string): string
+	local normalized = name:gsub("’", "'")
+	normalized = normalized:gsub("%s+", " ")
+	normalized = normalized:match("^%s*(.-)%s*$") or normalized
+	return normalized:lower()
+end
+
+local function findTemplateByName(weaponId: string): Instance?
+	local normalizedTarget = normalizeName(weaponId)
+	for _, inst in ipairs(WeaponTemplates:GetDescendants()) do
+		if normalizeName(inst.Name) == normalizedTarget then
+			return inst
+		end
+	end
+	return nil
+end
+
 local function cloneTemplate(weaponId: string): Tool?
-	local template = WeaponTemplates:FindFirstChild(weaponId)
+	local template = WeaponTemplates:FindFirstChild(weaponId) or findTemplateByName(weaponId)
 	if not template then
-		local lowered = string.lower(weaponId)
+		local lowered = normalizeName(weaponId)
 		local fallbackId
 		if string.find(lowered, "sword") then
 			fallbackId = "Sword"
@@ -166,7 +183,7 @@ local function cloneTemplate(weaponId: string): Tool?
 		end
 
 		if fallbackId then
-			template = WeaponTemplates:FindFirstChild(fallbackId)
+			template = WeaponTemplates:FindFirstChild(fallbackId) or findTemplateByName(fallbackId)
 		end
 		if not template then
 			warn("[WeaponService] Missing weapon template:", weaponId)
