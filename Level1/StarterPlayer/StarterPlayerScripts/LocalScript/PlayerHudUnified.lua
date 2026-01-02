@@ -59,7 +59,7 @@ nameText.Font = Enum.Font.GothamBold
 nameText.TextSize = 14
 nameText.TextXAlignment = Enum.TextXAlignment.Right
 nameText.TextColor3 = Color3.fromRGB(245, 245, 245)
-nameText.Text = plr.Name .. " • Lv. 1"
+nameText.Text = plr.Name .. " • Lv. 1 • -"
 nameText.Parent = nameBox
 
 local function autoSizeNameBox()
@@ -151,7 +151,8 @@ plr.CharacterAdded:Connect(bindCharacter)
 local level, xp, nextXp, coins = 1, 0, 120, 0
 
 local function render()
-	nameText.Text = ("%s • Lv. %d"):format(plr.Name, level)
+	local race = tostring(plr:GetAttribute("Race") or "-")
+	nameText.Text = ("%s • Lv. %d • %s"):format(plr.Name, level, race)
 	coinsText.Text = ("Monety: %d"):format(coins)
 	local n = math.max(1, nextXp)
 	xpLabel.Text = ("EXP: %d/%d"):format(xp, n)
@@ -167,5 +168,7 @@ PlayerProgressEvent.OnClientEvent:Connect(function(payload)
 	coins = tonumber(payload.coins) or coins
 	render()
 end)
+
+plr:GetAttributeChangedSignal("Race"):Connect(render)
 
 render()

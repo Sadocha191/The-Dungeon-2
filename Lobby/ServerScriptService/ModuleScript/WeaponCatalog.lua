@@ -1,6 +1,9 @@
-local ServerStorage = game:GetService("ServerStorage")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local templates = ServerStorage:WaitForChild("WeaponTemplates")
+local templates = ReplicatedStorage:WaitForChild("WeaponTemplates")
+local weaponConfigsModule = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	and ReplicatedStorage.ModuleScripts:FindFirstChild("WeaponConfigs")
+local WeaponConfigs = weaponConfigsModule and require(weaponConfigsModule) or nil
 
 local WeaponCatalog = {}
 
@@ -94,10 +97,38 @@ local function normalizeToolParts(tool: Tool)
 	end
 end
 
-function WeaponCatalog.PrepareTool(tool: Tool)
+local function applyWeaponConfig(tool: Tool, weaponName: string)
+	if not WeaponConfigs then return end
+	local def = WeaponConfigs.Get and WeaponConfigs.Get(weaponName) or WeaponConfigs.Defs and WeaponConfigs.Defs[weaponName]
+	if not def then return end
+
+	local stats = def.stats or {}
+	tool:SetAttribute("WeaponType", def.weaponType or "")
+	tool:SetAttribute("Rarity", def.rarity or "")
+	tool:SetAttribute("BaseDamage", def.baseDamage or 0)
+	tool:SetAttribute("MaxLevel", def.maxLevel or 0)
+	tool:SetAttribute("SellValue", def.sellValue or math.max(1, math.floor((def.baseDamage or 0) * 3)))
+
+	tool:SetAttribute("HP", stats.HP or 0)
+	tool:SetAttribute("SPD", stats.SPD or 0)
+	tool:SetAttribute("CRIT_RATE", stats.CRIT_RATE or 0)
+	tool:SetAttribute("CRIT_DMG", stats.CRIT_DMG or 0)
+	tool:SetAttribute("LIFESTEAL", stats.LIFESTEAL or 0)
+	tool:SetAttribute("DEF", stats.DEF or 0)
+
+	tool:SetAttribute("PassiveName", def.passiveName or "")
+	tool:SetAttribute("PassiveDescription", def.passiveDescription or "")
+	tool:SetAttribute("AbilityName", def.abilityName or "")
+	tool:SetAttribute("AbilityDescription", def.abilityDescription or "")
+end
+
+function WeaponCatalog.PrepareTool(tool: Tool, weaponName: string?)
 	tool.RequiresHandle = true
 	disableLegacyScripts(tool)
 	normalizeToolParts(tool)
+	if weaponName then
+		applyWeaponConfig(tool, weaponName)
+	end
 end
 
 function WeaponCatalog.FindTemplate(weaponName: string): Tool?
