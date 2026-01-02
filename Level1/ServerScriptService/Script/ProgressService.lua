@@ -5,8 +5,32 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
 local PhysicsService = game:GetService("PhysicsService")
+local ServerScriptService = game:GetService("ServerScriptService")
 
-local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
+local function findModule(name: string): ModuleScript?
+	local direct = ServerScriptService:FindFirstChild(name)
+	if direct and direct:IsA("ModuleScript") then
+		return direct
+	end
+	local folder = ServerScriptService:FindFirstChild("ModuleScript")
+		or ServerScriptService:FindFirstChild("ModuleScripts")
+	if folder then
+		local nested = folder:FindFirstChild(name)
+		if nested and nested:IsA("ModuleScript") then
+			return nested
+		end
+	end
+	return nil
+end
+
+local playerDataModule = findModule("PlayerData")
+local weaponServiceModule = findModule("WeaponService")
+if not playerDataModule or not weaponServiceModule then
+	error("[ProgressService] Missing PlayerData/WeaponService module.")
+end
+
+local PlayerData = require(playerDataModule)
+local WeaponService = require(weaponServiceModule)
 local UpDefs = require(ReplicatedStorage:WaitForChild("UpgradeDefinitions"))
 
 -- Ensure PauseState
@@ -99,39 +123,6 @@ PauseState.Changed:Connect(function()
 end)
 
 -- Tools
-local WeaponTemplates = ReplicatedStorage:WaitForChild("WeaponTemplates")
-local function giveLoadout(plr: Player)
-	local d = PlayerData.Get(plr)
-	local backpack = plr:WaitForChild("Backpack")
-	local starterWeapon = plr:GetAttribute("StarterWeaponName")
-
-	local function give(toolName: string): boolean
-		for _,x in ipairs(backpack:GetChildren()) do
-			if x:IsA("Tool") and x.Name == toolName then return end
-		end
-		local src = WeaponTemplates:FindFirstChild(toolName)
-		if src and src:IsA("Tool") then
-			src:Clone().Parent = backpack
-			return true
-		end
-		return false
-	end
-
-	if typeof(starterWeapon) == "string" and starterWeapon ~= "" then
-		if give(starterWeapon) then
-			return
-		end
-	end
-
-	if typeof(starterWeapon) == "string" and starterWeapon ~= "" then
-		give(starterWeapon)
-		return
-	end
-
-	give("Sword")
-	if d.unlockBow then give("Bow") end
-	if d.unlockWand then give("Staff") end
-end
 
 local function pushProgress(plr: Player)
 	local d = PlayerData.Get(plr)
@@ -776,7 +767,7 @@ Players.PlayerAdded:Connect(function(plr)
 		end)
 
 		task.wait(0.1)
-		giveLoadout(plr)
+		WeaponService.EquipLoadout(plr)
 		pushProgress(plr)
 	end)
 end)

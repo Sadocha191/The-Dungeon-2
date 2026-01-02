@@ -39,6 +39,9 @@ local function defaultProfile()
 		-- Unlock weapons
 		unlockBow = true,
 		unlockWand = true,
+
+		-- Loadout (weapon entries: { id, level, rarity, stats })
+		Loadout = {},
 	}
 end
 
@@ -118,6 +121,9 @@ function PlayerData.Get(plr)
 
 	data.unlockBow = data.unlockBow ~= false
 	data.unlockWand = data.unlockWand ~= false
+	if typeof(data.Loadout) ~= "table" then
+		data.Loadout = {}
+	end
 
 	PlayerData._cache[uid] = data
 	PlayerData._dirty[uid] = false
