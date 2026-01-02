@@ -5,12 +5,12 @@
 --     synchronizuje level/coins z Twoim PlayerData
 
 local Players = game:GetService("Players")
-local ServerStorage = game:GetService("ServerStorage")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
 
-local templates = ServerStorage:WaitForChild("WeaponTemplates")
+local templates = ReplicatedStorage:WaitForChild("WeaponTemplates")
 
 local function isWeaponTool(inst: Instance): boolean
 	return inst:IsA("Tool") and typeof(inst:GetAttribute("WeaponType")) == "string"
@@ -82,7 +82,9 @@ Players.PlayerAdded:Connect(function(player: Player)
 
 	-- ✅ bron
 	player:SetAttribute("StarterWeaponName", weaponName)
-	giveTool(player, weaponName)
+	if not giveTool(player, weaponName) then
+		giveTool(player, "Sword")
+	end
 
 	-- ✅ podepnij do Twojego globalnego progresu w dungeon
 	local data = PlayerData.Get(player)
