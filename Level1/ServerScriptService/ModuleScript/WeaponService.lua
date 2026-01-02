@@ -146,13 +146,37 @@ end
 local function cloneTemplate(weaponId: string): Tool?
 	local template = WeaponTemplates:FindFirstChild(weaponId)
 	if not template then
-		warn("[WeaponService] Missing weapon template:", weaponId)
-		return nil
+		local lowered = string.lower(weaponId)
+		local fallbackId
+		if string.find(lowered, "sword") then
+			fallbackId = "Sword"
+		elseif string.find(lowered, "halberd") then
+			fallbackId = "Halberd"
+		elseif string.find(lowered, "scythe") then
+			fallbackId = "Scythe"
+		elseif string.find(lowered, "bow") then
+			fallbackId = "Bow"
+		elseif string.find(lowered, "pistol") then
+			fallbackId = "Pistol"
+		elseif string.find(lowered, "staff") then
+			fallbackId = "Staff"
+		elseif string.find(lowered, "wand") then
+			fallbackId = "Wand"
+		end
+
+		if fallbackId then
+			template = WeaponTemplates:FindFirstChild(fallbackId)
+		end
+		if not template then
+			warn("[WeaponService] Missing weapon template:", weaponId)
+			return nil
+		end
 	end
 
 	local clone = template:Clone()
 	local tool = wrapAsTool(clone, weaponId)
 	if tool then
+		tool.Name = weaponId
 		return tool
 	end
 

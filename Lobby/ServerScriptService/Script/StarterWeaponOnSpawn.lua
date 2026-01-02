@@ -5,6 +5,7 @@
 --     Jeśli gracz nie ma broni -> daje tę z DS (StarterWeaponName) albo Knight's Oath.
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerStateStore = require(ServerScriptService:WaitForChild("PlayerStateStore"))
@@ -35,8 +36,16 @@ local WeaponCatalog = require(weaponCatalogModule)
 
 local START_WEAPON_NAME = "Sword"
 
+local WeaponTemplates = ReplicatedStorage:FindFirstChild("WeaponTemplates")
+
 local function isWeaponTool(inst: Instance): boolean
-	return inst:IsA("Tool") and typeof(inst:GetAttribute("WeaponType")) == "string"
+	if not inst:IsA("Tool") then
+		return false
+	end
+	if typeof(inst:GetAttribute("WeaponType")) == "string" then
+		return true
+	end
+	return WeaponTemplates and WeaponTemplates:FindFirstChild(inst.Name, true) ~= nil
 end
 
 local function hasAnyWeapon(player: Player): boolean
