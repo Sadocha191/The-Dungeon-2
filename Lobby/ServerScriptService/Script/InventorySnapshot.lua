@@ -6,8 +6,16 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
-local CurrencyService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("CurrencyService"))
-local PlayerStateStore = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerStateStore"))
+
+local moduleFolder = ServerScriptService:FindFirstChild("ModuleScript")
+	or ServerScriptService:FindFirstChild("ModuleScripts")
+if not moduleFolder then
+	warn("[InventorySnapshot] Missing ModuleScript folder; inventory snapshot disabled.")
+	return
+end
+
+local CurrencyService = require(moduleFolder:WaitForChild("CurrencyService"))
+local PlayerStateStore = require(moduleFolder:WaitForChild("PlayerStateStore"))
 
 local remoteFunctions = ReplicatedStorage:FindFirstChild("RemoteFunctions")
 if not remoteFunctions then
