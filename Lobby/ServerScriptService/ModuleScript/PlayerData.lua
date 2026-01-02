@@ -27,6 +27,12 @@ local function defaultData()
 			WeaponPoints = 0,
 			Tickets = 0,
 		},
+		Missions = {
+			ClaimCounts = {},
+			LastResetDaily = 0,
+			LastResetWeekly = 0,
+			Progress = {},
+		},
 		Pity = {},
 		Weapons = {},
 
@@ -77,6 +83,14 @@ function PlayerData.Get(plr: Player)
 			data.Currencies.Coins = data.coins
 		end
 		data.coins = data.Currencies.Coins
+
+		if typeof(loaded.Missions) == "table" then
+			data.Missions = loaded.Missions
+			data.Missions.ClaimCounts = data.Missions.ClaimCounts or {}
+			data.Missions.Progress = data.Missions.Progress or {}
+			data.Missions.LastResetDaily = clampInt(data.Missions.LastResetDaily)
+			data.Missions.LastResetWeekly = clampInt(data.Missions.LastResetWeekly)
+		end
 
 		if typeof(loaded.Pity) == "table" then
 			data.Pity = loaded.Pity
@@ -150,6 +164,7 @@ function PlayerData.Save(plr: Player)
 		upgradePoints = data.upgradePoints,
 		upgrades = data.upgrades,
 		Currencies = data.Currencies,
+		Missions = data.Missions,
 		Pity = data.Pity,
 		Weapons = data.Weapons,
 
