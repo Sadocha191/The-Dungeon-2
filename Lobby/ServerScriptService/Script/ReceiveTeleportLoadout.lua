@@ -8,7 +8,21 @@ local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
-local WeaponCatalog = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WeaponCatalog"))
+
+local function getModuleFolder(): Instance?
+	return ServerScriptService:FindFirstChild("ModuleScript")
+		or ServerScriptService:FindFirstChild("ModuleScripts")
+		or ServerScriptService:WaitForChild("ModuleScript", 5)
+		or ServerScriptService:WaitForChild("ModuleScripts", 5)
+end
+
+local moduleFolder = getModuleFolder()
+if not moduleFolder then
+	warn("[ReceiveTeleportLoadout] Missing ModuleScript(s) folder; loadout disabled.")
+	return
+end
+
+local WeaponCatalog = require(moduleFolder:WaitForChild("WeaponCatalog"))
 
 local function giveTool(player: Player, toolName: string): boolean
 	local template = WeaponCatalog.FindTemplate(toolName)

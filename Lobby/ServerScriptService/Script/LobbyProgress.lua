@@ -8,18 +8,18 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
 
-local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-if not remotes then
-	remotes = Instance.new("Folder")
-	remotes.Name = "Remotes"
-	remotes.Parent = ReplicatedStorage
+local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
+if not remoteEvents then
+	remoteEvents = Instance.new("Folder")
+	remoteEvents.Name = "RemoteEvents"
+	remoteEvents.Parent = ReplicatedStorage
 end
 
-local PlayerProgressEvent = remotes:FindFirstChild("PlayerProgressEvent")
+local PlayerProgressEvent = remoteEvents:FindFirstChild("PlayerProgressEvent")
 if not PlayerProgressEvent then
 	PlayerProgressEvent = Instance.new("RemoteEvent")
 	PlayerProgressEvent.Name = "PlayerProgressEvent"
-	PlayerProgressEvent.Parent = remotes
+	PlayerProgressEvent.Parent = remoteEvents
 end
 
 local function send(plr: Player)

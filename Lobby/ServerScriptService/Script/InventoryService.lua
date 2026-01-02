@@ -7,7 +7,21 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerStateStore = require(ServerScriptService:WaitForChild("PlayerStateStore"))
-local WeaponCatalog = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WeaponCatalog"))
+
+local function getModuleFolder(): Instance?
+	return ServerScriptService:FindFirstChild("ModuleScript")
+		or ServerScriptService:FindFirstChild("ModuleScripts")
+		or ServerScriptService:WaitForChild("ModuleScript", 5)
+		or ServerScriptService:WaitForChild("ModuleScripts", 5)
+end
+
+local moduleFolder = getModuleFolder()
+if not moduleFolder then
+	warn("[InventoryService] Missing ModuleScript(s) folder; inventory disabled.")
+	return
+end
+
+local WeaponCatalog = require(moduleFolder:WaitForChild("WeaponCatalog"))
 
 local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
 if not remoteEvents then
