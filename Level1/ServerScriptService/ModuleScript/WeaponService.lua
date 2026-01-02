@@ -238,7 +238,7 @@ local function buildLoadoutList(player: Player)
 	end
 
 	if #entries == 0 then
-		entries = { { id = "Sword", entry = { id = "Sword", level = 1 } } }
+		entries = { { id = "Knight's Oath", entry = { id = "Knight's Oath", level = 1 } } }
 	end
 
 	return entries

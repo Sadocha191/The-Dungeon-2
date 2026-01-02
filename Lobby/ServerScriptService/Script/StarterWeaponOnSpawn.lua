@@ -35,7 +35,7 @@ end
 
 local WeaponCatalog = require(weaponCatalogModule)
 
-local START_WEAPON_NAME = "Sword"
+local START_WEAPON_NAME = "Knight's Oath"
 
 local WeaponTemplates = ServerStorage:WaitForChild("WeaponTemplates", 10)
 if not WeaponTemplates then
