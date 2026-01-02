@@ -4,6 +4,7 @@
 
 local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local ProfilesManager = require(ServerScriptService:WaitForChild("ProfilesManager"))
@@ -77,8 +78,19 @@ local function sanitizeProfile(profile: any)
 	}
 end
 
+local WeaponTemplates = ServerStorage:WaitForChild("WeaponTemplates", 10)
+if not WeaponTemplates then
+	warn("[PortalToLevel1] Missing ServerStorage.WeaponTemplates; fallback to WeaponType attributes only.")
+end
+
 local function isWeaponTool(inst: Instance): boolean
-	return inst:IsA("Tool") and typeof(inst:GetAttribute("WeaponType")) == "string"
+	if not inst:IsA("Tool") then
+		return false
+	end
+	if typeof(inst:GetAttribute("WeaponType")) == "string" then
+		return true
+	end
+	return WeaponTemplates and WeaponTemplates:FindFirstChild(inst.Name, true) ~= nil
 end
 
 local function findWeaponName(player: Player): string?

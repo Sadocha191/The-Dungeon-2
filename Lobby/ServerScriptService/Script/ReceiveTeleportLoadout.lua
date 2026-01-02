@@ -8,6 +8,7 @@ local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
+local PlayerStateStore = require(ServerScriptService:WaitForChild("PlayerStateStore"))
 
 local function findWeaponCatalog(): ModuleScript?
 	local direct = ServerScriptService:FindFirstChild("WeaponCatalog", true)
@@ -91,7 +92,10 @@ Players.PlayerAdded:Connect(function(player: Player)
 
 	-- ✅ bron
 	player:SetAttribute("StarterWeaponName", weaponName)
-	giveTool(player, weaponName)
+	if giveTool(player, weaponName) then
+		PlayerStateStore.EnsureOwnedWeapon(player, weaponName)
+		PlayerStateStore.SetEquippedWeaponName(player, weaponName)
+	end
 
 	-- ✅ podepnij do Twojego globalnego progresu w dungeon
 	local data = PlayerData.Get(player)
