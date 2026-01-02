@@ -17,8 +17,8 @@ local PlayerProgressEvent = remoteEvents:WaitForChild("PlayerProgressEvent")
 
 -- Race updates (opcjonalnie)
 local RaceUpdated = remoteEvents:FindFirstChild("RaceUpdated")
-local InventoryAction = remoteEvents:WaitForChild("InventoryAction")
-local InventorySync = remoteEvents:WaitForChild("InventorySync")
+local InventoryAction
+local InventorySync
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "PlayerHudGui_Lobby"
@@ -200,7 +200,15 @@ end
 plr:GetAttributeChangedSignal("Race"):Connect(render)
 
 -- INVENTORY (Lobby only)
-inventoryGui = Instance.new("ScreenGui")
+task.spawn(function()
+	InventoryAction = remoteEvents:WaitForChild("InventoryAction", 10)
+	InventorySync = remoteEvents:WaitForChild("InventorySync", 10)
+	if not InventoryAction or not InventorySync then
+		warn("[PlayerHudLobby] Inventory remotes missing; skipping inventory UI")
+		return
+	end
+
+	inventoryGui = Instance.new("ScreenGui")
 inventoryGui.Name = "InventoryGui_Lobby"
 inventoryGui.ResetOnSpawn = false
 inventoryGui.IgnoreGuiInset = true
@@ -695,6 +703,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 end)
 
 InventoryAction:FireServer({ type = "request" })
+end)
 
 -- AUTO-HIDE: jeśli jakikolwiek ScreenGui ma Modal=true i Enabled=true, chowamy HUD
 local function anyModalOpen(): boolean
