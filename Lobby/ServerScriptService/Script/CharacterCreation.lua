@@ -5,8 +5,11 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local ProfilesManager = require(ServerScriptService:WaitForChild("ProfilesManager"))
-local Races = require(ReplicatedStorage:WaitForChild("Races"))
+local serverModules = ServerScriptService:WaitForChild("ModuleScript")
+local replicatedModules = ReplicatedStorage:WaitForChild("ModuleScripts")
+
+local ProfilesManager = require(serverModules:WaitForChild("ProfilesManager"))
+local Races = require(replicatedModules:WaitForChild("Races"))
 
 local remotes = ReplicatedStorage:WaitForChild("RemoteEvents")
 local CreateReq = remotes:WaitForChild("CreateProfileRequest")
@@ -68,6 +71,9 @@ CreateReq.OnServerEvent:Connect(function(player: Player, className)
 		race = (ok and payload and payload.Race) or nil,
 		rollPreview = ok and buildRollPreview(picked, payload and payload.Race) or nil,
 	}
+	if ok and payload and typeof(payload.Race) == "string" then
+		player:SetAttribute("Race", payload.Race)
+	end
 	CreateRes:FireClient(player, response)
 end)
 
@@ -80,6 +86,9 @@ RerollReq.OnServerEvent:Connect(function(player: Player)
 		profile = ok and payload or nil,
 		race = (ok and payload and payload.Race) or nil,
 	}
+	if ok and payload and typeof(payload.Race) == "string" then
+		player:SetAttribute("Race", payload.Race)
+	end
 	RerollRes:FireClient(player, response)
 end)
 
