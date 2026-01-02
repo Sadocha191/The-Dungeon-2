@@ -17,8 +17,9 @@ local PlayerProgressEvent = remoteEvents:WaitForChild("PlayerProgressEvent")
 local remoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions")
 local GetInventorySnapshot = remoteFunctions:WaitForChild("RF_GetInventorySnapshot")
 
-local WeaponConfigs = require(ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("WeaponConfigs"))
-local Races = require(ReplicatedStorage:WaitForChild("Races"))
+local moduleFolder = ReplicatedStorage:WaitForChild("ModuleScripts")
+local WeaponConfigs = require(moduleFolder:WaitForChild("WeaponConfigs"))
+local Races = require(moduleFolder:WaitForChild("Races"))
 
 local function hexToColor3(hex)
 	hex = tostring(hex or "")

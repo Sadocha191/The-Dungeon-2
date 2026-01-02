@@ -6,7 +6,9 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
+local serverModules = ServerScriptService:WaitForChild("ModuleScript")
+
+local PlayerData = require(serverModules:WaitForChild("PlayerData"))
 
 local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
 if not remoteEvents then
