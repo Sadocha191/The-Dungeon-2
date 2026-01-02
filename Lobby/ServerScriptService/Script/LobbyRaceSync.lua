@@ -13,7 +13,11 @@ local RerollRaceResponse = remoteFolder:WaitForChild("RerollRaceResponse")
 
 -- Owijamy FireClient, żeby za każdym razem, gdy serwer wysyła wynik losowania,
 -- równolegle ustawić atrybut Race na graczu.
-local function wrapResponseEvent(ev: RemoteEvent, extractRace: (any) -> (string?))
+local function wrapResponseEvent(ev: Instance?, extractRace: (any) -> (string?))
+	if not ev or not ev:IsA("RemoteEvent") then
+		warn("[LobbyRaceSync] Expected RemoteEvent, got", ev and ev.ClassName or "nil")
+		return
+	end
 	local original = ev.FireClient
 	ev.FireClient = function(self, player: Player, ...)
 		local args = { ... }
