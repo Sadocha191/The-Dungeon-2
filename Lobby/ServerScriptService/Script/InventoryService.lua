@@ -4,6 +4,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerStateStore = require(ServerScriptService:WaitForChild("PlayerStateStore"))
@@ -52,8 +53,19 @@ end
 local InventoryAction = ensureRemote("InventoryAction")
 local InventorySync = ensureRemote("InventorySync")
 
+local WeaponTemplates = ServerStorage:WaitForChild("WeaponTemplates", 10)
+if not WeaponTemplates then
+	warn("[InventoryService] Missing ServerStorage.WeaponTemplates; fallback to WeaponType attributes only.")
+end
+
 local function isWeaponTool(inst: Instance): boolean
-	return inst:IsA("Tool") and typeof(inst:GetAttribute("WeaponType")) == "string"
+	if not inst:IsA("Tool") then
+		return false
+	end
+	if typeof(inst:GetAttribute("WeaponType")) == "string" then
+		return true
+	end
+	return WeaponTemplates and WeaponTemplates:FindFirstChild(inst.Name, true) ~= nil
 end
 
 local function clearWeaponTools(container: Instance?)
@@ -63,6 +75,28 @@ local function clearWeaponTools(container: Instance?)
 			inst:Destroy()
 		end
 	end
+end
+
+local function findWeaponName(player: Player): string?
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if backpack then
+		for _, inst in ipairs(backpack:GetChildren()) do
+			if isWeaponTool(inst) then return inst.Name end
+		end
+	end
+	local char = player.Character
+	if char then
+		for _, inst in ipairs(char:GetChildren()) do
+			if isWeaponTool(inst) then return inst.Name end
+		end
+	end
+	local starterGear = player:FindFirstChild("StarterGear")
+	if starterGear then
+		for _, inst in ipairs(starterGear:GetChildren()) do
+			if isWeaponTool(inst) then return inst.Name end
+		end
+	end
+	return nil
 end
 
 local function equipWeapon(player: Player, weaponName: string): boolean
@@ -195,6 +229,17 @@ end)
 
 Players.PlayerAdded:Connect(function(player: Player)
 	local state = PlayerStateStore.Load(player)
+	if typeof(state.StarterWeaponName) == "string" and state.StarterWeaponName ~= "" then
+		PlayerStateStore.EnsureOwnedWeapon(player, state.StarterWeaponName)
+	end
+	if typeof(state.StarterWeaponName) ~= "string" or state.StarterWeaponName == "" then
+		local detected = findWeaponName(player)
+		if typeof(detected) == "string" and detected ~= "" then
+			PlayerStateStore.EnsureOwnedWeapon(player, detected)
+			PlayerStateStore.SetEquippedWeaponName(player, detected)
+			state = PlayerStateStore.Get(player) or state
+		end
+	end
 	if typeof(state.StarterWeaponName) == "string" and state.StarterWeaponName ~= "" then
 		equipWeapon(player, state.StarterWeaponName)
 	end

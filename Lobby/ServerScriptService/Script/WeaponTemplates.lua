@@ -1,6 +1,6 @@
 -- SCRIPT: WeaponTemplates.server.lua
 -- GDZIE: ServerScriptService/WeaponTemplates.server.lua (Script)
--- CO: normalizuje szablony broni (prefaby) z ReplicatedStorage/WeaponTemplates
+-- CO: normalizuje szablony broni (prefaby) z ServerStorage/WeaponTemplates
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
