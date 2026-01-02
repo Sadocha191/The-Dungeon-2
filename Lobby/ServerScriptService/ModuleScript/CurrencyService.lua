@@ -43,6 +43,14 @@ function CurrencyService.AddCurrency(player: Player, currency: string, amount: n
 	return currencies
 end
 
+function CurrencyService.AddCoins(player: Player, amount: number)
+	return CurrencyService.AddCurrency(player, "Coins", amount)
+end
+
+function CurrencyService.AddWeaponPoints(player: Player, amount: number)
+	return CurrencyService.AddCurrency(player, "WeaponPoints", amount)
+end
+
 function CurrencyService.RemoveCurrency(player: Player, currency: string, amount: number): boolean
 	local data = PlayerData.Get(player)
 	local currencies = ensureCurrencies(data)
