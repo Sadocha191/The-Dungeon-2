@@ -5,17 +5,24 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
-
 local moduleFolder = ServerScriptService:FindFirstChild("ModuleScript")
 	or ServerScriptService:FindFirstChild("ModuleScripts")
-if not moduleFolder then
-	warn("[InventorySnapshot] Missing ModuleScript folder; inventory snapshot disabled.")
-	return
+
+local function requireModule(name: string)
+	local mod = ServerScriptService:FindFirstChild(name)
+	if not mod and moduleFolder then
+		mod = moduleFolder:FindFirstChild(name)
+	end
+	if not mod or not mod:IsA("ModuleScript") then
+		warn(("[InventorySnapshot] Missing module: %s"):format(name))
+		return nil
+	end
+	return require(mod)
 end
 
-local CurrencyService = require(moduleFolder:WaitForChild("CurrencyService"))
-local PlayerStateStore = require(moduleFolder:WaitForChild("PlayerStateStore"))
+local PlayerData = requireModule("PlayerData")
+local CurrencyService = requireModule("CurrencyService")
+local PlayerStateStore = requireModule("PlayerStateStore")
 
 local remoteFunctions = ReplicatedStorage:FindFirstChild("RemoteFunctions")
 if not remoteFunctions then
@@ -38,6 +45,13 @@ end
 local GetInventorySnapshot = ensureRemoteFunction("RF_GetInventorySnapshot")
 
 GetInventorySnapshot.OnServerInvoke = function(player)
+	if not PlayerData or not CurrencyService or not PlayerStateStore then
+		return {
+			playerInfo = {},
+			currencies = {},
+			weapons = {},
+		}
+	end
 	local data = PlayerData.Get(player)
 	local currencies = CurrencyService.GetBalances(player)
 
