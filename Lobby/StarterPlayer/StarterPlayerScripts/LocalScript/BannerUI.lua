@@ -8,6 +8,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+local WeaponConfigs = require(ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("WeaponConfigs"))
+
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local remoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions")
 
@@ -144,6 +146,7 @@ featuredText.Font = Enum.Font.GothamSemibold
 featuredText.TextSize = 12
 featuredText.TextColor3 = Color3.fromRGB(200, 200, 220)
 featuredText.TextXAlignment = Enum.TextXAlignment.Left
+featuredText.RichText = true
 featuredText.Text = "Featured: -"
 featuredText.Parent = detailsFrame
 
@@ -215,6 +218,7 @@ resultsBox.TextColor3 = Color3.fromRGB(220, 220, 220)
 resultsBox.TextXAlignment = Enum.TextXAlignment.Left
 resultsBox.TextYAlignment = Enum.TextYAlignment.Top
 resultsBox.TextWrapped = true
+resultsBox.RichText = true
 resultsBox.Text = "Wyniki: -"
 resultsBox.Parent = detailsFrame
 Instance.new("UICorner", resultsBox).CornerRadius = UDim.new(0, 8)
@@ -226,6 +230,22 @@ resultsPadding.Parent = resultsBox
 local banners = {}
 local state = {}
 local selectedBannerId
+
+local rarityColors = WeaponConfigs.RarityColors or {}
+
+local function colorToHex(color: Color3): string
+	return string.format("#%02X%02X%02X", math.floor(color.R * 255), math.floor(color.G * 255), math.floor(color.B * 255))
+end
+
+local function colorizeWeaponName(weaponId: string, rarity: string?): string
+	local def = WeaponConfigs.Get and WeaponConfigs.Get(weaponId) or nil
+	local finalRarity = (def and def.rarity) or rarity
+	local color = finalRarity and rarityColors[finalRarity] or nil
+	if color then
+		return string.format("<font color=\"%s\">%s</font>", colorToHex(color), weaponId)
+	end
+	return tostring(weaponId)
+end
 
 local function formatRates(rates: any)
 	if typeof(rates) ~= "table" then
@@ -261,7 +281,11 @@ local function updateDetails()
 
 	bannerName.Text = banner.DisplayName or selectedBannerId
 	bannerDesc.Text = banner.Description or "-"
-	featuredText.Text = "Featured: " .. table.concat(banner.FeaturedWeaponIds or {}, ", ")
+	local featuredNames = {}
+	for _, weaponId in ipairs(banner.FeaturedWeaponIds or {}) do
+		table.insert(featuredNames, colorizeWeaponName(weaponId))
+	end
+	featuredText.Text = "Featured: " .. table.concat(featuredNames, ", ")
 	ratesText.Text = "Rates: " .. formatRates(banner.RarityRates)
 	local pityConfig = banner.Pity or {}
 	local pityState = (state.Pity or {})[selectedBannerId] or { Count = 0, FeaturedFail = false }
@@ -391,7 +415,9 @@ local function doRoll(amount: number)
 	local lines = {}
 	for _, result in ipairs(payload.Results or {}) do
 		local featured = result.Featured and " [Featured]" or ""
-		table.insert(lines, string.format("%s (%s)%s", tostring(result.WeaponId or "-"), tostring(result.Rarity or "-"), featured))
+		local weaponId = tostring(result.WeaponId or "-")
+		local rarity = tostring(result.Rarity or "-")
+		table.insert(lines, string.format("%s (%s)%s", colorizeWeaponName(weaponId, rarity), rarity, featured))
 	end
 	resultsBox.Text = "Wyniki: " .. table.concat(lines, ", ")
 end

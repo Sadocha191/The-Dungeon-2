@@ -164,6 +164,13 @@ end
 local function cloneTemplate(weaponId: string): Tool?
 	local template = WeaponTemplates:FindFirstChild(weaponId) or findTemplateByName(weaponId)
 	if not template then
+		local def = getWeaponConfig(weaponId)
+		local weaponType = def and def.weaponType or nil
+		if weaponType then
+			template = WeaponTemplates:FindFirstChild(weaponType) or findTemplateByName(weaponType)
+		end
+	end
+	if not template then
 		local lowered = normalizeName(weaponId)
 		local fallbackId
 		if string.find(lowered, "sword") then
@@ -238,7 +245,7 @@ local function buildLoadoutList(player: Player)
 	end
 
 	if #entries == 0 then
-		entries = { { id = "Sword", entry = { id = "Sword", level = 1 } } }
+		entries = { { id = "Knight's Oath", entry = { id = "Knight's Oath", level = 1 } } }
 	end
 
 	return entries
