@@ -4,6 +4,7 @@
 
 local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local ProfilesManager = require(ServerScriptService:WaitForChild("ProfilesManager"))
@@ -77,7 +78,7 @@ local function sanitizeProfile(profile: any)
 	}
 end
 
-local WeaponTemplates = ReplicatedStorage:FindFirstChild("WeaponTemplates")
+local WeaponTemplates = ServerStorage:FindFirstChild("WeaponTemplates")
 
 local function isWeaponTool(inst: Instance): boolean
 	if not inst:IsA("Tool") then

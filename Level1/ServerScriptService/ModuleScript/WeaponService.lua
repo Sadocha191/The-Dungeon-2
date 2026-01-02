@@ -1,7 +1,8 @@
 -- WeaponService.lua (ServerScriptService)
--- Responsible for equipping player loadouts from ReplicatedStorage.WeaponTemplates
+-- Responsible for equipping player loadouts from ServerStorage.WeaponTemplates
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local function findModule(name: string): ModuleScript?
@@ -27,7 +28,7 @@ end
 
 local PlayerData = require(playerDataModule)
 
-local WeaponTemplates = ReplicatedStorage:WaitForChild("WeaponTemplates")
+local WeaponTemplates = ServerStorage:WaitForChild("WeaponTemplates")
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
 local WeaponConfigs = moduleFolder and moduleFolder:FindFirstChild("WeaponConfigs")
 	and require(moduleFolder.WeaponConfigs) or nil
