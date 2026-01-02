@@ -49,6 +49,32 @@ local BASE_JUMP_POWER = 50
 
 -- Pause => freeze players too
 local frozen = {} -- [uid] = {ws, jp}
+local getFinalStats
+local function updatePlayerDerivedStats(plr: Player)
+	local char = plr.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
+
+	local tool = char:FindFirstChildOfClass("Tool")
+	local stats = getFinalStats(plr, tool)
+	local d = PlayerData.Get(plr)
+
+	local prevMax = hum.MaxHealth
+	local ratio = prevMax > 0 and (hum.Health / prevMax) or 1
+	hum.MaxHealth = math.max(1, stats.maxHP)
+	hum.Health = math.min(hum.MaxHealth, math.max(1, ratio * hum.MaxHealth))
+
+	hum.WalkSpeed = (BASE_PLAYER_SPEED * stats.speedMult) + (d.upgrades.speed or 0) * 1
+	hum.JumpPower = BASE_JUMP_POWER + (d.upgrades.jump or 0) * 2
+
+	plr:SetAttribute("FinalMaxHP", hum.MaxHealth)
+	plr:SetAttribute("FinalSpeedMult", stats.speedMult)
+	plr:SetAttribute("FinalCritRate", stats.critRate)
+	plr:SetAttribute("FinalCritDmg", stats.critDmg)
+	plr:SetAttribute("FinalLifesteal", stats.lifesteal)
+	plr:SetAttribute("FinalDefense", stats.defense)
+end
+
 local function applyPauseToPlayer(plr: Player, paused: boolean)
 	local c = plr.Character
 	local hum = c and c:FindFirstChildOfClass("Humanoid")
@@ -61,11 +87,7 @@ local function applyPauseToPlayer(plr: Player, paused: boolean)
 		hum.WalkSpeed = 0
 		hum.JumpPower = 0
 	else
-		local d = PlayerData.Get(plr)
-		local ws = BASE_PLAYER_SPEED + (d.upgrades.speed or 0) * 1
-		local jp = BASE_JUMP_POWER + (d.upgrades.jump or 0) * 2
-		hum.WalkSpeed = ws
-		hum.JumpPower = jp
+		updatePlayerDerivedStats(plr)
 		frozen[plr.UserId] = nil
 	end
 end
@@ -81,6 +103,7 @@ local WeaponTemplates = ReplicatedStorage:WaitForChild("WeaponTemplates")
 local function giveLoadout(plr: Player)
 	local d = PlayerData.Get(plr)
 	local backpack = plr:WaitForChild("Backpack")
+	local starterWeapon = plr:GetAttribute("StarterWeaponName")
 
 	local function give(toolName: string)
 		for _,x in ipairs(backpack:GetChildren()) do
@@ -90,9 +113,14 @@ local function giveLoadout(plr: Player)
 		if src and src:IsA("Tool") then src:Clone().Parent = backpack end
 	end
 
+	if typeof(starterWeapon) == "string" and starterWeapon ~= "" then
+		give(starterWeapon)
+		return
+	end
+
 	give("Sword")
 	if d.unlockBow then give("Bow") end
-	if d.unlockWand then give("Wand") end
+	if d.unlockWand then give("Staff") end
 end
 
 local function pushProgress(plr: Player)
@@ -163,8 +191,8 @@ UpgradeEvent.OnServerEvent:Connect(function(plr, payload)
 	local stat = choice.stat
 
 	-- defaults if missing in datastore (compat)
-	if stat == "critChance" and d.critChance == nil then d.critChance = 0.08 end
-	if stat == "critMult" and d.critMult == nil then d.critMult = 1.60 end
+	if stat == "critChance" and d.critChance == nil then d.critChance = 0 end
+	if stat == "critMult" and d.critMult == nil then d.critMult = 0 end
 
 	if stat == "attackSpeed" then
 		d.attackSpeed = math.clamp((tonumber(d.attackSpeed) or 1.0) + choice.value, 0.6, 2.0)
@@ -175,11 +203,11 @@ UpgradeEvent.OnServerEvent:Connect(function(plr, payload)
 	elseif stat == "fireDps" then
 		d.fireDps = math.max(0, (tonumber(d.fireDps) or 0) + choice.value)
 	elseif stat == "damage" then
-		d.damage = math.max(1, (tonumber(d.damage) or 18) + choice.value)
+		d.damage = math.max(0, (tonumber(d.damage) or 0) + choice.value)
 	elseif stat == "critChance" then
-		d.critChance = math.clamp((tonumber(d.critChance) or 0.08) + choice.value, 0, 0.6)
+		d.critChance = math.clamp((tonumber(d.critChance) or 0) + choice.value, 0, 0.6)
 	elseif stat == "critMult" then
-		d.critMult = math.clamp((tonumber(d.critMult) or 1.6) + choice.value, 1.2, 4.0)
+		d.critMult = math.clamp((tonumber(d.critMult) or 0) + choice.value, 0, 1.0)
 	end
 
 	-- track owned upgrades for UI
@@ -237,20 +265,109 @@ local function applyBurn(h: Humanoid, dps: number, seconds: number)
 	end)
 end
 
-local function getStats(plr: Player)
-	local d = PlayerData.Get(plr)
-	local dmg = math.max(10, tonumber(d.damage) or 18)
-	local multi = math.clamp(tonumber(d.multiShot) or 0, 0, 6)
-	local fch = math.clamp(tonumber(d.fireChance) or 0, 0, 0.9)
-	local fdps = math.max(0, tonumber(d.fireDps) or 0)
-	local aspd = math.clamp(tonumber(d.attackSpeed) or 1.0, 0.6, 2.0)
-
-	local critC = math.clamp(tonumber(d.critChance) or 0.08, 0, 0.6)
-	local critM = math.clamp(tonumber(d.critMult) or 1.60, 1.2, 4.0)
-	return dmg, multi, fch, fdps, aspd, critC, critM
+local function resolveWeaponType(rawType: string?): string
+	if rawType == "Melee" then return "Sword" end
+	if rawType == "Wand" then return "Staff" end
+	return rawType or ""
 end
 
-local function dealMobDamage(plr: Player, mobHum: Humanoid, mobRoot: BasePart, baseDamage: number, fireChance: number, fireDps: number, critC: number, critM: number)
+local function getWeaponStats(tool: Tool?)
+	if not tool then
+		return {
+			type = "",
+			atk = 0,
+			bonusHP = 0,
+			bonusSpeed = 0,
+			bonusCritRate = 0,
+			bonusCritDmg = 0,
+			bonusLifesteal = 0,
+			bonusDefense = 0,
+		}
+	end
+
+	local wType = resolveWeaponType(tool:GetAttribute("WeaponType"))
+	local level = math.max(1, math.floor(tonumber(tool:GetAttribute("WeaponLevel")) or 1))
+	local baseAtk = tonumber(tool:GetAttribute("BaseATK")) or tonumber(tool:GetAttribute("ATK")) or 0
+	local atkPerLevel = tonumber(tool:GetAttribute("ATKPerLevel")) or 0
+	local atk = baseAtk + (level - 1) * atkPerLevel
+	local bonusScale = 1 + (level - 1) * 0.02
+
+	return {
+		type = wType,
+		atk = atk,
+		bonusHP = (tonumber(tool:GetAttribute("BonusHP")) or 0) * bonusScale,
+		bonusSpeed = (tonumber(tool:GetAttribute("BonusSpeed")) or 0) * bonusScale,
+		bonusCritRate = (tonumber(tool:GetAttribute("BonusCritRate")) or 0) * bonusScale,
+		bonusCritDmg = (tonumber(tool:GetAttribute("BonusCritDmg")) or 0) * bonusScale,
+		bonusLifesteal = (tonumber(tool:GetAttribute("BonusLifesteal")) or 0) * bonusScale,
+		bonusDefense = (tonumber(tool:GetAttribute("BonusDefense")) or 0) * bonusScale,
+	}
+end
+
+local function getDamageBonusPct(d): number
+	local raw = tonumber(d.damageBonusPct)
+	if raw ~= nil then
+		return math.max(0, raw)
+	end
+	local legacy = tonumber(d.damage)
+	if legacy ~= nil then
+		return math.max(0, legacy / 100)
+	end
+	return 0
+end
+
+local function getCritMultBonus(d, baseCritDmg: number): number
+	local raw = tonumber(d.critMult)
+	if raw == nil then return 0 end
+	if raw > 1.0 then
+		return raw - baseCritDmg
+	end
+	return raw
+end
+
+getFinalStats = function(plr: Player, tool: Tool?)
+	local d = PlayerData.Get(plr)
+	local w = getWeaponStats(tool)
+
+	local baseHP = tonumber(d.baseHP) or 100
+	local baseSpeed = tonumber(d.baseSpeed) or 1.0
+	local baseCritRate = tonumber(d.baseCritRate) or 0.05
+	local baseCritDmg = tonumber(d.baseCritDmg) or 1.5
+	local baseDefense = tonumber(d.baseDefense) or 0
+	local baseLifesteal = tonumber(d.baseLifesteal) or 0
+
+	local finalHP = baseHP + w.bonusHP + (tonumber(d.bonusHP) or 0)
+	local finalSpeed = math.clamp(baseSpeed + w.bonusSpeed + (tonumber(d.speedBonus) or 0), 0.85, 1.35)
+	local finalCritRate = math.clamp(baseCritRate + w.bonusCritRate + (tonumber(d.critChance) or 0), 0, 0.6)
+	local finalCritDmg = math.clamp(baseCritDmg + w.bonusCritDmg + getCritMultBonus(d, baseCritDmg), 1.5, 2.5)
+	local finalLifesteal = math.clamp(baseLifesteal + w.bonusLifesteal + (tonumber(d.lifesteal) or 0), 0, 0.12)
+	local finalDefense = baseDefense + w.bonusDefense + (tonumber(d.defense) or 0)
+
+	return {
+		weaponType = w.type,
+		weaponAtk = w.atk,
+		damageBonusPct = getDamageBonusPct(d),
+		multiShot = math.clamp(tonumber(d.multiShot) or 0, 0, 6),
+		fireChance = math.clamp(tonumber(d.fireChance) or 0, 0, 0.9),
+		fireDps = math.max(0, tonumber(d.fireDps) or 0),
+		attackSpeed = math.clamp(tonumber(d.attackSpeed) or 1.0, 0.6, 2.0),
+		critRate = finalCritRate,
+		critDmg = finalCritDmg,
+		lifesteal = finalLifesteal,
+		speedMult = finalSpeed,
+		maxHP = finalHP,
+		defense = finalDefense,
+	}
+end
+
+local function getCombatStats(plr: Player, tool: Tool?)
+	local stats = getFinalStats(plr, tool)
+	local finalAtk = math.max(1, stats.weaponAtk * (1 + stats.damageBonusPct))
+	stats.finalAtk = finalAtk
+	return stats
+end
+
+local function dealMobDamage(plr: Player, mobHum: Humanoid, mobRoot: BasePart, baseDamage: number, fireChance: number, fireDps: number, critC: number, critM: number, lifesteal: number)
 	local isCrit = (math.random() < critC)
 	local final = baseDamage
 	if isCrit then final = math.floor(baseDamage * critM) end
@@ -264,31 +381,95 @@ local function dealMobDamage(plr: Player, mobHum: Humanoid, mobRoot: BasePart, b
 		crit = isCrit,
 	})
 
+	if lifesteal > 0 then
+		local hum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
+		if hum and hum.Health > 0 then
+			local heal = math.floor(final * lifesteal)
+			if heal > 0 then
+				hum.Health = math.min(hum.MaxHealth, hum.Health + heal)
+			end
+		end
+	end
+
 	if fireDps > 0 and math.random() < fireChance then
 		applyBurn(mobHum, fireDps, 3.0)
 	end
 end
 
 -- melee AoE
-local function swordAoE(plr: Player, center: Vector3, radius: number)
+local MELEE_ENEMY_SCALE = 1.1
+local function getMeleeTargetsArc(origin: Vector3, forward: Vector3, range: number, angleDeg: number, hitLimit: number?)
 	local enf = enemiesFolder()
-	if not enf then return end
+	if not enf then return {} end
 
-	local dmg, _, fch, fdps, _, critC, critM = getStats(plr)
+	local out = {}
+	local flatForward = Vector3.new(forward.X, 0, forward.Z)
+	local halfAngle = math.rad(angleDeg / 2)
 
 	for _,m in ipairs(enf:GetChildren()) do
 		local eh = m:FindFirstChildOfClass("Humanoid")
 		local er = m:FindFirstChild("HumanoidRootPart")
 		if eh and er and eh.Health > 0 then
-			if (er.Position - center).Magnitude <= radius then
-				dealMobDamage(plr, eh, er, dmg, fch, fdps, critC, critM)
+			local toEnemy = er.Position - origin
+			local flatToEnemy = Vector3.new(toEnemy.X, 0, toEnemy.Z)
+			local dist = flatToEnemy.Magnitude
+			local enemyRadius = math.max(er.Size.X, er.Size.Z) * 0.55 * MELEE_ENEMY_SCALE
+
+			if dist <= (range + enemyRadius) and dist > 0.1 and flatForward.Magnitude > 0 then
+				local angle = math.acos(math.clamp(flatForward.Unit:Dot(flatToEnemy.Unit), -1, 1))
+				if angle <= halfAngle then
+					table.insert(out, { hum = eh, root = er, dist = dist })
+				end
 			end
 		end
 	end
+
+	table.sort(out, function(a, b) return a.dist < b.dist end)
+	if hitLimit and #out > hitLimit then
+		for i = #out, hitLimit + 1, -1 do
+			out[i] = nil
+		end
+	end
+	return out
+end
+
+local function getMeleeTargetsLine(origin: Vector3, forward: Vector3, length: number, width: number, hitLimit: number?)
+	local enf = enemiesFolder()
+	if not enf then return {} end
+
+	local out = {}
+	local flatForward = Vector3.new(forward.X, 0, forward.Z)
+	if flatForward.Magnitude <= 0.01 then return out end
+	flatForward = flatForward.Unit
+
+	for _,m in ipairs(enf:GetChildren()) do
+		local eh = m:FindFirstChildOfClass("Humanoid")
+		local er = m:FindFirstChild("HumanoidRootPart")
+		if eh and er and eh.Health > 0 then
+			local toEnemy = er.Position - origin
+			local flatToEnemy = Vector3.new(toEnemy.X, 0, toEnemy.Z)
+			local forwardDist = flatToEnemy:Dot(flatForward)
+			if forwardDist > 0 and forwardDist <= length then
+				local lateral = (flatToEnemy - flatForward * forwardDist).Magnitude
+				local enemyRadius = math.max(er.Size.X, er.Size.Z) * 0.55 * MELEE_ENEMY_SCALE
+				if lateral <= (width / 2 + enemyRadius) then
+					table.insert(out, { hum = eh, root = er, dist = forwardDist })
+				end
+			end
+		end
+	end
+
+	table.sort(out, function(a, b) return a.dist < b.dist end)
+	if hitLimit and #out > hitLimit then
+		for i = #out, hitLimit + 1, -1 do
+			out[i] = nil
+		end
+	end
+	return out
 end
 
 -- projectile (ray + overlap)
-local function overlapHit(pos: Vector3, radius: number, ignore: {Instance})
+local function overlapHit(pos: Vector3, radius: number, ignore: {Instance}, hitModels: {[Model]: boolean}?)
 	local params = OverlapParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = ignore
@@ -296,19 +477,46 @@ local function overlapHit(pos: Vector3, radius: number, ignore: {Instance})
 	for _,p in ipairs(parts) do
 		local model = p:FindFirstAncestorOfClass("Model")
 		if model and model.Parent == enemiesFolder() then
+			if hitModels and hitModels[model] then
+				continue
+			end
 			local hum = model:FindFirstChildOfClass("Humanoid")
 			local root = model:FindFirstChild("HumanoidRootPart")
 			if hum and root and hum.Health > 0 then
-				return hum, root
+				return hum, root, model
 			end
 		end
 	end
 	return nil
 end
 
-local function spawnProjectile(plr: Player, origin: Vector3, dir: Vector3, speed: number, life: number, dmgMul: number)
+local function applyAreaDamage(plr: Player, center: Vector3, radius: number, hitLimit: number?, damage: number, stats)
+	local enf = enemiesFolder()
+	if not enf then return end
+
+	local targets = {}
+	for _,m in ipairs(enf:GetChildren()) do
+		local eh = m:FindFirstChildOfClass("Humanoid")
+		local er = m:FindFirstChild("HumanoidRootPart")
+		if eh and er and eh.Health > 0 then
+			local dist = (er.Position - center).Magnitude
+			if dist <= radius then
+				table.insert(targets, { hum = eh, root = er, dist = dist })
+			end
+		end
+	end
+
+	table.sort(targets, function(a, b) return a.dist < b.dist end)
+	local maxHits = hitLimit or #targets
+	for i = 1, math.min(maxHits, #targets) do
+		local entry = targets[i]
+		dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal)
+	end
+end
+
+local function spawnProjectile(plr: Player, origin: Vector3, dir: Vector3, speed: number, range: number, damage: number, radius: number, pierce: number, impactAoE: {radius: number, hitLimit: number, damageMul: number}?)
 	local p = Instance.new("Part")
-	p.Size = Vector3.new(0.4,0.4,0.4)
+	p.Size = Vector3.new(radius * 2, radius * 2, radius * 2)
 	p.Shape = Enum.PartType.Ball
 	p.Material = Enum.Material.Neon
 	p.Color = Color3.fromRGB(180,220,255)
@@ -317,29 +525,39 @@ local function spawnProjectile(plr: Player, origin: Vector3, dir: Vector3, speed
 	p.CanQuery = false
 	p.CFrame = CFrame.new(origin)
 	p.Parent = workspace
-	Debris:AddItem(p, life)
+	Debris:AddItem(p, range / speed)
 
-	local baseDmg, _, fch, fdps, _, critC, critM = getStats(plr)
-	local damage = math.max(1, math.floor(baseDmg * dmgMul))
-
+	local stats = getCombatStats(plr, plr.Character and plr.Character:FindFirstChildOfClass("Tool"))
 	local ignore = { plr.Character, p }
+	local hitModels = {}
+	local hits = 0
+	local maxHits = math.max(1, pierce)
+
 	local rayParams = RaycastParams.new()
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
 	rayParams.FilterDescendantsInstances = ignore
 
 	local pos = origin
 	local vel = dir.Unit * speed
-	local t0 = time()
+	local traveled = 0
 
-	while p.Parent and (time() - t0) < life do
+	while p.Parent and traveled < range do
 		if PauseState.Value then task.wait(0.05) continue end
 		local dt = RunService.Heartbeat:Wait()
 		local nextPos = pos + vel * dt
 
-		local oh, oroot = overlapHit(nextPos, 1.7, ignore)
-		if oh and oroot then
-			dealMobDamage(plr, oh, oroot, damage, fch, fdps, critC, critM)
-			break
+		local oh, oroot, omodel = overlapHit(nextPos, radius, ignore, hitModels)
+		if oh and oroot and omodel then
+			dealMobDamage(plr, oh, oroot, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal)
+			if impactAoE then
+				local aoeDamage = math.max(1, math.floor(damage * impactAoE.damageMul))
+				applyAreaDamage(plr, oroot.Position, impactAoE.radius, impactAoE.hitLimit, aoeDamage, stats)
+			end
+			hitModels[omodel] = true
+			hits += 1
+			if hits >= maxHits then
+				break
+			end
 		end
 
 		local hit = workspace:Raycast(pos, nextPos - pos, rayParams)
@@ -349,12 +567,21 @@ local function spawnProjectile(plr: Player, origin: Vector3, dir: Vector3, speed
 				local mh = model:FindFirstChildOfClass("Humanoid")
 				local mr = model:FindFirstChild("HumanoidRootPart")
 				if mh and mr and mh.Health > 0 then
-					dealMobDamage(plr, mh, mr, damage, fch, fdps, critC, critM)
+					dealMobDamage(plr, mh, mr, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal)
+					if impactAoE then
+						local aoeDamage = math.max(1, math.floor(damage * impactAoE.damageMul))
+						applyAreaDamage(plr, mr.Position, impactAoE.radius, impactAoE.hitLimit, aoeDamage, stats)
+					end
+					hitModels[model] = true
+					hits += 1
 				end
 			end
-			break
+			if hits >= maxHits then
+				break
+			end
 		end
 
+		traveled += (nextPos - pos).Magnitude
 		pos = nextPos
 		p.CFrame = CFrame.new(pos)
 	end
@@ -378,25 +605,46 @@ WeaponEvent.OnServerEvent:Connect(function(plr, payload)
 	local wType = tool:GetAttribute("WeaponType")
 	if typeof(wType) ~= "string" then return end
 
-	local baseDmg, multi, _, _, aspd = getStats(plr)
+	local weaponType = resolveWeaponType(wType)
+	local stats = getCombatStats(plr, tool)
+	local aspd = stats.attackSpeed
 
-	if payload.action == "MELEE" and wType == "Melee" then
+	if payload.action == "MELEE" and (weaponType == "Sword" or weaponType == "Scythe" or weaponType == "Halberd") then
 		local now = os.clock()
-		local cd = 0.50 / aspd
+		local cdBase = (weaponType == "Scythe") and 0.70 or (weaponType == "Halberd" and 0.60 or 0.50)
+		local cd = cdBase / aspd
 		if swingCd[plr.UserId] and (now - swingCd[plr.UserId]) < cd then return end
 		swingCd[plr.UserId] = now
 
-		-- większy range melee
-		local center = hrp.Position + hrp.CFrame.LookVector * 8.5
-		swordAoE(plr, center, 10.5)
+		local forward = hrp.CFrame.LookVector
+		if weaponType == "Sword" then
+			local targets = getMeleeTargetsArc(hrp.Position + forward * 2, forward, 6, 90, 3)
+			local damage = math.max(1, math.floor(stats.finalAtk * 0.75))
+			for _,entry in ipairs(targets) do
+				dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal)
+			end
+		elseif weaponType == "Scythe" then
+			local targets = getMeleeTargetsArc(hrp.Position, forward, 7.5, 220, nil)
+			local damage = math.max(1, math.floor(stats.finalAtk * 0.65))
+			for _,entry in ipairs(targets) do
+				dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal)
+			end
+		elseif weaponType == "Halberd" then
+			local targets = getMeleeTargetsLine(hrp.Position, forward, 9, 2.5, 3)
+			local damage = math.max(1, math.floor(stats.finalAtk * 0.75))
+			for _,entry in ipairs(targets) do
+				dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal)
+			end
+		end
 
-	elseif payload.action == "SHOOT" and (wType == "Bow" or wType == "Wand") then
+	elseif payload.action == "SHOOT" and (weaponType == "Bow" or weaponType == "Staff" or weaponType == "Pistol") then
 		local aim = payload.aim
 		if typeof(aim) ~= "Vector3" then return end
 		if (aim - hrp.Position).Magnitude > 800 then return end
 
 		local now = os.clock()
-		local cd = (wType == "Bow") and (0.65 / aspd) or (0.55 / aspd)
+		local cdBase = (weaponType == "Bow") and 0.65 or (weaponType == "Staff" and 0.60 or 0.35)
+		local cd = cdBase / aspd
 		if shotCd[plr.UserId] and (now - shotCd[plr.UserId]) < cd then return end
 		shotCd[plr.UserId] = now
 
@@ -404,19 +652,65 @@ WeaponEvent.OnServerEvent:Connect(function(plr, payload)
 		local dir = (aim - origin)
 		if dir.Magnitude < 3 then return end
 
-		-- strzał do tyłu OK (bez ograniczeń)
-		local speed = (wType == "Bow") and 160 or 185
-		local life = 3.0
-		local dmgMul = (wType == "Bow") and 0.95 or 0.85
-
-		local total = 1 + multi
+		local total = 1 + stats.multiShot
 		local spread = math.rad(4)
 
-		for i=1,total do
-			local angle = (i - (total+1)/2) * spread
-			local rot = CFrame.fromAxisAngle(Vector3.new(0,1,0), angle)
-			local shotDir = rot:VectorToWorldSpace(dir.Unit)
-			spawnProjectile(plr, origin, shotDir, speed, life, dmgMul)
+		if weaponType == "Bow" then
+			local speed = 160
+			local range = 45
+			local damage = math.max(1, math.floor(stats.finalAtk))
+			for i=1,total do
+				local angle = (i - (total+1)/2) * spread
+				local rot = CFrame.fromAxisAngle(Vector3.new(0,1,0), angle)
+				local shotDir = rot:VectorToWorldSpace(dir.Unit)
+				spawnProjectile(plr, origin, shotDir, speed, range, damage, 0.3, 1)
+			end
+		elseif weaponType == "Staff" then
+			local speed = 175
+			local range = 40
+			local damage = math.max(1, math.floor(stats.finalAtk))
+			for i=1,1 do
+				spawnProjectile(
+					plr,
+					origin,
+					dir.Unit,
+					speed,
+					range,
+					damage,
+					0.35,
+					1,
+					{ radius = 3.5, hitLimit = 4, damageMul = 0.7 }
+				)
+			end
+		elseif weaponType == "Pistol" then
+			local range = 35
+			local damage = math.max(1, math.floor(stats.finalAtk))
+			local pierce = math.max(1, math.floor(tonumber(tool:GetAttribute("Pierce")) or 1))
+			local params = RaycastParams.new()
+			params.FilterType = Enum.RaycastFilterType.Exclude
+			params.FilterDescendantsInstances = { plr.Character }
+			local remaining = range
+			local currentOrigin = origin
+			local hits = 0
+
+			while hits < pierce and remaining > 0 do
+				local result = workspace:Raycast(currentOrigin, dir.Unit * remaining, params)
+				if not result then break end
+				local model = result.Instance:FindFirstAncestorOfClass("Model")
+				if model and model.Parent == enemiesFolder() then
+					local mh = model:FindFirstChildOfClass("Humanoid")
+					local mr = model:FindFirstChild("HumanoidRootPart")
+					if mh and mr and mh.Health > 0 then
+						dealMobDamage(plr, mh, mr, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal)
+						hits += 1
+						params.FilterDescendantsInstances = { plr.Character, model }
+					end
+				end
+
+				local traveled = (result.Position - currentOrigin).Magnitude
+				remaining -= traveled + 0.1
+				currentOrigin = result.Position + dir.Unit * 0.2
+			end
 		end
 	end
 end)
@@ -456,11 +750,20 @@ Players.PlayerAdded:Connect(function(plr)
 		PauseState.Value = false
 
 		local hum = char:FindFirstChildOfClass("Humanoid")
-		local dd = PlayerData.Get(plr)
 		if hum then
-			hum.WalkSpeed = BASE_PLAYER_SPEED + (dd.upgrades.speed or 0) * 1
-			hum.JumpPower = BASE_JUMP_POWER + (dd.upgrades.jump or 0) * 2
+			updatePlayerDerivedStats(plr)
 		end
+
+		char.ChildAdded:Connect(function(child)
+			if child:IsA("Tool") then
+				updatePlayerDerivedStats(plr)
+			end
+		end)
+		char.ChildRemoved:Connect(function(child)
+			if child:IsA("Tool") then
+				updatePlayerDerivedStats(plr)
+			end
+		end)
 
 		task.wait(0.1)
 		giveLoadout(plr)

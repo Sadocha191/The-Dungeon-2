@@ -298,7 +298,10 @@ tool.Equipped:Connect(function()
 	wasautorotated = charhum.AutoRotate
 	charhum.AutoRotate = false
 	uis.MouseIconEnabled = false
-	gui.Parent = owner:FindFirstChildOfClass("PlayerGui")
+	local playerGui = owner:FindFirstChildOfClass("PlayerGui") or owner:WaitForChild("PlayerGui", 5)
+	if playerGui then
+		gui.Parent = playerGui
+	end
 	handlegui.Enabled = true
 	inputpressholder = uis.InputBegan:Connect(inputpressfunc)
 	inputreleaseholder = uis.InputEnded:Connect(inputreleasefunc)
