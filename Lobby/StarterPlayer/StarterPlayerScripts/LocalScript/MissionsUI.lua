@@ -286,18 +286,46 @@ local function openMissions()
 end
 
 local function findMissionPrompt()
-	local npcFolder = Workspace:WaitForChild("NPCs")
-	local missionContainer = npcFolder:WaitForChild("MissionNPC")
-	local missionNpc = missionContainer:WaitForChild("MissionNPC")
-	local prompt = missionNpc:FindFirstChild("MissionPrompt", true)
-	return prompt
+	local npcFolder = Workspace:FindFirstChild("NPCs")
+	if not npcFolder then
+		return nil
+	end
+
+	local missionContainer = npcFolder:FindFirstChild("MissionNPC")
+	if not missionContainer then
+		return nil
+	end
+
+	local missionNpc = missionContainer:FindFirstChild("MissionNPC")
+	if not missionNpc then
+		return nil
+	end
+
+	return missionNpc:FindFirstChild("MissionPrompt", true)
+end
+
+local function bindMissionPrompt(prompt: ProximityPrompt)
+	prompt.Triggered:Connect(function()
+		openMissions()
+	end)
 end
 
 local missionPrompt = findMissionPrompt()
 if missionPrompt and missionPrompt:IsA("ProximityPrompt") then
-	missionPrompt.Triggered:Connect(function()
-		openMissions()
-	end)
+	bindMissionPrompt(missionPrompt)
 else
-	warn("[MissionsUI] MissionPrompt not found")
+	local connection
+	connection = Workspace.DescendantAdded:Connect(function(descendant)
+		if descendant:IsA("ProximityPrompt") and descendant.Name == "MissionPrompt" then
+			connection:Disconnect()
+			bindMissionPrompt(descendant)
+		end
+	end)
+
+	task.delay(10, function()
+		if connection and connection.Connected then
+			connection:Disconnect()
+			warn("[MissionsUI] MissionPrompt not found")
+		end
+	end)
 end
