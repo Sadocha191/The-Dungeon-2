@@ -39,7 +39,16 @@ local function disableLegacyScripts(tool: Tool)
 	end
 end
 
+local function clearToolJoints(tool: Tool)
+	for _, inst in ipairs(tool:GetDescendants()) do
+		if inst:IsA("JointInstance") or inst:IsA("WeldConstraint") then
+			inst:Destroy()
+		end
+	end
+end
+
 local function normalizeToolParts(tool: Tool)
+	clearToolJoints(tool)
 	local handle = tool:FindFirstChild("Handle", true)
 	local handlePart: BasePart? = nil
 	if handle and handle:IsA("BasePart") then
