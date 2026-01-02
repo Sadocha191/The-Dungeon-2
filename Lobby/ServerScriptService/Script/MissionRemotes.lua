@@ -5,9 +5,11 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local MissionService = require(ServerScriptService:WaitForChild("MissionService"))
-local CurrencyService = require(ServerScriptService:WaitForChild("CurrencyService"))
-local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
+local serverModules = ServerScriptService:WaitForChild("ModuleScript")
+
+local MissionService = require(serverModules:WaitForChild("MissionService"))
+local CurrencyService = require(serverModules:WaitForChild("CurrencyService"))
+local PlayerData = require(serverModules:WaitForChild("PlayerData"))
 
 local remoteFunctions = ReplicatedStorage:FindFirstChild("RemoteFunctions")
 if not remoteFunctions then

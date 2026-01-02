@@ -5,9 +5,11 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local AccountReset = require(ServerScriptService:WaitForChild("AccountReset"))
-local PlayerStateStore = require(ServerScriptService:WaitForChild("PlayerStateStore"))
-local ProfilesManager = require(ServerScriptService:WaitForChild("ProfilesManager"))
+local serverModules = ServerScriptService:WaitForChild("ModuleScript")
+
+local AccountReset = require(serverModules:WaitForChild("AccountReset"))
+local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
+local ProfilesManager = require(serverModules:WaitForChild("ProfilesManager"))
 
 local npc = script.Parent
 local primary = npc.PrimaryPart or npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChildWhichIsA("BasePart")

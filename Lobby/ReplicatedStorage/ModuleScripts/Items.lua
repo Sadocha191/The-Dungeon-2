@@ -9,8 +9,10 @@ UWAGA: To jest minimalny fundament. Zapis do DataStore dodamy jako kolejny krok.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Races = require(ReplicatedStorage:WaitForChild("Races"))
-local Classes = require(ReplicatedStorage:WaitForChild("Classes"))
+local moduleFolder = ReplicatedStorage:WaitForChild("ModuleScripts")
+
+local Races = require(moduleFolder:WaitForChild("Races"))
+local Classes = require(moduleFolder:WaitForChild("Classes"))
 
 local ProfilesManager = {}
 
