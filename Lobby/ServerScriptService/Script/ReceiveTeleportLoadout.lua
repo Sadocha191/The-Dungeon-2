@@ -44,12 +44,12 @@ local function giveTool(player: Player, toolName: string): boolean
 	if not backpack then return false end
 
 	local clone = template:Clone()
-	WeaponCatalog.PrepareTool(clone)
+	WeaponCatalog.PrepareTool(clone, toolName)
 	clone.Parent = backpack
 	local starterGear = player:FindFirstChild("StarterGear")
 	if starterGear then
 		local starterClone = template:Clone()
-		WeaponCatalog.PrepareTool(starterClone)
+		WeaponCatalog.PrepareTool(starterClone, toolName)
 		starterClone.Parent = starterGear
 	end
 	return true
