@@ -9,20 +9,29 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
 
-local function getModuleFolder(): Instance?
-	return ServerScriptService:FindFirstChild("ModuleScript")
+local function findWeaponCatalog(): ModuleScript?
+	local direct = ServerScriptService:FindFirstChild("WeaponCatalog", true)
+	if direct and direct:IsA("ModuleScript") then
+		return direct
+	end
+	local folder = ServerScriptService:FindFirstChild("ModuleScript")
 		or ServerScriptService:FindFirstChild("ModuleScripts")
-		or ServerScriptService:WaitForChild("ModuleScript", 5)
-		or ServerScriptService:WaitForChild("ModuleScripts", 5)
+	if folder then
+		local nested = folder:FindFirstChild("WeaponCatalog")
+		if nested and nested:IsA("ModuleScript") then
+			return nested
+		end
+	end
+	return nil
 end
 
-local moduleFolder = getModuleFolder()
-if not moduleFolder then
-	warn("[ReceiveTeleportLoadout] Missing ModuleScript(s) folder; loadout disabled.")
+local weaponCatalogModule = findWeaponCatalog()
+if not weaponCatalogModule then
+	warn("[ReceiveTeleportLoadout] Missing WeaponCatalog module; loadout disabled.")
 	return
 end
 
-local WeaponCatalog = require(moduleFolder:WaitForChild("WeaponCatalog"))
+local WeaponCatalog = require(weaponCatalogModule)
 
 local function giveTool(player: Player, toolName: string): boolean
 	local template = WeaponCatalog.FindTemplate(toolName)

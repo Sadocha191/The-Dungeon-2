@@ -8,20 +8,29 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerStateStore = require(ServerScriptService:WaitForChild("PlayerStateStore"))
 
-local function getModuleFolder(): Instance?
-	return ServerScriptService:FindFirstChild("ModuleScript")
+local function findWeaponCatalog(): ModuleScript?
+	local direct = ServerScriptService:FindFirstChild("WeaponCatalog", true)
+	if direct and direct:IsA("ModuleScript") then
+		return direct
+	end
+	local folder = ServerScriptService:FindFirstChild("ModuleScript")
 		or ServerScriptService:FindFirstChild("ModuleScripts")
-		or ServerScriptService:WaitForChild("ModuleScript", 5)
-		or ServerScriptService:WaitForChild("ModuleScripts", 5)
+	if folder then
+		local nested = folder:FindFirstChild("WeaponCatalog")
+		if nested and nested:IsA("ModuleScript") then
+			return nested
+		end
+	end
+	return nil
 end
 
-local moduleFolder = getModuleFolder()
-if not moduleFolder then
-	warn("[InventoryService] Missing ModuleScript(s) folder; inventory disabled.")
+local weaponCatalogModule = findWeaponCatalog()
+if not weaponCatalogModule then
+	warn("[InventoryService] Missing WeaponCatalog module; inventory disabled.")
 	return
 end
 
-local WeaponCatalog = require(moduleFolder:WaitForChild("WeaponCatalog"))
+local WeaponCatalog = require(weaponCatalogModule)
 
 local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
 if not remoteEvents then
