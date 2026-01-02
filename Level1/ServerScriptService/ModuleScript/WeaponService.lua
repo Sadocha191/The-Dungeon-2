@@ -206,11 +206,8 @@ function WeaponService.EquipLoadout(player: Player)
 	local backpack = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 5)
 	if not backpack then return end
 
-	local starterGear = player:FindFirstChild("StarterGear")
-
 	clearWeaponTools(backpack)
 	clearWeaponTools(player.Character)
-	clearWeaponTools(starterGear)
 
 	local equippedTool: Tool? = nil
 	for _, payload in ipairs(buildLoadoutList(player)) do
@@ -220,13 +217,6 @@ function WeaponService.EquipLoadout(player: Player)
 			tool.Parent = backpack
 			if not equippedTool then
 				equippedTool = tool
-			end
-			if starterGear then
-				local starterClone = cloneTemplate(payload.id)
-				if starterClone then
-					applyWeaponStats(starterClone, payload.id, payload.entry)
-					starterClone.Parent = starterGear
-				end
 			end
 		end
 	end

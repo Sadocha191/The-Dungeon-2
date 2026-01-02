@@ -81,11 +81,6 @@ local function equipWeapon(player: Player, weaponName: string): boolean
 	clearWeaponTools(backpack)
 	clearWeaponTools(player.Character)
 
-	local starterGear = player:FindFirstChild("StarterGear") or player:WaitForChild("StarterGear", 10)
-	if starterGear then
-		clearWeaponTools(starterGear)
-	end
-
 	local function clonePrepared(parent: Instance)
 		local clone = template:Clone()
 		WeaponCatalog.PrepareTool(clone, weaponName)
@@ -93,9 +88,6 @@ local function equipWeapon(player: Player, weaponName: string): boolean
 	end
 
 	clonePrepared(backpack)
-	if starterGear then
-		clonePrepared(starterGear)
-	end
 
 	PlayerStateStore.SetEquippedWeaponName(player, weaponName)
 	PlayerStateStore.EnsureOwnedWeapon(player, weaponName)
@@ -195,8 +187,6 @@ InventoryAction.OnServerEvent:Connect(function(player: Player, payload: any)
 			PlayerStateStore.SetEquippedWeaponName(player, nil)
 			clearWeaponTools(player:FindFirstChildOfClass("Backpack"))
 			clearWeaponTools(player.Character)
-			local starterGear = player:FindFirstChild("StarterGear")
-			clearWeaponTools(starterGear)
 		end
 		sendInventory(player)
 		return
