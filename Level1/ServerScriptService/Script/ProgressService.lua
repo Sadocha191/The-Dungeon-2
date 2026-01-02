@@ -105,12 +105,22 @@ local function giveLoadout(plr: Player)
 	local backpack = plr:WaitForChild("Backpack")
 	local starterWeapon = plr:GetAttribute("StarterWeaponName")
 
-	local function give(toolName: string)
+	local function give(toolName: string): boolean
 		for _,x in ipairs(backpack:GetChildren()) do
 			if x:IsA("Tool") and x.Name == toolName then return end
 		end
 		local src = WeaponTemplates:FindFirstChild(toolName)
-		if src and src:IsA("Tool") then src:Clone().Parent = backpack end
+		if src and src:IsA("Tool") then
+			src:Clone().Parent = backpack
+			return true
+		end
+		return false
+	end
+
+	if typeof(starterWeapon) == "string" and starterWeapon ~= "" then
+		if give(starterWeapon) then
+			return
+		end
 	end
 
 	if typeof(starterWeapon) == "string" and starterWeapon ~= "" then

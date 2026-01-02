@@ -82,7 +82,9 @@ Players.PlayerAdded:Connect(function(player: Player)
 
 	-- ✅ bron
 	player:SetAttribute("StarterWeaponName", weaponName)
-	giveTool(player, weaponName)
+	if not giveTool(player, weaponName) then
+		giveTool(player, "Sword")
+	end
 
 	-- ✅ podepnij do Twojego globalnego progresu w dungeon
 	local data = PlayerData.Get(player)
