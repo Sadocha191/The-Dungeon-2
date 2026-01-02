@@ -233,8 +233,17 @@ local selectedBannerId
 
 local rarityColors = WeaponConfigs.RarityColors or {}
 
-local function colorToHex(color: Color3): string
-	return string.format("#%02X%02X%02X", math.floor(color.R * 255), math.floor(color.G * 255), math.floor(color.B * 255))
+local function colorToHex(color: any): string
+	if typeof(color) == "Color3" then
+		return string.format("#%02X%02X%02X", math.floor(color.R * 255), math.floor(color.G * 255), math.floor(color.B * 255))
+	end
+	if typeof(color) == "string" then
+		if color:sub(1, 1) == "#" then
+			return color
+		end
+		return "#" .. color
+	end
+	return "#FFFFFF"
 end
 
 local function colorizeWeaponName(weaponId: string, rarity: string?): string

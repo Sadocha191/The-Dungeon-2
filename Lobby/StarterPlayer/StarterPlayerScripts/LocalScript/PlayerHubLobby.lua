@@ -354,7 +354,7 @@ itemsList.Parent = itemsPanel
 
 local itemsLayout = Instance.new("UIGridLayout", itemsList)
 itemsLayout.CellPadding = UDim2.fromOffset(12, 12)
-itemsLayout.CellSize = UDim2.fromOffset(220, 120)
+itemsLayout.CellSize = UDim2.fromOffset(240, 160)
 itemsLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
 local emptyItemsLabel = Instance.new("TextLabel")
@@ -454,7 +454,7 @@ end
 
 local function makeItemCard(item)
 	local card = Instance.new("Frame")
-	card.Size = UDim2.fromOffset(220, 120)
+	card.Size = UDim2.fromOffset(240, 160)
 	card.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
 	card.BorderSizePixel = 0
 	card.Parent = itemsList
@@ -488,28 +488,33 @@ local function makeItemCard(item)
 	local name = Instance.new("TextLabel")
 	name.BackgroundTransparency = 1
 	name.Position = UDim2.fromOffset(12, 36)
-	name.Size = UDim2.new(1, -24, 0, 18)
+	name.Size = UDim2.new(1, -24, 0, 34)
 	name.Font = Enum.Font.GothamBold
 	name.TextSize = 14
 	name.TextXAlignment = Enum.TextXAlignment.Left
+	name.TextYAlignment = Enum.TextYAlignment.Top
 	name.TextColor3 = Color3.fromRGB(245, 245, 245)
+	name.TextWrapped = true
 	name.Text = item.name or "Nieznana broń"
 	name.Parent = card
 
 	local meta = Instance.new("TextLabel")
 	meta.BackgroundTransparency = 1
-	meta.Position = UDim2.fromOffset(12, 56)
-	meta.Size = UDim2.new(1, -24, 0, 16)
+	meta.Position = UDim2.fromOffset(12, 72)
+	meta.Size = UDim2.new(1, -24, 0, 44)
 	meta.Font = Enum.Font.Gotham
 	meta.TextSize = 12
 	meta.TextXAlignment = Enum.TextXAlignment.Left
+	meta.TextYAlignment = Enum.TextYAlignment.Top
 	meta.TextColor3 = Color3.fromRGB(180, 180, 180)
+	meta.TextWrapped = true
 	meta.Text = item.meta or "Pozyskaj z gacha"
 	meta.Parent = card
 
 	local valueLabel = Instance.new("TextLabel")
 	valueLabel.BackgroundTransparency = 1
-	valueLabel.Position = UDim2.fromOffset(12, 74)
+	valueLabel.AnchorPoint = Vector2.new(0, 1)
+	valueLabel.Position = UDim2.new(0, 12, 1, -10)
 	valueLabel.Size = UDim2.new(1, -24, 0, 16)
 	valueLabel.Font = Enum.Font.Gotham
 	valueLabel.TextSize = 12
