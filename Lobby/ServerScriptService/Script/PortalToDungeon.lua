@@ -7,9 +7,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local ProfilesManager = require(ServerScriptService:WaitForChild("ProfilesManager"))
-local PlayerStateStore = require(ServerScriptService:WaitForChild("PlayerStateStore"))
-local Levels = require(ReplicatedStorage:WaitForChild("Levels"))
+local serverModules = ServerScriptService:WaitForChild("ModuleScript")
+local replicatedModules = ReplicatedStorage:WaitForChild("ModuleScripts")
+
+local ProfilesManager = require(serverModules:WaitForChild("ProfilesManager"))
+local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
+local Levels = require(replicatedModules:WaitForChild("Levels"))
 
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 

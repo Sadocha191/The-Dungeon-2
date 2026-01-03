@@ -3,13 +3,15 @@
 -- CO: serwerowy gacha + pity + featured guarantee
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ServerScriptService = game:GetService("ServerScriptService")
 
-local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
-local PlayerStateStore = require(ServerScriptService:WaitForChild("PlayerStateStore"))
-local CurrencyService = require(ServerScriptService:WaitForChild("CurrencyService"))
+local moduleFolder = script.Parent
+local replicatedModules = ReplicatedStorage:WaitForChild("ModuleScripts")
 
-local bannerConfigsModule = ReplicatedStorage:WaitForChild("BannerConfigs")
+local PlayerData = require(moduleFolder:WaitForChild("PlayerData"))
+local PlayerStateStore = require(moduleFolder:WaitForChild("PlayerStateStore"))
+local CurrencyService = require(moduleFolder:WaitForChild("CurrencyService"))
+
+local bannerConfigsModule = replicatedModules:WaitForChild("BannerConfigs")
 local BannerConfigs = require(bannerConfigsModule)
 
 local GachaService = {}

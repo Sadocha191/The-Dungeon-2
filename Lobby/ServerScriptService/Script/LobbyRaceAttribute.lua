@@ -5,7 +5,9 @@
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local ProfilesManager = require(ServerScriptService:WaitForChild("ProfilesManager"))
+local serverModules = ServerScriptService:WaitForChild("ModuleScript")
+
+local ProfilesManager = require(serverModules:WaitForChild("ProfilesManager"))
 
 local function trySet(plr: Player)
 	local profile = ProfilesManager.GetActiveProfile(plr)
