@@ -4,7 +4,8 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
-local WeaponCatalog = require(ServerScriptService:WaitForChild("WeaponCatalog"))
+local serverModules = ServerScriptService:WaitForChild("ModuleScript")
+local WeaponCatalog = require(serverModules:WaitForChild("WeaponCatalog"))
 local WeaponConfigs = require(ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("WeaponConfigs"))
 
 local updated = 0

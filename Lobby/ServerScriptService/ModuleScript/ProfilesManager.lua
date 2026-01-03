@@ -4,8 +4,10 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Races = require(ReplicatedStorage:WaitForChild("Races"))
-local Classes = require(ReplicatedStorage:WaitForChild("Classes"))
+local replicatedModules = ReplicatedStorage:WaitForChild("ModuleScripts")
+
+local Races = require(replicatedModules:WaitForChild("Races"))
+local Classes = require(replicatedModules:WaitForChild("Classes"))
 
 local PlayerStateStore = require(script.Parent:WaitForChild("PlayerStateStore"))
 

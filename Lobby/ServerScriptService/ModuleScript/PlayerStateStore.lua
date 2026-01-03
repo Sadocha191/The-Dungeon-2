@@ -9,6 +9,10 @@ local DS = DataStoreService:GetDataStore("PlayerState_v1")
 
 local Store = {}
 local cache: {[number]: any} = {}
+local lastSave: {[number]: number} = {}
+local pendingSave: {[number]: boolean} = {}
+
+local SAVE_COOLDOWN = 2.0
 
 local function key(userId: number): string
 	return "u:" .. tostring(userId)
@@ -56,7 +60,7 @@ function Store.Get(player: Player)
 	return cache[player.UserId]
 end
 
-function Store.Save(player: Player)
+local function doSave(player: Player)
 	local uid = player.UserId
 	local data = cache[uid]
 	if not data then return end
@@ -67,6 +71,37 @@ function Store.Save(player: Player)
 	if not ok then
 		warn("[PlayerStateStore] SetAsync failed:", err)
 	end
+	lastSave[uid] = os.clock()
+	pendingSave[uid] = nil
+end
+
+function Store.Save(player: Player, force: boolean?)
+	local uid = player.UserId
+	if force then
+		doSave(player)
+		return
+	end
+
+	local now = os.clock()
+	local last = lastSave[uid] or 0
+	local elapsed = now - last
+	if elapsed >= SAVE_COOLDOWN then
+		doSave(player)
+		return
+	end
+
+	if pendingSave[uid] then
+		return
+	end
+
+	pendingSave[uid] = true
+	task.delay(SAVE_COOLDOWN - elapsed, function()
+		if player.Parent == nil then
+			pendingSave[uid] = nil
+			return
+		end
+		doSave(player)
+	end)
 end
 
 function Store.SetCreated(player: Player, profileLite: any)
@@ -141,7 +176,7 @@ function Store.SetFavoriteWeapon(player: Player, weaponName: string, isFavorite:
 end
 
 Players.PlayerRemoving:Connect(function(player)
-	Store.Save(player)
+	Store.Save(player, true)
 	cache[player.UserId] = nil
 end)
 
