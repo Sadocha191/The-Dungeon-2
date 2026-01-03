@@ -257,24 +257,14 @@ raceLabel.TextXAlignment = Enum.TextXAlignment.Left
 raceLabel.Text = "Race: -"
 raceLabel.Parent = playerPanel
 
-local buffsTitle = Instance.new("TextLabel")
-buffsTitle.BackgroundTransparency = 1
-buffsTitle.Size = UDim2.new(1, 0, 0, 16)
-buffsTitle.Font = Enum.Font.GothamBold
-buffsTitle.TextSize = 13
-buffsTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
-buffsTitle.TextXAlignment = Enum.TextXAlignment.Left
-buffsTitle.Text = "Race Buffs"
-buffsTitle.Parent = playerPanel
+local statsList = Instance.new("Frame")
+statsList.BackgroundTransparency = 1
+statsList.Size = UDim2.new(1, 0, 0, 126)
+statsList.Parent = playerPanel
+local statsLayout = Instance.new("UIListLayout", statsList)
+statsLayout.Padding = UDim.new(0, 4)
 
-local buffsList = Instance.new("Frame")
-buffsList.BackgroundTransparency = 1
-buffsList.Size = UDim2.new(1, 0, 0, 112)
-buffsList.Parent = playerPanel
-local buffsLayout = Instance.new("UIListLayout", buffsList)
-buffsLayout.Padding = UDim.new(0, 4)
-
-local function makeBuffRow(labelText)
+local function makeStatRow(labelText)
 	local row = Instance.new("TextLabel")
 	row.BackgroundTransparency = 1
 	row.Size = UDim2.new(1, 0, 0, 14)
@@ -283,24 +273,25 @@ local function makeBuffRow(labelText)
 	row.TextXAlignment = Enum.TextXAlignment.Left
 	row.TextColor3 = Color3.fromRGB(200, 200, 200)
 	row.Text = labelText
-	row.Parent = buffsList
+	row.Parent = statsList
 	return row
 end
 
-local buffRows = {
-	HP = makeBuffRow("HP: -"),
-	ATK = makeBuffRow("ATK: -"),
-	DEF = makeBuffRow("DEF: -"),
-	LIFESTEAL = makeBuffRow("Life Steal: -"),
-	CRIT_RATE = makeBuffRow("Crit Rate: -"),
-	CRIT_DMG = makeBuffRow("Crit DMG: -"),
-	SPEED = makeBuffRow("Speed: -"),
+local statRows = {
+	HP = makeStatRow("HP: -"),
+	ATK = makeStatRow("ATK: -"),
+	DEF = makeStatRow("DEF: -"),
+	LIFESTEAL = makeStatRow("Lifesteal: -"),
+	CRIT_RATE = makeStatRow("Crit Rate: -"),
+	CRIT_DMG = makeStatRow("Crit DMG: -"),
+	SPEED = makeStatRow("Speed: -"),
 }
 
 local currenciesFrame = Instance.new("Frame")
 currenciesFrame.BackgroundTransparency = 1
 currenciesFrame.Size = UDim2.new(1, 0, 0, 34)
 currenciesFrame.Parent = playerPanel
+currenciesFrame.LayoutOrder = 999
 
 local coinsLabel = Instance.new("TextLabel")
 coinsLabel.BackgroundTransparency = 1
@@ -817,30 +808,42 @@ local function formatStatsShort(stats)
 	return "Bonus Stats: " .. table.concat(parts, " | ")
 end
 
-local function refreshRaceBuffs(raceName)
-	local def = Races.Defs and Races.Defs[raceName or ""]
-	local stats = def and def.stats or {}
-	local function getStat(...)
-		for _, key in ipairs({ ... }) do
-			local value = stats[key]
-			if value ~= nil then
-				return value
-			end
-		end
-		return 0
+local function refreshFinalStats(raceName)
+	local raceDef = Races.Defs and Races.Defs[raceName or ""]
+	local raceStats = raceDef and raceDef.stats or {}
+	local weaponDef = equippedWeaponId and (WeaponConfigs.Get and WeaponConfigs.Get(equippedWeaponId)) or nil
+	local weaponStats = weaponDef and weaponDef.stats or {}
+
+	local function getRaceStat(key)
+		return tonumber(raceStats[key]) or 0
 	end
 
-	buffRows.HP.Text = ("HP: %+d"):format(getStat("HP"))
-	buffRows.ATK.Text = ("ATK: %+d"):format(getStat("PhysicalPower", "MagicPower", "STR"))
-	buffRows.DEF.Text = ("DEF: %+d"):format(getStat("Armor"))
-	buffRows.LIFESTEAL.Text = ("Life Steal: %+d%%"):format(getStat("LifeSteal"))
-	buffRows.CRIT_RATE.Text = ("Crit Rate: %+d%%"):format(getStat("CritChance"))
-	buffRows.CRIT_DMG.Text = ("Crit DMG: %+d%%"):format(getStat("CritDmg"))
-	buffRows.SPEED.Text = ("Speed: %+d%%"):format(getStat("MoveSpeed", "AttackSpeed"))
+	local function getWeaponStat(key)
+		return tonumber(weaponStats[key]) or 0
+	end
+
+	local hp = getRaceStat("HP") + getWeaponStat("HP")
+	local atk = (weaponDef and weaponDef.baseDamage or 0)
+		+ getRaceStat("PhysicalPower")
+		+ getRaceStat("MagicPower")
+		+ getRaceStat("STR")
+	local def = getRaceStat("Armor") + getWeaponStat("DEF")
+	local lifesteal = getRaceStat("LifeSteal") + getWeaponStat("LIFESTEAL")
+	local critRate = getRaceStat("CritChance") + getWeaponStat("CRIT_RATE")
+	local critDmg = getRaceStat("CritDmg") + getWeaponStat("CRIT_DMG")
+	local speed = getRaceStat("MoveSpeed") + getWeaponStat("SPD")
+
+	statRows.HP.Text = ("HP: %d"):format(hp)
+	statRows.ATK.Text = ("ATK: %d"):format(atk)
+	statRows.DEF.Text = ("DEF: %d"):format(def)
+	statRows.LIFESTEAL.Text = ("Lifesteal: %d%%"):format(lifesteal)
+	statRows.CRIT_RATE.Text = ("Crit Rate: %d%%"):format(critRate)
+	statRows.CRIT_DMG.Text = ("Crit DMG: %d%%"):format(critDmg)
+	statRows.SPEED.Text = ("Speed: %d%%"):format(speed)
 end
 
 local function updatePlayerInfo()
-	playerName.Text = ("%s • Lv. %d"):format(plr.Name, level)
+	playerName.Text = ("%s – Lv. %d"):format(plr.Name, level)
 	expLabel.Text = ("EXP: %d/%d"):format(xp, math.max(1, nextXp))
 	local pct = math.clamp(xp / math.max(1, nextXp), 0, 1)
 	TweenService:Create(expFill, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
@@ -848,7 +851,7 @@ local function updatePlayerInfo()
 	}):Play()
 	local raceName = tostring(plr:GetAttribute("Race") or "-")
 	raceLabel.Text = ("Race: %s"):format(raceName)
-	refreshRaceBuffs(raceName)
+	refreshFinalStats(raceName)
 	coinsLabel.Text = ("Coins: %d"):format(coins)
 	wpLabel.Text = ("WP: %d"):format(weaponPoints)
 end
@@ -895,6 +898,7 @@ local function refreshEquippedPanel()
 		def = WeaponConfigs.Get(equippedWeaponId)
 	end
 	applyEquipped(def)
+	updatePlayerInfo()
 end
 
 local function applyDetails(def)
