@@ -17,7 +17,8 @@ local OpenCharacterCreation = remoteEvents:WaitForChild("OpenCharacterCreation")
 local CreateProfileRequest = remoteEvents:WaitForChild("CreateProfileRequest")
 local CreateProfileResponse = remoteEvents:FindFirstChild("CreateProfileResponse")
 
-local Races = require(ReplicatedStorage:WaitForChild("Races"))
+local moduleFolder = ReplicatedStorage:WaitForChild("ModuleScripts")
+local Races = require(moduleFolder:WaitForChild("Races"))
 
 -- ===== Colors =====
 local rarityColor = {

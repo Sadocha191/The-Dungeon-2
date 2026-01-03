@@ -7,7 +7,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Players = game:GetService("Players")
 
-local ProfilesManager = require(ServerScriptService:WaitForChild("ProfilesManager"))
+local serverModules = ServerScriptService:WaitForChild("ModuleScript")
+
+local ProfilesManager = require(serverModules:WaitForChild("ProfilesManager"))
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 
 -- >>> DOPASUJ do długości Twojej animacji losowania rasy (sekundy)

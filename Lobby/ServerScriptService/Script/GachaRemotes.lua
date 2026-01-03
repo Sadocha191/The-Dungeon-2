@@ -5,8 +5,10 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local GachaService = require(ServerScriptService:WaitForChild("GachaService"))
-local CurrencyService = require(ServerScriptService:WaitForChild("CurrencyService"))
+local serverModules = ServerScriptService:WaitForChild("ModuleScript")
+
+local GachaService = require(serverModules:WaitForChild("GachaService"))
+local CurrencyService = require(serverModules:WaitForChild("CurrencyService"))
 
 local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
 if not remoteEvents then

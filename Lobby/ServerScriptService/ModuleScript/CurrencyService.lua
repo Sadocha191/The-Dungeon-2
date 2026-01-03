@@ -2,9 +2,9 @@
 -- GDZIE: ServerScriptService/ModuleScript/CurrencyService.lua
 -- CO: obsługa walut (Coins / WeaponPoints / Tickets)
 
-local ServerScriptService = game:GetService("ServerScriptService")
+local moduleFolder = script.Parent
 
-local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
+local PlayerData = require(moduleFolder:WaitForChild("PlayerData"))
 
 local CurrencyService = {}
 

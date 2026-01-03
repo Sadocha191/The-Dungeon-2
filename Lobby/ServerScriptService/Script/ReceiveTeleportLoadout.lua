@@ -7,8 +7,10 @@
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
-local PlayerStateStore = require(ServerScriptService:WaitForChild("PlayerStateStore"))
+local serverModules = ServerScriptService:WaitForChild("ModuleScript")
+
+local PlayerData = require(serverModules:WaitForChild("PlayerData"))
+local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
 
 local function findWeaponCatalog(): ModuleScript?
 	local direct = ServerScriptService:FindFirstChild("WeaponCatalog", true)
@@ -76,7 +78,6 @@ Players.PlayerAdded:Connect(function(player: Player)
 	local tdata = joinData and joinData.TeleportData
 
 	if typeof(tdata) ~= "table" then
-		warn("[Dungeon] No TeleportData for", player.Name)
 		return
 	end
 
