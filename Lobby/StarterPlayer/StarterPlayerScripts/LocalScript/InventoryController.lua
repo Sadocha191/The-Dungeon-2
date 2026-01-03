@@ -13,15 +13,13 @@ local pg = plr:WaitForChild("PlayerGui")
 
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local PlayerProgressEvent = remoteEvents:WaitForChild("PlayerProgressEvent")
-local InventoryAction = remoteEvents:WaitForChild("InventoryAction", 5)
-local InventorySync = remoteEvents:WaitForChild("InventorySync", 5)
+local InventoryAction = remoteEvents:FindFirstChild("InventoryAction")
 
 local remoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions")
 local GetInventorySnapshot = remoteFunctions:WaitForChild("RF_GetInventorySnapshot")
 
-local moduleFolder = ReplicatedStorage:WaitForChild("ModuleScripts")
-local WeaponConfigs = require(moduleFolder:WaitForChild("WeaponConfigs"))
-local Races = require(moduleFolder:WaitForChild("Races"))
+local WeaponConfigs = require(ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("WeaponConfigs"))
+local Races = require(ReplicatedStorage:WaitForChild("Races"))
 
 local function hexToColor3(hex)
 	hex = tostring(hex or "")
@@ -148,7 +146,7 @@ playerPad.PaddingBottom = UDim.new(0, 16)
 playerPad.PaddingLeft = UDim.new(0, 16)
 playerPad.PaddingRight = UDim.new(0, 16)
 local playerLayout = Instance.new("UIListLayout", playerPanel)
-playerLayout.Padding = UDim.new(0, 8)
+playerLayout.Padding = UDim.new(0, 6)
 
 local playerName = Instance.new("TextLabel")
 playerName.BackgroundTransparency = 1
@@ -162,7 +160,7 @@ playerName.Parent = playerPanel
 
 local expWrap = Instance.new("Frame")
 expWrap.BackgroundTransparency = 1
-expWrap.Size = UDim2.new(1, 0, 0, 28)
+expWrap.Size = UDim2.new(1, 0, 0, 26)
 expWrap.Parent = playerPanel
 
 local expLabel = Instance.new("TextLabel")
@@ -192,35 +190,35 @@ Instance.new("UICorner", expFill).CornerRadius = UDim.new(0, 999)
 
 local raceLabel = Instance.new("TextLabel")
 raceLabel.BackgroundTransparency = 1
-raceLabel.Size = UDim2.new(1, 0, 0, 18)
-raceLabel.Font = Enum.Font.GothamSemibold
-raceLabel.TextSize = 12
+raceLabel.Size = UDim2.new(1, 0, 0, 16)
+raceLabel.Font = Enum.Font.Gotham
+raceLabel.TextSize = 13
 raceLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
 raceLabel.TextXAlignment = Enum.TextXAlignment.Left
 raceLabel.Text = "Race: -"
 raceLabel.Parent = playerPanel
 
-local statsTitle = Instance.new("TextLabel")
-statsTitle.BackgroundTransparency = 1
-statsTitle.Size = UDim2.new(1, 0, 0, 16)
-statsTitle.Font = Enum.Font.GothamBold
-statsTitle.TextSize = 12
-statsTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
-statsTitle.TextXAlignment = Enum.TextXAlignment.Left
-statsTitle.Text = "Stats"
-statsTitle.Parent = playerPanel
+local buffsTitle = Instance.new("TextLabel")
+buffsTitle.BackgroundTransparency = 1
+buffsTitle.Size = UDim2.new(1, 0, 0, 16)
+buffsTitle.Font = Enum.Font.GothamBold
+buffsTitle.TextSize = 13
+buffsTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
+buffsTitle.TextXAlignment = Enum.TextXAlignment.Left
+buffsTitle.Text = "Race Buffs"
+buffsTitle.Parent = playerPanel
 
 local buffsList = Instance.new("Frame")
 buffsList.BackgroundTransparency = 1
-buffsList.Size = UDim2.new(1, 0, 0, 118)
+buffsList.Size = UDim2.new(1, 0, 0, 112)
 buffsList.Parent = playerPanel
 local buffsLayout = Instance.new("UIListLayout", buffsList)
-buffsLayout.Padding = UDim.new(0, 2)
+buffsLayout.Padding = UDim.new(0, 4)
 
 local function makeBuffRow(labelText)
 	local row = Instance.new("TextLabel")
 	row.BackgroundTransparency = 1
-	row.Size = UDim2.new(1, 0, 0, 16)
+	row.Size = UDim2.new(1, 0, 0, 14)
 	row.Font = Enum.Font.Gotham
 	row.TextSize = 12
 	row.TextXAlignment = Enum.TextXAlignment.Left
@@ -234,7 +232,7 @@ local buffRows = {
 	HP = makeBuffRow("HP: -"),
 	ATK = makeBuffRow("ATK: -"),
 	DEF = makeBuffRow("DEF: -"),
-	LIFESTEAL = makeBuffRow("Lifesteal: -"),
+	LIFESTEAL = makeBuffRow("Life Steal: -"),
 	CRIT_RATE = makeBuffRow("Crit Rate: -"),
 	CRIT_DMG = makeBuffRow("Crit DMG: -"),
 	SPEED = makeBuffRow("Speed: -"),
@@ -266,13 +264,177 @@ wpLabel.TextXAlignment = Enum.TextXAlignment.Left
 wpLabel.Text = "WP: 0"
 wpLabel.Parent = currenciesFrame
 
+local equippedPanel = Instance.new("Frame")
+equippedPanel.Position = UDim2.fromOffset(0, 264)
+equippedPanel.Size = UDim2.new(1, 0, 1, -264)
+equippedPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+equippedPanel.BackgroundTransparency = 0.08
+equippedPanel.BorderSizePixel = 0
+equippedPanel.Parent = leftColumn
+Instance.new("UICorner", equippedPanel).CornerRadius = UDim.new(0, 12)
+local equippedPad = Instance.new("UIPadding", equippedPanel)
+equippedPad.PaddingTop = UDim.new(0, 16)
+equippedPad.PaddingBottom = UDim.new(0, 16)
+equippedPad.PaddingLeft = UDim.new(0, 16)
+equippedPad.PaddingRight = UDim.new(0, 16)
+
+local equippedTitle = Instance.new("TextLabel")
+equippedTitle.BackgroundTransparency = 1
+equippedTitle.Size = UDim2.new(1, 0, 0, 18)
+equippedTitle.Font = Enum.Font.GothamBold
+equippedTitle.TextSize = 14
+equippedTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
+equippedTitle.TextXAlignment = Enum.TextXAlignment.Left
+equippedTitle.Text = "Currently Equipped"
+equippedTitle.Parent = equippedPanel
+
+local equippedBody = Instance.new("Frame")
+equippedBody.BackgroundTransparency = 1
+equippedBody.Position = UDim2.fromOffset(0, 26)
+equippedBody.Size = UDim2.new(1, 0, 1, -26)
+equippedBody.Parent = equippedPanel
+
+local equippedLayout = Instance.new("UIListLayout", equippedBody)
+equippedLayout.Padding = UDim.new(0, 8)
+
+local equippedIconFrame = Instance.new("Frame")
+equippedIconFrame.Size = UDim2.fromOffset(72, 72)
+equippedIconFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+equippedIconFrame.BorderSizePixel = 0
+equippedIconFrame.Parent = equippedBody
+Instance.new("UICorner", equippedIconFrame).CornerRadius = UDim.new(0, 12)
+local equippedIconStroke = Instance.new("UIStroke", equippedIconFrame)
+equippedIconStroke.Color = Color3.fromRGB(50, 50, 64)
+equippedIconStroke.Thickness = 1
+
+local equippedIconLabel = Instance.new("TextLabel")
+equippedIconLabel.BackgroundTransparency = 1
+equippedIconLabel.Size = UDim2.new(1, 0, 1, 0)
+equippedIconLabel.Font = Enum.Font.GothamBold
+equippedIconLabel.TextSize = 20
+equippedIconLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+equippedIconLabel.Text = "?"
+equippedIconLabel.Parent = equippedIconFrame
+
+local equippedName = Instance.new("TextLabel")
+equippedName.BackgroundTransparency = 1
+equippedName.Size = UDim2.new(1, 0, 0, 20)
+equippedName.Font = Enum.Font.GothamBold
+equippedName.TextSize = 16
+equippedName.TextColor3 = Color3.fromRGB(245, 245, 245)
+equippedName.TextXAlignment = Enum.TextXAlignment.Left
+equippedName.TextWrapped = true
+equippedName.Text = "No weapon equipped"
+equippedName.Parent = equippedBody
+
+local equippedMeta = Instance.new("TextLabel")
+equippedMeta.BackgroundTransparency = 1
+equippedMeta.Size = UDim2.new(1, 0, 0, 18)
+equippedMeta.Font = Enum.Font.Gotham
+equippedMeta.TextSize = 12
+equippedMeta.TextColor3 = Color3.fromRGB(200, 200, 200)
+equippedMeta.TextXAlignment = Enum.TextXAlignment.Left
+equippedMeta.Text = "Type: - | Rarity: -"
+equippedMeta.Parent = equippedBody
+
+local equippedStats = Instance.new("TextLabel")
+equippedStats.BackgroundTransparency = 1
+equippedStats.Size = UDim2.new(1, 0, 0, 18)
+equippedStats.Font = Enum.Font.Gotham
+equippedStats.TextSize = 12
+equippedStats.TextColor3 = Color3.fromRGB(200, 200, 200)
+equippedStats.TextXAlignment = Enum.TextXAlignment.Left
+equippedStats.Text = "Level: - | ATK: -"
+equippedStats.Parent = equippedBody
+
+local equippedBonus = Instance.new("TextLabel")
+equippedBonus.BackgroundTransparency = 1
+equippedBonus.Size = UDim2.new(1, 0, 0, 32)
+equippedBonus.Font = Enum.Font.Gotham
+equippedBonus.TextSize = 12
+equippedBonus.TextColor3 = Color3.fromRGB(190, 190, 190)
+equippedBonus.TextXAlignment = Enum.TextXAlignment.Left
+equippedBonus.TextWrapped = true
+equippedBonus.Text = "Bonus Stats: -"
+equippedBonus.Parent = equippedBody
+
+local equippedPassive = Instance.new("TextLabel")
+equippedPassive.BackgroundTransparency = 1
+equippedPassive.Size = UDim2.new(1, 0, 0, 36)
+equippedPassive.Font = Enum.Font.Gotham
+equippedPassive.TextSize = 12
+equippedPassive.TextColor3 = Color3.fromRGB(190, 190, 190)
+equippedPassive.TextXAlignment = Enum.TextXAlignment.Left
+equippedPassive.TextWrapped = true
+equippedPassive.Text = "Passive/Ability: -"
+equippedPassive.Parent = equippedBody
+
+local rightColumn = Instance.new("Frame")
+rightColumn.Size = UDim2.new(1, -336, 1, 0)
+rightColumn.BackgroundTransparency = 1
+rightColumn.Parent = body
+
+local rightLayout = Instance.new("UIListLayout", rightColumn)
+rightLayout.FillDirection = Enum.FillDirection.Horizontal
+rightLayout.Padding = UDim.new(0, 16)
+
+local gridPanel = Instance.new("Frame")
+gridPanel.Size = UDim2.new(0.62, -8, 1, 0)
+gridPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+gridPanel.BackgroundTransparency = 0.08
+gridPanel.BorderSizePixel = 0
+gridPanel.Parent = rightColumn
+Instance.new("UICorner", gridPanel).CornerRadius = UDim.new(0, 12)
+local gridPad = Instance.new("UIPadding", gridPanel)
+gridPad.PaddingTop = UDim.new(0, 16)
+gridPad.PaddingBottom = UDim.new(0, 16)
+gridPad.PaddingLeft = UDim.new(0, 16)
+gridPad.PaddingRight = UDim.new(0, 16)
+
+local gridTitle = Instance.new("TextLabel")
+gridTitle.BackgroundTransparency = 1
+gridTitle.Size = UDim2.new(1, 0, 0, 20)
+gridTitle.Font = Enum.Font.GothamBold
+gridTitle.TextSize = 16
+gridTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
+gridTitle.TextXAlignment = Enum.TextXAlignment.Left
+gridTitle.Text = "Inventory Slots"
+gridTitle.Parent = gridPanel
+
+local slotsFrame = Instance.new("ScrollingFrame")
+slotsFrame.BackgroundTransparency = 1
+slotsFrame.Position = UDim2.fromOffset(0, 30)
+slotsFrame.Size = UDim2.new(1, 0, 1, -30)
+slotsFrame.ScrollBarThickness = 6
+slotsFrame.BorderSizePixel = 0
+slotsFrame.CanvasSize = UDim2.fromOffset(0, 0)
+slotsFrame.Parent = gridPanel
+
+local slotsLayout = Instance.new("UIGridLayout", slotsFrame)
+slotsLayout.CellPadding = UDim2.fromOffset(12, 12)
+slotsLayout.CellSize = UDim2.fromOffset(110, 110)
+slotsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local emptyLabel = Instance.new("TextLabel")
+emptyLabel.BackgroundTransparency = 1
+emptyLabel.Position = UDim2.fromOffset(0, 30)
+emptyLabel.Size = UDim2.new(1, 0, 1, -30)
+emptyLabel.Font = Enum.Font.Gotham
+emptyLabel.TextSize = 14
+emptyLabel.TextColor3 = Color3.fromRGB(160, 160, 160)
+emptyLabel.Text = "No weapons yet."
+emptyLabel.TextWrapped = true
+emptyLabel.TextXAlignment = Enum.TextXAlignment.Center
+emptyLabel.TextYAlignment = Enum.TextYAlignment.Center
+emptyLabel.Visible = false
+emptyLabel.Parent = gridPanel
+
 local detailsPanel = Instance.new("Frame")
-detailsPanel.Position = UDim2.fromOffset(0, 264)
-detailsPanel.Size = UDim2.new(1, 0, 1, -264)
+detailsPanel.Size = UDim2.new(0.38, -8, 1, 0)
 detailsPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
 detailsPanel.BackgroundTransparency = 0.08
 detailsPanel.BorderSizePixel = 0
-detailsPanel.Parent = leftColumn
+detailsPanel.Parent = rightColumn
 Instance.new("UICorner", detailsPanel).CornerRadius = UDim.new(0, 12)
 local detailsPad = Instance.new("UIPadding", detailsPanel)
 detailsPad.PaddingTop = UDim.new(0, 16)
@@ -287,7 +449,7 @@ detailsTitle.Font = Enum.Font.GothamBold
 detailsTitle.TextSize = 14
 detailsTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
 detailsTitle.TextXAlignment = Enum.TextXAlignment.Left
-detailsTitle.Text = "Selected Item Details"
+detailsTitle.Text = "Weapon Details"
 detailsTitle.Parent = detailsPanel
 
 local detailsScroll = Instance.new("ScrollingFrame")
@@ -424,454 +586,114 @@ end
 
 updateDetailsCanvas()
 
-local rightPanel = Instance.new("Frame")
-rightPanel.Size = UDim2.new(1, -336, 1, 0)
-rightPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
-rightPanel.BackgroundTransparency = 0.08
-rightPanel.BorderSizePixel = 0
-rightPanel.Parent = body
-Instance.new("UICorner", rightPanel).CornerRadius = UDim.new(0, 12)
-local rightPad = Instance.new("UIPadding", rightPanel)
-rightPad.PaddingTop = UDim.new(0, 16)
-rightPad.PaddingBottom = UDim.new(0, 16)
-rightPad.PaddingLeft = UDim.new(0, 16)
-rightPad.PaddingRight = UDim.new(0, 16)
+local infoOverlay = Instance.new("Frame")
+infoOverlay.Size = UDim2.fromScale(1, 1)
+infoOverlay.BackgroundColor3 = Color3.fromRGB(8, 8, 10)
+infoOverlay.BackgroundTransparency = 0.35
+infoOverlay.BorderSizePixel = 0
+infoOverlay.Visible = false
+infoOverlay.Parent = inventoryGui
 
-local gridPanel = Instance.new("Frame")
-gridPanel.BackgroundTransparency = 1
-gridPanel.Position = UDim2.fromOffset(0, 0)
-gridPanel.Size = UDim2.new(1, 0, 1, -140)
-gridPanel.Parent = rightPanel
+local infoPanel = Instance.new("Frame")
+infoPanel.AnchorPoint = Vector2.new(0.5, 0.5)
+infoPanel.Position = UDim2.fromScale(0.5, 0.5)
+infoPanel.Size = UDim2.fromOffset(420, 240)
+infoPanel.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+infoPanel.BackgroundTransparency = 0.06
+infoPanel.BorderSizePixel = 0
+infoPanel.Parent = infoOverlay
+Instance.new("UICorner", infoPanel).CornerRadius = UDim.new(0, 14)
+local infoStroke = Instance.new("UIStroke", infoPanel)
+infoStroke.Color = Color3.fromRGB(40, 40, 48)
+infoStroke.Thickness = 1
 
-local gridTitle = Instance.new("TextLabel")
-gridTitle.BackgroundTransparency = 1
-gridTitle.Size = UDim2.new(1, 0, 0, 20)
-gridTitle.Font = Enum.Font.GothamBold
-gridTitle.TextSize = 16
-gridTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
-gridTitle.TextXAlignment = Enum.TextXAlignment.Left
-gridTitle.Text = "Inventory Slots"
-gridTitle.Parent = gridPanel
+local infoTitle = Instance.new("TextLabel")
+infoTitle.BackgroundTransparency = 1
+infoTitle.Position = UDim2.fromOffset(20, 16)
+infoTitle.Size = UDim2.new(1, -40, 0, 18)
+infoTitle.Font = Enum.Font.GothamBold
+infoTitle.TextSize = 14
+infoTitle.TextColor3 = Color3.fromRGB(235, 235, 235)
+infoTitle.TextXAlignment = Enum.TextXAlignment.Left
+infoTitle.Text = "Weapon Info"
+infoTitle.Parent = infoPanel
 
-local slotsFrame = Instance.new("ScrollingFrame")
-slotsFrame.BackgroundTransparency = 1
-slotsFrame.Position = UDim2.fromOffset(0, 30)
-slotsFrame.Size = UDim2.new(1, 0, 1, -30)
-slotsFrame.ScrollBarThickness = 6
-slotsFrame.BorderSizePixel = 0
-slotsFrame.CanvasSize = UDim2.fromOffset(0, 0)
-slotsFrame.Parent = gridPanel
+local infoBody = Instance.new("TextLabel")
+infoBody.BackgroundTransparency = 1
+infoBody.Position = UDim2.fromOffset(20, 44)
+infoBody.Size = UDim2.new(1, -40, 1, -88)
+infoBody.Font = Enum.Font.Gotham
+infoBody.TextSize = 12
+infoBody.TextColor3 = Color3.fromRGB(200, 200, 200)
+infoBody.TextXAlignment = Enum.TextXAlignment.Left
+infoBody.TextYAlignment = Enum.TextYAlignment.Top
+infoBody.TextWrapped = true
+infoBody.Text = "-"
+infoBody.Parent = infoPanel
 
-local slotsLayout = Instance.new("UIGridLayout", slotsFrame)
-slotsLayout.CellPadding = UDim2.fromOffset(12, 12)
-slotsLayout.CellSize = UDim2.fromOffset(110, 110)
-slotsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+local infoClose = Instance.new("TextButton")
+infoClose.AnchorPoint = Vector2.new(1, 1)
+infoClose.Position = UDim2.new(1, -16, 1, -16)
+infoClose.Size = UDim2.fromOffset(90, 32)
+infoClose.BackgroundColor3 = Color3.fromRGB(40, 40, 52)
+infoClose.BorderSizePixel = 0
+infoClose.Font = Enum.Font.GothamBold
+infoClose.TextSize = 12
+infoClose.TextColor3 = Color3.fromRGB(230, 230, 230)
+infoClose.Text = "Close"
+infoClose.Parent = infoPanel
+Instance.new("UICorner", infoClose).CornerRadius = UDim.new(0, 10)
+addHover(infoClose, infoClose.BackgroundColor3, Color3.fromRGB(52, 52, 66))
 
-local emptyLabel = Instance.new("TextLabel")
-emptyLabel.BackgroundTransparency = 1
-emptyLabel.Position = UDim2.fromOffset(0, 30)
-emptyLabel.Size = UDim2.new(1, 0, 1, -30)
-emptyLabel.Font = Enum.Font.Gotham
-emptyLabel.TextSize = 14
-emptyLabel.TextColor3 = Color3.fromRGB(160, 160, 160)
-emptyLabel.Text = "No weapons yet."
-emptyLabel.TextWrapped = true
-emptyLabel.TextXAlignment = Enum.TextXAlignment.Center
-emptyLabel.TextYAlignment = Enum.TextYAlignment.Center
-emptyLabel.Visible = false
-emptyLabel.Parent = gridPanel
-
-local equippedPanel = Instance.new("Frame")
-equippedPanel.AnchorPoint = Vector2.new(0, 1)
-equippedPanel.Position = UDim2.new(0, 0, 1, 0)
-equippedPanel.Size = UDim2.new(1, 0, 0, 120)
-equippedPanel.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
-equippedPanel.BackgroundTransparency = 0.08
-equippedPanel.BorderSizePixel = 0
-equippedPanel.Parent = rightPanel
-Instance.new("UICorner", equippedPanel).CornerRadius = UDim.new(0, 12)
-local equippedPad = Instance.new("UIPadding", equippedPanel)
-equippedPad.PaddingTop = UDim.new(0, 12)
-equippedPad.PaddingBottom = UDim.new(0, 12)
-equippedPad.PaddingLeft = UDim.new(0, 12)
-equippedPad.PaddingRight = UDim.new(0, 12)
-
-local equippedTitle = Instance.new("TextLabel")
-equippedTitle.BackgroundTransparency = 1
-equippedTitle.Size = UDim2.new(1, 0, 0, 18)
-equippedTitle.Font = Enum.Font.GothamBold
-equippedTitle.TextSize = 13
-equippedTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
-equippedTitle.TextXAlignment = Enum.TextXAlignment.Left
-equippedTitle.Text = "Currently Equipped"
-equippedTitle.Parent = equippedPanel
-
-local equippedRow = Instance.new("Frame")
-equippedRow.BackgroundTransparency = 1
-equippedRow.Position = UDim2.fromOffset(0, 26)
-equippedRow.Size = UDim2.new(1, 0, 1, -26)
-equippedRow.Parent = equippedPanel
-
-local equippedIcon = Instance.new("Frame")
-equippedIcon.Size = UDim2.fromOffset(48, 48)
-equippedIcon.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
-equippedIcon.BorderSizePixel = 0
-equippedIcon.Parent = equippedRow
-Instance.new("UICorner", equippedIcon).CornerRadius = UDim.new(0, 10)
-local equippedIconStroke = Instance.new("UIStroke", equippedIcon)
-equippedIconStroke.Color = Color3.fromRGB(50, 50, 64)
-equippedIconStroke.Thickness = 1
-
-local equippedIconText = Instance.new("TextLabel")
-equippedIconText.BackgroundTransparency = 1
-equippedIconText.Size = UDim2.new(1, 0, 1, 0)
-equippedIconText.Font = Enum.Font.GothamBold
-equippedIconText.TextSize = 18
-equippedIconText.TextColor3 = Color3.fromRGB(220, 220, 220)
-equippedIconText.Text = "?"
-equippedIconText.Parent = equippedIcon
-
-local equippedName = Instance.new("TextLabel")
-equippedName.BackgroundTransparency = 1
-equippedName.Position = UDim2.fromOffset(60, 0)
-equippedName.Size = UDim2.new(1, -60, 0, 20)
-equippedName.Font = Enum.Font.GothamBold
-equippedName.TextSize = 14
-equippedName.TextColor3 = Color3.fromRGB(245, 245, 245)
-equippedName.TextXAlignment = Enum.TextXAlignment.Left
-equippedName.Text = "None"
-equippedName.Parent = equippedRow
-
-local equippedMeta = Instance.new("TextLabel")
-equippedMeta.BackgroundTransparency = 1
-equippedMeta.Position = UDim2.fromOffset(60, 22)
-equippedMeta.Size = UDim2.new(1, -60, 0, 16)
-equippedMeta.Font = Enum.Font.Gotham
-equippedMeta.TextSize = 12
-equippedMeta.TextColor3 = Color3.fromRGB(190, 190, 190)
-equippedMeta.TextXAlignment = Enum.TextXAlignment.Left
-equippedMeta.Text = "Rarity: -"
-equippedMeta.Parent = equippedRow
-
-local equippedLevel = Instance.new("TextLabel")
-equippedLevel.BackgroundTransparency = 1
-equippedLevel.Position = UDim2.fromOffset(60, 40)
-equippedLevel.Size = UDim2.new(1, -60, 0, 16)
-equippedLevel.Font = Enum.Font.Gotham
-equippedLevel.TextSize = 12
-equippedLevel.TextColor3 = Color3.fromRGB(170, 170, 170)
-equippedLevel.TextXAlignment = Enum.TextXAlignment.Left
-equippedLevel.Text = ""
-equippedLevel.Visible = false
-equippedLevel.Parent = equippedRow
-
-local contextBlocker = Instance.new("TextButton")
-contextBlocker.Size = UDim2.fromScale(1, 1)
-contextBlocker.BackgroundTransparency = 1
-contextBlocker.Text = ""
-contextBlocker.AutoButtonColor = false
-contextBlocker.Visible = false
-contextBlocker.ZIndex = 30
-contextBlocker.Parent = inventoryGui
+infoClose.MouseButton1Click:Connect(function()
+	infoOverlay.Visible = false
+end)
 
 local contextMenu = Instance.new("Frame")
-contextMenu.Size = UDim2.fromOffset(200, 220)
-contextMenu.BackgroundColor3 = Color3.fromRGB(26, 26, 34)
+contextMenu.Size = UDim2.fromOffset(150, 190)
+contextMenu.BackgroundColor3 = Color3.fromRGB(22, 22, 30)
+contextMenu.BackgroundTransparency = 0.06
 contextMenu.BorderSizePixel = 0
 contextMenu.Visible = false
-contextMenu.ZIndex = 40
 contextMenu.Parent = inventoryGui
 Instance.new("UICorner", contextMenu).CornerRadius = UDim.new(0, 10)
 local contextStroke = Instance.new("UIStroke", contextMenu)
 contextStroke.Color = Color3.fromRGB(50, 50, 64)
 contextStroke.Thickness = 1
-local contextPad = Instance.new("UIPadding", contextMenu)
-contextPad.PaddingTop = UDim.new(0, 8)
-contextPad.PaddingBottom = UDim.new(0, 8)
-contextPad.PaddingLeft = UDim.new(0, 8)
-contextPad.PaddingRight = UDim.new(0, 8)
-local contextLayout = Instance.new("UIListLayout", contextMenu)
-contextLayout.Padding = UDim.new(0, 4)
 
-local function makeContextButton(text)
-	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(1, 0, 0, 28)
-	btn.BackgroundColor3 = Color3.fromRGB(32, 32, 44)
-	btn.BorderSizePixel = 0
-	btn.Font = Enum.Font.Gotham
-	btn.TextSize = 12
-	btn.TextColor3 = Color3.fromRGB(230, 230, 230)
-	btn.TextXAlignment = Enum.TextXAlignment.Left
-	btn.Text = "  " .. text
-	btn.AutoButtonColor = false
-	btn.ZIndex = 41
-	btn.Parent = contextMenu
-	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
-	addHover(btn, btn.BackgroundColor3, Color3.fromRGB(40, 40, 56))
-	return btn
+local contextLayout = Instance.new("UIListLayout", contextMenu)
+contextLayout.Padding = UDim.new(0, 6)
+local contextPad = Instance.new("UIPadding", contextMenu)
+contextPad.PaddingTop = UDim.new(0, 6)
+contextPad.PaddingBottom = UDim.new(0, 6)
+contextPad.PaddingLeft = UDim.new(0, 6)
+contextPad.PaddingRight = UDim.new(0, 6)
+
+local function makeContextButton(label)
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.new(1, -12, 0, 28)
+	button.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+	button.BorderSizePixel = 0
+	button.Font = Enum.Font.GothamBold
+	button.TextSize = 12
+	button.TextColor3 = Color3.fromRGB(230, 230, 230)
+	button.Text = label
+	button.Parent = contextMenu
+	Instance.new("UICorner", button).CornerRadius = UDim.new(0, 8)
+	addHover(button, button.BackgroundColor3, Color3.fromRGB(40, 40, 52))
+	return button
 end
 
-local equipAction = makeContextButton("Equip (Wyposaż)")
-local sellAction = makeContextButton("Sell (Sprzedaj)")
-local upgradeAction = makeContextButton("Upgrade (Ulepsz)")
-local favoriteAction = makeContextButton("Add to Favorites (Dodaj do ulubionych)")
-local infoAction = makeContextButton("Weapon Info (Informacje o broni)")
-
-local infoOverlay = Instance.new("Frame")
-infoOverlay.Size = UDim2.fromScale(1, 1)
-infoOverlay.BackgroundColor3 = Color3.fromRGB(8, 8, 12)
-infoOverlay.BackgroundTransparency = 0.35
-infoOverlay.BorderSizePixel = 0
-infoOverlay.Visible = false
-infoOverlay.ZIndex = 50
-infoOverlay.Parent = inventoryGui
-
-local infoCloseBackdrop = Instance.new("TextButton")
-infoCloseBackdrop.Size = UDim2.fromScale(1, 1)
-infoCloseBackdrop.BackgroundTransparency = 1
-infoCloseBackdrop.Text = ""
-infoCloseBackdrop.AutoButtonColor = false
-infoCloseBackdrop.ZIndex = 51
-infoCloseBackdrop.Parent = infoOverlay
-
-local infoPanel = Instance.new("Frame")
-infoPanel.AnchorPoint = Vector2.new(0.5, 0.5)
-infoPanel.Position = UDim2.fromScale(0.5, 0.5)
-infoPanel.Size = UDim2.fromOffset(420, 430)
-infoPanel.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
-infoPanel.BorderSizePixel = 0
-infoPanel.ZIndex = 52
-infoPanel.Parent = infoOverlay
-Instance.new("UICorner", infoPanel).CornerRadius = UDim.new(0, 14)
-local infoStroke = Instance.new("UIStroke", infoPanel)
-infoStroke.Color = Color3.fromRGB(44, 44, 56)
-infoStroke.Thickness = 1
-local infoPad = Instance.new("UIPadding", infoPanel)
-infoPad.PaddingTop = UDim.new(0, 16)
-infoPad.PaddingBottom = UDim.new(0, 16)
-infoPad.PaddingLeft = UDim.new(0, 16)
-infoPad.PaddingRight = UDim.new(0, 16)
-
-local infoTitle = Instance.new("TextLabel")
-infoTitle.BackgroundTransparency = 1
-infoTitle.Size = UDim2.new(1, -32, 0, 22)
-infoTitle.Font = Enum.Font.GothamBold
-infoTitle.TextSize = 16
-infoTitle.TextColor3 = Color3.fromRGB(245, 245, 245)
-infoTitle.TextXAlignment = Enum.TextXAlignment.Left
-infoTitle.Text = "Weapon Info"
-infoTitle.ZIndex = 53
-infoTitle.Parent = infoPanel
-
-local infoClose = Instance.new("TextButton")
-infoClose.AnchorPoint = Vector2.new(1, 0)
-infoClose.Position = UDim2.new(1, 0, 0, 0)
-infoClose.Size = UDim2.fromOffset(24, 24)
-infoClose.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-infoClose.BorderSizePixel = 0
-infoClose.Font = Enum.Font.GothamBold
-infoClose.TextSize = 12
-infoClose.TextColor3 = Color3.fromRGB(220, 220, 220)
-infoClose.Text = "X"
-infoClose.ZIndex = 53
-infoClose.Parent = infoPanel
-Instance.new("UICorner", infoClose).CornerRadius = UDim.new(0, 8)
-addHover(infoClose, infoClose.BackgroundColor3, Color3.fromRGB(40, 40, 52))
-
-local infoScroll = Instance.new("ScrollingFrame")
-infoScroll.BackgroundTransparency = 1
-infoScroll.Position = UDim2.fromOffset(0, 30)
-infoScroll.Size = UDim2.new(1, 0, 1, -30)
-infoScroll.ScrollBarThickness = 6
-infoScroll.BorderSizePixel = 0
-infoScroll.CanvasSize = UDim2.fromOffset(0, 0)
-infoScroll.ZIndex = 53
-infoScroll.Parent = infoPanel
-local infoLayout = Instance.new("UIListLayout", infoScroll)
-infoLayout.Padding = UDim.new(0, 8)
-
-local infoName = Instance.new("TextLabel")
-infoName.BackgroundTransparency = 1
-infoName.Size = UDim2.new(1, 0, 0, 22)
-infoName.Font = Enum.Font.GothamBold
-infoName.TextSize = 16
-infoName.TextColor3 = Color3.fromRGB(245, 245, 245)
-infoName.TextXAlignment = Enum.TextXAlignment.Left
-infoName.TextWrapped = true
-infoName.Text = "Weapon Name"
-infoName.ZIndex = 54
-infoName.Parent = infoScroll
-
-local infoDesc = Instance.new("TextLabel")
-infoDesc.BackgroundTransparency = 1
-infoDesc.Size = UDim2.new(1, 0, 0, 40)
-infoDesc.Font = Enum.Font.Gotham
-infoDesc.TextSize = 12
-infoDesc.TextColor3 = Color3.fromRGB(190, 190, 190)
-infoDesc.TextXAlignment = Enum.TextXAlignment.Left
-infoDesc.TextWrapped = true
-infoDesc.Text = "-"
-infoDesc.ZIndex = 54
-infoDesc.Parent = infoScroll
-
-local infoLineMeta = Instance.new("TextLabel")
-infoLineMeta.BackgroundTransparency = 1
-infoLineMeta.Size = UDim2.new(1, 0, 0, 18)
-infoLineMeta.Font = Enum.Font.Gotham
-infoLineMeta.TextSize = 12
-infoLineMeta.TextColor3 = Color3.fromRGB(200, 200, 200)
-infoLineMeta.TextXAlignment = Enum.TextXAlignment.Left
-infoLineMeta.Text = "Type: - | Rarity: -"
-infoLineMeta.ZIndex = 54
-infoLineMeta.Parent = infoScroll
-
-local infoLineStats = Instance.new("TextLabel")
-infoLineStats.BackgroundTransparency = 1
-infoLineStats.Size = UDim2.new(1, 0, 0, 18)
-infoLineStats.Font = Enum.Font.Gotham
-infoLineStats.TextSize = 12
-infoLineStats.TextColor3 = Color3.fromRGB(200, 200, 200)
-infoLineStats.TextXAlignment = Enum.TextXAlignment.Left
-infoLineStats.Text = "Max Level: - | ATK: -"
-infoLineStats.ZIndex = 54
-infoLineStats.Parent = infoScroll
-
-local infoBonus = Instance.new("TextLabel")
-infoBonus.BackgroundTransparency = 1
-infoBonus.Size = UDim2.new(1, 0, 0, 34)
-infoBonus.Font = Enum.Font.Gotham
-infoBonus.TextSize = 12
-infoBonus.TextColor3 = Color3.fromRGB(190, 190, 190)
-infoBonus.TextXAlignment = Enum.TextXAlignment.Left
-infoBonus.TextWrapped = true
-infoBonus.Text = "Bonus Stats: -"
-infoBonus.ZIndex = 54
-infoBonus.Parent = infoScroll
-
-local infoPassiveTitle = Instance.new("TextLabel")
-infoPassiveTitle.BackgroundTransparency = 1
-infoPassiveTitle.Size = UDim2.new(1, 0, 0, 16)
-infoPassiveTitle.Font = Enum.Font.GothamBold
-infoPassiveTitle.TextSize = 12
-infoPassiveTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
-infoPassiveTitle.TextXAlignment = Enum.TextXAlignment.Left
-infoPassiveTitle.Text = "Passive"
-infoPassiveTitle.ZIndex = 54
-infoPassiveTitle.Parent = infoScroll
-
-local infoPassiveDesc = Instance.new("TextLabel")
-infoPassiveDesc.BackgroundTransparency = 1
-infoPassiveDesc.Size = UDim2.new(1, 0, 0, 40)
-infoPassiveDesc.Font = Enum.Font.Gotham
-infoPassiveDesc.TextSize = 12
-infoPassiveDesc.TextColor3 = Color3.fromRGB(190, 190, 190)
-infoPassiveDesc.TextXAlignment = Enum.TextXAlignment.Left
-infoPassiveDesc.TextWrapped = true
-infoPassiveDesc.Text = "-"
-infoPassiveDesc.ZIndex = 54
-infoPassiveDesc.Parent = infoScroll
-
-local infoAbilityTitle = Instance.new("TextLabel")
-infoAbilityTitle.BackgroundTransparency = 1
-infoAbilityTitle.Size = UDim2.new(1, 0, 0, 16)
-infoAbilityTitle.Font = Enum.Font.GothamBold
-infoAbilityTitle.TextSize = 12
-infoAbilityTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
-infoAbilityTitle.TextXAlignment = Enum.TextXAlignment.Left
-infoAbilityTitle.Text = "Ability"
-infoAbilityTitle.ZIndex = 54
-infoAbilityTitle.Parent = infoScroll
-
-local infoAbilityDesc = Instance.new("TextLabel")
-infoAbilityDesc.BackgroundTransparency = 1
-infoAbilityDesc.Size = UDim2.new(1, 0, 0, 40)
-infoAbilityDesc.Font = Enum.Font.Gotham
-infoAbilityDesc.TextSize = 12
-infoAbilityDesc.TextColor3 = Color3.fromRGB(190, 190, 190)
-infoAbilityDesc.TextXAlignment = Enum.TextXAlignment.Left
-infoAbilityDesc.TextWrapped = true
-infoAbilityDesc.Text = "-"
-infoAbilityDesc.ZIndex = 54
-infoAbilityDesc.Parent = infoScroll
-
-local upgradeOverlay = Instance.new("Frame")
-upgradeOverlay.Size = UDim2.fromScale(1, 1)
-upgradeOverlay.BackgroundColor3 = Color3.fromRGB(8, 8, 12)
-upgradeOverlay.BackgroundTransparency = 0.35
-upgradeOverlay.BorderSizePixel = 0
-upgradeOverlay.Visible = false
-upgradeOverlay.ZIndex = 50
-upgradeOverlay.Parent = inventoryGui
-
-local upgradeCloseBackdrop = Instance.new("TextButton")
-upgradeCloseBackdrop.Size = UDim2.fromScale(1, 1)
-upgradeCloseBackdrop.BackgroundTransparency = 1
-upgradeCloseBackdrop.Text = ""
-upgradeCloseBackdrop.AutoButtonColor = false
-upgradeCloseBackdrop.ZIndex = 51
-upgradeCloseBackdrop.Parent = upgradeOverlay
-
-local upgradePanel = Instance.new("Frame")
-upgradePanel.AnchorPoint = Vector2.new(0.5, 0.5)
-upgradePanel.Position = UDim2.fromScale(0.5, 0.5)
-upgradePanel.Size = UDim2.fromOffset(320, 180)
-upgradePanel.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
-upgradePanel.BorderSizePixel = 0
-upgradePanel.ZIndex = 52
-upgradePanel.Parent = upgradeOverlay
-Instance.new("UICorner", upgradePanel).CornerRadius = UDim.new(0, 14)
-local upgradeStroke = Instance.new("UIStroke", upgradePanel)
-upgradeStroke.Color = Color3.fromRGB(44, 44, 56)
-upgradeStroke.Thickness = 1
-local upgradePad = Instance.new("UIPadding", upgradePanel)
-upgradePad.PaddingTop = UDim.new(0, 16)
-upgradePad.PaddingBottom = UDim.new(0, 16)
-upgradePad.PaddingLeft = UDim.new(0, 16)
-upgradePad.PaddingRight = UDim.new(0, 16)
-
-local upgradeTitle = Instance.new("TextLabel")
-upgradeTitle.BackgroundTransparency = 1
-upgradeTitle.Size = UDim2.new(1, -32, 0, 22)
-upgradeTitle.Font = Enum.Font.GothamBold
-upgradeTitle.TextSize = 16
-upgradeTitle.TextColor3 = Color3.fromRGB(245, 245, 245)
-upgradeTitle.TextXAlignment = Enum.TextXAlignment.Left
-upgradeTitle.Text = "Upgrade (Placeholder)"
-upgradeTitle.ZIndex = 53
-upgradeTitle.Parent = upgradePanel
-
-local upgradeClose = Instance.new("TextButton")
-upgradeClose.AnchorPoint = Vector2.new(1, 0)
-upgradeClose.Position = UDim2.new(1, 0, 0, 0)
-upgradeClose.Size = UDim2.fromOffset(24, 24)
-upgradeClose.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-upgradeClose.BorderSizePixel = 0
-upgradeClose.Font = Enum.Font.GothamBold
-upgradeClose.TextSize = 12
-upgradeClose.TextColor3 = Color3.fromRGB(220, 220, 220)
-upgradeClose.Text = "X"
-upgradeClose.ZIndex = 53
-upgradeClose.Parent = upgradePanel
-Instance.new("UICorner", upgradeClose).CornerRadius = UDim.new(0, 8)
-addHover(upgradeClose, upgradeClose.BackgroundColor3, Color3.fromRGB(40, 40, 52))
-
-local upgradeBody = Instance.new("TextLabel")
-upgradeBody.BackgroundTransparency = 1
-upgradeBody.Position = UDim2.fromOffset(0, 36)
-upgradeBody.Size = UDim2.new(1, 0, 1, -36)
-upgradeBody.Font = Enum.Font.Gotham
-upgradeBody.TextSize = 12
-upgradeBody.TextColor3 = Color3.fromRGB(190, 190, 190)
-upgradeBody.TextXAlignment = Enum.TextXAlignment.Left
-upgradeBody.TextWrapped = true
-upgradeBody.Text = "Upgrade flow will be available soon."
-upgradeBody.ZIndex = 53
-upgradeBody.Parent = upgradePanel
+local equipBtn = makeContextButton("Equip")
+local sellBtn = makeContextButton("Sell")
+local upgradeBtn = makeContextButton("Upgrade")
+local favoriteBtn = makeContextButton("Favorite")
+local infoBtn = makeContextButton("Weapon Info")
 
 local inventoryItems = {}
 local selectedIndex
-local selectedWeaponId
 local equippedWeaponId
+local contextIndex
 local weaponPoints = 0
 local level, xp, nextXp, coins = 1, 0, 120, 0
 
@@ -907,6 +729,35 @@ local function formatStats(stats)
 	return "Bonus Stats: " .. table.concat(parts, " | ")
 end
 
+local function formatStatsShort(stats)
+	if typeof(stats) ~= "table" then
+		return "Bonus Stats: -"
+	end
+	local parts = {}
+	if stats.HP and stats.HP ~= 0 then
+		table.insert(parts, ("HP %+d"):format(stats.HP))
+	end
+	if stats.DEF and stats.DEF ~= 0 then
+		table.insert(parts, ("DEF %+d"):format(stats.DEF))
+	end
+	if stats.CRIT_RATE and stats.CRIT_RATE ~= 0 then
+		table.insert(parts, ("Crit %+d%%"):format(stats.CRIT_RATE))
+	end
+	if stats.CRIT_DMG and stats.CRIT_DMG ~= 0 then
+		table.insert(parts, ("Crit DMG %+d%%"):format(stats.CRIT_DMG))
+	end
+	if stats.LIFESTEAL and stats.LIFESTEAL ~= 0 then
+		table.insert(parts, ("LS %+d%%"):format(stats.LIFESTEAL))
+	end
+	if stats.SPD and stats.SPD ~= 0 then
+		table.insert(parts, ("SPD %+d%%"):format(stats.SPD))
+	end
+	if #parts == 0 then
+		return "Bonus Stats: -"
+	end
+	return "Bonus Stats: " .. table.concat(parts, " | ")
+end
+
 local function refreshRaceBuffs(raceName)
 	local def = Races.Defs and Races.Defs[raceName or ""]
 	local stats = def and def.stats or {}
@@ -923,7 +774,7 @@ local function refreshRaceBuffs(raceName)
 	buffRows.HP.Text = ("HP: %+d"):format(getStat("HP"))
 	buffRows.ATK.Text = ("ATK: %+d"):format(getStat("PhysicalPower", "MagicPower", "STR"))
 	buffRows.DEF.Text = ("DEF: %+d"):format(getStat("Armor"))
-	buffRows.LIFESTEAL.Text = ("Lifesteal: %+d%%"):format(getStat("LifeSteal"))
+	buffRows.LIFESTEAL.Text = ("Life Steal: %+d%%"):format(getStat("LifeSteal"))
 	buffRows.CRIT_RATE.Text = ("Crit Rate: %+d%%"):format(getStat("CritChance"))
 	buffRows.CRIT_DMG.Text = ("Crit DMG: %+d%%"):format(getStat("CritDmg"))
 	buffRows.SPEED.Text = ("Speed: %+d%%"):format(getStat("MoveSpeed", "AttackSpeed"))
@@ -941,6 +792,50 @@ local function updatePlayerInfo()
 	refreshRaceBuffs(raceName)
 	coinsLabel.Text = ("Coins: %d"):format(coins)
 	wpLabel.Text = ("WP: %d"):format(weaponPoints)
+end
+
+local function applyEquipped(def)
+	if not def then
+		equippedName.Text = "No weapon equipped"
+		equippedName.TextColor3 = Color3.fromRGB(245, 245, 245)
+		equippedMeta.Text = "Type: - | Rarity: -"
+		equippedMeta.TextColor3 = Color3.fromRGB(200, 200, 200)
+		equippedStats.Text = "Level: - | ATK: -"
+		equippedBonus.Text = "Bonus Stats: -"
+		equippedPassive.Text = "Passive/Ability: -"
+		equippedIconLabel.Text = "?"
+		equippedIconStroke.Color = Color3.fromRGB(50, 50, 64)
+		return
+	end
+
+	local rarity = def.rarity or "Common"
+	local color = rarityColor(rarity)
+	equippedName.Text = def.name or def.id or "Unknown"
+	equippedName.TextColor3 = color
+	equippedMeta.Text = ("Type: %s | Rarity: %s"):format(def.weaponType or "-", rarity)
+	equippedMeta.TextColor3 = color
+	equippedStats.Text = ("Level: %s | ATK: %s"):format(tostring(def.maxLevel or "-"), tostring(def.baseDamage or "-"))
+	equippedBonus.Text = formatStatsShort(def.stats)
+
+	local passiveText = def.passiveName or ""
+	local abilityText = def.abilityName or ""
+	if passiveText == "" and abilityText == "" then
+		equippedPassive.Text = "Passive/Ability: -"
+	else
+		local summary = passiveText ~= "" and passiveText or abilityText
+		equippedPassive.Text = ("Passive/Ability: %s"):format(summary)
+	end
+
+	equippedIconLabel.Text = def.weaponType and def.weaponType:sub(1, 1) or "?"
+	equippedIconStroke.Color = color
+end
+
+local function refreshEquippedPanel()
+	local def
+	if equippedWeaponId then
+		def = WeaponConfigs.Get(equippedWeaponId)
+	end
+	applyEquipped(def)
 end
 
 local function applyDetails(def)
@@ -998,145 +893,50 @@ local function applyDetails(def)
 	updateDetailsCanvas()
 end
 
-local function updateEquippedPanel()
-	local equippedItem
-	if equippedWeaponId then
-		for _, item in ipairs(inventoryItems) do
-			if item.id == equippedWeaponId then
-				equippedItem = item
-				break
-			end
-		end
-	end
+local function hideContextMenu()
+	contextMenu.Visible = false
+	contextIndex = nil
+end
 
-	if not equippedItem or not equippedItem.def then
-		equippedName.Text = "None"
-		equippedName.TextColor3 = Color3.fromRGB(245, 245, 245)
-		equippedMeta.Text = "Rarity: -"
-		equippedMeta.TextColor3 = Color3.fromRGB(190, 190, 190)
-		equippedLevel.Text = ""
-		equippedLevel.Visible = false
-		equippedIconText.Text = "?"
-		equippedIconStroke.Color = Color3.fromRGB(50, 50, 64)
+local function showInfoPopup(def)
+	if not def then
 		return
 	end
-
-	local def = equippedItem.def
-	local rarity = def.rarity or "Common"
-	local color = rarityColor(rarity)
-	equippedName.Text = def.name or equippedItem.id or "Unknown"
-	equippedName.TextColor3 = color
-	equippedMeta.Text = ("Rarity: %s"):format(rarity)
-	equippedMeta.TextColor3 = color
-	equippedIconText.Text = def.weaponType and def.weaponType:sub(1, 1) or "?"
-	equippedIconStroke.Color = color
-
-	local levelText = equippedItem.level and ("Lv. %s"):format(tostring(equippedItem.level)) or ""
-	equippedLevel.Text = levelText
-	equippedLevel.Visible = levelText ~= ""
-end
-
-local function updateInfoCanvas()
-	task.defer(function()
-		infoScroll.CanvasSize = UDim2.fromOffset(0, infoLayout.AbsoluteContentSize.Y + 8)
-	end)
-end
-
-local function openWeaponInfo(def)
-	if not def then return end
-	local rarity = def.rarity or "Common"
-	local color = rarityColor(rarity)
-	infoName.Text = def.name or def.id or "Unknown"
-	infoName.TextColor3 = color
-	infoDesc.Text = def.description or def.passiveDescription or def.abilityDescription or "Brak opisu."
-	infoLineMeta.Text = ("Type: %s | Rarity: %s"):format(def.weaponType or "-", rarity)
-	infoLineMeta.TextColor3 = color
-	infoLineStats.Text = ("Max Level: %s | ATK: %s"):format(tostring(def.maxLevel or "-"), tostring(def.baseDamage or "-"))
-	infoBonus.Text = formatStats(def.stats)
-
-	local passiveName = def.passiveName or ""
-	if passiveName ~= "" then
-		infoPassiveTitle.Text = ("Passive: %s"):format(passiveName)
-		infoPassiveDesc.Text = def.passiveDescription or "-"
-	else
-		infoPassiveTitle.Text = "Passive"
-		infoPassiveDesc.Text = "-"
+	infoTitle.Text = def.name or "Weapon Info"
+	local parts = {}
+	if def.passiveName and def.passiveName ~= "" then
+		table.insert(parts, ("Passive: %s\n%s"):format(def.passiveName, def.passiveDescription or "-"))
 	end
-
-	local abilityName = def.abilityName or ""
-	if abilityName ~= "" then
-		infoAbilityTitle.Text = ("Ability: %s"):format(abilityName)
-		infoAbilityDesc.Text = def.abilityDescription or "-"
-	else
-		infoAbilityTitle.Text = "Ability"
-		infoAbilityDesc.Text = "-"
+	if def.abilityName and def.abilityName ~= "" then
+		table.insert(parts, ("Ability: %s\n%s"):format(def.abilityName, def.abilityDescription or "-"))
 	end
-
-	updateInfoCanvas()
+	if #parts == 0 then
+		infoBody.Text = "No passive or ability details."
+	else
+		infoBody.Text = table.concat(parts, "\n\n")
+	end
 	infoOverlay.Visible = true
 end
 
-local function closeWeaponInfo()
-	infoOverlay.Visible = false
-end
-
-local function openUpgradePlaceholder(item)
-	local name = item and item.def and item.def.name or item and item.id or "weapon"
-	upgradeBody.Text = ("Upgrade flow for %s will be available soon."):format(name)
-	upgradeOverlay.Visible = true
-end
-
-local function closeUpgradePlaceholder()
-	upgradeOverlay.Visible = false
-end
-
-local contextItemIndex
-
-local function closeContextMenu()
-	contextItemIndex = nil
-	contextMenu.Visible = false
-	contextBlocker.Visible = false
-end
-
-local function openContextMenu(index)
+local function showContextMenu(index, screenPos)
+	contextIndex = index
 	local item = inventoryItems[index]
-	if not item then return end
-	contextItemIndex = index
-	local isFavorite = item.isFavorite == true
-	favoriteAction.Text = "  " .. (isFavorite and "Remove from Favorites (Usuń z ulubionych)" or "Add to Favorites (Dodaj do ulubionych)")
-
-	contextBlocker.Visible = true
-	contextMenu.Visible = true
-
-	task.defer(function()
-		local mousePos = UserInputService:GetMouseLocation()
-		local guiSize = inventoryGui.AbsoluteSize
-		local menuSize = contextMenu.AbsoluteSize
-		local x = math.clamp(mousePos.X, 8, guiSize.X - menuSize.X - 8)
-		local y = math.clamp(mousePos.Y, 8, guiSize.Y - menuSize.Y - 8)
-		contextMenu.Position = UDim2.fromOffset(x, y)
-	end)
-end
-
-local function setItemFavorite(index, isFavorite)
-	local item = inventoryItems[index]
-	if not item then return end
-	item.isFavorite = isFavorite
-	local slot = slotWidgets[index]
-	if slot then
-		local favoriteIcon = slot:FindFirstChild("FavoriteIcon")
-		if favoriteIcon and favoriteIcon:IsA("TextLabel") then
-			favoriteIcon.Visible = isFavorite
-		end
+	if not item then
+		return
 	end
+	favoriteBtn.Text = item.favorite and "Unfavorite" or "Favorite"
+
+	local menuSize = contextMenu.AbsoluteSize
+	local x = math.clamp(screenPos.X, 10, workspace.CurrentCamera.ViewportSize.X - menuSize.X - 10)
+	local y = math.clamp(screenPos.Y, 10, workspace.CurrentCamera.ViewportSize.Y - menuSize.Y - 10)
+	contextMenu.Position = UDim2.fromOffset(x, y)
+	contextMenu.Visible = true
 end
 
 local slotWidgets = {}
 
 local function setSelected(index)
 	selectedIndex = index
-	local selectedItem = inventoryItems[index]
-	selectedWeaponId = selectedItem and selectedItem.id or nil
 	for i, slot in ipairs(slotWidgets) do
 		local selected = i == index
 		local stroke = slot:FindFirstChild("Stroke")
@@ -1150,11 +950,12 @@ local function setSelected(index)
 		end
 	end
 
-	applyDetails(selectedItem and selectedItem.def)
+	local item = inventoryItems[index]
+	applyDetails(item and item.def)
+	hideContextMenu()
 end
 
 local function rebuildSlots()
-	local previousSelectedId = selectedWeaponId
 	for _, child in ipairs(slotsFrame:GetChildren()) do
 		if child:IsA("TextButton") then
 			child:Destroy()
@@ -1202,6 +1003,21 @@ local function rebuildSlots()
 		icon.Text = def and def.weaponType and def.weaponType:sub(1, 1) or "?"
 		icon.Parent = slot
 
+		if equippedWeaponId == item.id then
+			local equippedTag = Instance.new("TextLabel")
+			equippedTag.AnchorPoint = Vector2.new(1, 0)
+			equippedTag.Position = UDim2.new(1, -8, 0, 8)
+			equippedTag.Size = UDim2.fromOffset(18, 18)
+			equippedTag.BackgroundColor3 = Color3.fromRGB(60, 140, 255)
+			equippedTag.BorderSizePixel = 0
+			equippedTag.Font = Enum.Font.GothamBold
+			equippedTag.TextSize = 11
+			equippedTag.TextColor3 = Color3.fromRGB(255, 255, 255)
+			equippedTag.Text = "E"
+			equippedTag.Parent = slot
+			Instance.new("UICorner", equippedTag).CornerRadius = UDim.new(0, 6)
+		end
+
 		local name = Instance.new("TextLabel")
 		name.BackgroundTransparency = 1
 		name.Position = UDim2.fromOffset(8, 40)
@@ -1227,19 +1043,6 @@ local function rebuildSlots()
 		rarityTag.Text = def and (def.rarity or "") or ""
 		rarityTag.Parent = slot
 
-		local favoriteIcon = Instance.new("TextLabel")
-		favoriteIcon.Name = "FavoriteIcon"
-		favoriteIcon.BackgroundTransparency = 1
-		favoriteIcon.AnchorPoint = Vector2.new(1, 0)
-		favoriteIcon.Position = UDim2.new(1, -8, 0, 8)
-		favoriteIcon.Size = UDim2.fromOffset(16, 16)
-		favoriteIcon.Font = Enum.Font.GothamBold
-		favoriteIcon.TextSize = 14
-		favoriteIcon.TextColor3 = Color3.fromRGB(255, 214, 102)
-		favoriteIcon.Text = "★"
-		favoriteIcon.Visible = item.isFavorite == true
-		favoriteIcon.Parent = slot
-
 		addHover(slot, slot.BackgroundColor3, Color3.fromRGB(32, 32, 44))
 
 		slot.MouseButton1Click:Connect(function()
@@ -1247,7 +1050,7 @@ local function rebuildSlots()
 		end)
 		slot.MouseButton2Click:Connect(function()
 			setSelected(index)
-			openContextMenu(index)
+			showContextMenu(index, UserInputService:GetMouseLocation())
 		end)
 
 		slotWidgets[index] = slot
@@ -1258,24 +1061,66 @@ local function rebuildSlots()
 	end)
 
 	if #inventoryItems > 0 then
-		local desiredIndex = selectedIndex
-		if previousSelectedId then
-			for idx, item in ipairs(inventoryItems) do
-				if item.id == previousSelectedId then
-					desiredIndex = idx
-					break
-				end
-			end
+		if not selectedIndex or not inventoryItems[selectedIndex] then
+			setSelected(1)
+		else
+			setSelected(selectedIndex)
 		end
-		if not desiredIndex or not inventoryItems[desiredIndex] then
-			desiredIndex = 1
-		end
-		setSelected(desiredIndex)
 	else
 		applyDetails(nil)
 	end
-	updateEquippedPanel()
 end
+
+local function fireInventoryAction(actionType, payload)
+	if not InventoryAction then
+		warn("[InventoryController] InventoryAction remote missing")
+		return
+	end
+	local message = payload or {}
+	message.type = actionType
+	InventoryAction:FireServer(message)
+end
+
+equipBtn.MouseButton1Click:Connect(function()
+	local item = contextIndex and inventoryItems[contextIndex]
+	if not item then return end
+	fireInventoryAction("equip", { id = item.id })
+	equippedWeaponId = item.id
+	refreshEquippedPanel()
+	hideContextMenu()
+	task.delay(0.2, loadSnapshot)
+end)
+
+sellBtn.MouseButton1Click:Connect(function()
+	local item = contextIndex and inventoryItems[contextIndex]
+	if not item then return end
+	fireInventoryAction("sell", { id = item.id })
+	hideContextMenu()
+	task.delay(0.2, loadSnapshot)
+end)
+
+upgradeBtn.MouseButton1Click:Connect(function()
+	hideContextMenu()
+	warn("[InventoryController] Upgrade not implemented yet.")
+end)
+
+favoriteBtn.MouseButton1Click:Connect(function()
+	local item = contextIndex and inventoryItems[contextIndex]
+	if not item then return end
+	local nextValue = not item.favorite
+	fireInventoryAction("favorite", { id = item.id, value = nextValue })
+	item.favorite = nextValue
+	favoriteBtn.Text = nextValue and "Unfavorite" or "Favorite"
+	hideContextMenu()
+	task.delay(0.2, loadSnapshot)
+end)
+
+infoBtn.MouseButton1Click:Connect(function()
+	local item = contextIndex and inventoryItems[contextIndex]
+	if not item then return end
+	showInfoPopup(item.def)
+	hideContextMenu()
+end)
 
 local function loadSnapshot()
 	local ok, payload = pcall(function()
@@ -1295,131 +1140,43 @@ local function loadSnapshot()
 	coins = tonumber(currencies.Coins) or coins
 	weaponPoints = tonumber(currencies.WeaponPoints) or weaponPoints
 
-	updatePlayerInfo()
-	if not InventorySync then
-		inventoryItems = {}
-		for _, entry in ipairs(payload.weapons or {}) do
-			local weaponId = entry.WeaponId or entry.weaponId or entry.id or entry
-			if typeof(weaponId) == "string" and weaponId ~= "" then
-				local def = WeaponConfigs.Get(weaponId)
-				table.insert(inventoryItems, {
-					id = weaponId,
-					def = def,
-				})
-			end
+	equippedWeaponId = payload.equippedId
+
+	inventoryItems = {}
+	for _, entry in ipairs(payload.weapons or {}) do
+		local weaponId = entry.WeaponId or entry.weaponId or entry.id or entry
+		if typeof(weaponId) == "string" and weaponId ~= "" then
+			local def = WeaponConfigs.Get(weaponId)
+			table.insert(inventoryItems, {
+				id = weaponId,
+				def = def,
+				favorite = entry.Favorite == true,
+			})
 		end
-		equippedWeaponId = nil
-		rebuildSlots()
-	else
-		updateEquippedPanel()
 	end
+
+	updatePlayerInfo()
+	rebuildSlots()
+	refreshEquippedPanel()
 end
 
 closeBtn.MouseButton1Click:Connect(function()
 	inventoryGui.Enabled = false
-	closeContextMenu()
-	closeWeaponInfo()
-	closeUpgradePlaceholder()
+	hideContextMenu()
+	infoOverlay.Visible = false
 end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if input.KeyCode == Enum.KeyCode.Escape then
-		if contextMenu.Visible then
-			closeContextMenu()
-		end
-		if infoOverlay.Visible then
-			closeWeaponInfo()
-		end
-		if upgradeOverlay.Visible then
-			closeUpgradePlaceholder()
-		end
-	end
 	if gameProcessed then return end
+	if contextMenu.Visible and input.UserInputType == Enum.UserInputType.MouseButton1 then
+		hideContextMenu()
+	end
 	if input.KeyCode == Enum.KeyCode.B then
 		inventoryGui.Enabled = not inventoryGui.Enabled
 		if inventoryGui.Enabled then
 			loadSnapshot()
-			if InventoryAction then
-				InventoryAction:FireServer({ type = "request" })
-			end
 		end
 	end
-end)
-
-if InventorySync then
-	InventorySync.OnClientEvent:Connect(function(payload)
-		if typeof(payload) ~= "table" then return end
-		equippedWeaponId = payload.equippedId
-		inventoryItems = {}
-		for _, entry in ipairs(payload.items or {}) do
-			local weaponId = entry.id or entry.WeaponId or entry.weaponId or entry.name
-			if typeof(weaponId) == "string" and weaponId ~= "" then
-				local def = WeaponConfigs.Get(weaponId)
-				table.insert(inventoryItems, {
-					id = weaponId,
-					def = def,
-					isFavorite = entry.favorite == true,
-					level = entry.level or entry.Level,
-				})
-			end
-		end
-		rebuildSlots()
-	end)
-end
-
-contextBlocker.MouseButton1Click:Connect(closeContextMenu)
-contextBlocker.MouseButton2Click:Connect(closeContextMenu)
-infoClose.MouseButton1Click:Connect(closeWeaponInfo)
-infoCloseBackdrop.MouseButton1Click:Connect(closeWeaponInfo)
-upgradeClose.MouseButton1Click:Connect(closeUpgradePlaceholder)
-upgradeCloseBackdrop.MouseButton1Click:Connect(closeUpgradePlaceholder)
-
-equipAction.MouseButton1Click:Connect(function()
-	local item = contextItemIndex and inventoryItems[contextItemIndex]
-	if not item then return end
-	if InventoryAction then
-		InventoryAction:FireServer({ type = "equip", id = item.id })
-	end
-	equippedWeaponId = item.id
-	updateEquippedPanel()
-	closeContextMenu()
-end)
-
-sellAction.MouseButton1Click:Connect(function()
-	local item = contextItemIndex and inventoryItems[contextItemIndex]
-	if not item then return end
-	if InventoryAction then
-		InventoryAction:FireServer({ type = "sell", id = item.id })
-	else
-		table.remove(inventoryItems, contextItemIndex)
-		rebuildSlots()
-	end
-	closeContextMenu()
-end)
-
-upgradeAction.MouseButton1Click:Connect(function()
-	local item = contextItemIndex and inventoryItems[contextItemIndex]
-	if not item then return end
-	closeContextMenu()
-	openUpgradePlaceholder(item)
-end)
-
-favoriteAction.MouseButton1Click:Connect(function()
-	local item = contextItemIndex and inventoryItems[contextItemIndex]
-	if not item then return end
-	local newValue = not item.isFavorite
-	setItemFavorite(contextItemIndex, newValue)
-	if InventoryAction then
-		InventoryAction:FireServer({ type = "favorite", id = item.id, value = newValue })
-	end
-	closeContextMenu()
-end)
-
-infoAction.MouseButton1Click:Connect(function()
-	local item = contextItemIndex and inventoryItems[contextItemIndex]
-	if not item then return end
-	closeContextMenu()
-	openWeaponInfo(item.def)
 end)
 
 PlayerProgressEvent.OnClientEvent:Connect(function(payload)

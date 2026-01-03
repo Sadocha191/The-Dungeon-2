@@ -57,14 +57,24 @@ GetInventorySnapshot.OnServerInvoke = function(player)
 
 	local weapons = {}
 	local weaponSource = data.Weapons
+	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
 	if typeof(weaponSource) ~= "table" or #weaponSource == 0 then
-		local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
 		weaponSource = state.OwnedWeapons
+	end
+
+	local favoriteSet = {}
+	for _, name in ipairs(state.FavoriteWeapons or {}) do
+		if typeof(name) == "string" then
+			favoriteSet[name] = true
+		end
 	end
 
 	for _, weaponId in ipairs(weaponSource or {}) do
 		if typeof(weaponId) == "string" and weaponId ~= "" then
-			table.insert(weapons, { WeaponId = weaponId })
+			table.insert(weapons, {
+				WeaponId = weaponId,
+				Favorite = favoriteSet[weaponId] == true,
+			})
 		end
 	end
 
@@ -79,6 +89,7 @@ GetInventorySnapshot.OnServerInvoke = function(player)
 			Coins = currencies.Coins,
 			WeaponPoints = currencies.WeaponPoints,
 		},
+		equippedId = state.StarterWeaponName,
 		weapons = weapons,
 	}
 end
