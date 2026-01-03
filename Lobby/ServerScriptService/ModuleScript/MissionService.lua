@@ -5,9 +5,12 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local MissionConfigs = require(ReplicatedStorage:WaitForChild("MissionConfigs"))
-local CurrencyService = require(ServerScriptService:WaitForChild("CurrencyService"))
-local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
+local replicatedModules = ReplicatedStorage:WaitForChild("ModuleScripts")
+local serverModules = ServerScriptService:WaitForChild("ModuleScript")
+
+local MissionConfigs = require(replicatedModules:WaitForChild("MissionConfigs"))
+local CurrencyService = require(serverModules:WaitForChild("CurrencyService"))
+local PlayerData = require(serverModules:WaitForChild("PlayerData"))
 
 local MissionService = {}
 
