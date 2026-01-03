@@ -11,15 +11,74 @@ local UserInputService = game:GetService("UserInputService")
 local plr = Players.LocalPlayer
 local pg = plr:WaitForChild("PlayerGui")
 
-local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
-local PlayerProgressEvent = remoteEvents:WaitForChild("PlayerProgressEvent")
-local InventoryAction = remoteEvents:FindFirstChild("InventoryAction")
+local function waitForChild(parent, name, timeout)
+	local found = parent:FindFirstChild(name)
+	if found then
+		return found
+	end
+	local start = os.clock()
+	while os.clock() - start < (timeout or 5) do
+		found = parent:FindFirstChild(name)
+		if found then
+			return found
+		end
+		task.wait(0.1)
+	end
+	return nil
+end
 
-local remoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions")
-local GetInventorySnapshot = remoteFunctions:WaitForChild("RF_GetInventorySnapshot")
+local remoteEvents = waitForChild(ReplicatedStorage, "RemoteEvents", 5)
+local PlayerProgressEvent = remoteEvents and waitForChild(remoteEvents, "PlayerProgressEvent", 5)
+local InventoryAction = remoteEvents and remoteEvents:FindFirstChild("InventoryAction")
 
-local WeaponConfigs = require(ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("WeaponConfigs"))
-local Races = require(ReplicatedStorage:WaitForChild("Races"))
+local remoteFunctions = waitForChild(ReplicatedStorage, "RemoteFunctions", 5)
+local GetInventorySnapshot = remoteFunctions and remoteFunctions:FindFirstChild("RF_GetInventorySnapshot")
+
+local function findModule(root, name)
+	local direct = root:FindFirstChild(name)
+	if direct and direct:IsA("ModuleScript") then
+		return direct
+	end
+	local moduleFolder = root:FindFirstChild("ModuleScripts")
+		or root:FindFirstChild("ModuleScript")
+	if moduleFolder then
+		local nested = moduleFolder:FindFirstChild(name, true)
+		if nested and nested:IsA("ModuleScript") then
+			return nested
+		end
+	end
+	return nil
+end
+
+local WeaponConfigs = {}
+do
+	local module = findModule(ReplicatedStorage, "WeaponConfigs")
+	if module then
+		local ok, result = pcall(require, module)
+		if ok and result then
+			WeaponConfigs = result
+		else
+			warn("[InventoryController] Failed to load WeaponConfigs")
+		end
+	else
+		warn("[InventoryController] Missing WeaponConfigs module")
+	end
+end
+
+local Races = { Defs = {} }
+do
+	local module = findModule(ReplicatedStorage, "Races")
+	if module then
+		local ok, result = pcall(require, module)
+		if ok and result then
+			Races = result
+		else
+			warn("[InventoryController] Failed to load Races")
+		end
+	else
+		warn("[InventoryController] Missing Races module")
+	end
+end
 
 local function hexToColor3(hex)
 	hex = tostring(hex or "")
@@ -1123,6 +1182,10 @@ infoBtn.MouseButton1Click:Connect(function()
 end)
 
 local function loadSnapshot()
+	if not GetInventorySnapshot then
+		warn("[InventoryController] RF_GetInventorySnapshot missing")
+		return
+	end
 	local ok, payload = pcall(function()
 		return GetInventorySnapshot:InvokeServer()
 	end)
@@ -1179,16 +1242,20 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	end
 end)
 
-PlayerProgressEvent.OnClientEvent:Connect(function(payload)
-	if typeof(payload) ~= "table" or payload.type ~= "progress" then return end
-	level = tonumber(payload.level) or level
-	xp = tonumber(payload.xp) or xp
-	nextXp = tonumber(payload.nextXp) or nextXp
-	coins = tonumber(payload.coins) or coins
-	if inventoryGui.Enabled then
-		updatePlayerInfo()
-	end
-end)
+if PlayerProgressEvent then
+	PlayerProgressEvent.OnClientEvent:Connect(function(payload)
+		if typeof(payload) ~= "table" or payload.type ~= "progress" then return end
+		level = tonumber(payload.level) or level
+		xp = tonumber(payload.xp) or xp
+		nextXp = tonumber(payload.nextXp) or nextXp
+		coins = tonumber(payload.coins) or coins
+		if inventoryGui.Enabled then
+			updatePlayerInfo()
+		end
+	end)
+else
+	warn("[InventoryController] PlayerProgressEvent missing")
+end
 
 plr:GetAttributeChangedSignal("Race"):Connect(function()
 	if inventoryGui.Enabled then
