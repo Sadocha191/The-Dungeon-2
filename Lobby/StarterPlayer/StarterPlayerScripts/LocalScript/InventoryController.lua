@@ -206,6 +206,7 @@ playerPad.PaddingLeft = UDim.new(0, 16)
 playerPad.PaddingRight = UDim.new(0, 16)
 local playerLayout = Instance.new("UIListLayout", playerPanel)
 playerLayout.Padding = UDim.new(0, 6)
+playerLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
 local playerName = Instance.new("TextLabel")
 playerName.BackgroundTransparency = 1
@@ -294,6 +295,7 @@ local statRows = {
 local currenciesFrame = Instance.new("Frame")
 currenciesFrame.BackgroundTransparency = 1
 currenciesFrame.Size = UDim2.new(1, 0, 0, 34)
+currenciesFrame.LayoutOrder = 5
 currenciesFrame.Parent = playerPanel
 currenciesFrame.LayoutOrder = 999
 
