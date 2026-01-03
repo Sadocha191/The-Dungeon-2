@@ -206,6 +206,7 @@ playerPad.PaddingLeft = UDim.new(0, 16)
 playerPad.PaddingRight = UDim.new(0, 16)
 local playerLayout = Instance.new("UIListLayout", playerPanel)
 playerLayout.Padding = UDim.new(0, 6)
+playerLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
 local playerName = Instance.new("TextLabel")
 playerName.BackgroundTransparency = 1
@@ -214,12 +215,14 @@ playerName.Font = Enum.Font.GothamBold
 playerName.TextSize = 16
 playerName.TextColor3 = Color3.fromRGB(240, 240, 240)
 playerName.TextXAlignment = Enum.TextXAlignment.Left
-playerName.Text = "PlayerName • Lv. 1"
+playerName.LayoutOrder = 1
+playerName.Text = "PlayerName - Lv. 1"
 playerName.Parent = playerPanel
 
 local expWrap = Instance.new("Frame")
 expWrap.BackgroundTransparency = 1
 expWrap.Size = UDim2.new(1, 0, 0, 26)
+expWrap.LayoutOrder = 2
 expWrap.Parent = playerPanel
 
 local expLabel = Instance.new("TextLabel")
@@ -254,12 +257,14 @@ raceLabel.Font = Enum.Font.Gotham
 raceLabel.TextSize = 13
 raceLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
 raceLabel.TextXAlignment = Enum.TextXAlignment.Left
+raceLabel.LayoutOrder = 3
 raceLabel.Text = "Race: -"
 raceLabel.Parent = playerPanel
 
 local statsList = Instance.new("Frame")
 statsList.BackgroundTransparency = 1
 statsList.Size = UDim2.new(1, 0, 0, 126)
+statsList.LayoutOrder = 4
 statsList.Parent = playerPanel
 local statsLayout = Instance.new("UIListLayout", statsList)
 statsLayout.Padding = UDim.new(0, 4)
@@ -290,13 +295,14 @@ local statRows = {
 local currenciesFrame = Instance.new("Frame")
 currenciesFrame.BackgroundTransparency = 1
 currenciesFrame.Size = UDim2.new(1, 0, 0, 34)
+currenciesFrame.LayoutOrder = 5
 currenciesFrame.Parent = playerPanel
 currenciesFrame.LayoutOrder = 999
 
 local coinsLabel = Instance.new("TextLabel")
 coinsLabel.BackgroundTransparency = 1
 coinsLabel.Size = UDim2.new(1, 0, 0, 16)
-coinsLabel.Font = Enum.Font.GothamBold
+coinsLabel.Font = Enum.Font.Gotham
 coinsLabel.TextSize = 13
 coinsLabel.TextColor3 = Color3.fromRGB(235, 235, 235)
 coinsLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -843,7 +849,7 @@ local function refreshFinalStats(raceName)
 end
 
 local function updatePlayerInfo()
-	playerName.Text = ("%s – Lv. %d"):format(plr.Name, level)
+playerName.Text = ("%s - Lv. %d"):format(plr.Name, level)
 	expLabel.Text = ("EXP: %d/%d"):format(xp, math.max(1, nextXp))
 	local pct = math.clamp(xp / math.max(1, nextXp), 0, 1)
 	TweenService:Create(expFill, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
