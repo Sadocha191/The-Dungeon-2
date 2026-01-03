@@ -1130,6 +1130,48 @@ local function rebuildSlots()
 	end
 end
 
+local function loadSnapshot()
+	if not GetInventorySnapshot then
+		warn("[InventoryController] RF_GetInventorySnapshot missing")
+		return
+	end
+	local ok, payload = pcall(function()
+		return GetInventorySnapshot:InvokeServer()
+	end)
+	if not ok or typeof(payload) ~= "table" then
+		warn("[InventoryController] Failed to load snapshot")
+		return
+	end
+
+	local info = payload.playerInfo or {}
+	level = tonumber(info.level) or level
+	xp = tonumber(info.xp) or xp
+	nextXp = tonumber(info.nextXp) or nextXp
+
+	local currencies = payload.currencies or {}
+	coins = tonumber(currencies.Coins) or coins
+	weaponPoints = tonumber(currencies.WeaponPoints) or weaponPoints
+
+	equippedWeaponId = payload.equippedId
+
+	inventoryItems = {}
+	for _, entry in ipairs(payload.weapons or {}) do
+		local weaponId = entry.WeaponId or entry.weaponId or entry.id or entry
+		if typeof(weaponId) == "string" and weaponId ~= "" then
+			local def = WeaponConfigs.Get and WeaponConfigs.Get(weaponId) or nil
+			table.insert(inventoryItems, {
+				id = weaponId,
+				def = def,
+				favorite = entry.Favorite == true,
+			})
+		end
+	end
+
+	updatePlayerInfo()
+	rebuildSlots()
+	refreshEquippedPanel()
+end
+
 local function fireInventoryAction(actionType, payload)
 	if not InventoryAction then
 		warn("[InventoryController] InventoryAction remote missing")
@@ -1180,48 +1222,6 @@ infoBtn.MouseButton1Click:Connect(function()
 	showInfoPopup(item.def)
 	hideContextMenu()
 end)
-
-local function loadSnapshot()
-	if not GetInventorySnapshot then
-		warn("[InventoryController] RF_GetInventorySnapshot missing")
-		return
-	end
-	local ok, payload = pcall(function()
-		return GetInventorySnapshot:InvokeServer()
-	end)
-	if not ok or typeof(payload) ~= "table" then
-		warn("[InventoryController] Failed to load snapshot")
-		return
-	end
-
-	local info = payload.playerInfo or {}
-	level = tonumber(info.level) or level
-	xp = tonumber(info.xp) or xp
-	nextXp = tonumber(info.nextXp) or nextXp
-
-	local currencies = payload.currencies or {}
-	coins = tonumber(currencies.Coins) or coins
-	weaponPoints = tonumber(currencies.WeaponPoints) or weaponPoints
-
-	equippedWeaponId = payload.equippedId
-
-	inventoryItems = {}
-	for _, entry in ipairs(payload.weapons or {}) do
-		local weaponId = entry.WeaponId or entry.weaponId or entry.id or entry
-		if typeof(weaponId) == "string" and weaponId ~= "" then
-			local def = WeaponConfigs.Get(weaponId)
-			table.insert(inventoryItems, {
-				id = weaponId,
-				def = def,
-				favorite = entry.Favorite == true,
-			})
-		end
-	end
-
-	updatePlayerInfo()
-	rebuildSlots()
-	refreshEquippedPanel()
-end
 
 closeBtn.MouseButton1Click:Connect(function()
 	inventoryGui.Enabled = false

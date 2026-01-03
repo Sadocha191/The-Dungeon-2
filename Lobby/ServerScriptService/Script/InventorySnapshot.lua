@@ -58,8 +58,10 @@ GetInventorySnapshot.OnServerInvoke = function(player)
 	local weapons = {}
 	local weaponSource = data.Weapons
 	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
-	if typeof(weaponSource) ~= "table" or #weaponSource == 0 then
+	if typeof(state.OwnedWeapons) == "table" and #state.OwnedWeapons > 0 then
 		weaponSource = state.OwnedWeapons
+	elseif typeof(weaponSource) ~= "table" or #weaponSource == 0 then
+		weaponSource = {}
 	end
 
 	local favoriteSet = {}
