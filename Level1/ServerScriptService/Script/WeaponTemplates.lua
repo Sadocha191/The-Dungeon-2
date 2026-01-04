@@ -10,9 +10,11 @@ if not WeaponTemplates then
 	return
 end
 
-local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
-local WeaponConfigs = moduleFolder and moduleFolder:FindFirstChild("WeaponConfigs")
-	and require(moduleFolder.WeaponConfigs) or nil
+local moduleFolder = ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
+local weaponConfigsModule = (moduleFolder and moduleFolder:FindFirstChild("WeaponConfigs"))
+	or ReplicatedStorage:FindFirstChild("WeaponConfigs")
+local WeaponConfigs = weaponConfigsModule and require(weaponConfigsModule) or nil
 
 if not WeaponConfigs or not WeaponConfigs.GetAll then
 	warn("[WeaponTemplates] Missing WeaponConfigs module")

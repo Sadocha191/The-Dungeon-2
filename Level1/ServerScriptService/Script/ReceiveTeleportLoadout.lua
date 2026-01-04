@@ -53,7 +53,12 @@ Players.PlayerAdded:Connect(function(player: Player)
 	local tdata = joinData and joinData.TeleportData
 
 	if typeof(tdata) ~= "table" then
-		warn("[Dungeon] No TeleportData for", player.Name)
+		warn("[Dungeon] No TeleportData for", player.Name, "- using fallback loadout")
+		local fallback = player:GetAttribute("StarterWeaponName")
+		if typeof(fallback) == "string" and fallback ~= "" then
+			WeaponService.SyncLoadoutFromStarter(player)
+		end
+		WeaponService.EquipLoadout(player)
 		return
 	end
 
