@@ -270,8 +270,18 @@ local function buildLoadoutList(player: Player)
 end
 
 function WeaponService.EquipLoadout(player: Player)
-	local backpack = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 5)
-	if not backpack then return end
+	local backpack = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 10)
+	if not backpack then
+		local conn
+		conn = player.CharacterAdded:Connect(function()
+			if conn then
+				conn:Disconnect()
+				conn = nil
+			end
+			WeaponService.EquipLoadout(player)
+		end)
+		return
+	end
 
 	clearWeaponTools(backpack)
 	clearWeaponTools(player.Character)
