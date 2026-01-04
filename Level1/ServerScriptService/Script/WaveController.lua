@@ -291,8 +291,8 @@ local function spawnOrc(hp, dmg, spd, wave, onKill)
 	hum.MaxHealth = hp
 	hum.Health = hp
 	hum.WalkSpeed = spd
-	hum.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
-	hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	hum.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOn
+	hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.Viewer
 	pcall(function() root:SetNetworkOwner(nil) end)
 
 	root.CFrame = getSafeSpawnCFrame(orc)
