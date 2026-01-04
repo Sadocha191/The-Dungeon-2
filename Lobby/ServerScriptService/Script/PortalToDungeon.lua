@@ -125,17 +125,15 @@ local function tryTeleport(player: Player, placeId: number)
 	end
 
 	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
-	if not state.StarterWeaponClaimed or typeof(state.StarterWeaponName) ~= "string" then
-		local weaponName = findWeaponName(player)
-		if typeof(weaponName) == "string" and weaponName ~= "" then
-			PlayerStateStore.SetStarterWeaponClaimed(player, weaponName)
-			PlayerStateStore.EnsureOwnedWeapon(player, weaponName)
-			state = PlayerStateStore.Get(player) or state
-		else
-			-- wymuszamy broń przed wejściem do dungeona
-			warn("[PortalToLevel1] Missing starter weapon for", player.Name)
-			return
-		end
+	local weaponName = findWeaponName(player)
+	if typeof(weaponName) == "string" and weaponName ~= "" then
+		PlayerStateStore.SetStarterWeaponClaimed(player, weaponName)
+		PlayerStateStore.EnsureOwnedWeapon(player, weaponName)
+		state = PlayerStateStore.Get(player) or state
+	else
+		-- wymuszamy broń przed wejściem do dungeona
+		warn("[PortalToLevel1] Missing starter weapon for", player.Name)
+		return
 	end
 
 	local tdata = {
