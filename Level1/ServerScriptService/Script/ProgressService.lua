@@ -73,6 +73,16 @@ local BASE_JUMP_POWER = 50
 
 -- Pause => freeze players too
 local frozen = {} -- [uid] = {ws, jp}
+local battleFocus = {} -- [uid] = { untilTime }
+local momentumStacks = {} -- [uid] = stacks
+local riposteReady = {} -- [uid] = untilTime
+local bladeDanceHits = {} -- [uid] = count
+local parryUntil = {} -- [uid] = untilTime
+local quickDrawUntil = {} -- [uid] = untilTime
+local manaSurgeStacks = {} -- [uid] = count
+local arcaneOverflowCd = {} -- [uid] = untilTime
+local lastPistolShot = {} -- [uid] = time
+local lastHealth = {} -- [uid] = health
 local getFinalStats
 local function updatePlayerDerivedStats(plr: Player)
 	local char = plr.Character
@@ -136,23 +146,28 @@ end
 -- ===== Upgrade roll (3) =====
 local pending = {} -- [uid] = {token, choices}
 
-local function roll3()
-	local pool = table.clone(UpDefs.POOL)
+local function roll3(weaponType: string?)
+	local pool = UpDefs.GetPool and UpDefs.GetPool(weaponType) or table.clone(UpDefs.POOL)
+	if #pool < 3 then
+		pool = table.clone(UpDefs.POOL)
+	end
 	local out = {}
 	for i=1,3 do
 		local idx = math.random(1, #pool)
 		local base = pool[idx]
 		table.remove(pool, idx)
 
-		local rarity, color = UpDefs.RollRarity()
-		-- lekkie wzmocnienie per rarity
-		local mult = (rarity=="Common" and 1.0) or (rarity=="Rare" and 1.4) or (rarity=="Epic" and 2.0) or 3.0
-
+		local rarity, color, mult = UpDefs.RollRarity()
+		local raw = (base.base or 0) * (mult or 1)
 		local value
-		if base.id == "ASPD" or base.id == "CRITR" or base.id == "CRITM" or base.id == "FCH" then
-			value = math.floor((base.base * mult) * 100) / 100
+		if base.mode == "count" then
+			value = math.max(1, math.floor(raw + 0.5))
+		elseif base.mode == "flat" then
+			value = math.floor(raw * 100) / 100
+		elseif base.mode == "percent" then
+			value = math.max(1, math.floor(raw + 0.5))
 		else
-			value = math.floor(base.base * mult)
+			value = math.floor(raw * 100) / 100
 		end
 
 		out[i] = {
@@ -163,6 +178,9 @@ local function roll3()
 			value = value,
 			rarity = rarity,
 			color = color,
+			applyScale = base.applyScale or 1,
+			secondaryStat = base.secondaryStat,
+			secondaryScale = base.secondaryScale,
 		}
 	end
 	return out
@@ -170,7 +188,10 @@ end
 
 local function openUpgrade(plr: Player)
 	local token = ("%d_%d"):format(plr.UserId, math.floor(os.clock()*1000))
-	local choices = roll3()
+	local char = plr.Character
+	local tool = char and char:FindFirstChildOfClass("Tool")
+	local weaponType = tool and resolveWeaponType(tool:GetAttribute("WeaponType")) or ""
+	local choices = roll3(weaponType)
 	pending[plr.UserId] = { token = token, choices = choices }
 	PauseState.Value = true
 	UpgradeEvent:FireClient(plr, { type="SHOW", token=token, choices=choices })
@@ -190,25 +211,84 @@ UpgradeEvent.OnServerEvent:Connect(function(plr, payload)
 
 	local d = PlayerData.Get(plr)
 	local stat = choice.stat
+	local scaledValue = (tonumber(choice.value) or 0) * (tonumber(choice.applyScale) or 1)
 
 	-- defaults if missing in datastore (compat)
 	if stat == "critChance" and d.critChance == nil then d.critChance = 0 end
 	if stat == "critMult" and d.critMult == nil then d.critMult = 0 end
 
 	if stat == "attackSpeed" then
-		d.attackSpeed = math.clamp((tonumber(d.attackSpeed) or 1.0) + choice.value, 0.6, 2.0)
+		d.attackSpeed = math.clamp((tonumber(d.attackSpeed) or 1.0) + scaledValue, 0.6, 2.0)
 	elseif stat == "multiShot" then
-		d.multiShot = math.clamp((tonumber(d.multiShot) or 0) + choice.value, 0, 6)
+		d.multiShot = math.clamp((tonumber(d.multiShot) or 0) + scaledValue, 0, 6)
 	elseif stat == "fireChance" then
-		d.fireChance = math.clamp((tonumber(d.fireChance) or 0) + choice.value, 0, 0.9)
+		d.fireChance = math.clamp((tonumber(d.fireChance) or 0) + scaledValue, 0, 0.9)
 	elseif stat == "fireDps" then
-		d.fireDps = math.max(0, (tonumber(d.fireDps) or 0) + choice.value)
+		d.fireDps = math.max(0, (tonumber(d.fireDps) or 0) + scaledValue)
 	elseif stat == "damage" then
-		d.damage = math.max(0, (tonumber(d.damage) or 0) + choice.value)
+		d.damage = math.max(0, (tonumber(d.damage) or 0) + scaledValue)
 	elseif stat == "critChance" then
-		d.critChance = math.clamp((tonumber(d.critChance) or 0) + choice.value, 0, 0.6)
+		d.critChance = math.clamp((tonumber(d.critChance) or 0) + scaledValue, 0, 0.6)
 	elseif stat == "critMult" then
-		d.critMult = math.clamp((tonumber(d.critMult) or 0) + choice.value, 0, 1.0)
+		d.critMult = math.clamp((tonumber(d.critMult) or 0) + scaledValue, 0, 1.0)
+	elseif stat == "damageBonusPct" then
+		d.damageBonusPct = math.max(0, (tonumber(d.damageBonusPct) or 0) + scaledValue)
+	elseif stat == "lifesteal" then
+		d.lifesteal = math.clamp((tonumber(d.lifesteal) or 0) + scaledValue, 0, 0.12)
+	elseif stat == "rangeBonus" then
+		d.rangeBonus = math.max(0, (tonumber(d.rangeBonus) or 0) + scaledValue)
+	elseif stat == "battleFocusBonus" then
+		d.battleFocusBonus = math.max(0, (tonumber(d.battleFocusBonus) or 0) + scaledValue)
+	elseif stat == "momentumBonus" then
+		d.momentumBonus = math.max(0, (tonumber(d.momentumBonus) or 0) + scaledValue)
+	elseif stat == "cleaveBonus" then
+		d.cleaveBonus = math.max(0, (tonumber(d.cleaveBonus) or 0) + scaledValue)
+	elseif stat == "riposteBonus" then
+		d.riposteBonus = math.max(0, (tonumber(d.riposteBonus) or 0) + scaledValue)
+	elseif stat == "bladeDanceEvery" then
+		d.bladeDanceEvery = math.max(0, (tonumber(d.bladeDanceEvery) or 0) + scaledValue)
+	elseif stat == "parryReduction" then
+		d.parryReduction = math.clamp((tonumber(d.parryReduction) or 0) + scaledValue, 0, 0.6)
+	elseif stat == "staggerDuration" then
+		d.staggerDuration = math.max(0, (tonumber(d.staggerDuration) or 0) + scaledValue)
+	elseif stat == "executeBonus" then
+		d.executeBonus = math.max(0, (tonumber(d.executeBonus) or 0) + scaledValue)
+	elseif stat == "overchargeBonus" then
+		d.overchargeBonus = math.max(0, (tonumber(d.overchargeBonus) or 0) + scaledValue)
+	elseif stat == "sweepBonus" then
+		d.sweepBonus = math.max(0, (tonumber(d.sweepBonus) or 0) + scaledValue)
+	elseif stat == "thrustBonus" then
+		d.thrustBonus = math.max(0, (tonumber(d.thrustBonus) or 0) + scaledValue)
+	elseif stat == "pierceBonus" then
+		d.pierceBonus = math.max(0, (tonumber(d.pierceBonus) or 0) + scaledValue)
+	elseif stat == "slamRadiusBonus" then
+		d.slamRadiusBonus = math.max(0, (tonumber(d.slamRadiusBonus) or 0) + scaledValue)
+	elseif stat == "aftershockMultiplier" then
+		d.aftershockMultiplier = math.max(0, (tonumber(d.aftershockMultiplier) or 0) + scaledValue)
+	elseif stat == "eagleEyeBonus" then
+		d.eagleEyeBonus = math.max(0, (tonumber(d.eagleEyeBonus) or 0) + scaledValue)
+	elseif stat == "quickDrawBonus" then
+		d.quickDrawBonus = math.max(0, (tonumber(d.quickDrawBonus) or 0) + scaledValue)
+	elseif stat == "arrowPierce" then
+		d.arrowPierce = math.max(0, (tonumber(d.arrowPierce) or 0) + scaledValue)
+	elseif stat == "elementalPowerBonus" then
+		d.elementalPowerBonus = math.max(0, (tonumber(d.elementalPowerBonus) or 0) + scaledValue)
+	elseif stat == "arcaneOverflowHeal" then
+		d.arcaneOverflowHeal = math.max(0, (tonumber(d.arcaneOverflowHeal) or 0) + scaledValue)
+	elseif stat == "manaSurgeEvery" then
+		d.manaSurgeEvery = math.max(0, (tonumber(d.manaSurgeEvery) or 0) + scaledValue)
+	elseif stat == "deadeyeDelay" then
+		d.deadeyeDelay = math.max(0, (tonumber(d.deadeyeDelay) or 0) + scaledValue)
+	elseif stat == "ricochet" then
+		d.ricochet = math.clamp((tonumber(d.ricochet) or 0) + scaledValue, 0, 6)
+	end
+
+	if choice.secondaryStat then
+		local secondaryScale = tonumber(choice.secondaryScale) or 1
+		local secondaryValue = (tonumber(choice.value) or 0) * secondaryScale
+		if choice.secondaryStat == "attackSpeed" then
+			d.attackSpeed = math.clamp((tonumber(d.attackSpeed) or 1.0) + secondaryValue, 0.6, 2.0)
+		end
 	end
 
 	-- track owned upgrades for UI
@@ -266,6 +346,81 @@ local function applyBurn(h: Humanoid, dps: number, seconds: number)
 	end)
 end
 
+local EXECUTE_THRESHOLD = 0.3
+local MOMENTUM_MAX = 5
+local BATTLE_FOCUS_DURATION = 4
+local RIPOSTE_DURATION = 5
+local QUICK_DRAW_DURATION = 3
+local ARCANE_OVERFLOW_COOLDOWN = 4
+local PARRY_WINDOW_DURATION = 0.6
+local MANA_SURGE_BONUS = 0.25
+local RICOCHET_RADIUS = 10
+
+local function applyStagger(hum: Humanoid, duration: number)
+	if duration <= 0 then return end
+	local previous = hum.WalkSpeed
+	hum.WalkSpeed = 0
+	task.delay(duration, function()
+		if hum.Parent then
+			hum.WalkSpeed = previous
+		end
+	end)
+end
+
+local function applyExecute(plr: Player, mobHum: Humanoid, baseDamage: number)
+	local d = PlayerData.Get(plr)
+	local executeBonus = tonumber(d.executeBonus) or 0
+	if executeBonus <= 0 or mobHum.MaxHealth <= 0 then
+		return baseDamage
+	end
+	if (mobHum.Health / mobHum.MaxHealth) <= EXECUTE_THRESHOLD then
+		return math.max(1, math.floor(baseDamage * (1 + executeBonus)))
+	end
+	return baseDamage
+end
+
+local function applyRiposte(plr: Player, baseDamage: number)
+	local d = PlayerData.Get(plr)
+	local bonus = tonumber(d.riposteBonus) or 0
+	if bonus <= 0 then return baseDamage end
+	local readyUntil = riposteReady[plr.UserId]
+	if readyUntil and readyUntil > time() then
+		riposteReady[plr.UserId] = nil
+		return math.max(1, math.floor(baseDamage * (1 + bonus)))
+	end
+	return baseDamage
+end
+
+local function applyMomentum(plr: Player, baseDamage: number)
+	local d = PlayerData.Get(plr)
+	local bonus = tonumber(d.momentumBonus) or 0
+	if bonus <= 0 then return baseDamage end
+	local stacks = momentumStacks[plr.UserId] or 0
+	local mult = 1 + (stacks * bonus)
+	return math.max(1, math.floor(baseDamage * mult))
+end
+
+local function updateMomentum(plr: Player, hitSuccess: boolean)
+	local uid = plr.UserId
+	if hitSuccess then
+		local current = momentumStacks[uid] or 0
+		momentumStacks[uid] = math.min(MOMENTUM_MAX, current + 1)
+	else
+		momentumStacks[uid] = 0
+	end
+end
+
+local function grantBattleFocus(plr: Player)
+	local d = PlayerData.Get(plr)
+	if (tonumber(d.battleFocusBonus) or 0) <= 0 then return end
+	battleFocus[plr.UserId] = { untilTime = time() + BATTLE_FOCUS_DURATION }
+end
+
+local function grantQuickDraw(plr: Player)
+	local d = PlayerData.Get(plr)
+	if (tonumber(d.quickDrawBonus) or 0) <= 0 then return end
+	quickDrawUntil[plr.UserId] = time() + QUICK_DRAW_DURATION
+end
 local function resolveWeaponType(rawType: string?): string
 	if rawType == "Melee" then return "Sword" end
 	if rawType == "Wand" then return "Staff" end
@@ -317,6 +472,26 @@ local function getDamageBonusPct(d): number
 	return 0
 end
 
+local function getBattleFocusBonus(plr: Player, d)
+	local bonus = tonumber(d.battleFocusBonus) or 0
+	if bonus <= 0 then return 0 end
+	local active = battleFocus[plr.UserId]
+	if active and active.untilTime and active.untilTime > time() then
+		return bonus
+	end
+	return 0
+end
+
+local function getQuickDrawBonus(plr: Player, d)
+	local bonus = tonumber(d.quickDrawBonus) or 0
+	if bonus <= 0 then return 0 end
+	local active = quickDrawUntil[plr.UserId]
+	if active and active > time() then
+		return bonus
+	end
+	return 0
+end
+
 local function getCritMultBonus(d, baseCritDmg: number): number
 	local raw = tonumber(d.critMult)
 	if raw == nil then return 0 end
@@ -362,17 +537,29 @@ getFinalStats = function(plr: Player, tool: Tool?)
 end
 
 local function getCombatStats(plr: Player, tool: Tool?)
+	local d = PlayerData.Get(plr)
 	local stats = getFinalStats(plr, tool)
+	local battleBonus = getBattleFocusBonus(plr, d)
+	local quickDrawBonus = getQuickDrawBonus(plr, d)
+	local elementalPower = tonumber(d.elementalPowerBonus) or 0
+
+	stats.damageBonusPct = math.max(0, stats.damageBonusPct + battleBonus)
+	stats.attackSpeed = math.clamp(stats.attackSpeed + quickDrawBonus, 0.6, 2.0)
+	stats.fireDps = math.max(0, stats.fireDps * (1 + elementalPower))
 	local finalAtk = math.max(1, stats.weaponAtk * (1 + stats.damageBonusPct))
 	stats.finalAtk = finalAtk
 	return stats
 end
 
-local function dealMobDamage(plr: Player, mobHum: Humanoid, mobRoot: BasePart, baseDamage: number, fireChance: number, fireDps: number, critC: number, critM: number, lifesteal: number)
-	local isCrit = (math.random() < critC)
-	local final = baseDamage
-	if isCrit then final = math.floor(baseDamage * critM) end
+local function dealMobDamage(plr: Player, mobHum: Humanoid, mobRoot: BasePart, baseDamage: number, fireChance: number, fireDps: number, critC: number, critM: number, lifesteal: number, extraCritBonus: number?)
+	local critChance = math.clamp(critC + (extraCritBonus or 0), 0, 1)
+	local damage = applyExecute(plr, mobHum, baseDamage)
+	damage = applyRiposte(plr, damage)
+	local isCrit = (math.random() < critChance)
+	local final = damage
+	if isCrit then final = math.floor(damage * critM) end
 
+	local willDie = mobHum.Health - final <= 0
 	mobHum:TakeDamage(final)
 
 	-- stimmy indicator (client draws)
@@ -381,6 +568,14 @@ local function dealMobDamage(plr: Player, mobHum: Humanoid, mobRoot: BasePart, b
 		amount = final,
 		crit = isCrit,
 	})
+
+	if willDie then
+		grantBattleFocus(plr)
+	end
+
+	if isCrit then
+		grantQuickDraw(plr)
+	end
 
 	if lifesteal > 0 then
 		local hum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
@@ -491,9 +686,30 @@ local function overlapHit(pos: Vector3, radius: number, ignore: {Instance}, hitM
 	return nil
 end
 
+local function findNearestEnemy(pos: Vector3, excludeModel: Model?)
+	local enf = enemiesFolder()
+	if not enf then return nil end
+	local best, bestRoot, bestDist
+	for _,m in ipairs(enf:GetChildren()) do
+		if m ~= excludeModel then
+			local hum = m:FindFirstChildOfClass("Humanoid")
+			local root = m:FindFirstChild("HumanoidRootPart")
+			if hum and root and hum.Health > 0 then
+				local dist = (root.Position - pos).Magnitude
+				if dist <= RICOCHET_RADIUS and (not bestDist or dist < bestDist) then
+					best = hum
+					bestRoot = root
+					bestDist = dist
+				end
+			end
+		end
+	end
+	return best, bestRoot
+end
+
 local function applyAreaDamage(plr: Player, center: Vector3, radius: number, hitLimit: number?, damage: number, stats)
 	local enf = enemiesFolder()
-	if not enf then return end
+	if not enf then return 0 end
 
 	local targets = {}
 	for _,m in ipairs(enf:GetChildren()) do
@@ -509,13 +725,16 @@ local function applyAreaDamage(plr: Player, center: Vector3, radius: number, hit
 
 	table.sort(targets, function(a, b) return a.dist < b.dist end)
 	local maxHits = hitLimit or #targets
+	local hits = 0
 	for i = 1, math.min(maxHits, #targets) do
 		local entry = targets[i]
-		dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal)
+		dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, 0)
+		hits += 1
 	end
+	return hits
 end
 
-local function spawnProjectile(plr: Player, origin: Vector3, dir: Vector3, speed: number, range: number, damage: number, radius: number, pierce: number, impactAoE: {radius: number, hitLimit: number, damageMul: number}?)
+local function spawnProjectile(plr: Player, origin: Vector3, dir: Vector3, speed: number, range: number, damage: number, radius: number, pierce: number, impactAoE: {radius: number, hitLimit: number, damageMul: number}?, extraCritBonus: number?)
 	local p = Instance.new("Part")
 	p.Size = Vector3.new(radius * 2, radius * 2, radius * 2)
 	p.Shape = Enum.PartType.Ball
@@ -549,7 +768,7 @@ local function spawnProjectile(plr: Player, origin: Vector3, dir: Vector3, speed
 
 		local oh, oroot, omodel = overlapHit(nextPos, radius, ignore, hitModels)
 		if oh and oroot and omodel then
-			dealMobDamage(plr, oh, oroot, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal)
+			dealMobDamage(plr, oh, oroot, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, extraCritBonus)
 			if impactAoE then
 				local aoeDamage = math.max(1, math.floor(damage * impactAoE.damageMul))
 				applyAreaDamage(plr, oroot.Position, impactAoE.radius, impactAoE.hitLimit, aoeDamage, stats)
@@ -568,7 +787,7 @@ local function spawnProjectile(plr: Player, origin: Vector3, dir: Vector3, speed
 				local mh = model:FindFirstChildOfClass("Humanoid")
 				local mr = model:FindFirstChild("HumanoidRootPart")
 				if mh and mr and mh.Health > 0 then
-					dealMobDamage(plr, mh, mr, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal)
+					dealMobDamage(plr, mh, mr, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, extraCritBonus)
 					if impactAoE then
 						local aoeDamage = math.max(1, math.floor(damage * impactAoE.damageMul))
 						applyAreaDamage(plr, mr.Position, impactAoE.radius, impactAoE.hitLimit, aoeDamage, stats)
@@ -609,34 +828,113 @@ WeaponEvent.OnServerEvent:Connect(function(plr, payload)
 	local weaponType = resolveWeaponType(wType)
 	local stats = getCombatStats(plr, tool)
 	local aspd = stats.attackSpeed
+	local d = PlayerData.Get(plr)
+	local rangeBonus = tonumber(d.rangeBonus) or 0
 
-	if payload.action == "MELEE" and (weaponType == "Sword" or weaponType == "Scythe" or weaponType == "Halberd") then
+	if payload.action == "MELEE" and (weaponType == "Sword" or weaponType == "Scythe" or weaponType == "Halberd" or weaponType == "Claymore" or weaponType == "Greataxe") then
 		local now = os.clock()
-		local cdBase = (weaponType == "Scythe") and 0.70 or (weaponType == "Halberd" and 0.60 or 0.50)
+		local cdBase = (weaponType == "Scythe") and 0.70
+			or (weaponType == "Halberd" and 0.60)
+			or (weaponType == "Claymore" and 0.85)
+			or (weaponType == "Greataxe" and 1.0)
+			or 0.50
 		local cd = cdBase / aspd
 		if swingCd[plr.UserId] and (now - swingCd[plr.UserId]) < cd then return end
 		swingCd[plr.UserId] = now
 
 		local forward = hrp.CFrame.LookVector
+		local hitCount = 0
+
 		if weaponType == "Sword" then
-			local targets = getMeleeTargetsArc(hrp.Position + forward * 2, forward, 6, 90, 3)
-			local damage = math.max(1, math.floor(stats.finalAtk * 0.75))
+			local hitLimit = 3 + math.floor(tonumber(d.cleaveBonus) or 0)
+			local targets = getMeleeTargetsArc(hrp.Position + forward * 2, forward, 6 + rangeBonus, 90, hitLimit)
+			local damage = applyMomentum(plr, math.max(1, math.floor(stats.finalAtk * 0.75)))
+			local bladeEvery = tonumber(d.bladeDanceEvery) or 0
+			local extraSwing = false
+			if bladeEvery > 0 then
+				local totalHits = (bladeDanceHits[plr.UserId] or 0) + #targets
+				if totalHits >= bladeEvery then
+					extraSwing = true
+					totalHits -= bladeEvery
+				end
+				bladeDanceHits[plr.UserId] = totalHits
+			end
 			for _,entry in ipairs(targets) do
-				dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal)
+				dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, 0)
+				hitCount += 1
+			end
+			if extraSwing then
+				for _,entry in ipairs(targets) do
+					dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, 0)
+					hitCount += 1
+				end
+			end
+
+			if (tonumber(d.parryReduction) or 0) > 0 then
+				local untilTime = time() + PARRY_WINDOW_DURATION
+				parryUntil[plr.UserId] = untilTime
+				plr:SetAttribute("ParryReduction", d.parryReduction)
+				plr:SetAttribute("ParryUntil", untilTime)
 			end
 		elseif weaponType == "Scythe" then
-			local targets = getMeleeTargetsArc(hrp.Position, forward, 7.5, 220, nil)
-			local damage = math.max(1, math.floor(stats.finalAtk * 0.65))
+			local angle = 220 + (tonumber(d.sweepBonus) or 0)
+			local targets = getMeleeTargetsArc(hrp.Position, forward, 7.5 + rangeBonus, angle, nil)
+			local damage = applyMomentum(plr, math.max(1, math.floor(stats.finalAtk * 0.65)))
 			for _,entry in ipairs(targets) do
-				dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal)
+				dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, 0)
+				hitCount += 1
 			end
 		elseif weaponType == "Halberd" then
-			local targets = getMeleeTargetsLine(hrp.Position, forward, 9, 2.5, 3)
-			local damage = math.max(1, math.floor(stats.finalAtk * 0.75))
+			local hitLimit = 3 + math.floor(tonumber(d.pierceBonus) or 0)
+			local length = 9 + rangeBonus + (tonumber(d.thrustBonus) or 0)
+			local targets = getMeleeTargetsLine(hrp.Position, forward, length, 2.5, hitLimit)
+			local damage = applyMomentum(plr, math.max(1, math.floor(stats.finalAtk * 0.75)))
 			for _,entry in ipairs(targets) do
-				dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal)
+				dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, 0)
+				hitCount += 1
 			end
+		elseif weaponType == "Claymore" then
+			local damage = applyMomentum(plr, math.max(1, math.floor(stats.finalAtk * 0.95)))
+			local staggerDuration = tonumber(d.staggerDuration) or 0
+			task.delay(0.2, function()
+				local charNow = plr.Character
+				local hrpNow = charNow and charNow:FindFirstChild("HumanoidRootPart")
+				if not hrpNow then return end
+				local forwardNow = hrpNow.CFrame.LookVector
+				local targets = getMeleeTargetsArc(hrpNow.Position + forwardNow * 2.5, forwardNow, 7 + rangeBonus, 120, 4)
+				local hits = 0
+				for _,entry in ipairs(targets) do
+					dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, 0)
+					if staggerDuration > 0 then
+						applyStagger(entry.hum, staggerDuration)
+					end
+					hits += 1
+				end
+				updateMomentum(plr, hits > 0)
+			end)
+			return
+		elseif weaponType == "Greataxe" then
+			local damage = applyMomentum(plr, math.max(1, math.floor(stats.finalAtk * 1.1)))
+			local slamRadius = 4.5 + rangeBonus + (tonumber(d.slamRadiusBonus) or 0)
+			local aftershock = tonumber(d.aftershockMultiplier) or 0
+			task.delay(0.25, function()
+				local charNow = plr.Character
+				local hrpNow = charNow and charNow:FindFirstChild("HumanoidRootPart")
+				if not hrpNow then return end
+				local forwardNow = hrpNow.CFrame.LookVector
+				local center = hrpNow.Position + forwardNow * 3.5
+				local hits = applyAreaDamage(plr, center, slamRadius, nil, damage, stats)
+				if aftershock > 0 then
+					task.delay(0.35, function()
+						applyAreaDamage(plr, center, slamRadius + 0.5, nil, math.max(1, math.floor(damage * aftershock)), stats)
+					end)
+				end
+				updateMomentum(plr, hits > 0)
+			end)
+			return
 		end
+
+		updateMomentum(plr, hitCount > 0)
 
 	elseif payload.action == "SHOOT" and (weaponType == "Bow" or weaponType == "Staff" or weaponType == "Pistol") then
 		local aim = payload.aim
@@ -660,16 +958,47 @@ WeaponEvent.OnServerEvent:Connect(function(plr, payload)
 			local speed = 160
 			local range = 45
 			local damage = math.max(1, math.floor(stats.finalAtk))
+			local pierce = 1 + math.floor(tonumber(d.arrowPierce) or 0)
+			local eagleEye = tonumber(d.eagleEyeBonus) or 0
+			local extraCrit = 0
+			if eagleEye > 0 then
+				extraCrit = math.min(0.25, (dir.Magnitude / 10) * eagleEye)
+			end
 			for i=1,total do
 				local angle = (i - (total+1)/2) * spread
 				local rot = CFrame.fromAxisAngle(Vector3.new(0,1,0), angle)
 				local shotDir = rot:VectorToWorldSpace(dir.Unit)
-				spawnProjectile(plr, origin, shotDir, speed, range, damage, 0.3, 1)
+				spawnProjectile(plr, origin, shotDir, speed, range, damage, 0.3, pierce, nil, extraCrit)
 			end
 		elseif weaponType == "Staff" then
 			local speed = 175
 			local range = 40
 			local damage = math.max(1, math.floor(stats.finalAtk))
+			local empowered = false
+			local surgeEvery = tonumber(d.manaSurgeEvery) or 0
+			if surgeEvery > 0 then
+				local count = (manaSurgeStacks[plr.UserId] or 0) + 1
+				if count >= surgeEvery then
+					empowered = true
+					count = 0
+				end
+				manaSurgeStacks[plr.UserId] = count
+			end
+			if empowered then
+				damage = math.max(1, math.floor(damage * (1 + MANA_SURGE_BONUS)))
+			end
+
+			local heal = tonumber(d.arcaneOverflowHeal) or 0
+			local cd = arcaneOverflowCd[plr.UserId] or 0
+			if heal > 0 and cd <= time() then
+				arcaneOverflowCd[plr.UserId] = time() + ARCANE_OVERFLOW_COOLDOWN
+				local currentHum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
+				if currentHum and currentHum.Health > 0 then
+					currentHum.Health = math.min(currentHum.MaxHealth, currentHum.Health + heal)
+				end
+			end
+
+			local aoeRadius = empowered and 4.5 or 3.5
 			for i=1,1 do
 				spawnProjectile(
 					plr,
@@ -680,13 +1009,24 @@ WeaponEvent.OnServerEvent:Connect(function(plr, payload)
 					damage,
 					0.35,
 					1,
-					{ radius = 3.5, hitLimit = 4, damageMul = 0.7 }
+					{ radius = aoeRadius, hitLimit = 4, damageMul = 0.7 },
+					0
 				)
 			end
 		elseif weaponType == "Pistol" then
 			local range = 35
 			local damage = math.max(1, math.floor(stats.finalAtk))
 			local pierce = math.max(1, math.floor(tonumber(tool:GetAttribute("Pierce")) or 1))
+			local extraCrit = 0
+			local deadeyeDelay = tonumber(d.deadeyeDelay) or 0
+			if deadeyeDelay > 0 then
+				local lastShot = lastPistolShot[plr.UserId] or 0
+				if (now - lastShot) >= deadeyeDelay then
+					extraCrit = 1
+				end
+				lastPistolShot[plr.UserId] = now
+			end
+			local ricochetCount = math.floor(tonumber(d.ricochet) or 0)
 			local params = RaycastParams.new()
 			params.FilterType = Enum.RaycastFilterType.Exclude
 			params.FilterDescendantsInstances = { plr.Character }
@@ -702,7 +1042,17 @@ WeaponEvent.OnServerEvent:Connect(function(plr, payload)
 					local mh = model:FindFirstChildOfClass("Humanoid")
 					local mr = model:FindFirstChild("HumanoidRootPart")
 					if mh and mr and mh.Health > 0 then
-						dealMobDamage(plr, mh, mr, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal)
+						dealMobDamage(plr, mh, mr, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, extraCrit)
+						local ricHits = 0
+						local lastModel = model
+						while ricHits < ricochetCount do
+							local rh, rr = findNearestEnemy(mr.Position, lastModel)
+							if not rh or not rr then break end
+							local ricDamage = math.max(1, math.floor(damage * 0.6))
+							dealMobDamage(plr, rh, rr, ricDamage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, 0)
+							lastModel = rh.Parent
+							ricHits += 1
+						end
 						hits += 1
 						params.FilterDescendantsInstances = { plr.Character, model }
 					end
@@ -753,6 +1103,14 @@ Players.PlayerAdded:Connect(function(plr)
 		local hum = char:FindFirstChildOfClass("Humanoid")
 		if hum then
 			updatePlayerDerivedStats(plr)
+			lastHealth[plr.UserId] = hum.Health
+			hum.HealthChanged:Connect(function(current)
+				local prev = lastHealth[plr.UserId] or current
+				if current < prev then
+					riposteReady[plr.UserId] = time() + RIPOSTE_DURATION
+				end
+				lastHealth[plr.UserId] = current
+			end)
 		end
 
 		char.ChildAdded:Connect(function(child)
