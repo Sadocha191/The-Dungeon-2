@@ -68,10 +68,28 @@ local function getRolledStat(stats: any, keys: {string}): number
 	return 0
 end
 
+local function inferWeaponType(tool: Tool): string
+	local attr = tool:GetAttribute("WeaponType")
+	if typeof(attr) == "string" and attr ~= "" then
+		return attr
+	end
+
+	local parent = tool.Parent
+	if parent and parent:IsA("Folder") then
+		local name = parent.Name
+		if name == "Sword" or name == "Scythe" or name == "Halberd" or name == "Bow"
+			or name == "Staff" or name == "Pistol" or name == "Claymore" or name == "Greataxe" then
+			return name
+		end
+	end
+
+	return ""
+end
+
 local function applyWeaponStats(tool: Tool, weaponId: string, entry: any)
 	local def = getWeaponConfig(weaponId)
 	if not def then
-		tool:SetAttribute("WeaponType", tool:GetAttribute("WeaponType") or "")
+		tool:SetAttribute("WeaponType", inferWeaponType(tool))
 		return
 	end
 
@@ -86,7 +104,7 @@ local function applyWeaponStats(tool: Tool, weaponId: string, entry: any)
 	local combat = def.combat or {}
 
 	tool:SetAttribute("WeaponId", weaponId)
-	tool:SetAttribute("WeaponType", def.weaponType or "")
+	tool:SetAttribute("WeaponType", def.weaponType or inferWeaponType(tool))
 	tool:SetAttribute("WeaponLevel", level)
 	tool:SetAttribute("Rarity", rarity)
 

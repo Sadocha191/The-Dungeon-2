@@ -27,6 +27,8 @@ local function defaultProfile()
 		attackSpeed = 1.00,   -- mnożnik szybkości ataku
 		critChance = 0,       -- bonus do crit chance
 		critMult = 0,         -- bonus do crit dmg
+		damageBonusPct = 0,   -- % dmg (0.15 = +15%)
+		lifesteal = 0,        -- bonus lifesteal
 
 		-- Base player stats (always active)
 		baseHP = 100,
@@ -35,6 +37,30 @@ local function defaultProfile()
 		baseCritDmg = 1.5,
 		baseDefense = 0,
 		baseLifesteal = 0,
+
+		-- Run buffs
+		rangeBonus = 0,
+		battleFocusBonus = 0,
+		momentumBonus = 0,
+		cleaveBonus = 0,
+		riposteBonus = 0,
+		bladeDanceEvery = 0,
+		parryReduction = 0,
+		staggerDuration = 0,
+		executeBonus = 0,
+		overchargeBonus = 0,
+		sweepBonus = 0,
+		thrustBonus = 0,
+		pierceBonus = 0,
+		slamRadiusBonus = 0,
+		aftershockMultiplier = 0,
+		eagleEyeBonus = 0,
+		quickDrawBonus = 0,
+		arrowPierce = 0,
+		elementalPowerBonus = 0,
+		arcaneOverflowHeal = 0,
+		manaSurgeEvery = 0,
+		deadeyeDelay = 0,
 
 		-- Unlock weapons
 		unlockBow = true,
@@ -111,6 +137,8 @@ function PlayerData.Get(plr)
 	data.attackSpeed = math.clamp(tonumber(data.attackSpeed) or 1.0, 0.6, 2.0)
 	data.critChance = math.clamp(tonumber(data.critChance) or 0, 0, 0.6)
 	data.critMult = tonumber(data.critMult) or 0
+	data.damageBonusPct = math.max(0, tonumber(data.damageBonusPct) or 0)
+	data.lifesteal = math.clamp(tonumber(data.lifesteal) or 0, 0, 0.12)
 
 	data.baseHP = math.max(1, clampInt(data.baseHP) or 100)
 	data.baseSpeed = math.clamp(tonumber(data.baseSpeed) or 1.0, 0.5, 2.0)
@@ -118,6 +146,29 @@ function PlayerData.Get(plr)
 	data.baseCritDmg = math.max(1.0, tonumber(data.baseCritDmg) or 1.5)
 	data.baseDefense = math.max(0, tonumber(data.baseDefense) or 0)
 	data.baseLifesteal = math.clamp(tonumber(data.baseLifesteal) or 0, 0, 0.12)
+
+	data.rangeBonus = math.max(0, tonumber(data.rangeBonus) or 0)
+	data.battleFocusBonus = math.max(0, tonumber(data.battleFocusBonus) or 0)
+	data.momentumBonus = math.max(0, tonumber(data.momentumBonus) or 0)
+	data.cleaveBonus = math.max(0, clampInt(data.cleaveBonus))
+	data.riposteBonus = math.max(0, tonumber(data.riposteBonus) or 0)
+	data.bladeDanceEvery = math.max(0, clampInt(data.bladeDanceEvery))
+	data.parryReduction = math.clamp(tonumber(data.parryReduction) or 0, 0, 0.6)
+	data.staggerDuration = math.max(0, tonumber(data.staggerDuration) or 0)
+	data.executeBonus = math.max(0, tonumber(data.executeBonus) or 0)
+	data.overchargeBonus = math.max(0, tonumber(data.overchargeBonus) or 0)
+	data.sweepBonus = math.max(0, tonumber(data.sweepBonus) or 0)
+	data.thrustBonus = math.max(0, tonumber(data.thrustBonus) or 0)
+	data.pierceBonus = math.max(0, clampInt(data.pierceBonus))
+	data.slamRadiusBonus = math.max(0, tonumber(data.slamRadiusBonus) or 0)
+	data.aftershockMultiplier = math.max(0, tonumber(data.aftershockMultiplier) or 0)
+	data.eagleEyeBonus = math.max(0, tonumber(data.eagleEyeBonus) or 0)
+	data.quickDrawBonus = math.max(0, tonumber(data.quickDrawBonus) or 0)
+	data.arrowPierce = math.max(0, clampInt(data.arrowPierce))
+	data.elementalPowerBonus = math.max(0, tonumber(data.elementalPowerBonus) or 0)
+	data.arcaneOverflowHeal = math.max(0, tonumber(data.arcaneOverflowHeal) or 0)
+	data.manaSurgeEvery = math.max(0, clampInt(data.manaSurgeEvery))
+	data.deadeyeDelay = math.max(0, tonumber(data.deadeyeDelay) or 0)
 
 	data.unlockBow = data.unlockBow ~= false
 	data.unlockWand = data.unlockWand ~= false
