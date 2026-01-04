@@ -378,7 +378,18 @@ local function spawnOrc(hp, dmg, spd, wave, onKill)
 			-- ATTACK: always attempt in range
 			if dist <= ATTACK_RANGE and (now - lastAttack) >= ATTACK_COOLDOWN then
 				lastAttack = now
-				targetHum:TakeDamage(dmg)
+				local finalDmg = dmg
+				local targetPlr = Players:GetPlayerFromCharacter(targetChar)
+				if targetPlr then
+					local parryUntil = targetPlr:GetAttribute("ParryUntil")
+					local parryReduction = targetPlr:GetAttribute("ParryReduction")
+					if typeof(parryUntil) == "number" and typeof(parryReduction) == "number" then
+						if parryUntil > time() and parryReduction > 0 then
+							finalDmg = math.max(1, math.floor(dmg * (1 - parryReduction)))
+						end
+					end
+				end
+				targetHum:TakeDamage(finalDmg)
 				-- gdy bije, wymuś direct chwilę, żeby nie “odpływał” na offset
 				forceDirectUntil = math.max(forceDirectUntil, now + 0.8)
 			end
