@@ -54,10 +54,21 @@ Players.PlayerAdded:Connect(function(player: Player)
 
 	if typeof(tdata) ~= "table" then
 		warn("[Dungeon] No TeleportData for", player.Name, "- using fallback loadout")
-		local fallback = player:GetAttribute("StarterWeaponName")
-		if typeof(fallback) == "string" and fallback ~= "" then
-			WeaponService.SyncLoadoutFromStarter(player)
+		local data = PlayerData.Get(player)
+		local fallbackProfile = {
+			Id = "Local",
+			Class = player:GetAttribute("Class") or "Default",
+			Race = player:GetAttribute("Race") or "Human",
+			Stats = { Level = data.level or 1 },
+		}
+		applyProfileAttributes(player, fallbackProfile)
+
+		local fallbackWeapon = player:GetAttribute("StarterWeaponName")
+		if typeof(fallbackWeapon) ~= "string" or fallbackWeapon == "" then
+			fallbackWeapon = "Knight's Oath"
+			player:SetAttribute("StarterWeaponName", fallbackWeapon)
 		end
+		WeaponService.SyncLoadoutFromStarter(player)
 		WeaponService.EquipLoadout(player)
 		return
 	end

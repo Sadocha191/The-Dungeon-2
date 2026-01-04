@@ -31,7 +31,49 @@ end
 
 local PlayerData = require(playerDataModule)
 local WeaponService = require(weaponServiceModule)
-local UpDefs = require(ReplicatedStorage:WaitForChild("UpgradeDefinitions"))
+local function buildFallbackUpDefs()
+	local fallback = {}
+	fallback.POOL = {
+		{ id = "DMG", name = "Damage Up", desc = "+%d%% ATK", stat = "damageBonusPct", base = 8, mode = "percent", applyScale = 0.01, weaponTypes = "ALL" },
+		{ id = "ASPD", name = "Attack Speed", desc = "+%d%% attack speed", stat = "attackSpeed", base = 6, mode = "percent", applyScale = 0.01, weaponTypes = "ALL" },
+		{ id = "CRIT", name = "Crit Chance", desc = "+%d%% Crit Rate", stat = "critChance", base = 4, mode = "percent", applyScale = 0.01, weaponTypes = "ALL" },
+	}
+	function fallback.RollRarity()
+		return "Common", Color3.fromRGB(200, 200, 200), 1.0
+	end
+	function fallback.GetPool()
+		return fallback.POOL
+	end
+	return fallback
+end
+
+local function findUpgradeDefinitions(): ModuleScript?
+	local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
+		or ReplicatedStorage:FindFirstChild("ModuleScript")
+	if moduleFolder then
+		local nested = moduleFolder:FindFirstChild("UpgradeDefinitions")
+		if nested and nested:IsA("ModuleScript") then
+			return nested
+		end
+	end
+	local direct = ReplicatedStorage:FindFirstChild("UpgradeDefinitions")
+	if direct and direct:IsA("ModuleScript") then
+		return direct
+	end
+	return nil
+end
+
+local upDefsModule = findUpgradeDefinitions()
+if not upDefsModule then
+	local moduleFolder = ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+		or ReplicatedStorage:WaitForChild("ModuleScript", 5)
+	upDefsModule = moduleFolder and moduleFolder:FindFirstChild("UpgradeDefinitions")
+end
+local UpDefs = upDefsModule and upDefsModule:IsA("ModuleScript")
+	and require(upDefsModule) or buildFallbackUpDefs()
+if not upDefsModule then
+	warn("[ProgressService] Missing ReplicatedStorage.UpgradeDefinitions; using fallback pool.")
+end
 
 -- Ensure PauseState
 local PauseState = ReplicatedStorage:FindFirstChild("PauseState")

@@ -4,7 +4,18 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UIS = game:GetService("UserInputService")
 
-local UpDefs = require(ReplicatedStorage:WaitForChild("UpgradeDefinitions"))
+local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+local upDefsModule = moduleFolder and moduleFolder:FindFirstChild("UpgradeDefinitions")
+if not upDefsModule then
+	local waitFolder = ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+		or ReplicatedStorage:WaitForChild("ModuleScript", 5)
+	upDefsModule = waitFolder and waitFolder:FindFirstChild("UpgradeDefinitions")
+end
+local UpDefs = upDefsModule and upDefsModule:IsA("ModuleScript") and require(upDefsModule) or { POOL = {} }
+if not upDefsModule then
+	warn("[UpgradeViews] Missing ReplicatedStorage.UpgradeDefinitions; admin list disabled.")
+end
 
 local plr = Players.LocalPlayer
 local pg = plr:WaitForChild("PlayerGui")
