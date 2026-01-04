@@ -27,7 +27,7 @@ UserInputService.InputBegan:Connect(function(input, gp)
 	local wType = tool:GetAttribute("WeaponType")
 	if typeof(wType) ~= "string" then return end
 
-	if wType == "Melee" or wType == "Sword" or wType == "Scythe" or wType == "Halberd" then
+	if wType == "Melee" or wType == "Sword" or wType == "Scythe" or wType == "Halberd" or wType == "Claymore" or wType == "Greataxe" then
 		WeaponEvent:FireServer({ action = "MELEE" })
 	elseif wType == "Bow" or wType == "Wand" or wType == "Staff" or wType == "Pistol" then
 		local hitPos = mouse.Hit and mouse.Hit.Position
