@@ -2,13 +2,14 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
 
 local plr = Players.LocalPlayer
 local PauseState = ReplicatedStorage:WaitForChild("PauseState")
 local WeaponEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("WeaponEvent")
 
 local mouse = plr:GetMouse()
+local activeTool: Tool? = nil
+local activeConn: RBXScriptConnection? = nil
 
 local function getEquippedTool()
 	local char = plr.Character
@@ -16,13 +17,8 @@ local function getEquippedTool()
 	return char:FindFirstChildOfClass("Tool")
 end
 
-UserInputService.InputBegan:Connect(function(input, gp)
-	if gp then return end
+local function fireWeapon(tool: Tool)
 	if PauseState.Value then return end
-	if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-
-	local tool = getEquippedTool()
-	if not tool then return end
 
 	local wType = tool:GetAttribute("WeaponType")
 	if typeof(wType) ~= "string" then return end
@@ -34,4 +30,35 @@ UserInputService.InputBegan:Connect(function(input, gp)
 		if typeof(hitPos) ~= "Vector3" then return end
 		WeaponEvent:FireServer({ action = "SHOOT", aim = hitPos })
 	end
-end)
+end
+
+local function bindTool(tool: Tool?)
+	if activeConn then
+		activeConn:Disconnect()
+		activeConn = nil
+	end
+	activeTool = tool
+	if not activeTool then return end
+	activeConn = activeTool.Activated:Connect(function()
+		fireWeapon(activeTool)
+	end)
+end
+
+local function onCharacterAdded(char: Model)
+	bindTool(char:FindFirstChildOfClass("Tool"))
+	char.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") then
+			bindTool(child)
+		end
+	end)
+	char.ChildRemoved:Connect(function(child)
+		if child == activeTool then
+			bindTool(char:FindFirstChildOfClass("Tool"))
+		end
+	end)
+end
+
+if plr.Character then
+	onCharacterAdded(plr.Character)
+end
+plr.CharacterAdded:Connect(onCharacterAdded)
