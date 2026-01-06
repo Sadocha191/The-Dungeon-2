@@ -33,7 +33,7 @@ title.Font = Enum.Font.GothamBold
 title.TextSize = 14
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.TextColor3 = Color3.fromRGB(245,245,245)
-title.Text = "Fala -/-"
+title.Text = "Wave -/-"
 title.Parent = panel
 
 local sub = Instance.new("TextLabel")
@@ -44,7 +44,7 @@ sub.Font = Enum.Font.Gotham
 sub.TextSize = 12
 sub.TextXAlignment = Enum.TextXAlignment.Left
 sub.TextColor3 = Color3.fromRGB(210,210,210)
-sub.Text = "Zostało: -/-"
+sub.Text = "Remaining: -/-"
 sub.Parent = panel
 
 local barBack = Instance.new("Frame")
@@ -90,12 +90,12 @@ WaveStatusEvent.OnClientEvent:Connect(function(p)
 	if p.type == "prepTick" then
 		local s = tonumber(p.seconds) or 0
 		center.Visible = s > 0
-		if s > 0 then center.Text = ("START ZA: %d"):format(s) end
+		if s > 0 then center.Text = ("STARTS IN: %d"):format(s) end
 
 	elseif p.type == "waveCountdown" then
 		local s = tonumber(p.seconds) or 0
 		center.Visible = s > 0
-		if s > 0 then center.Text = ("NOWA FALA ZA: %d"):format(s) end
+		if s > 0 then center.Text = ("NEXT WAVE IN: %d"):format(s) end
 
 	elseif p.type == "waveStart" or p.type == "waveUpdate" then
 		local wave = tonumber(p.wave) or 0
@@ -103,12 +103,12 @@ WaveStatusEvent.OnClientEvent:Connect(function(p)
 		local rem = tonumber(p.remaining) or 0
 		local tot = tonumber(p.totalToKill) or 1
 
-		title.Text = ("Fala %d/%d"):format(wave, tw)
-		sub.Text = ("Zostało: %d/%d"):format(rem, tot)
+		title.Text = ("Wave %d/%d"):format(wave, tw)
+		sub.Text = ("Remaining: %d/%d"):format(rem, tot)
 		setBar(rem / math.max(1, tot))
 
 	elseif p.type == "complete" then
-		title.Text = "Misja ukończona"
+		title.Text = "Mission complete"
 		sub.Text = ""
 		setBar(0)
 	end

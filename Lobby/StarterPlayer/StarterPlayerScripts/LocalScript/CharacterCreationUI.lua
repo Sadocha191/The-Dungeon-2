@@ -126,7 +126,7 @@ title.Font = Enum.Font.GothamBold
 title.TextSize = 32
 title.TextColor3 = Color3.fromRGB(20, 20, 22)
 title.TextStrokeTransparency = 0.9
-title.Text = "Tworzenie postaci"
+title.Text = "Character Creation"
 title.Parent = root
 
 local function makePanel(size: UDim2, pos: UDim2)
@@ -159,9 +159,9 @@ local function header(parent: Instance, text: string)
 	return h
 end
 
-header(infoPanel, "Informacje")
-header(centerPanel, "Losowanie")
-header(chancePanel, "Szanse na rasy")
+header(infoPanel, "Information")
+header(centerPanel, "Roll")
+header(chancePanel, "Race Odds")
 
 local infoText = Instance.new("TextLabel")
 infoText.BackgroundTransparency = 1
@@ -173,7 +173,7 @@ infoText.TextXAlignment = Enum.TextXAlignment.Left
 infoText.TextYAlignment = Enum.TextYAlignment.Top
 infoText.TextColor3 = Color3.fromRGB(220, 220, 220)
 infoText.TextWrapped = true
-infoText.Text = "Kliknij Losuj aby stworzyć postać.\nMożesz to zrobić tylko raz."
+infoText.Text = "Click Roll to create a character.\nYou can only do this once."
 infoText.Parent = infoPanel
 
 local buffsHeader = Instance.new("TextLabel")
@@ -184,7 +184,7 @@ buffsHeader.Font = Enum.Font.GothamBold
 buffsHeader.TextSize = 20
 buffsHeader.TextXAlignment = Enum.TextXAlignment.Left
 buffsHeader.TextColor3 = Color3.fromRGB(245, 245, 245)
-buffsHeader.Text = "Buffy postaci"
+buffsHeader.Text = "Character Buffs"
 buffsHeader.Visible = false
 buffsHeader.Parent = infoPanel
 
@@ -211,7 +211,7 @@ closeBtn.BorderSizePixel = 0
 closeBtn.Font = Enum.Font.GothamBold
 closeBtn.TextSize = 18
 closeBtn.TextColor3 = Color3.fromRGB(245,245,245)
-closeBtn.Text = "Zamknij"
+closeBtn.Text = "Close"
 closeBtn.Parent = root
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 14)
 
@@ -224,7 +224,7 @@ current.Font = Enum.Font.GothamBold
 current.TextSize = 20
 current.TextXAlignment = Enum.TextXAlignment.Left
 current.TextColor3 = Color3.fromRGB(245,245,245)
-current.Text = "Aktualna rasa: -"
+current.Text = "Current race: -"
 current.Parent = centerPanel
 
 -- Strip frame
@@ -297,7 +297,7 @@ rollBtn.BorderSizePixel = 0
 rollBtn.Font = Enum.Font.GothamBold
 rollBtn.TextSize = 20
 rollBtn.TextColor3 = Color3.fromRGB(245,245,245)
-rollBtn.Text = "Losuj"
+rollBtn.Text = "Roll"
 rollBtn.Parent = centerPanel
 Instance.new("UICorner", rollBtn).CornerRadius = UDim.new(0, 14)
 
@@ -371,7 +371,7 @@ local function setBuffsText(raceName: string?)
 			table.insert(lines, "• " .. tostring(buff))
 		end
 	else
-		table.insert(lines, "Brak buffów.")
+		table.insert(lines, "No buffs.")
 	end
 
 	buffsHeader.Visible = true
@@ -381,13 +381,13 @@ end
 
 local function setRaceDisplay(raceName: string?)
 	if typeof(raceName) ~= "string" or raceName == "" or raceName == "-" then
-		current.Text = "Aktualna rasa: -"
+		current.Text = "Current race: -"
 		current.TextColor3 = Color3.fromRGB(245,245,245)
 		setBuffsText(nil)
 		return
 	end
 
-	current.Text = ("Aktualna rasa: %s"):format(raceName)
+	current.Text = ("Current race: %s"):format(raceName)
 	current.TextColor3 = colorOfRace(raceName)
 	setBuffsText(raceName)
 end
@@ -469,7 +469,7 @@ local function openUI()
 	rolling = false
 	finalRace = nil
 	rollBtn.Active = true
-	rollBtn.Text = "Losuj"
+	rollBtn.Text = "Roll"
 	rollPreview = nil
 
 	local cls = getClassName()
@@ -529,7 +529,7 @@ rollBtn.MouseButton1Click:Connect(function()
 
 	rolling = true
 	rollBtn.Active = false
-	rollBtn.Text = "Losowanie..."
+	rollBtn.Text = "Rolling..."
 
 	local cls = getClassName()
 	local chances = buildChancesForClass(cls)
@@ -558,7 +558,7 @@ rollBtn.MouseButton1Click:Connect(function()
 	else
 		rolling = false
 		rollBtn.Active = true
-		rollBtn.Text = "Losuj"
+		rollBtn.Text = "Roll"
 	end
 end)
 

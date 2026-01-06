@@ -42,7 +42,7 @@ title.Font = Enum.Font.GothamBlack
 title.TextSize = 20
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.TextColor3 = Color3.fromRGB(245,245,245)
-title.Text = "Misja ukończona"
+title.Text = "Mission complete"
 title.Parent = card
 
 local body = Instance.new("TextLabel")
@@ -81,6 +81,6 @@ MissionSummaryEvent.OnClientEvent:Connect(function(payload)
 	local sec = tonumber(payload.time) or 0
 	local lvl = tonumber(payload.level) or 1
 	local coins = tonumber(payload.coins) or 0
-	body.Text = ("Fale: %d\nCzas: %ds\nPoziom: %d\nMonety (global): %d"):format(waves, sec, lvl, coins)
+body.Text = ("Waves: %d\nTime: %ds\nLevel: %d\nCoins (global): %d"):format(waves, sec, lvl, coins)
 	gui.Enabled = true
 end)

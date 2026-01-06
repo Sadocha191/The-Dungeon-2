@@ -9,7 +9,7 @@ local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 
 local npc = script.Parent
 local primary = npc.PrimaryPart or npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChildWhichIsA("BasePart")
-assert(primary and primary:IsA("BasePart"), "NPC musi mieć PrimaryPart/BasePart")
+assert(primary and primary:IsA("BasePart"), "NPC must have a PrimaryPart/BasePart")
 
 local remotes = ReplicatedStorage:WaitForChild("RemoteEvents")
 local OpenUI = remotes:WaitForChild("OpenCharacterCreation")
@@ -28,7 +28,7 @@ local function ensurePrompt(part: BasePart, name: string, actionText: string, ob
 	return p
 end
 
-local createPrompt = ensurePrompt(primary, "CreateCharacterPrompt", "Stwórz postać", "Twórca postaci", 0)
+local createPrompt = ensurePrompt(primary, "CreateCharacterPrompt", "Create character", "Character Creator", 0)
 
 createPrompt.Triggered:Connect(function(player: Player)
 	OpenUI:FireClient(player)

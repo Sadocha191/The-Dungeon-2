@@ -1,22 +1,22 @@
 The Dungeon
 
-The Dungeon to gra typu dungeon crawler stworzona w Roblox. Gracz eksploruje losowo generowane lochy, walczy z przeciwnikami i rozwija postać, przechodząc coraz trudniejsze etapy.
+The Dungeon is a dungeon crawler game created in Roblox. The player explores procedurally generated dungeons, fights enemies, and develops their character while progressing through increasingly difficult stages.
 
-Główne założenia
+Core assumptions
 
-eksploracja lochów
+dungeon exploration
 
-system walki PvE
+PvE combat system
 
-rozwój postaci i statystyk
+character and stat progression
 
-rosnący poziom trudności
+increasing difficulty
 
-Status projektu
+Project status
 
-Projekt w trakcie rozwoju. Mechaniki są sukcesywnie dodawane i poprawiane.
+The project is in development. Mechanics are continuously added and improved.
 
-Technologie
+Technologies
 
 Roblox Studio
 

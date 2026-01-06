@@ -35,7 +35,7 @@ coinsText.Font = Enum.Font.GothamBold
 coinsText.TextSize = 14
 coinsText.TextXAlignment = Enum.TextXAlignment.Left
 coinsText.TextColor3 = Color3.fromRGB(245, 245, 245)
-coinsText.Text = "Monety: 0"
+coinsText.Text = "Coins: 0"
 coinsText.Parent = coinsBox
 
 -- Name (right)
@@ -153,7 +153,7 @@ local level, xp, nextXp, coins = 1, 0, 120, 0
 local function render()
 	local race = tostring(plr:GetAttribute("Race") or "-")
 	nameText.Text = ("%s • Lv. %d • %s"):format(plr.Name, level, race)
-	coinsText.Text = ("Monety: %d"):format(coins)
+	coinsText.Text = ("Coins: %d"):format(coins)
 	local n = math.max(1, nextXp)
 	xpLabel.Text = ("EXP: %d/%d"):format(xp, n)
 	tweenFill(xpFill, xp / n)

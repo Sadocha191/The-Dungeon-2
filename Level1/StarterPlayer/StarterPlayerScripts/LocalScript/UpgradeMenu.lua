@@ -41,7 +41,7 @@ title.Font = Enum.Font.GothamBlack
 title.TextSize = 20
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.TextColor3 = Color3.fromRGB(245,245,245)
-title.Text = "Wybierz upgrade"
+title.Text = "Choose an upgrade"
 title.Parent = card
 
 local container = Instance.new("Frame")
@@ -63,7 +63,7 @@ footer.Size = UDim2.new(1, -44, 0, 18)
 footer.Font = Enum.Font.Gotham
 footer.TextSize = 12
 footer.TextColor3 = Color3.fromRGB(210,210,210)
-footer.Text = "Kliknij kartę, potem Potwierdź."
+footer.Text = "Click a card, then Confirm."
 footer.Parent = card
 
 local selectedId = nil
@@ -131,7 +131,7 @@ local function makeOption(opt)
 
 	btn.MouseButton1Click:Connect(function()
 		selectedId = opt.id
-		confirmBtn.Text = ("Potwierdź: %s"):format(opt.name)
+		confirmBtn.Text = ("Confirm: %s"):format(opt.name)
 		confirmBtn.BackgroundTransparency = 0
 	end)
 
@@ -148,7 +148,7 @@ confirmBtn.BorderSizePixel = 0
 confirmBtn.Font = Enum.Font.GothamBold
 confirmBtn.TextSize = 14
 confirmBtn.TextColor3 = Color3.fromRGB(10,10,12)
-confirmBtn.Text = "Wybierz kartę"
+confirmBtn.Text = "Select a card"
 confirmBtn.Parent = card
 Instance.new("UICorner", confirmBtn).CornerRadius = UDim.new(0, 14)
 
@@ -171,7 +171,7 @@ UpgradeEvent.OnClientEvent:Connect(function(payload)
 		makeOption(opt)
 	end
 
-	confirmBtn.Text = "Wybierz kartę"
+	confirmBtn.Text = "Select a card"
 	confirmBtn.BackgroundTransparency = 0.35
 
 	gui.Enabled = true

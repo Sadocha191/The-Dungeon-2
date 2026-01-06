@@ -40,7 +40,7 @@ if not prompt then
 	prompt.RequiresLineOfSight = false
 	prompt.Parent = portalPart
 end
-prompt.ActionText = "Wybierz poziom"
+prompt.ActionText = "Select level"
 
 local lastOpen: {[number]: number} = {}
 local lastTp: {[number]: number} = {}
