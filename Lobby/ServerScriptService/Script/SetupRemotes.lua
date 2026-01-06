@@ -1,6 +1,6 @@
 -- SCRIPT: SetupRemotes.server.lua
 -- GDZIE: ServerScriptService/SetupRemotes.server.lua (Script)
--- Robi: tworzy RemoteEvent do otwierania kreatora z NPC
+-- Robi: tworzy RemoteEvent do otwierania kreatora z NPC oraz do losowania ras
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -22,4 +22,9 @@ local function ensureRemote(name: string): RemoteEvent
 end
 
 ensureRemote("OpenCharacterCreation")
-print("[SetupRemotes] OpenCharacterCreation ready")
+ensureRemote("CreateProfileRequest")
+ensureRemote("CreateProfileResponse")
+ensureRemote("RerollRaceRequest")
+ensureRemote("RerollRaceResponse")
+ensureRemote("RaceUpdated")
+print("[SetupRemotes] Character creation remotes ready")
