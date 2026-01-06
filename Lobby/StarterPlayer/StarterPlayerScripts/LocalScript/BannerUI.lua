@@ -182,7 +182,7 @@ costText.Font = Enum.Font.Gotham
 costText.TextSize = 12
 costText.TextColor3 = Color3.fromRGB(200, 200, 200)
 costText.TextXAlignment = Enum.TextXAlignment.Left
-costText.Text = "Koszt: -"
+costText.Text = "Cost: -"
 costText.Parent = detailsFrame
 
 local rollOne = Instance.new("TextButton")
@@ -219,7 +219,7 @@ resultsBox.TextXAlignment = Enum.TextXAlignment.Left
 resultsBox.TextYAlignment = Enum.TextYAlignment.Top
 resultsBox.TextWrapped = true
 resultsBox.RichText = true
-resultsBox.Text = "Wyniki: -"
+resultsBox.Text = "Results: -"
 resultsBox.Parent = detailsFrame
 Instance.new("UICorner", resultsBox).CornerRadius = UDim.new(0, 8)
 local resultsPadding = Instance.new("UIPadding")
@@ -284,7 +284,7 @@ local function updateDetails()
 		featuredText.Text = "Featured: -"
 		ratesText.Text = "Rates: -"
 		pityText.Text = "Pity: -"
-		costText.Text = "Koszt: -"
+		costText.Text = "Cost: -"
 		return
 	end
 
@@ -303,7 +303,7 @@ local function updateDetails()
 	local pityLine = string.format("Pity: %d/%d (Target: %s, 50/50 fail: %s)", pityState.Count or 0, hard, target, tostring(pityState.FeaturedFail == true))
 	pityText.Text = pityLine
 	local cost = banner.Cost or {}
-	costText.Text = string.format("Koszt: %d %s", tonumber(cost.Amount) or 0, tostring(cost.Currency or ""))
+costText.Text = string.format("Cost: %d %s", tonumber(cost.Amount) or 0, tostring(cost.Currency or ""))
 end
 
 local function clearList()
@@ -335,7 +335,7 @@ local function rebuildList()
 		Instance.new("UICorner", button).CornerRadius = UDim.new(0, 8)
 
 		if not banner.Active then
-			button.Text = "  " .. (banner.DisplayName or id) .. " (Niedostępny)"
+			button.Text = "  " .. (banner.DisplayName or id) .. " (Unavailable)"
 			button.BackgroundColor3 = Color3.fromRGB(36, 26, 26)
 		end
 
@@ -414,7 +414,7 @@ local function doRoll(amount: number)
 		return RollBanner:InvokeServer(selectedBannerId, amount)
 	end)
 	if not ok or not success then
-		resultsBox.Text = "Wyniki: Błąd rolla."
+		resultsBox.Text = "Results: Roll failed."
 		return
 	end
 	state.Pity = payload.Pity or state.Pity
@@ -428,7 +428,7 @@ local function doRoll(amount: number)
 		local rarity = tostring(result.Rarity or "-")
 		table.insert(lines, string.format("%s (%s)%s", colorizeWeaponName(weaponId, rarity), rarity, featured))
 	end
-	resultsBox.Text = "Wyniki: " .. table.concat(lines, ", ")
+resultsBox.Text = "Results: " .. table.concat(lines, ", ")
 end
 
 rollOne.MouseButton1Click:Connect(function()

@@ -43,7 +43,7 @@ coinsText.TextSize = 14
 coinsText.TextXAlignment = Enum.TextXAlignment.Left
 coinsText.TextYAlignment = Enum.TextYAlignment.Center
 coinsText.TextColor3 = Color3.fromRGB(245, 245, 245)
-coinsText.Text = "Monety: 0"
+coinsText.Text = "Coins: 0"
 coinsText.Parent = coinsBox
 
 -- Name + level + race (right) - autosize width
@@ -68,7 +68,7 @@ nameText.TextSize = 14
 nameText.TextXAlignment = Enum.TextXAlignment.Right
 nameText.TextYAlignment = Enum.TextYAlignment.Center
 nameText.TextColor3 = Color3.fromRGB(245, 245, 245)
-nameText.Text = plr.Name .. " • Lv. 1 • Rasa: -"
+nameText.Text = plr.Name .. " • Lv. 1 • Race: -"
 nameText.Parent = nameBox
 
 -- Bottom bars
@@ -159,8 +159,8 @@ end
 
 local function render()
 	race = tostring(plr:GetAttribute("Race") or race or "-")
-	nameText.Text = ("%s • Lv. %d • Rasa: %s"):format(plr.Name, level, race)
-	coinsText.Text = ("Monety: %d"):format(coins)
+	nameText.Text = ("%s • Lv. %d • Race: %s"):format(plr.Name, level, race)
+	coinsText.Text = ("Coins: %d"):format(coins)
 
 	local n = math.max(1, nextXp)
 	xpLabel.Text = ("EXP: %d/%d"):format(xp, n)

@@ -930,7 +930,7 @@ local function applyDetails(def)
 	itemName.Text = def.name or def.id or "Unknown"
 	itemName.TextColor3 = color
 
-	local description = def.description or def.passiveDescription or def.abilityDescription or "Brak opisu."
+	local description = def.description or def.passiveDescription or def.abilityDescription or "No description."
 	itemDesc.Text = description
 	infoLine.Text = ("Type: %s | Rarity: %s"):format(def.weaponType or "-", rarity)
 	infoLine.TextColor3 = color
@@ -1244,7 +1244,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if contextMenu.Visible and input.UserInputType == Enum.UserInputType.MouseButton1 then
 		hideContextMenu()
 	end
-	if input.KeyCode == Enum.KeyCode.B then
+	if input.KeyCode == Enum.KeyCode.Tab then
 		inventoryGui.Enabled = not inventoryGui.Enabled
 		if inventoryGui.Enabled then
 			loadSnapshot()

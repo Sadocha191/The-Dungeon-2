@@ -16,7 +16,7 @@ local btn = Instance.new("TextButton", gui)
 btn.Size = UDim2.fromOffset(260, 60)
 btn.Position = UDim2.fromScale(0.5, 0.5)
 btn.AnchorPoint = Vector2.new(0.5, 0.5)
-btn.Text = "WRÓĆ DO LOBBY"
+btn.Text = "RETURN TO LOBBY"
 btn.Font = Enum.Font.GothamBold
 btn.TextSize = 16
 
