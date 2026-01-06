@@ -1240,7 +1240,7 @@ closeBtn.MouseButton1Click:Connect(function()
 end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then return end
+	if gameProcessed and input.KeyCode ~= Enum.KeyCode.Tab then return end
 	if contextMenu.Visible and input.UserInputType == Enum.UserInputType.MouseButton1 then
 		hideContextMenu()
 	end
