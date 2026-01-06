@@ -47,7 +47,7 @@ title.Font = Enum.Font.GothamBold
 title.TextSize = 24
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.TextColor3 = Color3.fromRGB(245, 245, 245)
-title.Text = "Wybierz poziom"
+title.Text = "Select Level"
 title.Parent = root
 
 local closeBtn = Instance.new("TextButton")
@@ -59,7 +59,7 @@ closeBtn.BorderSizePixel = 0
 closeBtn.Font = Enum.Font.GothamBold
 closeBtn.TextSize = 16
 closeBtn.TextColor3 = Color3.fromRGB(245, 245, 245)
-closeBtn.Text = "Zamknij"
+closeBtn.Text = "Close"
 closeBtn.Parent = root
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 10)
 
@@ -89,7 +89,7 @@ local function makeLevelButton(entry)
 	btn.Font = Enum.Font.GothamBold
 	btn.TextSize = 18
 	btn.TextColor3 = Color3.fromRGB(245, 245, 245)
-	btn.Text = tostring(entry.name or entry.key or "Poziom")
+	btn.Text = tostring(entry.name or entry.key or "Level")
 	btn.Parent = listFrame
 	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 12)
 
@@ -112,7 +112,7 @@ local function rebuildList()
 		label.TextSize = 18
 		label.TextXAlignment = Enum.TextXAlignment.Left
 		label.TextColor3 = Color3.fromRGB(220, 220, 220)
-		label.Text = "Brak dostępnych poziomów."
+		label.Text = "No levels available."
 		label.Parent = listFrame
 		return
 	end

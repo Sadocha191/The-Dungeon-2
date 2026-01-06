@@ -51,7 +51,7 @@ btnLobby.BorderSizePixel = 0
 btnLobby.Font = Enum.Font.GothamBold
 btnLobby.TextSize = 16
 btnLobby.TextColor3 = Color3.fromRGB(255,255,255)
-btnLobby.Text = "Powrót do lobby"
+btnLobby.Text = "Return to lobby"
 btnLobby.Parent = panel
 Instance.new("UICorner", btnLobby).CornerRadius = UDim.new(0, 14)
 
@@ -63,7 +63,7 @@ btnClose.BorderSizePixel = 0
 btnClose.Font = Enum.Font.GothamBold
 btnClose.TextSize = 16
 btnClose.TextColor3 = Color3.fromRGB(255,255,255)
-btnClose.Text = "Zamknij"
+btnClose.Text = "Close"
 btnClose.Parent = panel
 Instance.new("UICorner", btnClose).CornerRadius = UDim.new(0, 14)
 

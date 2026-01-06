@@ -11,11 +11,11 @@ local Races = {}
 -- HP, Mana, STR, DEX, INT, Armor, CritChance, CritDmg, MoveSpeed, AttackSpeed, LifeSteal, CDR, MagicPower, PhysicalPower
 
 Races.Tiers = {
-	Common = {name = "Zwykła",     mult = 1.00},
-	Rare = {name = "Rzadka",      mult = 1.25},
-	Epic = {name = "Epicka",      mult = 1.55},
-	Legendary = {name = "Legendarna", mult = 1.90},
-	Mythic = {name = "Mityczna",  mult = 2.30},
+	Common = {name = "Common",     mult = 1.00},
+	Rare = {name = "Rare",      mult = 1.25},
+	Epic = {name = "Epic",      mult = 1.55},
+	Legendary = {name = "Legendary", mult = 1.90},
+	Mythic = {name = "Mythic",  mult = 2.30},
 }
 
 -- Uwaga: "stats" są już wpisane jako docelowe (nie mnożymy ich dodatkowo automatem),
@@ -25,123 +25,123 @@ Races.Defs = {
 	-- ===== ZWYKŁE =====
 	Human = {
 		tier = "Common",
-		desc = "Zbalansowany start.",
+		desc = "Balanced start.",
 		roleTags = {"any"},
 		stats = {HP = 10, Mana = 10, STR = 1, DEX = 1, INT = 1},
-		buffs = {"Adaptacja: +3% do wszystkich obrażeń"},
+		buffs = {"Adaptation: +3% to all damage"},
 	},
 	Forester = {
 		tier = "Common",
-		desc = "Łowca z lasu. Mobilność i celność.",
+		desc = "Forest hunter. Mobility and accuracy.",
 		roleTags = {"dex","ranged"},
 		stats = {DEX = 4, MoveSpeed = 4, CritChance = 2},
-		buffs = {"Tropiciel: +5% dmg do pierwszego trafionego celu"},
+		buffs = {"Tracker: +5% damage to the first target hit"},
 	},
 	Miner = {
 		tier = "Common",
-		desc = "Twardy pracownik. Trochę pancerza i HP.",
+		desc = "Hard worker. Some armor and HP.",
 		roleTags = {"tank","str"},
 		stats = {HP = 18, Armor = 3, STR = 2},
-		buffs = {"Hart: -2% dmg otrzymanego"},
+		buffs = {"Fortitude: -2% damage taken"},
 	},
 	Acolyte = {
 		tier = "Common",
-		desc = "Uczeń magii. Mana i skrócenie odnowień.",
+		desc = "Magic apprentice. Mana and cooldown reduction.",
 		roleTags = {"int","magic"},
 		stats = {Mana = 22, INT = 3, CDR = 3},
-		buffs = {"Skupienie: +3% MagicPower"},
+		buffs = {"Focus: +3% Magic Power"},
 	},
 
 	-- ===== RZADKIE =====
 	Elf = {
 		tier = "Rare",
-		desc = "Wysoka mana, dobra magia.",
+		desc = "High mana, strong magic.",
 		roleTags = {"int","magic"},
 		stats = {Mana = 40, INT = 5, CDR = 5, MagicPower = 6},
-		buffs = {"Mana Scaling: +0.20% dmg za 10 many"},
+		buffs = {"Mana Scaling: +0.20% damage per 10 mana"},
 	},
 	Dwarf = {
 		tier = "Rare",
-		desc = "Obrońca. Pancerz i redukcja obrażeń.",
+		desc = "Defender. Armor and damage reduction.",
 		roleTags = {"tank","str"},
 		stats = {HP = 25, Armor = 7, STR = 3},
-		buffs = {"Kamienna skóra: -5% dmg otrzymanego"},
+		buffs = {"Stone Skin: -5% damage taken"},
 	},
 	Goblin = {
 		tier = "Rare",
-		desc = "Szybkość i krytyki.",
+		desc = "Speed and crits.",
 		roleTags = {"dex"},
 		stats = {DEX = 6, MoveSpeed = 6, CritChance = 4, AttackSpeed = 3},
-		buffs = {"Chciwość: +10% monet z dropu"},
+		buffs = {"Greed: +10% coins from drops"},
 	},
 	Undead = {
 		tier = "Rare",
-		desc = "Przetrwanie przez sustain.",
+		desc = "Survival through sustain.",
 		roleTags = {"any"},
 		stats = {HP = 18, LifeSteal = 4, Armor = 2},
-		buffs = {"Pożeranie: +2% Lifesteal gdy trafiasz (cap 6%)"},
+		buffs = {"Devour: +2% Lifesteal when you hit (cap 6%)"},
 	},
 
 	-- ===== EPICKIE =====
 	Orc = {
 		tier = "Epic",
-		desc = "Mocny physical i HP.",
+		desc = "Strong physical power and HP.",
 		roleTags = {"str"},
 		stats = {HP = 35, STR = 8, Armor = 3, PhysicalPower = 10},
-		buffs = {"Szał: gdy HP < 40% masz +12% PhysicalPower"},
+		buffs = {"Rage: when HP < 40% you gain +12% Physical Power"},
 	},
 	Shadowborn = {
 		tier = "Epic",
-		desc = "Zasadzki i wysokie crity.",
+		desc = "Ambushes and high crits.",
 		roleTags = {"dex"},
 		stats = {DEX = 7, CritChance = 7, CritDmg = 18, MoveSpeed = 4},
-		buffs = {"Zasadzka: pierwszy hit na wroga +15% dmg"},
+		buffs = {"Ambush: first hit on an enemy +15% damage"},
 	},
 	Dragonkin = {
 		tier = "Epic",
-		desc = "Hybrid. Dobre staty w obie strony.",
+		desc = "Hybrid. Solid stats on both sides.",
 		roleTags = {"str","int"},
 		stats = {HP = 30, STR = 4, INT = 4, Armor = 3, PhysicalPower = 6, MagicPower = 6},
-		buffs = {"Smocza krew: +5% do wszystkich obrażeń"},
+		buffs = {"Dragon Blood: +5% to all damage"},
 	},
 
 	-- ===== LEGENDARNE =====
 	Vampire = {
 		tier = "Legendary",
-		desc = "Wysoki sustain i crit.",
+		desc = "High sustain and crit.",
 		roleTags = {"dex","any"},
 		stats = {HP = 20, LifeSteal = 9, CritChance = 5, CritDmg = 15, MoveSpeed = 2},
-		buffs = {"Głód: +1% Lifesteal za każde 20% brakującego HP (cap 5%)"},
+		buffs = {"Hunger: +1% Lifesteal for every 20% missing HP (cap 5%)"},
 	},
 	Golem = {
 		tier = "Legendary",
-		desc = "Najtwardszy tank (kosztem mobilności).",
+		desc = "Toughest tank (at the cost of mobility).",
 		roleTags = {"tank"},
 		stats = {HP = 55, Armor = 14, MoveSpeed = -5},
-		buffs = {"Forteca: -10% dmg otrzymanego"},
+		buffs = {"Fortress: -10% damage taken"},
 	},
 	Archmage = {
 		tier = "Legendary",
-		desc = "Czysta magia i CDR.",
+		desc = "Pure magic and CDR.",
 		roleTags = {"int","magic"},
 		stats = {Mana = 70, INT = 10, CDR = 12, MagicPower = 14, HP = -5},
-		buffs = {"Arcana: +8% MagicPower"},
+		buffs = {"Arcana: +8% Magic Power"},
 	},
 
 	-- ===== MITYCZNE =====
 	Angel = {
 		tier = "Mythic",
-		desc = "Bardzo mocna, uniwersalna. Najlepsze bazowe bonusy.",
+		desc = "Very strong and versatile. Best base bonuses.",
 		roleTags = {"any","magic"},
 		stats = {HP = 35, Mana = 55, STR = 4, DEX = 4, INT = 8, Armor = 6, CDR = 10, MagicPower = 12},
-		buffs = {"Błogosławieństwo: -6% dmg otrzymanego i +6% dmg zadawanego"},
+		buffs = {"Blessing: -6% damage taken and +6% damage dealt"},
 	},
 	Demon = {
 		tier = "Mythic",
-		desc = "Ogromny dmg, ryzykowna obrona.",
+		desc = "Massive damage, risky defense.",
 		roleTags = {"any"},
 		stats = {PhysicalPower = 18, MagicPower = 18, CritDmg = 25, Armor = -4, HP = 10},
-		buffs = {"Pakt: +12% dmg, ale +8% dmg otrzymanego"},
+		buffs = {"Pact: +12% damage but +8% damage taken"},
 	},
 }
 

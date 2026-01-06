@@ -6,7 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local npc = script.Parent
 local primary = npc.PrimaryPart or npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChildWhichIsA("BasePart")
-assert(primary and primary:IsA("BasePart"), "NPC musi mieć PrimaryPart/BasePart")
+assert(primary and primary:IsA("BasePart"), "NPC must have a PrimaryPart/BasePart")
 
 local remotes = ReplicatedStorage:WaitForChild("RemoteEvents")
 local OpenUI = remotes:WaitForChild("OpenWeaponBannerUI")
@@ -25,7 +25,7 @@ local function ensurePrompt(part: BasePart, name: string, actionText: string, ob
 	return p
 end
 
-local prompt = ensurePrompt(primary, "WeaponBannerPrompt", "Sprawdź bannery", "Banner Gacha", 0)
+local prompt = ensurePrompt(primary, "WeaponBannerPrompt", "Check banners", "Banner Gacha", 0)
 
 prompt.Triggered:Connect(function(player: Player)
 	OpenUI:FireClient(player)

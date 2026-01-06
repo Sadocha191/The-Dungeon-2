@@ -15,7 +15,7 @@ add({
 	Id = "TEST_CLAIM",
 	Type = "Test",
 	Title = "Test Claim",
-	Description = "Testowa misja do nieskończonego odbierania nagród.",
+	Description = "Test mission for unlimited reward claims.",
 	Reward = {
 		Coins = 500,
 		WeaponPoints = 50,

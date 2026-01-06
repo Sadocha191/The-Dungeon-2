@@ -2,8 +2,8 @@ local BannerConfigs = {}
 
 BannerConfigs.Banners = {
 	WeaponFocus = {
-		DisplayName = "Banner broni: Początkujący",
-		Description = "Zwiększona szansa na wybrane bronie.",
+		DisplayName = "Weapon Banner: Beginner",
+		Description = "Increased chance for featured weapons.",
 		Icon = "",
 		Active = true,
 		Cost = {
