@@ -155,12 +155,18 @@ local function tryTeleport(player: Player, placeId: number)
 end
 
 prompt.Triggered:Connect(function(player: Player)
+	if player:GetAttribute("TutorialComplete") ~= true then
+		return
+	end
 	if not canOpen(player) then return end
 	if not distanceOk(player) then return end
 	OpenLevelSelect:FireClient(player)
 end)
 
 RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: string)
+	if player:GetAttribute("TutorialComplete") ~= true then
+		return
+	end
 	if typeof(levelKey) ~= "string" then return end
 	if not canTeleport(player) then return end
 	if not distanceOk(player) then return end
