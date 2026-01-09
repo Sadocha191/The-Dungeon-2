@@ -92,9 +92,15 @@ local function registerNpc(model: Model)
 end
 
 local function scanNpcs()
-	if not NPCS_FOLDER then return end
-	for _, inst in ipairs(NPCS_FOLDER:GetChildren()) do
-		if inst:IsA("Model") then
+	if NPCS_FOLDER then
+		for _, inst in ipairs(NPCS_FOLDER:GetChildren()) do
+			if inst:IsA("Model") then
+				registerNpc(inst)
+			end
+		end
+	end
+	for _, inst in ipairs(Workspace:GetDescendants()) do
+		if inst:IsA("Model") and typeof(inst:GetAttribute("TutorialNpcId")) == "string" then
 			registerNpc(inst)
 		end
 	end
@@ -110,7 +116,14 @@ if NPCS_FOLDER then
 	end)
 else
 	warn("[TutorialService] NPCs folder not found.")
+	scanNpcs()
 end
+
+Workspace.DescendantAdded:Connect(function(inst)
+	if inst:IsA("Model") and typeof(inst:GetAttribute("TutorialNpcId")) == "string" then
+		registerNpc(inst)
+	end
+end)
 
 local function getNpcTarget(npcId: string): Vector3?
 	local entry = npcById[npcId]

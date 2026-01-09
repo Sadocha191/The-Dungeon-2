@@ -77,7 +77,6 @@ end
 
 local function updatePromptVisibility()
 	local npcs = findNpcsFolder()
-	if not npcs then return end
 	local step = getTutorialStep()
 	local active = isTutorialActive()
 
