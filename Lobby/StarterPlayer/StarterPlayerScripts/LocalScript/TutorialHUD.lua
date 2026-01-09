@@ -77,7 +77,6 @@ end
 
 local function updatePromptVisibility()
 	local npcs = findNpcsFolder()
-	if not npcs then return end
 	local step = getTutorialStep()
 	local active = isTutorialActive()
 
@@ -89,16 +88,28 @@ local function updatePromptVisibility()
 		[5] = "Knight",
 	})[step]
 
-	for _, model in ipairs(npcs:GetChildren()) do
-		if model:IsA("Model") then
-			local npcId = model:GetAttribute("TutorialNpcId")
-			for _, inst in ipairs(model:GetDescendants()) do
-				if inst:IsA("ProximityPrompt") then
-					if active and npcId == stepNpcId then
-						inst.Enabled = true
-					else
-						inst.Enabled = false
-					end
+	local targets = {}
+	if npcs then
+		for _, model in ipairs(npcs:GetChildren()) do
+			if model:IsA("Model") then
+				table.insert(targets, model)
+			end
+		end
+	end
+	for _, model in ipairs(workspace:GetDescendants()) do
+		if model:IsA("Model") and typeof(model:GetAttribute("TutorialNpcId")) == "string" then
+			table.insert(targets, model)
+		end
+	end
+
+	for _, model in ipairs(targets) do
+		local npcId = model:GetAttribute("TutorialNpcId")
+		for _, inst in ipairs(model:GetDescendants()) do
+			if inst:IsA("ProximityPrompt") then
+				if active and npcId == stepNpcId then
+					inst.Enabled = true
+				else
+					inst.Enabled = false
 				end
 			end
 		end
