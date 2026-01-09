@@ -92,12 +92,14 @@ local function updatePromptVisibility()
 	for _, model in ipairs(npcs:GetChildren()) do
 		if model:IsA("Model") then
 			local npcId = model:GetAttribute("TutorialNpcId")
-			for _, inst in ipairs(model:GetDescendants()) do
-				if inst:IsA("ProximityPrompt") then
-					if active and npcId == stepNpcId then
-						inst.Enabled = true
-					else
-						inst.Enabled = false
+			if npcId then
+				for _, inst in ipairs(model:GetDescendants()) do
+					if inst:IsA("ProximityPrompt") then
+						if active then
+							inst.Enabled = npcId == stepNpcId
+						else
+							inst.Enabled = true
+						end
 					end
 				end
 			end
