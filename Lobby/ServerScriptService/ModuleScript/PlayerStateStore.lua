@@ -37,6 +37,12 @@ function Store.Load(player: Player)
 			StarterWeaponName = nil, -- ✅
 			OwnedWeapons = {},
 			FavoriteWeapons = {},
+			OwnedSpells = {},
+			Tutorial = {
+				Active = true,
+				Step = 1,
+				Complete = false,
+			},
 			Profile = nil,
 		}
 	end
@@ -50,6 +56,20 @@ function Store.Load(player: Player)
 	end
 	if typeof(data.FavoriteWeapons) ~= "table" then
 		data.FavoriteWeapons = {}
+	end
+	if typeof(data.OwnedSpells) ~= "table" then
+		data.OwnedSpells = {}
+	end
+	if typeof(data.Tutorial) ~= "table" then
+		data.Tutorial = {
+			Active = true,
+			Step = 1,
+			Complete = false,
+		}
+	else
+		data.Tutorial.Active = data.Tutorial.Active ~= false
+		data.Tutorial.Step = math.max(1, math.floor(tonumber(data.Tutorial.Step) or 1))
+		data.Tutorial.Complete = data.Tutorial.Complete == true
 	end
 
 	cache[uid] = data
@@ -173,6 +193,49 @@ function Store.SetFavoriteWeapon(player: Player, weaponName: string, isFavorite:
 		table.insert(data.FavoriteWeapons, weaponName)
 		Store.Save(player)
 	end
+end
+
+function Store.GetTutorialState(player: Player)
+	local data = cache[player.UserId] or Store.Load(player)
+	return data.Tutorial
+end
+
+function Store.SetTutorialState(player: Player, payload: {Active: boolean?, Step: number?, Complete: boolean?})
+	local data = cache[player.UserId] or Store.Load(player)
+	data.Tutorial = data.Tutorial or { Active = true, Step = 1, Complete = false }
+	if payload.Active ~= nil then
+		data.Tutorial.Active = payload.Active == true
+	end
+	if payload.Step ~= nil then
+		data.Tutorial.Step = math.max(1, math.floor(tonumber(payload.Step) or 1))
+	end
+	if payload.Complete ~= nil then
+		data.Tutorial.Complete = payload.Complete == true
+	end
+	if typeof(data.Profile) == "table" then
+		data.Profile.Tutorial = {
+			Active = data.Tutorial.Active,
+			Step = data.Tutorial.Step,
+			Complete = data.Tutorial.Complete,
+		}
+	end
+	Store.Save(player)
+end
+
+function Store.EnsureOwnedSpell(player: Player, spellId: string)
+	local data = cache[player.UserId] or Store.Load(player)
+	if typeof(spellId) ~= "string" or spellId == "" then return end
+	data.OwnedSpells = data.OwnedSpells or {}
+	for _, name in ipairs(data.OwnedSpells) do
+		if name == spellId then
+			return
+		end
+	end
+	table.insert(data.OwnedSpells, spellId)
+	if typeof(data.Profile) == "table" then
+		data.Profile.OwnedSpells = data.OwnedSpells
+	end
+	Store.Save(player)
 end
 
 Players.PlayerRemoving:Connect(function(player)
