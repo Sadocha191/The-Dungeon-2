@@ -31,7 +31,20 @@ local OpenDialogueEvent = ensureRemote("OpenDialogueEvent")
 local DialogueFinishedEvent = ensureRemote("DialogueFinishedEvent")
 local TutorialTargetEvent = ensureRemote("TutorialTargetEvent")
 
-local NPCS_FOLDER = Workspace:WaitForChild("NPCs", 10)
+local function findNpcsFolder(): Instance?
+	local direct = Workspace:FindFirstChild("NPCs")
+	if direct then
+		return direct
+	end
+	for _, inst in ipairs(Workspace:GetDescendants()) do
+		if inst.Name == "NPCs" then
+			return inst
+		end
+	end
+	return nil
+end
+
+local NPCS_FOLDER = findNpcsFolder()
 
 local STARTER_SWORD_NAME = "StarterSword"
 local FALLBACK_SWORD_NAME = "Knight's Oath"
@@ -87,9 +100,9 @@ local function scanNpcs()
 	end
 end
 
-scanNpcs()
-
 if NPCS_FOLDER then
+	scanNpcs()
+
 	NPCS_FOLDER.ChildAdded:Connect(function(child)
 		if child:IsA("Model") then
 			registerNpc(child)
