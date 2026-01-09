@@ -108,6 +108,8 @@ if NPCS_FOLDER then
 			registerNpc(child)
 		end
 	end)
+else
+	warn("[TutorialService] NPCs folder not found.")
 end
 
 local function getNpcTarget(npcId: string): Vector3?

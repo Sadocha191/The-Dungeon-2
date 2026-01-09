@@ -62,8 +62,21 @@ local function isTutorialActive()
 	return player:GetAttribute("TutorialActive") == true
 end
 
+local function findNpcsFolder(): Instance?
+	local direct = workspace:FindFirstChild("NPCs")
+	if direct then
+		return direct
+	end
+	for _, inst in ipairs(workspace:GetDescendants()) do
+		if inst.Name == "NPCs" then
+			return inst
+		end
+	end
+	return nil
+end
+
 local function updatePromptVisibility()
-	local npcs = workspace:FindFirstChild("NPCs")
+	local npcs = findNpcsFolder()
 	if not npcs then return end
 	local step = getTutorialStep()
 	local active = isTutorialActive()
