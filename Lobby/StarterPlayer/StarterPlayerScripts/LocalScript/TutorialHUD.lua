@@ -54,6 +54,57 @@ local guideState = {
 	targetAttachment = nil :: Attachment?,
 }
 
+local function getTutorialStep()
+	return player:GetAttribute("TutorialStep") or 1
+end
+
+local function isTutorialActive()
+	return player:GetAttribute("TutorialActive") == true
+end
+
+local function findNpcsFolder(): Instance?
+	local direct = workspace:FindFirstChild("NPCs")
+	if direct then
+		return direct
+	end
+	for _, inst in ipairs(workspace:GetDescendants()) do
+		if inst.Name == "NPCs" then
+			return inst
+		end
+	end
+	return nil
+end
+
+local function updatePromptVisibility()
+	local npcs = findNpcsFolder()
+	if not npcs then return end
+	local step = getTutorialStep()
+	local active = isTutorialActive()
+
+	local stepNpcId = ({
+		[1] = "Knight",
+		[2] = "Blacksmith",
+		[3] = "Knight",
+		[4] = "Witch",
+		[5] = "Knight",
+	})[step]
+
+	for _, model in ipairs(npcs:GetChildren()) do
+		if model:IsA("Model") then
+			local npcId = model:GetAttribute("TutorialNpcId")
+			for _, inst in ipairs(model:GetDescendants()) do
+				if inst:IsA("ProximityPrompt") then
+					if active and npcId == stepNpcId then
+						inst.Enabled = true
+					else
+						inst.Enabled = false
+					end
+				end
+			end
+		end
+	end
+end
+
 local function clearGuide()
 	if guideState.beam then
 		guideState.beam:Destroy()
@@ -124,6 +175,7 @@ local function renderGuide()
 end
 
 showPathButton.MouseButton1Click:Connect(function()
+	TutorialTargetEvent:FireServer()
 	renderGuide()
 end)
 
@@ -139,8 +191,14 @@ TutorialTargetEvent.OnClientEvent:Connect(function(targetPos: Vector3?, objectiv
 	renderGuide()
 end)
 
+player:GetAttributeChangedSignal("TutorialStep"):Connect(updatePromptVisibility)
+player:GetAttributeChangedSignal("TutorialActive"):Connect(updatePromptVisibility)
+
 player.CharacterAdded:Connect(function()
 	if guideState.targetPos then
 		task.defer(renderGuide)
 	end
+	task.defer(updatePromptVisibility)
 end)
+
+task.defer(updatePromptVisibility)

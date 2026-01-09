@@ -31,7 +31,6 @@ local gui = Instance.new("ScreenGui")
 gui.Name = "DialogueUI"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
-gui.Modal = true
 gui.Enabled = false
 gui.Parent = player:WaitForChild("PlayerGui")
 

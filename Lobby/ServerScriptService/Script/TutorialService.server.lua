@@ -31,7 +31,20 @@ local OpenDialogueEvent = ensureRemote("OpenDialogueEvent")
 local DialogueFinishedEvent = ensureRemote("DialogueFinishedEvent")
 local TutorialTargetEvent = ensureRemote("TutorialTargetEvent")
 
-local NPCS_FOLDER = Workspace:WaitForChild("NPCs", 10)
+local function findNpcsFolder(): Instance?
+	local direct = Workspace:FindFirstChild("NPCs")
+	if direct then
+		return direct
+	end
+	for _, inst in ipairs(Workspace:GetDescendants()) do
+		if inst.Name == "NPCs" then
+			return inst
+		end
+	end
+	return nil
+end
+
+local NPCS_FOLDER = findNpcsFolder()
 
 local STARTER_SWORD_NAME = "StarterSword"
 local FALLBACK_SWORD_NAME = "Knight's Oath"
@@ -87,23 +100,16 @@ local function scanNpcs()
 	end
 end
 
-scanNpcs()
-
 if NPCS_FOLDER then
+	scanNpcs()
+
 	NPCS_FOLDER.ChildAdded:Connect(function(child)
 		if child:IsA("Model") then
 			registerNpc(child)
 		end
 	end)
-end
-
-local function setPromptStates(step: number?, active: boolean)
-	for npcId, entry in pairs(npcById) do
-		if entry.prompt then
-			local shouldEnable = active and stepConfig[step or 0] and stepConfig[step or 0].npcId == npcId
-			entry.prompt.Enabled = shouldEnable == true
-		end
-	end
+else
+	warn("[TutorialService] NPCs folder not found.")
 end
 
 local function getNpcTarget(npcId: string): Vector3?
@@ -134,6 +140,12 @@ local function sendObjective(player: Player, step: number?, active: boolean)
 		TutorialTargetEvent:FireClient(player, nil, config.objective)
 	end
 end
+
+TutorialTargetEvent.OnServerEvent:Connect(function(player: Player)
+	local tutorial = PlayerStateStore.GetTutorialState(player)
+	if not tutorial then return end
+	sendObjective(player, tutorial.Step, tutorial.Active)
+end)
 
 local function applyAttributes(player: Player, tutorial: {Active: boolean, Step: number, Complete: boolean})
 	player:SetAttribute("TutorialActive", tutorial.Active == true)
@@ -213,7 +225,6 @@ local function advanceStep(player: Player, nextStep: number?)
 
 	local tutorial = PlayerStateStore.GetTutorialState(player)
 	applyAttributes(player, tutorial)
-	setPromptStates(tutorial.Step, tutorial.Active)
 	sendObjective(player, tutorial.Step, tutorial.Active)
 end
 
@@ -263,7 +274,6 @@ end)
 Players.PlayerAdded:Connect(function(player: Player)
 	local tutorial = ensureDefaults(player)
 	applyAttributes(player, tutorial)
-	setPromptStates(tutorial.Step, tutorial.Active)
 	sendObjective(player, tutorial.Step, tutorial.Active)
 
 	player.CharacterAdded:Connect(function()
