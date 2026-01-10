@@ -303,7 +303,7 @@ local function updateDetails()
 	local pityLine = string.format("Pity: %d/%d (Target: %s, 50/50 fail: %s)", pityState.Count or 0, hard, target, tostring(pityState.FeaturedFail == true))
 	pityText.Text = pityLine
 	local cost = banner.Cost or {}
-costText.Text = string.format("Cost: %d %s", tonumber(cost.Amount) or 0, tostring(cost.Currency or ""))
+	costText.Text = string.format("Cost: %d %s", tonumber(cost.Amount) or 0, tostring(cost.Currency or ""))
 end
 
 local function clearList()
@@ -428,7 +428,7 @@ local function doRoll(amount: number)
 		local rarity = tostring(result.Rarity or "-")
 		table.insert(lines, string.format("%s (%s)%s", colorizeWeaponName(weaponId, rarity), rarity, featured))
 	end
-resultsBox.Text = "Results: " .. table.concat(lines, ", ")
+	resultsBox.Text = "Results: " .. table.concat(lines, ", ")
 end
 
 rollOne.MouseButton1Click:Connect(function()

@@ -817,8 +817,18 @@ end
 local function refreshFinalStats(raceName)
 	local raceDef = Races.Defs and Races.Defs[raceName or ""]
 	local raceStats = raceDef and raceDef.stats or {}
-	local weaponDef = equippedWeaponId and (WeaponConfigs.Get and WeaponConfigs.Get(equippedWeaponId)) or nil
-	local weaponStats = weaponDef and weaponDef.stats or {}
+	local equippedItem
+	if equippedWeaponId then
+		for _, it in ipairs(inventoryItems) do
+			if it.id == equippedWeaponId then
+				equippedItem = it
+				break
+			end
+		end
+	end
+	local weaponDef = equippedItem and equippedItem.def or nil
+	local weaponStats = (equippedItem and equippedItem.stats) or (weaponDef and weaponDef.stats) or {}
+	local weaponATK = (equippedItem and equippedItem.stats and equippedItem.stats.ATK) or (weaponDef and weaponDef.baseDamage) or 0
 
 	local function getRaceStat(key)
 		return tonumber(raceStats[key]) or 0
@@ -829,7 +839,7 @@ local function refreshFinalStats(raceName)
 	end
 
 	local hp = getRaceStat("HP") + getWeaponStat("HP")
-	local atk = (weaponDef and weaponDef.baseDamage or 0)
+	local atk = weaponATK
 		+ getRaceStat("PhysicalPower")
 		+ getRaceStat("MagicPower")
 		+ getRaceStat("STR")
@@ -849,7 +859,7 @@ local function refreshFinalStats(raceName)
 end
 
 local function updatePlayerInfo()
-playerName.Text = ("%s - Lv. %d"):format(plr.Name, level)
+	playerName.Text = ("%s - Lv. %d"):format(plr.Name, level)
 	expLabel.Text = ("EXP: %d/%d"):format(xp, math.max(1, nextXp))
 	local pct = math.clamp(xp / math.max(1, nextXp), 0, 1)
 	TweenService:Create(expFill, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
@@ -862,8 +872,9 @@ playerName.Text = ("%s - Lv. %d"):format(plr.Name, level)
 	wpLabel.Text = ("WP: %d"):format(weaponPoints)
 end
 
-local function applyEquipped(def)
-	if not def then
+
+local function applyEquipped(item)
+	if not item or not item.def then
 		equippedName.Text = "No weapon equipped"
 		equippedName.TextColor3 = Color3.fromRGB(245, 245, 245)
 		equippedMeta.Text = "Type: - | Rarity: -"
@@ -876,14 +887,18 @@ local function applyEquipped(def)
 		return
 	end
 
-	local rarity = def.rarity or "Common"
+	local def = item.def
+	local rarity = item.rarity or def.rarity or "Common"
 	local color = rarityColor(rarity)
-	equippedName.Text = def.name or def.id or "Unknown"
+	equippedName.Text = item.displayName or def.name or def.id or "Unknown"
 	equippedName.TextColor3 = color
 	equippedMeta.Text = ("Type: %s | Rarity: %s"):format(def.weaponType or "-", rarity)
 	equippedMeta.TextColor3 = color
-	equippedStats.Text = ("Level: %s | ATK: %s"):format(tostring(def.maxLevel or "-"), tostring(def.baseDamage or "-"))
-	equippedBonus.Text = formatStatsShort(def.stats)
+	local lvl = tonumber(item.level) or 1
+	local maxLvl = tonumber(item.maxLevel) or def.maxLevel or "-"
+	local atk = (item.stats and item.stats.ATK) or def.baseDamage or "-"
+	equippedStats.Text = ("Level: %s/%s | ATK: %s"):format(tostring(lvl), tostring(maxLvl), tostring(atk))
+	equippedBonus.Text = formatStatsShort(item.stats or def.stats)
 
 	local passiveText = def.passiveName or ""
 	local abilityText = def.abilityName or ""
@@ -899,16 +914,21 @@ local function applyEquipped(def)
 end
 
 local function refreshEquippedPanel()
-	local def
+	local equippedItem
 	if equippedWeaponId then
-		def = WeaponConfigs.Get(equippedWeaponId)
+		for _, it in ipairs(inventoryItems) do
+			if it.id == equippedWeaponId then
+				equippedItem = it
+				break
+			end
+		end
 	end
-	applyEquipped(def)
+	applyEquipped(equippedItem)
 	updatePlayerInfo()
 end
 
-local function applyDetails(def)
-	if not def then
+local function applyDetails(item)
+	if not item or not item.def then
 		itemName.Text = "Select a weapon"
 		itemName.TextColor3 = Color3.fromRGB(245, 245, 245)
 		itemDesc.Text = "Pick a weapon slot to see its details."
@@ -925,17 +945,21 @@ local function applyDetails(def)
 		return
 	end
 
-	local rarity = def.rarity or "Common"
+	local def = item.def
+	local rarity = item.rarity or def.rarity or "Common"
 	local color = rarityColor(rarity)
-	itemName.Text = def.name or def.id or "Unknown"
+	itemName.Text = item.displayName or def.name or def.id or "Unknown"
 	itemName.TextColor3 = color
 
 	local description = def.description or def.passiveDescription or def.abilityDescription or "No description."
 	itemDesc.Text = description
 	infoLine.Text = ("Type: %s | Rarity: %s"):format(def.weaponType or "-", rarity)
 	infoLine.TextColor3 = color
-	statLine.Text = ("Max Level: %s | ATK: %s"):format(tostring(def.maxLevel or "-"), tostring(def.baseDamage or "-"))
-	bonusStats.Text = formatStats(def.stats)
+	local lvl = tonumber(item.level) or 1
+	local maxLvl = tonumber(item.maxLevel) or def.maxLevel or "-"
+	local atk = (item.stats and item.stats.ATK) or def.baseDamage or "-"
+	statLine.Text = ("Level: %s/%s | ATK: %s"):format(tostring(lvl), tostring(maxLvl), tostring(atk))
+	bonusStats.Text = formatStats(item.stats or def.stats)
 
 	local passiveName = def.passiveName or ""
 	if passiveName ~= "" then
@@ -1020,7 +1044,7 @@ local function setSelected(index)
 	end
 
 	local item = inventoryItems[index]
-	applyDetails(item and item.def)
+	applyDetails(item)
 	hideContextMenu()
 end
 
@@ -1166,12 +1190,22 @@ local function loadSnapshot()
 
 	inventoryItems = {}
 	for _, entry in ipairs(payload.weapons or {}) do
-		local weaponId = entry.WeaponId or entry.weaponId or entry.id or entry
-		if typeof(weaponId) == "string" and weaponId ~= "" then
+		local instanceId = entry.InstanceId or entry.instanceId or entry.id
+		local weaponId = entry.WeaponId or entry.weaponId or entry.weapon
+		if typeof(instanceId) == "string" and instanceId ~= "" and typeof(weaponId) == "string" and weaponId ~= "" then
 			local def = WeaponConfigs.Get and WeaponConfigs.Get(weaponId) or nil
+			local rarity = entry.Rarity or (def and def.rarity) or "Common"
+			local prefix = entry.Prefix or "Standard"
+			local displayName = prefix .. " " .. ((def and def.name) or weaponId)
 			table.insert(inventoryItems, {
-				id = weaponId,
+				id = instanceId,
+				weaponId = weaponId,
+				displayName = displayName,
 				def = def,
+				rarity = rarity,
+				level = tonumber(entry.Level) or 1,
+				maxLevel = tonumber(entry.MaxLevel) or (def and def.maxLevel) or nil,
+				stats = entry.Stats or {},
 				favorite = entry.Favorite == true,
 			})
 		end

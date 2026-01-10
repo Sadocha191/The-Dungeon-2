@@ -102,7 +102,26 @@ local function findWeaponName(player: Player): string?
 	return nil
 end
 
-local function equipWeapon(player: Player, weaponName: string): boolean
+local function applyInstanceAttributes(tool: Tool, inst: any)
+	tool:SetAttribute("WeaponInstanceId", inst.instanceId)
+	tool:SetAttribute("WeaponLevel", tonumber(inst.level) or 1)
+	tool:SetAttribute("WeaponPrefix", tostring(inst.prefix or "Standard"))
+	if typeof(inst.rollStats) == "table" then
+		for k, v in pairs(inst.rollStats) do
+			if typeof(k) == "string" and typeof(v) == "number" then
+				tool:SetAttribute("Roll_" .. k, v)
+			end
+		end
+	end
+end
+
+local function equipWeaponInstance(player: Player, instanceId: string): boolean
+	PlayerStateStore.Load(player)
+	local inst = PlayerStateStore.GetWeaponInstance(player, instanceId)
+	if not inst then
+		return false
+	end
+	local weaponName = inst.weaponId
 	local template = WeaponCatalog.FindTemplate(weaponName)
 	if not template then
 		warn("[InventoryService] Missing weapon template:", weaponName)
@@ -118,16 +137,18 @@ local function equipWeapon(player: Player, weaponName: string): boolean
 	clearWeaponTools(backpack)
 	clearWeaponTools(player.Character)
 
-	local function clonePrepared(parent: Instance)
+	local function clonePrepared(parent: Instance): Tool
 		local clone = template:Clone()
 		WeaponCatalog.PrepareTool(clone, weaponName)
+		applyInstanceAttributes(clone, inst)
 		clone.Parent = parent
+		return clone
 	end
 
 	clonePrepared(backpack)
 
-	PlayerStateStore.SetEquippedWeaponName(player, weaponName)
-	PlayerStateStore.EnsureOwnedWeapon(player, weaponName)
+	PlayerStateStore.SetEquippedWeaponInstance(player, instanceId)
+	PlayerStateStore.EnsureOwnedWeapon(player, weaponName) -- legacy unique list sync
 	return true
 end
 
@@ -142,30 +163,67 @@ local function buildFavoriteSet(list: {any}?): {[string]: boolean}
 	return set
 end
 
-local function buildItemData(weaponName: string, favorites: {[string]: boolean})
-	local item = {
-		id = weaponName,
-		name = weaponName,
-		favorite = favorites[weaponName] == true,
+
+local function toPct(x: number): number
+	return math.floor((tonumber(x) or 0) * 100 + 0.5)
+end
+
+local function computeInstanceStats(def: any, inst: any)
+	local combat = def.combat or {}
+	local roll = (typeof(inst.rollStats) == "table") and inst.rollStats or {}
+	local lvl = math.max(1, math.floor(tonumber(inst.level) or 1))
+
+	local baseAtk = (combat.baseAtk or def.baseDamage or 0) + (roll.BaseATK or 0)
+	local atkPerLevel = (combat.atkPerLevel or 0) + (roll.ATKPerLevel or 0)
+	local atk = baseAtk + (lvl - 1) * atkPerLevel
+
+	local hp = (combat.bonusHP or 0) + (roll.BonusHP or 0)
+	local defv = (combat.bonusDefense or 0) + (roll.BonusDefense or 0)
+	local spd = (combat.bonusSpeed or 0) + (roll.BonusSpeed or 0)
+	local critRate = (combat.bonusCritRate or 0) + (roll.BonusCritRate or 0)
+	local critDmg = (combat.bonusCritDmg or 0) + (roll.BonusCritDmg or 0)
+	local lifesteal = (combat.bonusLifesteal or 0) + (roll.BonusLifesteal or 0)
+
+	return {
+		ATK = math.floor(atk + 0.5),
+		HP = math.floor(hp + 0.5),
+		DEF = math.floor(defv + 0.5),
+		SPD = toPct(spd),
+		CRIT_RATE = toPct(critRate),
+		CRIT_DMG = toPct(critDmg),
+		LIFESTEAL = toPct(lifesteal),
 	}
-	local def = WeaponConfigs.Get(weaponName)
+end
+
+local function buildItemData(inst: any, favorites: {[string]: boolean})
+	local weaponId = inst.weaponId
+	local def = WeaponConfigs.Get(weaponId)
+	local rarity = (tostring(inst.rarity or "") ~= "" and tostring(inst.rarity)) or (def and def.rarity) or "Common"
+	local item = {
+		id = inst.instanceId,
+		weaponId = weaponId,
+		prefix = tostring(inst.prefix or "Standard"),
+		level = tonumber(inst.level) or 1,
+		rarity = rarity,
+		favorite = favorites[weaponId] == true,
+	}
 	if def then
 		item.weaponType = def.weaponType
-		item.rarity = def.rarity
-		item.baseDamage = def.baseDamage
+		item.maxLevel = def.maxLevel
+		item.passiveName = def.passiveName
+		item.abilityName = def.abilityName
+		item.stats = computeInstanceStats(def, inst)
 		local rarityMultiplier = ({
 			Common = 1,
 			Rare = 1.4,
 			Epic = 1.8,
 			Legendary = 2.4,
 			Mythical = 3,
-		})[def.rarity] or 1
+		})[rarity] or 1
 		item.sellValue = def.sellValue or math.max(1, math.floor((def.baseDamage or 0) * 3 * rarityMultiplier))
-		item.maxLevel = def.maxLevel
-		item.stats = def.stats
-		item.passiveName = def.passiveName
+	end
+	if def then
 		item.passiveDescription = def.passiveDescription
-		item.abilityName = def.abilityName
 		item.abilityDescription = def.abilityDescription
 	end
 	return item
@@ -188,25 +246,19 @@ local function sendInventory(player: Player)
 	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
 	local favorites = buildFavoriteSet(state.FavoriteWeapons)
 	local items = {}
-	for _, weaponName in ipairs(state.OwnedWeapons or {}) do
-		if typeof(weaponName) == "string" and weaponName ~= "" then
-			table.insert(items, buildItemData(weaponName, favorites))
+	for _, inst in ipairs(state.WeaponInstances or {}) do
+		if typeof(inst) == "table" and typeof(inst.instanceId) == "string" then
+			table.insert(items, buildItemData(inst, favorites))
 		end
 	end
 	InventorySync:FireClient(player, {
 		items = items,
-		equippedId = state.StarterWeaponName,
+		equippedId = state.EquippedWeaponInstanceId,
 	})
 end
 
-local function isOwned(state: any, weaponName: string): boolean
-	if typeof(state.OwnedWeapons) ~= "table" then return false end
-	for _, name in ipairs(state.OwnedWeapons) do
-		if name == weaponName then
-			return true
-		end
-	end
-	return false
+local function hasInstance(player: Player, instanceId: string): boolean
+	return PlayerStateStore.GetWeaponInstance(player, instanceId) ~= nil
 end
 
 InventoryAction.OnServerEvent:Connect(function(player: Player, payload: any)
@@ -217,35 +269,37 @@ InventoryAction.OnServerEvent:Connect(function(player: Player, payload: any)
 		return
 	end
 
-	local weaponName = tostring(payload.id or "")
-	if weaponName == "" then return end
+	local instanceId = tostring(payload.id or "")
+	if instanceId == "" then return end
 
 	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
 
 	if actionType == "equip" then
-		if not isOwned(state, weaponName) then return end
-		equipWeapon(player, weaponName)
+		if not hasInstance(player, instanceId) then return end
+		equipWeaponInstance(player, instanceId)
 		sendInventory(player)
 		return
 	end
 
 	if actionType == "favorite" then
-		if not isOwned(state, weaponName) then return end
-		PlayerStateStore.SetFavoriteWeapon(player, weaponName, payload.value == true)
+		local inst = PlayerStateStore.GetWeaponInstance(player, instanceId)
+		if not inst then return end
+		PlayerStateStore.SetFavoriteWeapon(player, inst.weaponId, payload.value == true)
 		sendInventory(player)
 		return
 	end
 
 	if actionType == "sell" then
-		if not isOwned(state, weaponName) then return end
-		PlayerStateStore.RemoveOwnedWeapon(player, weaponName)
-		PlayerStateStore.SetFavoriteWeapon(player, weaponName, false)
-		local sellValue = getSellValue(weaponName)
+		local inst = PlayerStateStore.GetWeaponInstance(player, instanceId)
+		if not inst then return end
+		PlayerStateStore.RemoveWeaponInstance(player, instanceId)
+		PlayerStateStore.SetFavoriteWeapon(player, inst.weaponId, false)
+		local sellValue = getSellValue(inst.weaponId)
 		if sellValue > 0 then
 			CurrencyService.AddCoins(player, sellValue)
 		end
-		if state.StarterWeaponName == weaponName then
-			PlayerStateStore.SetEquippedWeaponName(player, nil)
+		if state.EquippedWeaponInstanceId == instanceId then
+			PlayerStateStore.SetEquippedWeaponInstance(player, nil)
 			clearWeaponTools(player:FindFirstChildOfClass("Backpack"))
 			clearWeaponTools(player.Character)
 		end
@@ -256,38 +310,19 @@ end)
 
 Players.PlayerAdded:Connect(function(player: Player)
 	local state = PlayerStateStore.Load(player)
-	if typeof(state.StarterWeaponName) ~= "string" or state.StarterWeaponName == "" then
+	-- jeśli brak instancji, spróbuj wykryć tool z Backpack/Character i zrobić instancję
+	if (#(state.WeaponInstances or {}) == 0) then
 		local detected = findWeaponName(player)
 		if typeof(detected) == "string" and detected ~= "" then
 			PlayerStateStore.EnsureOwnedWeapon(player, detected)
-			PlayerStateStore.SetEquippedWeaponName(player, detected)
 			state = PlayerStateStore.Get(player) or state
 		end
 	end
-	if typeof(state.StarterWeaponName) == "string" and state.StarterWeaponName ~= "" then
-		PlayerStateStore.EnsureOwnedWeapon(player, state.StarterWeaponName)
-	end
-	if typeof(state.StarterWeaponName) ~= "string" or state.StarterWeaponName == "" then
-		local detected = findWeaponName(player)
-		if typeof(detected) == "string" and detected ~= "" then
-			PlayerStateStore.EnsureOwnedWeapon(player, detected)
-			PlayerStateStore.SetEquippedWeaponName(player, detected)
-			state = PlayerStateStore.Get(player) or state
-		end
-	end
-	if typeof(state.StarterWeaponName) == "string" and state.StarterWeaponName ~= "" then
-		PlayerStateStore.EnsureOwnedWeapon(player, state.StarterWeaponName)
-	end
-	if typeof(state.StarterWeaponName) ~= "string" or state.StarterWeaponName == "" then
-		local detected = findWeaponName(player)
-		if typeof(detected) == "string" and detected ~= "" then
-			PlayerStateStore.EnsureOwnedWeapon(player, detected)
-			PlayerStateStore.SetEquippedWeaponName(player, detected)
-			state = PlayerStateStore.Get(player) or state
-		end
-	end
-	if typeof(state.StarterWeaponName) == "string" and state.StarterWeaponName ~= "" then
-		equipWeapon(player, state.StarterWeaponName)
+	-- equip zapisanej instancji (albo pierwszej)
+	if typeof(state.EquippedWeaponInstanceId) == "string" and state.EquippedWeaponInstanceId ~= "" then
+		equipWeaponInstance(player, state.EquippedWeaponInstanceId)
+	elseif state.WeaponInstances and state.WeaponInstances[1] then
+		equipWeaponInstance(player, state.WeaponInstances[1].instanceId)
 	end
 	task.defer(function()
 		sendInventory(player)

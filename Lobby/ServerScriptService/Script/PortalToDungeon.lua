@@ -14,7 +14,12 @@ local ProfilesManager = require(serverModules:WaitForChild("ProfilesManager"))
 local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
 local Levels = require(replicatedModules:WaitForChild("Levels"))
 
-local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
+local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
+if not remoteEvents then
+	remoteEvents = Instance.new("Folder")
+	remoteEvents.Name = "RemoteEvents"
+	remoteEvents.Parent = ReplicatedStorage
+end
 
 local function ensureRemote(name: string): RemoteEvent
 	local ev = remoteEvents:FindFirstChild(name)
@@ -125,20 +130,31 @@ local function tryTeleport(player: Player, placeId: number)
 	end
 
 	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
-	local weaponName = findWeaponName(player)
-	if typeof(weaponName) == "string" and weaponName ~= "" then
-		PlayerStateStore.SetStarterWeaponClaimed(player, weaponName)
-		PlayerStateStore.EnsureOwnedWeapon(player, weaponName)
-		state = PlayerStateStore.Get(player) or state
-	else
-		-- wymuszamy broń przed wejściem do dungeona
-		warn("[PortalToLevel1] Missing starter weapon for", player.Name)
+	local equipped = PlayerStateStore.GetEquippedWeaponInstance(player)
+	if not equipped then
+		warn("[PortalToLevel1] Missing equipped weapon instance for", player.Name)
 		return
 	end
+	local weaponName = equipped.weaponId
+	if typeof(weaponName) ~= "string" or weaponName == "" then
+		warn("[PortalToLevel1] Equipped instance has no weaponId for", player.Name)
+		return
+	end
+	-- utrzymuj legacy pola w sync
+	PlayerStateStore.SetStarterWeaponClaimed(player, weaponName)
+	PlayerStateStore.EnsureOwnedWeapon(player, weaponName)
+	state = PlayerStateStore.Get(player) or state
 
 	local tdata = {
 		Profile = sanitizeProfile(profile),
-		StarterWeaponName = state.StarterWeaponName, -- ✅
+		StarterWeaponName = state.StarterWeaponName,
+		EquippedWeaponInstance = {
+			InstanceId = equipped.instanceId,
+			WeaponId = equipped.weaponId,
+			Level = equipped.level,
+			Prefix = equipped.prefix,
+			RollStats = equipped.rollStats,
+		},
 		FromPlace = game.PlaceId,
 	}
 

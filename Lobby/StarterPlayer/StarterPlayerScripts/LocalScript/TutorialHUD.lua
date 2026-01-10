@@ -22,6 +22,7 @@ frame.Position = UDim2.new(0, 20, 1, -110)
 frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 frame.BackgroundTransparency = 0.2
 frame.Parent = gui
+frame.Visible = false
 
 local objectiveLabel = Instance.new("TextLabel")
 objectiveLabel.Size = UDim2.new(1, -20, 0, 40)
@@ -188,12 +189,30 @@ TutorialTargetEvent.OnClientEvent:Connect(function(targetPos: Vector3?, objectiv
 	end
 	guideState.objective = objectiveText or ""
 	objectiveLabel.Text = guideState.objective
-	frame.Visible = guideState.objective ~= ""
+	frame.Visible = (guideState.objective ~= "") and isTutorialActive()
 	renderGuide()
+end)
+
+player:GetAttributeChangedSignal("TutorialActive"):Connect(function()
+	if not isTutorialActive() then
+		clearGuide()
+		frame.Visible = false
+	end
 end)
 
 player:GetAttributeChangedSignal("TutorialStep"):Connect(updatePromptVisibility)
 player:GetAttributeChangedSignal("TutorialActive"):Connect(updatePromptVisibility)
+
+-- jeśli tutorial nieaktywny (ukończony), schowaj HUD nawet jeśli serwer nie wyśle eventu
+player:GetAttributeChangedSignal("TutorialActive"):Connect(function()
+	if not isTutorialActive() then
+		guideState.targetPos = nil
+		guideState.objective = ""
+		objectiveLabel.Text = ""
+		frame.Visible = false
+		clearGuide()
+	end
+end)
 
 player.CharacterAdded:Connect(function()
 	if guideState.targetPos then

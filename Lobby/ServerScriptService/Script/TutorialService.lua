@@ -61,11 +61,57 @@ local stepConfig = {
 
 local npcById: {[string]: {model: Model, prompt: ProximityPrompt?}} = {}
 
-local function registerNpc(model: Model)
-	local npcId = model:GetAttribute("TutorialNpcId")
-	if typeof(npcId) ~= "string" or npcId == "" then
-		return
+local function resolveNpcId(model: Model): string?
+	local attr = model:GetAttribute("TutorialNpcId")
+	if typeof(attr) == "string" and attr ~= "" then
+		return attr
 	end
+	-- fallback: jeśli nie ustawiasz atrybutów, bierz nazwę modelu
+	for _, cfg in pairs(stepConfig) do
+		if cfg.npcId == model.Name then
+			return model.Name
+		end
+	end
+	return nil
+end
+
+local function findAnyBasePart(model: Model): BasePart?
+	if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
+		return model.PrimaryPart
+	end
+	local hrp = model:FindFirstChild("HumanoidRootPart")
+	if hrp and hrp:IsA("BasePart") then
+		return hrp
+	end
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BasePart") then
+			return d
+		end
+	end
+	return nil
+end
+
+local function ensureTalkPrompt(model: Model, npcId: string): ProximityPrompt?
+	local part = findAnyBasePart(model)
+	if not part then return nil end
+
+	local p = part:FindFirstChild("TalkPrompt")
+	if p and p:IsA("ProximityPrompt") then return p end
+
+	p = Instance.new("ProximityPrompt")
+	p.Name = "TalkPrompt"
+	p.ActionText = "Porozmawiaj"
+	p.ObjectText = npcId
+	p.HoldDuration = 0
+	p.MaxActivationDistance = 10
+	p.RequiresLineOfSight = false
+	p.Parent = part
+	return p
+end
+
+local function registerNpc(model: Model)
+	local npcId = resolveNpcId(model)
+	if not npcId then return end
 
 	local prompt: ProximityPrompt?
 	for _, inst in ipairs(model:GetDescendants()) do
@@ -74,11 +120,11 @@ local function registerNpc(model: Model)
 			break
 		end
 	end
+	if not prompt then
+		prompt = ensureTalkPrompt(model, npcId)
+	end
 
-	npcById[npcId] = {
-		model = model,
-		prompt = prompt,
-	}
+	npcById[npcId] = { model = model, prompt = prompt }
 
 	if prompt then
 		prompt.Triggered:Connect(function(player: Player)
@@ -88,8 +134,11 @@ local function registerNpc(model: Model)
 			if not current or current.npcId ~= npcId then return end
 			OpenDialogueEvent:FireClient(player, current.dialogueKey)
 		end)
+	else
+		warn("[TutorialService] NPC without BasePart for prompt:", model:GetFullName())
 	end
 end
+
 
 local function scanNpcs()
 	if NPCS_FOLDER then
