@@ -1,23 +1,23 @@
-The Dungeon
+The Dungeon 2 (Roblox)
 
-The Dungeon is a dungeon crawler game created in Roblox. The player explores procedurally generated dungeons, fights enemies, and develops their character while progressing through increasingly difficult stages.
+Open-world dungeon crawler with 20-minute survival runs. Fight escalating hordes, earn Coins and loot, and return to the Village hub to craft and upgrade gear. After 20 minutes a boss spawns—defeat it to win the run and get back to the hub stronger for the next one.
 
-Core assumptions
+Core loop
 
-dungeon exploration
+Hub → choose loadout → enter a realm
 
-PvE combat system
+Survive waves, collect loot and Coins
 
-character and stat progression
+Boss at 20:00 → win and return, then upgrade and repeat
 
-increasing difficulty
+Features
 
-Project status
+Village hub with NPCs (tutorial + services)
 
-The project is in development. Mechanics are continuously added and improved.
+Randomized weapon crafting (up to Epic) and weapon upgrades
 
-Technologies
+Multiple weapon types, stats, and progression
 
-Roblox Studio
+Teleport portal to levels / realms
 
-Lua (Luau)
+Built in Roblox Studio.
