@@ -1,5 +1,6 @@
 -- MODULE: ProfilesManager.lua
--- GDZIE: ServerScriptService/ProfilesManager.lua (ModuleScript)
+-- GDZIE: ServerScriptService/ModuleScript/ProfilesManager.lua
+-- CO: Trzyma aktywny profil w pamięci + tworzy profil. Bez Modulescriptu Classes.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,12 +8,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local replicatedModules = ReplicatedStorage:WaitForChild("ModuleScripts")
 
 local Races = require(replicatedModules:WaitForChild("Races"))
-local Classes = require(replicatedModules:WaitForChild("Classes"))
+local Items = require(replicatedModules:WaitForChild("Items"))
 
 local PlayerStateStore = require(script.Parent:WaitForChild("PlayerStateStore"))
 
 local ProfilesManager = {}
-local mem: {[number]: any} = {} -- userId -> active profile (w pamięci)
+local mem: {[number]: any} = {} -- userId -> aktywny profil (w pamięci)
 
 local function newProfileId(userId: number): string
 	return tostring(userId) .. "-" .. tostring(os.time()) .. "-" .. tostring(math.random(1000, 9999))
@@ -35,8 +36,9 @@ function ProfilesManager.CreateProfile(player: Player, className: string)
 		return false, "AlreadyCreated"
 	end
 
-	if typeof(className) ~= "string" or not Classes.IsValid(className) then
-		return false, "InvalidClass"
+	if typeof(className) ~= "string" or not Items.IsValidClass(className) then
+		-- fallback: jak klient wyśle nil/śmieci
+		className = Items.GetDefaultClass()
 	end
 
 	local profile = {
@@ -44,15 +46,17 @@ function ProfilesManager.CreateProfile(player: Player, className: string)
 		CreatedAt = os.time(),
 		Class = className,
 		Race = Races.RollForClass(className),
-		Stats = Classes.GetBaseStats(className),
+		Stats = Items.GetBaseStats(className),
 		Coins = 0,
 		RaceRetryUsed = false,
 	}
 
 	mem[player.UserId] = profile
 
+	-- zapis do globalnego PlayerStateStore (to już masz w systemie)
 	PlayerStateStore.SetCreated(player, {
 		Id = profile.Id,
+		CreatedAt = profile.CreatedAt,
 		Class = profile.Class,
 		Race = profile.Race,
 		Stats = profile.Stats,
@@ -76,7 +80,7 @@ function ProfilesManager.RerollRaceOnce(player: Player)
 		return false, "RetryAlreadyUsed"
 	end
 
-	profile.Race = Races.RollForClass(profile.Class or "Default")
+	profile.Race = Races.RollForClass(profile.Class or Items.GetDefaultClass())
 	profile.RaceRetryUsed = true
 
 	-- update DS

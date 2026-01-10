@@ -1,11 +1,12 @@
 -- SCRIPT: PortalToLevel1.server.lua
--- GDZIE: ServerScriptService/PortalToLevel1.server.lua
--- ZMIANA: TeleportData zawiera Profile + StarterWeaponName
+-- GDZIE: Lobby/ServerScriptService/Script/PortalToDungeon.lua
+-- CO: ProximityPrompt na portalu + otwieranie LevelSelectUI + teleport z TeleportData.
 
 local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local Players = game:GetService("Players")
 
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 local replicatedModules = ReplicatedStorage:WaitForChild("ModuleScripts")
@@ -14,6 +15,7 @@ local ProfilesManager = require(serverModules:WaitForChild("ProfilesManager"))
 local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
 local Levels = require(replicatedModules:WaitForChild("Levels"))
 
+-- Remotes
 local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
 if not remoteEvents then
 	remoteEvents = Instance.new("Folder")
@@ -33,9 +35,43 @@ end
 local OpenLevelSelect = ensureRemote("OpenLevelSelect")
 local RequestLevelTeleport = ensureRemote("RequestLevelTeleport")
 
-local portalModel = workspace:WaitForChild("Portal")
-local portalPart = portalModel:WaitForChild("PortalTeleport")
+-- Portal może być w Workspace albo w ServerStorage. Nie używamy WaitForChild, żeby nie zawieszać skryptu.
+local function resolvePortalPart(): BasePart?
+	local ws = workspace
 
+	-- 1) Workspace: Model "Portal" / "PortalModel" + part "PortalTeleport"
+	local portalModel = ws:FindFirstChild("Portal") or ws:FindFirstChild("PortalModel")
+	if portalModel and portalModel:IsA("Model") then
+		local part = portalModel:FindFirstChild("PortalTeleport")
+		if part and part:IsA("BasePart") then return part end
+	end
+
+	-- 2) ServerStorage: "Portal" -> clone do Workspace
+	local stored = ServerStorage:FindFirstChild("Portal")
+	if stored and stored:IsA("Model") then
+		local clone = stored:Clone()
+		clone.Parent = ws
+		local part = clone:FindFirstChild("PortalTeleport")
+		if part and part:IsA("BasePart") then return part end
+	end
+
+	-- 3) Ostatni fallback: szukaj partu o nazwie PortalTeleport w całym Workspace
+	for _, d in ipairs(ws:GetDescendants()) do
+		if d:IsA("BasePart") and d.Name == "PortalTeleport" then
+			return d
+		end
+	end
+
+	return nil
+end
+
+local portalPart = resolvePortalPart()
+if not portalPart then
+	warn("[PortalToLevel1] PortalTeleport not found (Workspace/ServerStorage). Prompt will not be created.")
+	return
+end
+
+-- Prompt
 local prompt = portalPart:FindFirstChildOfClass("ProximityPrompt")
 if not prompt then
 	prompt = Instance.new("ProximityPrompt")
@@ -70,121 +106,70 @@ end
 
 local function distanceOk(player: Player): boolean
 	local char = player.Character
-	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	if not (hrp and hrp:IsA("BasePart")) then return false end
-	return (hrp.Position - portalPart.Position).Magnitude <= (prompt.MaxActivationDistance + 2)
+	if not char then return false end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return false end
+	return (hrp.Position - portalPart.Position).Magnitude <= 14
 end
 
-local function sanitizeProfile(profile: any)
-	return {
-		Id = tostring(profile.Id),
-		Class = tostring(profile.Class),
-		Race = tostring(profile.Race),
-		Stats = profile.Stats,
-		Coins = tonumber(profile.Coins) or 0,
-		RaceRetryUsed = profile.RaceRetryUsed == true,
-	}
-end
-
-local WeaponTemplates = ServerStorage:WaitForChild("WeaponTemplates", 10)
-if not WeaponTemplates then
-	warn("[PortalToLevel1] Missing ServerStorage.WeaponTemplates; fallback to WeaponType attributes only.")
-end
-
-local function isWeaponTool(inst: Instance): boolean
-	if not inst:IsA("Tool") then
-		return false
+local function tutorialComplete(player: Player): boolean
+	-- Twój “gate” na tutorial (jeśli chcesz blokować portal przed ukończeniem tutoriala)
+	local attr = player:GetAttribute("TutorialComplete")
+	if attr ~= nil then
+		return attr == true
 	end
-	if typeof(inst:GetAttribute("WeaponType")) == "string" then
+
+	-- fallback: jeśli atrybutu nie ma, patrzymy w store
+	local ok, state = pcall(function()
+		return PlayerStateStore.GetTutorialState(player)
+	end)
+	if ok and state and state.Complete == true then
 		return true
 	end
-	return WeaponTemplates and WeaponTemplates:FindFirstChild(inst.Name, true) ~= nil
-end
 
-local function findWeaponName(player: Player): string?
-	local backpack = player:FindFirstChildOfClass("Backpack")
-	if backpack then
-		for _, inst in ipairs(backpack:GetChildren()) do
-			if isWeaponTool(inst) then return inst.Name end
-		end
-	end
-	local char = player.Character
-	if char then
-		for _, inst in ipairs(char:GetChildren()) do
-			if isWeaponTool(inst) then return inst.Name end
-		end
-	end
-	local starterGear = player:FindFirstChild("StarterGear")
-	if starterGear then
-		for _, inst in ipairs(starterGear:GetChildren()) do
-			if isWeaponTool(inst) then return inst.Name end
-		end
-	end
-	return nil
+	return false
 end
 
 local function tryTeleport(player: Player, placeId: number)
-	local profile = ProfilesManager.GetActiveProfile(player)
-	if not profile then
-		return
-	end
+	if not canTeleport(player) then return end
 
-	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
-	local equipped = PlayerStateStore.GetEquippedWeaponInstance(player)
-	if not equipped then
-		warn("[PortalToLevel1] Missing equipped weapon instance for", player.Name)
-		return
-	end
-	local weaponName = equipped.weaponId
-	if typeof(weaponName) ~= "string" or weaponName == "" then
-		warn("[PortalToLevel1] Equipped instance has no weaponId for", player.Name)
-		return
-	end
-	-- utrzymuj legacy pola w sync
-	PlayerStateStore.SetStarterWeaponClaimed(player, weaponName)
-	PlayerStateStore.EnsureOwnedWeapon(player, weaponName)
-	state = PlayerStateStore.Get(player) or state
+	-- profile do teleportdata
+	local profile = ProfilesManager.GetProfile(player)
+	local st = PlayerStateStore.Get(player)
 
-	local tdata = {
-		Profile = sanitizeProfile(profile),
-		StarterWeaponName = state.StarterWeaponName,
-		EquippedWeaponInstance = {
-			InstanceId = equipped.instanceId,
-			WeaponId = equipped.weaponId,
-			Level = equipped.level,
-			Prefix = equipped.prefix,
-			RollStats = equipped.rollStats,
-		},
-		FromPlace = game.PlaceId,
+	local tpData = {
+		Profile = profile,
+		StarterWeaponName = st and st.StarterWeaponName or nil,
+		EquippedWeaponInstanceId = st and st.EquippedWeaponInstanceId or nil,
 	}
 
-	local options = Instance.new("TeleportOptions")
-	options:SetTeleportData(tdata)
-
 	local ok, err = pcall(function()
-		TeleportService:TeleportAsync(placeId, {player}, options)
+		TeleportService:TeleportAsync(placeId, { player }, tpData)
 	end)
-
 	if not ok then
 		warn("[PortalToLevel1] TeleportAsync failed:", err)
 	end
 end
 
+-- Otwieranie UI
 prompt.Triggered:Connect(function(player: Player)
-	if player:GetAttribute("TutorialComplete") ~= true then
+	if not player or not player.Parent then return end
+	if not distanceOk(player) then return end
+	if not canOpen(player) then return end
+
+	if not tutorialComplete(player) then
+		-- jak chcesz, możesz tu wysłać jakiś komunikat; na razie po prostu blokada
 		return
 	end
-	if not canOpen(player) then return end
-	if not distanceOk(player) then return end
+
 	OpenLevelSelect:FireClient(player)
 end)
 
-RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: string)
-	if player:GetAttribute("TutorialComplete") ~= true then
-		return
-	end
+-- Wybór poziomu z UI
+RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: any)
+	if not player or not player.Parent then return end
 	if typeof(levelKey) ~= "string" then return end
-	if not canTeleport(player) then return end
+	if not tutorialComplete(player) then return end
 	if not distanceOk(player) then return end
 
 	local entry = Levels.GetByKey(levelKey)
