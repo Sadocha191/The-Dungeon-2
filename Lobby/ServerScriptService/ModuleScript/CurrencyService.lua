@@ -1,95 +1,65 @@
--- MODULE: CurrencyService.lua
--- GDZIE: ServerScriptService/ModuleScript/CurrencyService.lua
--- CO: obsługa walut (Coins / WeaponPoints / Tickets)
+-- CurrencyService.lua
+-- Modyfikuje tylko stan w pamięci + MarkDirty. Nie zapisuje do DS bezpośrednio.
 
-local moduleFolder = script.Parent
-
-local PlayerData = require(moduleFolder:WaitForChild("PlayerData"))
+local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 
 local CurrencyService = {}
 
-local function ensureCurrencies(data: any)
-	data.Currencies = data.Currencies or { Coins = 0, WeaponPoints = 0, Tickets = 0 }
-	data.Currencies.Coins = math.max(0, math.floor(tonumber(data.Currencies.Coins) or 0))
-	data.Currencies.WeaponPoints = math.max(0, math.floor(tonumber(data.Currencies.WeaponPoints) or 0))
-	data.Currencies.Tickets = math.max(0, math.floor(tonumber(data.Currencies.Tickets) or 0))
-	data.coins = data.Currencies.Coins
-	return data.Currencies
+local function ensureProfile(data)
+	data.Profile = data.Profile or {}
+	data.Profile.Coins = tonumber(data.Profile.Coins) or 0
+	data.Profile.WeaponPoints = tonumber(data.Profile.WeaponPoints) or 0
+	return data.Profile
 end
 
-local function clampAmount(amount: number): number
-	amount = tonumber(amount) or 0
-	amount = math.floor(amount)
-	if amount < 0 then amount = 0 end
-	return amount
-end
-
-function CurrencyService.GetBalances(player: Player)
+function CurrencyService.GetCoins(player: Player): number
 	local data = PlayerData.Get(player)
-	return ensureCurrencies(data)
+	local p = ensureProfile(data)
+	return p.Coins
 end
 
-function CurrencyService.AddCurrency(player: Player, currency: string, amount: number)
+function CurrencyService.GetWeaponPoints(player: Player): number
 	local data = PlayerData.Get(player)
-	local currencies = ensureCurrencies(data)
-	amount = clampAmount(amount)
-	if amount == 0 then return currencies end
-	if currencies[currency] == nil then return currencies end
-	currencies[currency] += amount
-	if currency == "Coins" then
-		data.coins = currencies.Coins
-	end
-	PlayerData.MarkDirty(player)
-	return currencies
+	local p = ensureProfile(data)
+	return p.WeaponPoints
 end
 
 function CurrencyService.AddCoins(player: Player, amount: number)
-	return CurrencyService.AddCurrency(player, "Coins", amount)
+	amount = math.floor(tonumber(amount) or 0)
+	if amount == 0 then return end
+
+	local data = PlayerData.Get(player)
+	local p = ensureProfile(data)
+	p.Coins = math.max(0, p.Coins + amount)
+
+	PlayerData.MarkDirty(player, "coins")
 end
 
 function CurrencyService.AddWeaponPoints(player: Player, amount: number)
-	return CurrencyService.AddCurrency(player, "WeaponPoints", amount)
+	amount = math.floor(tonumber(amount) or 0)
+	if amount == 0 then return end
+
+	local data = PlayerData.Get(player)
+	local p = ensureProfile(data)
+	p.WeaponPoints = math.max(0, p.WeaponPoints + amount)
+
+	PlayerData.MarkDirty(player, "wp")
 end
 
-function CurrencyService.RemoveCurrency(player: Player, currency: string, amount: number): boolean
+function CurrencyService.SpendCoins(player: Player, amount: number): boolean
+	amount = math.floor(tonumber(amount) or 0)
+	if amount <= 0 then return true end
+
 	local data = PlayerData.Get(player)
-	local currencies = ensureCurrencies(data)
-	amount = clampAmount(amount)
-	if amount == 0 then return true end
-	if currencies[currency] == nil then return false end
-	if currencies[currency] < amount then
+	local p = ensureProfile(data)
+
+	if p.Coins < amount then
 		return false
 	end
-	currencies[currency] -= amount
-	if currency == "Coins" then
-		data.coins = currencies.Coins
-	end
-	PlayerData.MarkDirty(player)
+
+	p.Coins -= amount
+	PlayerData.MarkDirty(player, "coins_spend")
 	return true
-end
-
-function CurrencyService.ConvertWeaponPointsToTickets(player: Player, amountWeaponPoints: number)
-	local data = PlayerData.Get(player)
-	local currencies = ensureCurrencies(data)
-	local amount = clampAmount(amountWeaponPoints)
-	if amount <= 0 then
-		return false, "InvalidAmount", currencies
-	end
-
-	local conversion = math.floor(amount / 100)
-	if conversion <= 0 then
-		return false, "NotEnoughWeaponPoints", currencies
-	end
-
-	local required = conversion * 100
-	if currencies.WeaponPoints < required then
-		return false, "NotEnoughWeaponPoints", currencies
-	end
-
-	currencies.WeaponPoints -= required
-	currencies.Tickets += conversion
-	PlayerData.MarkDirty(player)
-	return true, { converted = conversion, spent = required }, currencies
 end
 
 return CurrencyService
