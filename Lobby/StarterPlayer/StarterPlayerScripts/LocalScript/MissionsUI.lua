@@ -1,7 +1,8 @@
 -- MissionsUI.lua (LocalScript)
--- OPCJA A: używa istniejącego prompta na Knight (np. tutorialowego "Porozmawiaj")
--- i otwiera Missions UI, gdy prompt jest w modelu "Workspace/NPCs/Knight/Knight".
--- Nie wymaga prompta o nazwie MissionPrompt.
+-- Działa z MissionRemotes.lua:
+-- RF_GetMissions -> { missions = {...}, currencies = {...} }
+-- RF_ClaimMission -> { ok = true/false, ... }
+-- Otwiera UI na promcie w Workspace.NPCs.Knight
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -11,26 +12,10 @@ local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
--- ===== RemoteFunctions =====
-local remoteFunctions = ReplicatedStorage:FindFirstChild("RemoteFunctions")
-if not remoteFunctions then
-	warn("[MissionsUI] Missing ReplicatedStorage.RemoteFunctions")
-	return
-end
+local remoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions")
+local RF_GetMissions = remoteFunctions:WaitForChild("RF_GetMissions")
+local RF_ClaimMission = remoteFunctions:WaitForChild("RF_ClaimMission")
 
-local RF_GetMissions = remoteFunctions:FindFirstChild("RF_GetMissions")
-local RF_ClaimMission = remoteFunctions:FindFirstChild("RF_ClaimMission")
-
-if not (RF_GetMissions and RF_GetMissions:IsA("RemoteFunction")) then
-	warn("[MissionsUI] Missing RemoteFunction RF_GetMissions")
-	return
-end
-if not (RF_ClaimMission and RF_ClaimMission:IsA("RemoteFunction")) then
-	warn("[MissionsUI] Missing RemoteFunction RF_ClaimMission")
-	return
-end
-
--- ===== Config =====
 local DAILY_MAX = 6
 local WEEKLY_MAX = 12
 
@@ -97,13 +82,25 @@ addStroke(panel, Color3.fromRGB(40, 40, 48))
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1
 title.Position = UDim2.fromOffset(24, 16)
-title.Size = UDim2.new(1, -140, 0, 28)
+title.Size = UDim2.new(1, -280, 0, 28)
 title.Font = Enum.Font.GothamBold
 title.TextSize = 20
 title.TextColor3 = Color3.fromRGB(245, 245, 245)
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Text = "Missions"
 title.Parent = panel
+
+local currencyLabel = Instance.new("TextLabel")
+currencyLabel.BackgroundTransparency = 1
+currencyLabel.AnchorPoint = Vector2.new(1, 0)
+currencyLabel.Position = UDim2.new(1, -60, 0, 20)
+currencyLabel.Size = UDim2.fromOffset(240, 20)
+currencyLabel.Font = Enum.Font.Gotham
+currencyLabel.TextSize = 12
+currencyLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+currencyLabel.TextXAlignment = Enum.TextXAlignment.Right
+currencyLabel.Text = ""
+currencyLabel.Parent = panel
 
 local closeBtn = Instance.new("TextButton")
 closeBtn.AnchorPoint = Vector2.new(1, 0)
@@ -199,9 +196,7 @@ local weeklyList = makeList(pageWeekly)
 
 local function clearList(list: ScrollingFrame)
 	for _, ch in ipairs(list:GetChildren()) do
-		if ch:IsA("Frame") then
-			ch:Destroy()
-		end
+		if ch:IsA("Frame") then ch:Destroy() end
 	end
 end
 
@@ -284,46 +279,56 @@ local function makeMissionRow(parentList: ScrollingFrame, mission: any, onClaim)
 	end
 
 	claim.MouseButton1Click:Connect(function()
-		if claimable then
-			onClaim(mission)
-		end
+		if claimable then onClaim(mission) end
 	end)
 end
 
--- ===== Data load / refresh =====
-local lastOpenAt = 0
-
-local function safeInvokeGet()
-	local ok, result = pcall(function()
+-- ===== Server calls (dopasowane do MissionRemotes.lua) =====
+local function getPayload()
+	local ok, payload = pcall(function()
 		return RF_GetMissions:InvokeServer()
 	end)
 	if not ok then
-		warn("[MissionsUI] RF_GetMissions failed:", result)
+		warn("[MissionsUI] RF_GetMissions error:", payload)
 		return nil
 	end
-	return result
+	return payload
 end
 
-local function safeInvokeClaim(id: string)
-	local ok, a = pcall(function()
+local function claimMission(id: string): boolean
+	local ok, payload = pcall(function()
 		return RF_ClaimMission:InvokeServer(id)
 	end)
 	if not ok then
-		warn("[MissionsUI] RF_ClaimMission failed:", a)
+		warn("[MissionsUI] RF_ClaimMission error:", payload)
 		return false
 	end
-	if typeof(a) == "boolean" then return a end
-	if typeof(a) == "table" then return a.success == true end
-	return false
+	return (typeof(payload) == "table" and payload.ok == true) or false
 end
 
 local function refreshUI()
-	local missions = safeInvokeGet()
 	clearList(dailyList)
 	clearList(weeklyList)
 
+	local payload = getPayload()
+	if typeof(payload) ~= "table" then
+		makeMissionRow(dailyList, { Title="Error", Description="Failed to load missions.", Claimable=false }, function() end)
+		return
+	end
+
+	local missions = payload.missions
+	local currencies = payload.currencies
+
+	if typeof(currencies) == "table" then
+		local coins = tonumber(currencies.Coins) or 0
+		local wp = tonumber(currencies.WeaponPoints) or 0
+		currencyLabel.Text = ("Coins: %d | WP: %d"):format(coins, wp)
+	else
+		currencyLabel.Text = ""
+	end
+
 	if typeof(missions) ~= "table" then
-		makeMissionRow(dailyList, {Title="Error", Description="Failed to load missions.", Claimable=false}, function() end)
+		makeMissionRow(dailyList, { Title="Error", Description="Server returned no mission list.", Claimable=false }, function() end)
 		return
 	end
 
@@ -332,11 +337,8 @@ local function refreshUI()
 
 	for _, m in ipairs(missions) do
 		if typeof(m) == "table" then
-			if m.Type == "Daily" then
-				table.insert(daily, m)
-			elseif m.Type == "Weekly" then
-				table.insert(weekly, m)
-			end
+			if m.Type == "Daily" then table.insert(daily, m) end
+			if m.Type == "Weekly" then table.insert(weekly, m) end
 		end
 	end
 
@@ -346,7 +348,7 @@ local function refreshUI()
 	local function onClaim(mission)
 		local id = tostring(mission.Id or "")
 		if id == "" then return end
-		if safeInvokeClaim(id) then
+		if claimMission(id) then
 			refreshUI()
 		end
 	end
@@ -357,12 +359,18 @@ local function refreshUI()
 	for _, m in ipairs(weekly) do
 		makeMissionRow(weeklyList, m, onClaim)
 	end
+
+	if #daily == 0 and #weekly == 0 then
+		makeMissionRow(dailyList, { Title="No missions", Description="Server returned empty pools. Check MissionConfigs + MissionService.", Claimable=false }, function() end)
+	end
 end
 
 -- ===== Open / Close =====
+local lastOpenAt = 0
+
 local function openUI()
 	local now = os.clock()
-	if (now - lastOpenAt) < 0.3 then return end
+	if (now - lastOpenAt) < 0.25 then return end
 	lastOpenAt = now
 
 	gui.Enabled = true
@@ -383,9 +391,7 @@ overlay.InputBegan:Connect(function(input)
 		local absSize = panel.AbsoluteSize
 		local inside = pos.X >= absPos.X and pos.X <= absPos.X + absSize.X
 			and pos.Y >= absPos.Y and pos.Y <= absPos.Y + absSize.Y
-		if not inside then
-			closeUI()
-		end
+		if not inside then closeUI() end
 	end
 end)
 
@@ -394,23 +400,21 @@ UserInputService.InputBegan:Connect(function(input, gp)
 	if input.KeyCode == Enum.KeyCode.Escape and gui.Enabled then
 		closeUI()
 	end
-	-- DEBUG fallback: M otwiera misje
+	-- debug: M otwiera
 	if input.KeyCode == Enum.KeyCode.M and not gui.Enabled then
 		openUI()
 	end
 end)
 
--- ===== Hook: otwieraj na dowolnym promcie będącym w modelu Knight =====
+-- ===== Prompt hook: Workspace.NPCs.Knight =====
 local function isPromptInsideKnight(prompt: ProximityPrompt): boolean
-	if not prompt then return false end
+	local npcs = workspace:FindFirstChild("NPCs")
+	local knight = npcs and npcs:FindFirstChild("Knight")
+	if not knight then return false end
 
-	local p = prompt.Parent
+	local p = prompt and prompt.Parent
 	while p do
-		-- ścieżka u Ciebie: Workspace/NPCs/Knight/Knight (Model)
-		if p.Name == "Knight" and p.Parent and p.Parent.Name == "Knight" then
-			-- p to model "Knight" wewnątrz folderu NPCs/Knight
-			return true
-		end
+		if p == knight then return true end
 		p = p.Parent
 	end
 	return false
@@ -423,4 +427,4 @@ ProximityPromptService.PromptTriggered:Connect(function(prompt, plr)
 	end
 end)
 
-print("[MissionsUI] Ready (Knight prompt hook)")
+print("[MissionsUI] Ready")
