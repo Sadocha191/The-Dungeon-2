@@ -63,6 +63,10 @@ local START_COUNT = 20
 local COUNT_ADD_PER_WAVE = 4
 local MAX_ALIVE_ON_MAP = 12
 local WAVE_DURATION = 40
+local ELITE_INTERVAL = 300 -- 5 min
+local ELITE_HP_MULT = 2.5
+local ELITE_DMG_MULT = 2.0
+local ELITE_SPEED_BONUS = 2
 
 local BASE_HP = 65
 local BASE_DAMAGE = 7
@@ -164,6 +168,43 @@ local function makeWaveStats(wave: number)
 	local spd = math.floor(clamp(BASE_SPEED * (1 + SPEED_GROWTH_PER_WAVE*(wave-1)), BASE_SPEED, SPEED_CAP))
 	local total = START_COUNT + COUNT_ADD_PER_WAVE*(wave-1)
 	return hp, dmg, spd, total
+end
+
+
+local function pickTierForWave(wave: number): number
+	-- 10 wariantów: od słabszego do mocniejszego. Mapujemy 1..8 wave na zakresy tierów.
+	local ranges = {
+		{1,2},
+		{2,3},
+		{3,4},
+		{4,5},
+		{5,6},
+		{6,7},
+		{7,9},
+		{8,10},
+	}
+	local r = ranges[math.clamp(wave, 1, #ranges)] or {1,1}
+	return math.random(r[1], r[2])
+end
+
+local function applyTierMultipliers(hp: number, dmg: number, spd: number, tier: number, isElite: boolean)
+	-- tier: 1..10
+	local t = math.clamp(tier, 1, 10)
+	local hpMult = 1.0 + (t-1)*0.12
+	local dmgMult = 1.0 + (t-1)*0.10
+	local spdAdd = (t-1)*0.25
+
+	if isElite then
+		hpMult *= ELITE_HP_MULT
+		dmgMult *= ELITE_DMG_MULT
+		spdAdd += ELITE_SPEED_BONUS
+	end
+
+	local outHp = math.floor(hp * hpMult)
+	local outDmg = math.floor(dmg * dmgMult)
+	local outSpd = math.floor(spd + spdAdd)
+
+	return outHp, outDmg, outSpd
 end
 
 local function randomPointInRing(center: Vector3)
@@ -279,7 +320,7 @@ local function dropsForWave(wave: number)
 end
 
 -- ===== SPAWN ORC =====
-local function spawnOrc(hp, dmg, spd, wave, onKill)
+local function spawnOrc(hp, dmg, spd, wave, tier, isElite, onKill)
 	local orc = ORC_TEMPLATE:Clone()
 	orc.Parent = ENEMIES_FOLDER
 	setMobGroup(orc)
@@ -288,6 +329,19 @@ local function spawnOrc(hp, dmg, spd, wave, onKill)
 	local root = orc:FindFirstChild("HumanoidRootPart")
 	if not hum or not root then orc:Destroy() return nil end
 
+	-- variant attributes (dla misji i debug)
+	orc:SetAttribute("VariantTier", tier or 1)
+	orc:SetAttribute("IsElite", isElite == true)
+
+	-- delikatny wizual: większy elite + lekko większy tier
+	pcall(function()
+		local scale = 1 + (math.clamp(tonumber(tier) or 1, 1, 10) - 1) * 0.03
+		if isElite then scale += 0.15 end
+		orc:ScaleTo(scale)
+	end)
+
+
+	hp, dmg, spd = applyTierMultipliers(hp, dmg, spd, tier or 1, isElite == true)
 	hum.MaxHealth = hp
 	hum.Health = hp
 	hum.WalkSpeed = spd
@@ -374,6 +428,25 @@ local function spawnOrc(hp, dmg, spd, wave, onKill)
 			end
 
 			local now = time()
+
+			-- elite co 5 minut (dodatkowy spawn)
+			if now >= nextEliteAt and alive < MAX_ALIVE_ON_MAP then
+				local eliteTier = math.clamp(pickTierForWave(wave) + 2, 1, 10)
+				local xpDrop, coinDrop = dropsForWave(wave + 2)
+				local elite = spawnOrc(hp, dmg, spd, wave, eliteTier, true, function(pos)
+					-- elite liczymy jak normalny kill do fal
+					killed += 1
+					remaining = math.max(0, total - killed)
+					alive = math.max(0, alive - 1)
+					pushUi(false)
+					if _G.SpawnDropsAt then _G.SpawnDropsAt(pos, xpDrop, coinDrop) end
+				end)
+				if elite then
+					alive += 1
+					nextEliteAt = now + ELITE_INTERVAL
+					pushUi(false)
+				end
+			end
 
 			-- ATTACK: always attempt in range
 			if dist <= ATTACK_RANGE and (now - lastAttack) >= ATTACK_COOLDOWN then
@@ -490,6 +563,7 @@ end
 -- ===== MAIN =====
 task.spawn(function()
 	local startTime = time()
+	local nextEliteAt = startTime + ELITE_INTERVAL
 
 	for t = PREP_TIME, 1, -1 do
 		waitIfPaused()
@@ -536,7 +610,7 @@ task.spawn(function()
 			while spawned < total and alive < MAX_ALIVE_ON_MAP and now >= nextSpawnAt do
 				local xpDrop, coinDrop = dropsForWave(wave)
 
-				local orc = spawnOrc(hp, dmg, spd, wave, function(pos)
+				local orc = spawnOrc(hp, dmg, spd, wave, pickTierForWave(wave), false, function(pos)
 					killed += 1
 					remaining = math.max(0, total - killed)
 					alive = math.max(0, alive - 1)

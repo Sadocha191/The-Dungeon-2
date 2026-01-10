@@ -31,6 +31,7 @@ end
 
 local PlayerData = require(playerDataModule)
 local WeaponService = require(weaponServiceModule)
+local MissionProgress = require(serverModules:WaitForChild(\"MissionProgress\"))
 local function buildFallbackUpDefs()
 	local fallback = {}
 	fallback.POOL = {
@@ -347,6 +348,7 @@ end)
 
 -- ===== Award =====
 local sessionStart = {} -- [uid] = {xp, coins, time}
+local sessionDeaths = {} -- [uid] = deaths in current run
 function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	if not plr or not plr.Parent then return end
 	local d = PlayerData.Get(plr)
@@ -357,6 +359,7 @@ function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	PlayerData.MarkDirty(plr)
 	PlayerData.Save(plr, false)
 	pushProgress(plr)
+	MissionProgress.OnReward(plr, xp, coins)
 
 	-- level-up
 	local leveled = false
@@ -601,8 +604,23 @@ local function dealMobDamage(plr: Player, mobHum: Humanoid, mobRoot: BasePart, b
 	local final = damage
 	if isCrit then final = math.floor(damage * critM) end
 
+
+	-- tag last hit (dla kill-credit)
+	local mobModel = mobRoot:FindFirstAncestorOfClass("Model")
+	if mobModel then
+		mobModel:SetAttribute("LastHitUserId", plr.UserId)
+		mobModel:SetAttribute("LastHitAt", os.clock())
+	end
+
 	local willDie = mobHum.Health - final <= 0
 	mobHum:TakeDamage(final)
+
+	-- missions
+	MissionProgress.OnDamage(plr, final, isCrit)
+	if willDie then
+		MissionProgress.OnKill(plr, mobModel)
+	end
+
 
 	-- stimmy indicator (client draws)
 	DamageIndicatorEvent:FireAllClients({
@@ -1127,6 +1145,9 @@ function _G.MissionComplete(totalWaves: number, seconds: number)
 			coins = d.coins,
 			xp = d.xp,
 		})
+		local died = (sessionDeaths[plr.UserId] or 0) > 0
+		MissionProgress.OnRunComplete(plr, totalWaves, seconds, died)
+		sessionDeaths[plr.UserId] = 0
 	end
 end
 
@@ -1145,7 +1166,11 @@ Players.PlayerAdded:Connect(function(plr)
 		local hum = char:FindFirstChildOfClass("Humanoid")
 		if hum then
 			updatePlayerDerivedStats(plr)
-			lastHealth[plr.UserId] = hum.Health
+						hum.Died:Connect(function()
+				sessionDeaths[plr.UserId] = (sessionDeaths[plr.UserId] or 0) + 1
+			end)
+
+lastHealth[plr.UserId] = hum.Health
 			hum.HealthChanged:Connect(function(current)
 				local prev = lastHealth[plr.UserId] or current
 				if current < prev then
