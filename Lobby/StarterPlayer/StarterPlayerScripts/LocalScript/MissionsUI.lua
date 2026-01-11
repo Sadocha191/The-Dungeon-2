@@ -423,8 +423,12 @@ end
 ProximityPromptService.PromptTriggered:Connect(function(prompt, plr)
 	if plr ~= player then return end
 	if isPromptInsideKnight(prompt) then
-		openUI()
+		-- otwieraj misje tylko jeśli tutorial już zakończony
+		if player:GetAttribute("TutorialComplete") then
+			openUI()
+		end
 	end
 end)
+
 
 print("[MissionsUI] Ready")
