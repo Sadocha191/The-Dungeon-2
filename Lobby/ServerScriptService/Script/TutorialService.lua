@@ -1,6 +1,6 @@
 -- SCRIPT: TutorialService.server.lua
--- GDZIE: ServerScriptService/TutorialService.server.lua
 -- CO: prowadzenie tutorialu lobby jako state machine na graczu
+-- ZMIANA (KROK 3): tutorial NIE daje już starterowego miecza (broń jest od Kowala).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -66,7 +66,6 @@ local function resolveNpcId(model: Model): string?
 	if typeof(attr) == "string" and attr ~= "" then
 		return attr
 	end
-	-- fallback: jeśli nie ustawiasz atrybutów, bierz nazwę modelu
 	for _, cfg in pairs(stepConfig) do
 		if cfg.npcId == model.Name then
 			return model.Name
@@ -139,7 +138,6 @@ local function registerNpc(model: Model)
 	end
 end
 
-
 local function scanNpcs()
 	if NPCS_FOLDER then
 		for _, inst in ipairs(NPCS_FOLDER:GetChildren()) do
@@ -181,8 +179,7 @@ local function getNpcTarget(npcId: string): Vector3?
 	if model.PrimaryPart then
 		return model.PrimaryPart.Position
 	end
-	local pivot = model:GetPivot()
-	return pivot.Position
+	return model:GetPivot().Position
 end
 
 local function sendObjective(player: Player, step: number?, active: boolean)
@@ -215,56 +212,9 @@ local function applyAttributes(player: Player, tutorial: {Active: boolean, Step:
 	player:SetAttribute("TutorialComplete", tutorial.Complete == true)
 end
 
-local function giveStarterSword(player: Player)
-	local weaponName = STARTER_SWORD_NAME
-	local template = WeaponCatalog.FindTemplate(weaponName)
-	if not template and FALLBACK_SWORD_NAME then
-		weaponName = FALLBACK_SWORD_NAME
-		template = WeaponCatalog.FindTemplate(weaponName)
-	end
-	if not template then
-		warn("[TutorialService] Missing starter sword template:", STARTER_SWORD_NAME)
-		return
-	end
-
-	local backpack = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 10)
-	if not backpack then
-		warn("[TutorialService] Missing Backpack for", player.Name)
-		return
-	end
-
-	local clone = template:Clone()
-	WeaponCatalog.PrepareTool(clone, weaponName)
-	clone.Parent = backpack
-
-	PlayerStateStore.SetStarterWeaponClaimed(player, weaponName)
-	PlayerStateStore.EnsureOwnedWeapon(player, weaponName)
-
-	if REQUIRE_EQUIPPED then
-		local character = player.Character or player.CharacterAdded:Wait()
-		if not character then return end
-		if character:FindFirstChild(weaponName) then
-			return
-		end
-
-		local equipped = false
-		local connection
-		connection = character.ChildAdded:Connect(function(child)
-			if child:IsA("Tool") and child.Name == weaponName then
-				equipped = true
-				connection:Disconnect()
-			end
-		end)
-
-		local startTime = os.clock()
-		while not equipped and (os.clock() - startTime) < 10 do
-			task.wait(0.1)
-		end
-
-		if connection and connection.Connected then
-			connection:Disconnect()
-		end
-	end
+-- ZMIANA: nie dajemy już miecza (broń jest od kowala)
+local function giveStarterSword(_player: Player)
+	return
 end
 
 local function giveStarterSpell(player: Player)
@@ -292,11 +242,7 @@ end
 
 local function ensureDefaults(player: Player)
 	local tutorial = PlayerStateStore.GetTutorialState(player)
-	tutorial = tutorial or {
-		Active = true,
-		Step = 1,
-		Complete = false,
-	}
+	tutorial = tutorial or { Active = true, Step = 1, Complete = false }
 	if tutorial.Complete then
 		tutorial.Active = false
 	end
@@ -316,7 +262,7 @@ DialogueFinishedEvent.OnServerEvent:Connect(function(player: Player, dialogueKey
 	if not current or current.dialogueKey ~= dialogueKey then return end
 
 	if tutorial.Step == 2 then
-		giveStarterSword(player)
+		-- ZMIANA: bez miecza
 		advanceStep(player, 3)
 		return
 	end

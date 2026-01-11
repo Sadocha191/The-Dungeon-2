@@ -1,16 +1,15 @@
 -- SCRIPT: StarterWeaponOnSpawn.server.lua
--- GDZIE: ServerScriptService/StarterWeaponOnSpawn.server.lua
--- CO: daje/odtwarza broń startową bez nadpisywania.
---     Jeśli gracz ma już broń (WeaponType) -> nic nie robi.
---     Jeśli gracz nie ma broni -> daje tę z DS (StarterWeaponName) albo Knight's Oath.
+-- CO TERAZ ROBI:
+-- 1) Jeśli gracz MA broń (Tool) -> tylko synchronizuje stan (EnsureOwnedWeapon + equip name).
+-- 2) Jeśli gracz NIE ma broni:
+--    - jeśli ma zapisaną broń w PlayerStateStore (StarterWeaponName) -> odtwarza ją
+--    - jeśli nie ma zapisu -> NIE daje nic (zero darmowych mieczy).
 
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
-
 local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
 
 local function findWeaponCatalog(): ModuleScript?
@@ -31,18 +30,13 @@ end
 
 local weaponCatalogModule = findWeaponCatalog()
 if not weaponCatalogModule then
-	warn("[StarterWeapon] Missing WeaponCatalog module; starter weapon disabled.")
+	warn("[StarterWeaponOnSpawn] Missing WeaponCatalog module; disabled.")
 	return
 end
 
 local WeaponCatalog = require(weaponCatalogModule)
 
-local START_WEAPON_NAME = "Knight's Oath"
-
 local WeaponTemplates = ServerStorage:WaitForChild("WeaponTemplates", 10)
-if not WeaponTemplates then
-	warn("[StarterWeapon] Missing ServerStorage.WeaponTemplates; fallback to WeaponType attributes only.")
-end
 
 local function isWeaponTool(inst: Instance): boolean
 	if not inst:IsA("Tool") then
@@ -67,12 +61,6 @@ local function hasAnyWeapon(player: Player): boolean
 			if isWeaponTool(inst) then return true end
 		end
 	end
-	local starterGear = player:FindFirstChild("StarterGear")
-	if starterGear then
-		for _, inst in ipairs(starterGear:GetChildren()) do
-			if isWeaponTool(inst) then return true end
-		end
-	end
 	return false
 end
 
@@ -89,12 +77,6 @@ local function findWeaponName(player: Player): string?
 			if isWeaponTool(inst) then return inst.Name end
 		end
 	end
-	local starterGear = player:FindFirstChild("StarterGear")
-	if starterGear then
-		for _, inst in ipairs(starterGear:GetChildren()) do
-			if isWeaponTool(inst) then return inst.Name end
-		end
-	end
 	return nil
 end
 
@@ -107,13 +89,13 @@ end
 local function giveTool(player: Player, toolName: string): boolean
 	local template = WeaponCatalog.FindTemplate(toolName)
 	if not template then
-		warn("[StarterWeapon] Missing template:", toolName)
+		warn("[StarterWeaponOnSpawn] Missing template:", toolName)
 		return false
 	end
 
 	local backpack = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 10)
 	if not backpack then
-		warn("[StarterWeapon] No Backpack for", player.Name)
+		warn("[StarterWeaponOnSpawn] No Backpack for", player.Name)
 		return false
 	end
 
@@ -129,7 +111,7 @@ end
 local function ensureWeapon(player: Player)
 	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
 
-	-- ✅ jeśli ma już jakąkolwiek broń (np. gacha) -> nic nie rób
+	-- 1) jeśli gracz ma broń w plecaku/na postaci -> synchronizacja tylko
 	if hasAnyWeapon(player) then
 		local currentName = findWeaponName(player)
 		if typeof(currentName) == "string" and currentName ~= "" then
@@ -141,18 +123,19 @@ local function ensureWeapon(player: Player)
 		return
 	end
 
-	-- ✅ jeśli w DS jest zapisana broń (nawet gdy StarterWeaponClaimed=true) -> odtwórz ją
-	local preferred = START_WEAPON_NAME
+	-- 2) jeśli NIE ma broni -> odtwarzamy TYLKO jeśli jest zapisana w DS
+	local preferred: string? = nil
 	if typeof(state.StarterWeaponName) == "string" and state.StarterWeaponName ~= "" then
 		preferred = state.StarterWeaponName
 	end
 
-	if not giveTool(player, preferred) and preferred ~= START_WEAPON_NAME then
-		preferred = START_WEAPON_NAME
-		giveTool(player, preferred)
+	-- brak zapisanej broni = nowy gracz = NIE DAJEMY NIC
+	if not preferred then
+		return
 	end
 
-	if preferred == START_WEAPON_NAME or WeaponCatalog.FindTemplate(preferred) then
+	-- odtwórz broń z DS
+	if giveTool(player, preferred) then
 		PlayerStateStore.EnsureOwnedWeapon(player, preferred)
 		PlayerStateStore.SetEquippedWeaponName(player, preferred)
 	end
@@ -170,4 +153,4 @@ Players.PlayerAdded:Connect(function(player: Player)
 	end)
 end)
 
-print("[StarterWeaponOnSpawn] Ready ->", START_WEAPON_NAME)
+print("[StarterWeaponOnSpawn] Ready (no free starter weapon)")

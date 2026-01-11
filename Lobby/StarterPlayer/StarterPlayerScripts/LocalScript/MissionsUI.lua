@@ -1,8 +1,5 @@
 -- MissionsUI.lua (LocalScript)
--- Działa z MissionRemotes.lua:
--- RF_GetMissions -> { missions = {...}, currencies = {...} }
--- RF_ClaimMission -> { ok = true/false, ... }
--- Otwiera UI na promcie w Workspace.NPCs.Knight
+-- Otwiera misje po promcie Knight, ale tylko po ukończeniu tutoriala.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -15,16 +12,25 @@ local playerGui = player:WaitForChild("PlayerGui")
 local remoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions")
 local RF_GetMissions = remoteFunctions:WaitForChild("RF_GetMissions")
 local RF_ClaimMission = remoteFunctions:WaitForChild("RF_ClaimMission")
+local RF_GetTutorialState = remoteFunctions:WaitForChild("RF_GetTutorialState")
 
 local DAILY_MAX = 6
 local WEEKLY_MAX = 12
 
--- ===== UI helpers =====
+local function tutorialComplete(): boolean
+	local ok, t = pcall(function()
+		return RF_GetTutorialState:InvokeServer()
+	end)
+	if not ok or typeof(t) ~= "table" then
+		return false
+	end
+	return t.Complete == true
+end
+
 local function addCorner(inst: Instance, r: number)
 	local c = Instance.new("UICorner")
 	c.CornerRadius = UDim.new(0, r)
 	c.Parent = inst
-	return c
 end
 
 local function addStroke(inst: Instance, color: Color3)
@@ -32,7 +38,6 @@ local function addStroke(inst: Instance, color: Color3)
 	s.Thickness = 1
 	s.Color = color
 	s.Parent = inst
-	return s
 end
 
 local function formatReward(reward: any): string
@@ -54,7 +59,7 @@ local function formatProgress(mission: any): string
 	return ("Progress: %d/%d"):format(cur, tgt)
 end
 
--- ===== UI build =====
+-- ===== UI =====
 local gui = Instance.new("ScreenGui")
 gui.Name = "MissionsGui"
 gui.ResetOnSpawn = false
@@ -82,25 +87,13 @@ addStroke(panel, Color3.fromRGB(40, 40, 48))
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1
 title.Position = UDim2.fromOffset(24, 16)
-title.Size = UDim2.new(1, -280, 0, 28)
+title.Size = UDim2.new(1, -140, 0, 28)
 title.Font = Enum.Font.GothamBold
 title.TextSize = 20
 title.TextColor3 = Color3.fromRGB(245, 245, 245)
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Text = "Missions"
 title.Parent = panel
-
-local currencyLabel = Instance.new("TextLabel")
-currencyLabel.BackgroundTransparency = 1
-currencyLabel.AnchorPoint = Vector2.new(1, 0)
-currencyLabel.Position = UDim2.new(1, -60, 0, 20)
-currencyLabel.Size = UDim2.fromOffset(240, 20)
-currencyLabel.Font = Enum.Font.Gotham
-currencyLabel.TextSize = 12
-currencyLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-currencyLabel.TextXAlignment = Enum.TextXAlignment.Right
-currencyLabel.Text = ""
-currencyLabel.Parent = panel
 
 local closeBtn = Instance.new("TextButton")
 closeBtn.AnchorPoint = Vector2.new(1, 0)
@@ -180,7 +173,6 @@ local function makeList(parent: Instance)
 	list.BackgroundTransparency = 1
 	list.BorderSizePixel = 0
 	list.ScrollBarThickness = 6
-	list.CanvasSize = UDim2.fromOffset(0, 0)
 	list.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	list.Parent = parent
 
@@ -269,12 +261,10 @@ local function makeMissionRow(parentList: ScrollingFrame, mission: any, onClaim)
 	if claimable then
 		claim.BackgroundColor3 = Color3.fromRGB(60, 140, 255)
 		claim.Text = "Claim"
-		claim.AutoButtonColor = true
 		claim.Active = true
 	else
 		claim.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
 		claim.Text = "Not ready"
-		claim.AutoButtonColor = false
 		claim.Active = false
 	end
 
@@ -283,7 +273,6 @@ local function makeMissionRow(parentList: ScrollingFrame, mission: any, onClaim)
 	end)
 end
 
--- ===== Server calls (dopasowane do MissionRemotes.lua) =====
 local function getPayload()
 	local ok, payload = pcall(function()
 		return RF_GetMissions:InvokeServer()
@@ -311,30 +300,12 @@ local function refreshUI()
 	clearList(weeklyList)
 
 	local payload = getPayload()
-	if typeof(payload) ~= "table" then
-		makeMissionRow(dailyList, { Title="Error", Description="Failed to load missions.", Claimable=false }, function() end)
-		return
-	end
+	if typeof(payload) ~= "table" then return end
 
 	local missions = payload.missions
-	local currencies = payload.currencies
+	if typeof(missions) ~= "table" then return end
 
-	if typeof(currencies) == "table" then
-		local coins = tonumber(currencies.Coins) or 0
-		local wp = tonumber(currencies.WeaponPoints) or 0
-		currencyLabel.Text = ("Coins: %d | WP: %d"):format(coins, wp)
-	else
-		currencyLabel.Text = ""
-	end
-
-	if typeof(missions) ~= "table" then
-		makeMissionRow(dailyList, { Title="Error", Description="Server returned no mission list.", Claimable=false }, function() end)
-		return
-	end
-
-	local daily = {}
-	local weekly = {}
-
+	local daily, weekly = {}, {}
 	for _, m in ipairs(missions) do
 		if typeof(m) == "table" then
 			if m.Type == "Daily" then table.insert(daily, m) end
@@ -348,31 +319,18 @@ local function refreshUI()
 	local function onClaim(mission)
 		local id = tostring(mission.Id or "")
 		if id == "" then return end
-		if claimMission(id) then
-			refreshUI()
-		end
+		if claimMission(id) then refreshUI() end
 	end
 
-	for _, m in ipairs(daily) do
-		makeMissionRow(dailyList, m, onClaim)
-	end
-	for _, m in ipairs(weekly) do
-		makeMissionRow(weeklyList, m, onClaim)
-	end
-
-	if #daily == 0 and #weekly == 0 then
-		makeMissionRow(dailyList, { Title="No missions", Description="Server returned empty pools. Check MissionConfigs + MissionService.", Claimable=false }, function() end)
-	end
+	for _, m in ipairs(daily) do makeMissionRow(dailyList, m, onClaim) end
+	for _, m in ipairs(weekly) do makeMissionRow(weeklyList, m, onClaim) end
 end
 
--- ===== Open / Close =====
-local lastOpenAt = 0
-
 local function openUI()
-	local now = os.clock()
-	if (now - lastOpenAt) < 0.25 then return end
-	lastOpenAt = now
-
+	if not tutorialComplete() then
+		-- w trakcie tutoriala nie otwieramy
+		return
+	end
 	gui.Enabled = true
 	setTab("Daily")
 	refreshUI()
@@ -384,34 +342,15 @@ end
 
 closeBtn.MouseButton1Click:Connect(closeUI)
 
-overlay.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		local pos = input.Position
-		local absPos = panel.AbsolutePosition
-		local absSize = panel.AbsoluteSize
-		local inside = pos.X >= absPos.X and pos.X <= absPos.X + absSize.X
-			and pos.Y >= absPos.Y and pos.Y <= absPos.Y + absSize.Y
-		if not inside then closeUI() end
-	end
-end)
-
 UserInputService.InputBegan:Connect(function(input, gp)
 	if gp then return end
-	if input.KeyCode == Enum.KeyCode.Escape and gui.Enabled then
-		closeUI()
-	end
-	-- debug: M otwiera
-	if input.KeyCode == Enum.KeyCode.M and not gui.Enabled then
-		openUI()
-	end
+	if input.KeyCode == Enum.KeyCode.Escape and gui.Enabled then closeUI() end
 end)
 
--- ===== Prompt hook: Workspace.NPCs.Knight =====
 local function isPromptInsideKnight(prompt: ProximityPrompt): boolean
 	local npcs = workspace:FindFirstChild("NPCs")
 	local knight = npcs and npcs:FindFirstChild("Knight")
 	if not knight then return false end
-
 	local p = prompt and prompt.Parent
 	while p do
 		if p == knight then return true end
@@ -423,12 +362,6 @@ end
 ProximityPromptService.PromptTriggered:Connect(function(prompt, plr)
 	if plr ~= player then return end
 	if isPromptInsideKnight(prompt) then
-		-- otwieraj misje tylko jeśli tutorial już zakończony
-		if player:GetAttribute("TutorialComplete") then
-			openUI()
-		end
+		openUI()
 	end
 end)
-
-
-print("[MissionsUI] Ready")
