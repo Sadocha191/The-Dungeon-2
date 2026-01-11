@@ -8,10 +8,9 @@ local HttpService = game:GetService("HttpService")
 
 local SaveScheduler = require(script.Parent:WaitForChild("SaveScheduler"))
 
-local DS = DataStoreService:GetDataStore("PlayerState_v2") -- zmień na v1 jeśli chcesz zachować klucz
+local DS = DataStoreService:GetDataStore("PlayerState_v2")
 
 local Store = {}
-
 local cache: {[number]: any} = {}
 
 local function dsKey(userId: number): string
@@ -53,8 +52,7 @@ end
 local function defaultState()
 	return {
 		CreatedOnce = false,
-
-		Profile = nil, -- profile lite
+		Profile = nil,
 
 		StarterWeaponClaimed = false,
 		StarterWeaponName = nil,
@@ -67,7 +65,6 @@ local function defaultState()
 		EquippedWeaponInstanceId = nil,
 
 		Missions = {
-			-- selection + counters trzymasz tu, żeby lobby i level widziały to samo
 			DailyKey = 0,
 			WeeklyKey = 0,
 			SelectedDaily = {},
@@ -91,7 +88,6 @@ local function ensureSchema(data: any)
 		data = defaultState()
 	end
 
-	-- basics
 	if typeof(data.OwnedWeapons) ~= "table" then data.OwnedWeapons = {} end
 	if typeof(data.FavoriteWeapons) ~= "table" then data.FavoriteWeapons = {} end
 	if typeof(data.OwnedSpells) ~= "table" then data.OwnedSpells = {} end
@@ -99,11 +95,9 @@ local function ensureSchema(data: any)
 	data.StarterWeaponClaimed = data.StarterWeaponClaimed == true
 	if data.StarterWeaponName ~= nil then data.StarterWeaponName = tostring(data.StarterWeaponName) end
 
-	-- instances
 	if typeof(data.WeaponInstances) ~= "table" then data.WeaponInstances = {} end
 	if typeof(data.EquippedWeaponInstanceId) ~= "string" then data.EquippedWeaponInstanceId = nil end
 
-	-- missions
 	if typeof(data.Missions) ~= "table" then data.Missions = defaultState().Missions end
 	local m = data.Missions
 	if typeof(m.SelectedDaily) ~= "table" then m.SelectedDaily = {} end
@@ -115,7 +109,6 @@ local function ensureSchema(data: any)
 	m.DailyKey = tonumber(m.DailyKey) or 0
 	m.WeeklyKey = tonumber(m.WeeklyKey) or 0
 
-	-- tutorial
 	if typeof(data.Tutorial) ~= "table" then
 		data.Tutorial = defaultState().Tutorial
 	else
@@ -124,7 +117,6 @@ local function ensureSchema(data: any)
 		data.Tutorial.Complete = data.Tutorial.Complete == true
 	end
 
-	-- migration: jeśli nie ma instancji, a są OwnedWeapons
 	if #data.WeaponInstances == 0 and #data.OwnedWeapons > 0 then
 		for _, weaponId in ipairs(data.OwnedWeapons) do
 			if typeof(weaponId) == "string" and weaponId ~= "" then
@@ -133,7 +125,6 @@ local function ensureSchema(data: any)
 		end
 	end
 
-	-- normalize instances
 	for _, inst in ipairs(data.WeaponInstances) do
 		if typeof(inst) == "table" then
 			if typeof(inst.instanceId) ~= "string" or inst.instanceId == "" then
@@ -148,10 +139,8 @@ local function ensureSchema(data: any)
 		end
 	end
 
-	-- OwnedWeapons from instances
 	data.OwnedWeapons = ensureUniqueOwnedWeapons(data.WeaponInstances)
 
-	-- equipped sanity
 	local eq = data.EquippedWeaponInstanceId
 	local eqOk = false
 	if typeof(eq) == "string" and eq ~= "" then
@@ -207,27 +196,29 @@ function Store.MarkDirty(player: Player, reason: string?)
 	SaveScheduler.MarkDirty(player, reason or "state")
 end
 
--- Tylko scheduler wywołuje to bezpośrednio
 function Store:_RawSave(player: Player, reason: string)
 	local uid = player.UserId
 	local data = cache[uid]
 	if not data then return end
 
 	local ok, err = pcall(function()
-		DS:UpdateAsync(dsKey(uid), function(old)
-			-- trzymamy aktualny cache jako źródło prawdy
+		DS:UpdateAsync(dsKey(uid), function(_old)
 			return data
 		end)
 	end)
 	if not ok then
 		warn("[PlayerStateStore] UpdateAsync failed:", reason, err)
-		-- jak nie wyszło, oznacz z powrotem dirty (spróbuje później)
 		SaveScheduler.MarkDirty(player, "retry")
 	end
 end
 
 function Store.ForceSave(player: Player, reason: string?)
 	SaveScheduler.ForceSave(player, reason or "force")
+end
+
+-- kompat: stare skrypty wołają Save(player, true)
+function Store.Save(player: Player, _force: boolean?)
+	Store.ForceSave(player, "save")
 end
 
 -- ==== API: Profile ====
@@ -254,7 +245,6 @@ function Store.SetTutorialState(player: Player, payload: {Active: boolean?, Step
 	if payload.Step ~= nil then data.Tutorial.Step = math.max(1, math.floor(tonumber(payload.Step) or 1)) end
 	if payload.Complete ~= nil then data.Tutorial.Complete = payload.Complete == true end
 
-	-- jeśli trzymasz tutorial także w Profile, utrzymaj spójność
 	if typeof(data.Profile) == "table" then
 		data.Profile.Tutorial = {
 			Active = data.Tutorial.Active,
@@ -284,7 +274,7 @@ function Store.EnsureOwnedSpell(player: Player, spellId: string)
 	Store.MarkDirty(player, "spell")
 end
 
--- ==== API: Starter weapon (kompatybilność) ====
+-- ==== API: Starter weapon (kompat) ====
 
 function Store.SetStarterWeaponClaimed(player: Player, weaponName: string)
 	local data = Store.Get(player) or Store.Load(player)
@@ -343,6 +333,33 @@ function Store.AddWeaponInstance(player: Player, weaponId: string, rarity: strin
 	return inst
 end
 
+-- kompat: stare skrypty wołają EnsureOwnedWeapon(player, weaponId)
+function Store.EnsureOwnedWeapon(player: Player, weaponId: string)
+	local data = Store.Get(player) or Store.Load(player)
+	if typeof(weaponId) ~= "string" or weaponId == "" then return nil end
+
+	for _, inst in ipairs(data.WeaponInstances) do
+		if inst.weaponId == weaponId then
+			return inst
+		end
+	end
+
+	local created = newWeaponInstance(weaponId, "", 1, "Standard", {})
+	table.insert(data.WeaponInstances, created)
+	data.OwnedWeapons = ensureUniqueOwnedWeapons(data.WeaponInstances)
+
+	-- jeśli nie ma equip, ustaw na nową
+	if not (typeof(data.EquippedWeaponInstanceId) == "string" and data.EquippedWeaponInstanceId ~= "") then
+		data.EquippedWeaponInstanceId = created.instanceId
+	end
+
+	data.StarterWeaponClaimed = true
+	data.StarterWeaponName = weaponId
+
+	Store.MarkDirty(player, "ensure_weapon")
+	return created
+end
+
 function Store.RemoveWeaponInstance(player: Player, instanceId: string)
 	local data = Store.Get(player) or Store.Load(player)
 	if typeof(instanceId) ~= "string" or instanceId == "" then return false end
@@ -371,7 +388,7 @@ function Store.SetEquippedWeaponInstance(player: Player, instanceId: string)
 
 	data.EquippedWeaponInstanceId = inst.instanceId
 	data.StarterWeaponClaimed = true
-	data.StarterWeaponName = inst.weaponId -- kompat
+	data.StarterWeaponName = inst.weaponId
 
 	Store.MarkDirty(player, "equip_instance")
 	return true
@@ -385,7 +402,30 @@ function Store.GetEquippedWeaponInstance(player: Player)
 	return inst
 end
 
--- ==== API: Missions storage access (przydatne w Level1 i Lobby) ====
+-- kompat: InventoryService
+function Store.SetFavoriteWeapon(player: Player, weaponId: string, isFav: boolean)
+	local data = Store.Get(player) or Store.Load(player)
+	if typeof(weaponId) ~= "string" or weaponId == "" then return end
+
+	isFav = isFav == true
+	data.FavoriteWeapons = (typeof(data.FavoriteWeapons) == "table") and data.FavoriteWeapons or {}
+
+	-- remove if exists
+	local out = {}
+	for _, w in ipairs(data.FavoriteWeapons) do
+		if w ~= weaponId then
+			table.insert(out, w)
+		end
+	end
+	if isFav then
+		table.insert(out, weaponId)
+	end
+	data.FavoriteWeapons = out
+
+	Store.MarkDirty(player, "favorite")
+end
+
+-- ==== API: Missions state ====
 
 function Store.GetMissionsState(player: Player)
 	local data = Store.Get(player) or Store.Load(player)
@@ -402,7 +442,6 @@ Players.PlayerAdded:Connect(function(player)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
-	-- Zapis na wyjściu zawsze wymuszony
 	Store.ForceSave(player, "leave")
 	cache[player.UserId] = nil
 end)
