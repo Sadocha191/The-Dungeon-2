@@ -9,7 +9,7 @@ local TextService = game:GetService("TextService")
 
 local player = Players.LocalPlayer
 
-local remotesFolder = ReplicatedStorage:WaitForChild("Remotes")
+local remotesFolder = ReplicatedStorage:WaitForChild("RemoteEvents")
 local OpenDialogueEvent = remotesFolder:WaitForChild("OpenDialogueEvent")
 local DialogueFinishedEvent = remotesFolder:WaitForChild("DialogueFinishedEvent")
 

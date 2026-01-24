@@ -1,5 +1,6 @@
 -- WitchShopClient.client.lua (StarterPlayerScripts)
 
+local ProximityPromptService = game:GetService("ProximityPromptService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UIS = game:GetService("UserInputService")
@@ -7,8 +8,8 @@ local UIS = game:GetService("UserInputService")
 local plr = Players.LocalPlayer
 local pg = plr:WaitForChild("PlayerGui")
 
-local remotes = ReplicatedStorage:WaitForChild("Remotes")
-local WitchShopEvent = remotes:WaitForChild("WitchShopEvent")
+local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
+local WitchShopEvent = remoteEvents:WaitForChild("WitchShopEvent")
 
 local PauseState = ReplicatedStorage:WaitForChild("PauseState")
 
@@ -235,6 +236,29 @@ UIS.InputBegan:Connect(function(inp, gp)
 		closeShop()
 	end
 end)
+
+-- Open via proximity prompt (Witch NPC)
+local function isPromptInsideWitch(prompt: ProximityPrompt): boolean
+	local npcs = workspace:FindFirstChild("NPCs")
+	local witch = npcs and (npcs:FindFirstChild("Witch") or npcs:FindFirstChild("Wiedzma"))
+	if not witch then return false end
+
+	local p = prompt and prompt.Parent
+	while p do
+		if p == witch then return true end
+		p = p.Parent
+	end
+	return false
+end
+
+ProximityPromptService.PromptTriggered:Connect(function(prompt, player)
+	if player ~= plr then return end
+	if gui.Enabled then return end
+	if isPromptInsideWitch(prompt) then
+		WitchShopEvent:FireServer({ type = "OPEN" }) -- to odpala payload z SpellService
+	end
+end)
+
 
 WitchShopEvent.OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then return end

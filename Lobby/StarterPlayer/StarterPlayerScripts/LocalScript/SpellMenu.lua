@@ -6,7 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local plr = Players.LocalPlayer
 local pg = plr:WaitForChild("PlayerGui")
 
-local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local remotes = ReplicatedStorage:WaitForChild("RemoteEvents")
 local SpellEvent = remotes:WaitForChild("SpellEvent")
 
 local PauseState = ReplicatedStorage:WaitForChild("PauseState")

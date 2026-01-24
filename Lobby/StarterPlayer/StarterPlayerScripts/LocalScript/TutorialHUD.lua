@@ -7,7 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 
-local remotesFolder = ReplicatedStorage:WaitForChild("Remotes")
+local remotesFolder = ReplicatedStorage:WaitForChild("RemoteEvents")
 local TutorialTargetEvent = remotesFolder:WaitForChild("TutorialTargetEvent")
 
 local gui = Instance.new("ScreenGui")

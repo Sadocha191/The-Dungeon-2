@@ -16,25 +16,25 @@ local moduleFolder = ReplicatedStorage:WaitForChild("ModuleScripts")
 local SpellDefs = require(moduleFolder:WaitForChild("SpellDefinitions"))
 
 -- Remotes
-local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-if not remotes then
-	remotes = Instance.new("Folder")
-	remotes.Name = "Remotes"
-	remotes.Parent = ReplicatedStorage
+local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
+if not remoteEvents then
+	remoteEvents = Instance.new("Folder")
+	remoteEvents.Name = "RemoteEvents"
+	remoteEvents.Parent = ReplicatedStorage
 end
 
-local function getRemote(name: string): RemoteEvent
-	local r = remotes:FindFirstChild(name)
-	if not r then
-		r = Instance.new("RemoteEvent")
-		r.Name = name
-		r.Parent = remotes
-	end
-	return r :: any
+local function ensureRemote(name: string): RemoteEvent
+	local r = remoteEvents:FindFirstChild(name)
+	if r and r:IsA("RemoteEvent") then return r end
+	r = Instance.new("RemoteEvent")
+	r.Name = name
+	r.Parent = remoteEvents
+	return r
 end
 
-local SpellEvent = getRemote("SpellEvent")         -- level-up (3 choices)
-local WitchShopEvent = getRemote("WitchShopEvent") -- shop UI + buy
+local SpellEvent = ensureRemote("SpellEvent")
+local WitchShopEvent = ensureRemote("WitchShopEvent")
+
 
 -- Run state (per serwer/instancję)
 local runOwned: {[number]: {[string]: number}} = {} -- [uid][spellId] = level
