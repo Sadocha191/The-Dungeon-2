@@ -76,6 +76,11 @@ local function defaultProfile()
 		Weapons = {}, -- lista weaponId z rolli (opcjonalnie)
 		Pity = {},
 
+		-- Tutorial / Spells
+		tutorialCompleted = false,
+		spellbookUnlocked = false,
+		spellsUnlocked = {}, -- [spellId] = true
+
 		-- Loadout (weapon entries: { id, level, rarity, stats })
 		Loadout = {},
 	}
@@ -190,6 +195,13 @@ function PlayerData.Get(plr)
 	if typeof(data.Weapons) ~= "table" then data.Weapons = {} end
 	if typeof(data.Pity) ~= "table" then data.Pity = {} end
 	if typeof(data.Loadout) ~= "table" then data.Loadout = {} end
+
+	-- tutorial/spells sanity
+	data.tutorialCompleted = data.tutorialCompleted == true
+	data.spellbookUnlocked = data.spellbookUnlocked == true
+	if typeof(data.spellsUnlocked) ~= "table" then
+		data.spellsUnlocked = {}
+	end
 
 	PlayerData._cache[uid] = data
 	PlayerData._dirty[uid] = false
