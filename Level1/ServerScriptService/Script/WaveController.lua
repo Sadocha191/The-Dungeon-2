@@ -314,9 +314,7 @@ local function pickGoal(targetPos: Vector3, orc: Model, dist: number, forceDirec
 end
 
 local function dropsForWave(wave: number)
-	-- EXP FIX: szybciej levelujesz (mniej "grindu" na early)
-	-- było ~10 xp/killa na wave1. Teraz ~22 i rośnie szybciej.
-	local xp = math.floor(22 + (wave-1)*8 + math.random(0,6))
+	local xp = math.floor(10 + (wave-1)*4 + math.random(0,4))
 	local coins = math.floor(2 + (wave-1)*1.0 + math.random(0,2))
 	return xp, coins
 end
@@ -431,24 +429,6 @@ local function spawnOrc(hp, dmg, spd, wave, tier, isElite, onKill)
 
 			local now = time()
 
-			-- elite co 5 minut (dodatkowy spawn)
-			if now >= nextEliteAt and alive < MAX_ALIVE_ON_MAP then
-				local eliteTier = math.clamp(pickTierForWave(wave) + 2, 1, 10)
-				local xpDrop, coinDrop = dropsForWave(wave + 2)
-				local elite = spawnOrc(hp, dmg, spd, wave, eliteTier, true, function(pos)
-					-- elite liczymy jak normalny kill do fal
-					killed += 1
-					remaining = math.max(0, total - killed)
-					alive = math.max(0, alive - 1)
-					pushUi(false)
-					if _G.SpawnDropsAt then _G.SpawnDropsAt(pos, xpDrop, coinDrop) end
-				end)
-				if elite then
-					alive += 1
-					nextEliteAt = now + ELITE_INTERVAL
-					pushUi(false)
-				end
-			end
 
 			-- ATTACK: always attempt in range
 			if dist <= ATTACK_RANGE and (now - lastAttack) >= ATTACK_COOLDOWN then
@@ -609,6 +589,22 @@ task.spawn(function()
 			task.wait(0.15)
 
 			local now = time()
+			-- elite co 5 min (dodatkowy spawn, nie liczy się do kill targetu fali)
+			if now >= nextEliteAt and alive < MAX_ALIVE_ON_MAP then
+				local eliteTier = math.clamp(pickTierForWave(wave) + 2, 1, 10)
+				local xpDrop, coinDrop = dropsForWave(wave + 2)
+				local elite = spawnOrc(hp, dmg, spd, wave, eliteTier, true, function(pos)
+					alive = math.max(0, alive - 1)
+					pushUi(false)
+					if _G.SpawnDropsAt then _G.SpawnDropsAt(pos, xpDrop, coinDrop) end
+				end)
+				if elite then
+					alive += 1
+					nextEliteAt = now + ELITE_INTERVAL
+					pushUi(false)
+				end
+			end
+
 			while spawned < total and alive < MAX_ALIVE_ON_MAP and now >= nextSpawnAt do
 				local xpDrop, coinDrop = dropsForWave(wave)
 
