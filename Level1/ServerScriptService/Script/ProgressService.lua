@@ -6,9 +6,8 @@ local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
 local PhysicsService = game:GetService("PhysicsService")
 local ServerScriptService = game:GetService("ServerScriptService")
-
--- FIX: folder z modułami serwera
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local function findModule(name: string): ModuleScript?
 	local direct = ServerScriptService:FindFirstChild(name)
@@ -362,7 +361,9 @@ function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	PlayerData.MarkDirty(plr)
 	PlayerData.Save(plr, false)
 	pushProgress(plr)
-	MissionProgress.OnReward(plr, xp, coins)
+	if MissionProgress and typeof(MissionProgress.OnReward) == "function" then
+		MissionProgress.OnReward(plr, xp, coins)
+	end
 
 	-- level-up
 	local leveled = false

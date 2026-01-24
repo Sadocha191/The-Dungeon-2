@@ -74,6 +74,7 @@ Players.PlayerAdded:Connect(function(player: Player)
 	local profile = tdata.Profile
 	local weaponName = tdata.StarterWeaponName
 	local weaponEntry = tdata.StarterWeaponEntry
+	local equippedId = tdata.EquippedWeaponInstanceId
 
 	if typeof(profile) ~= "table" then
 		warn("[Dungeon] Bad TeleportData profile for", player.Name)
@@ -81,6 +82,10 @@ Players.PlayerAdded:Connect(function(player: Player)
 	end
 
 	applyProfileAttributes(player, profile)
+
+	if typeof(equippedId) == "string" and equippedId ~= "" then
+		player:SetAttribute("EquippedWeaponInstanceId", equippedId)
+	end
 
 	local data = PlayerData.Get(player)
 

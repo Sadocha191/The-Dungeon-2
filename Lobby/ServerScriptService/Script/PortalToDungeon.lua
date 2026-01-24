@@ -137,14 +137,22 @@ local function tryTeleport(player: Player, placeId: number)
 	local profile = ProfilesManager.GetProfile(player)
 	local st = PlayerStateStore.Get(player)
 
+	local weaponEntry = nil
+	if st and typeof(st.WeaponInstances) == "table" and st.EquippedWeaponInstanceId then
+		weaponEntry = st.WeaponInstances[st.EquippedWeaponInstanceId]
+	end
+
 	local tpData = {
 		Profile = profile,
 		StarterWeaponName = st and st.StarterWeaponName or nil,
+		StarterWeaponEntry = weaponEntry,
 		EquippedWeaponInstanceId = st and st.EquippedWeaponInstanceId or nil,
 	}
 
 	local ok, err = pcall(function()
-		TeleportService:TeleportAsync(placeId, { player }, tpData)
+		local options = Instance.new("TeleportOptions")
+		options:SetTeleportData(tpData)
+		TeleportService:TeleportAsync(placeId, { player }, options)
 	end)
 	if not ok then
 		warn("[PortalToLevel1] TeleportAsync failed:", err)
