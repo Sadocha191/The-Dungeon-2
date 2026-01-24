@@ -217,6 +217,16 @@ local function openShop(payload)
 	PauseState.Value = true
 end
 
+local function openMessage(msg: string)
+	gui.Enabled = true
+	PauseState.Value = true
+	rName.Text = "Witch Shop"
+	rInfo.Text = msg
+	buyBtn.Text = "Buy"
+	buyBtn.BackgroundTransparency = 0.5
+	buyBtn.Active = false
+end
+
 local function closeShop()
 	gui.Enabled = false
 	PauseState.Value = false
@@ -229,7 +239,6 @@ buyBtn.MouseButton1Click:Connect(function()
 	WitchShopEvent:FireServer({ type = "BUY", id = selected.id })
 end)
 
--- (opcjonalnie) ESC zamyka
 UIS.InputBegan:Connect(function(inp, gp)
 	if gp then return end
 	if inp.KeyCode == Enum.KeyCode.Escape and gui.Enabled then
@@ -255,18 +264,17 @@ ProximityPromptService.PromptTriggered:Connect(function(prompt, player)
 	if player ~= plr then return end
 	if gui.Enabled then return end
 	if isPromptInsideWitch(prompt) then
-		WitchShopEvent:FireServer({ type = "OPEN" }) -- to odpala payload z SpellService
+		WitchShopEvent:FireServer({ type = "OPEN" })
 	end
 end)
-
 
 WitchShopEvent.OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then return end
 
 	if payload.type == "OPEN" then
 		openShop(payload)
+
 	elseif payload.type == "BOUGHT" then
-		-- odśwież stan
 		if payload.coins then coinsLabel.Text = ("Coins: %d"):format(tonumber(payload.coins) or 0) end
 		if payload.spells then
 			currentSpells = payload.spells
@@ -276,7 +284,6 @@ WitchShopEvent.OnClientEvent:Connect(function(payload)
 			end
 			refreshCanvas()
 		end
-		-- ponownie ustaw prawy panel na ten sam spell (jeśli istnieje)
 		if selected then
 			for _, s in ipairs(currentSpells) do
 				if s.id == selected.id then
@@ -285,8 +292,8 @@ WitchShopEvent.OnClientEvent:Connect(function(payload)
 				end
 			end
 		end
+
 	elseif payload.type == "ERROR" or payload.type == "INFO" then
-		-- minimalnie: pokaż w panelu
-		rInfo.Text = tostring(payload.message or "...")
+		openMessage(tostring(payload.message or "..."))
 	end
 end)

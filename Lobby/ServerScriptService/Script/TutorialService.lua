@@ -11,10 +11,11 @@ local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
 local WeaponCatalog = require(serverModules:WaitForChild("WeaponCatalog"))
 
-local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+-- FIX: używamy RemoteEvents (zgodnie z resztą gry)
+local remotesFolder = ReplicatedStorage:FindFirstChild("RemoteEvents")
 if not remotesFolder then
 	remotesFolder = Instance.new("Folder")
-	remotesFolder.Name = "Remotes"
+	remotesFolder.Name = "RemoteEvents"
 	remotesFolder.Parent = ReplicatedStorage
 end
 
@@ -262,7 +263,6 @@ DialogueFinishedEvent.OnServerEvent:Connect(function(player: Player, dialogueKey
 	if not current or current.dialogueKey ~= dialogueKey then return end
 
 	if tutorial.Step == 2 then
-		-- ZMIANA: bez miecza
 		advanceStep(player, 3)
 		return
 	end

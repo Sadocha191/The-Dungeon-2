@@ -1,10 +1,9 @@
 -- WitchNPC.server.lua (Lobby)
 -- Odpowiada za:
--- 1) gating sklepu po tutorialu
+-- 1) gating sklepu po tutorialu (ATTR: TutorialComplete)
 -- 2) nadanie starter spellbooka przy pierwszej interakcji (jeśli masz _G.Spells_GrantStarterBook)
 -- 3) otwieranie UI klientowi przez WitchShopEvent:FireClient({type="OPEN", coins=..., spells=...})
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- ========== Helpers: safe require ==========
@@ -16,7 +15,6 @@ local function tryRequire(instance: Instance?)
 end
 
 local function findModuleByName(name: string): any
-	-- Szukamy w kilku typowych miejscach
 	local candidates = {
 		game:GetService("ServerScriptService"),
 		ReplicatedStorage,
@@ -34,7 +32,7 @@ local function findModuleByName(name: string): any
 	return nil
 end
 
--- Wymagane moduły (dopasuj nazwy jeżeli masz inne)
+-- Wymagane moduły
 local PlayerData = findModuleByName("PlayerData")
 if not PlayerData then
 	warn("[WitchNPC] Missing PlayerData module (ModuleScript named 'PlayerData').")
@@ -99,7 +97,6 @@ local function ensurePrompt(m: Model): ProximityPrompt?
 	local prompt = findPromptInModel(m)
 	if prompt then return prompt end
 
-	-- Jak nie ma prompta, tworzymy na pierwszym BasePart (żeby nie było „nic się nie dzieje”)
 	local part = findFirstBasePart(m)
 	if not part then return nil end
 
@@ -124,7 +121,6 @@ local function getPlayerData(plr: Player)
 end
 
 local function getShopList(): {string}
-	-- Oczekiwane API: SpellDefinitions.GetShopList() -> { "Fireball", "IceNova", ... }
 	if SpellDefinitions and SpellDefinitions.GetShopList then
 		local ok, list = pcall(SpellDefinitions.GetShopList)
 		if ok and typeof(list) == "table" then
@@ -135,7 +131,6 @@ local function getShopList(): {string}
 end
 
 local function getSpellDef(id: string)
-	-- Oczekiwane API: SpellDefinitions.Get(id) -> def
 	if SpellDefinitions and SpellDefinitions.Get then
 		local ok, def = pcall(SpellDefinitions.Get, id)
 		if ok and typeof(def) == "table" then
@@ -180,15 +175,15 @@ end
 prompt.Triggered:Connect(function(plr: Player)
 	local d = getPlayerData(plr)
 
-	-- Jeżeli masz globalną funkcję do nadania książki startowej – użyj
+	-- Starter book (jeśli masz hook)
 	if d and d.spellbookUnlocked ~= true and _G.Spells_GrantStarterBook then
 		pcall(function()
 			_G.Spells_GrantStarterBook(plr)
 		end)
 	end
 
-	-- Blokada sklepu do końca tutoriala
-	if not d or d.tutorialCompleted ~= true then
+	-- Gating po tutorialu (na atrybucie)
+	if plr:GetAttribute("TutorialComplete") ~= true then
 		WitchShopEvent:FireClient(plr, {
 			type = "INFO",
 			message = "Finish the tutorial to access the witch shop."
@@ -198,7 +193,7 @@ prompt.Triggered:Connect(function(plr: Player)
 
 	WitchShopEvent:FireClient(plr, {
 		type = "OPEN",
-		coins = d.coins or 0,
+		coins = (d and d.coins) or 0,
 		spells = buildShopPayload(plr, d),
 	})
 end)

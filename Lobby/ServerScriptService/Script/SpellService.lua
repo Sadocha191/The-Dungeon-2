@@ -35,7 +35,6 @@ end
 local SpellEvent = ensureRemote("SpellEvent")
 local WitchShopEvent = ensureRemote("WitchShopEvent")
 
-
 -- Run state (per serwer/instancję)
 local runOwned: {[number]: {[string]: number}} = {} -- [uid][spellId] = level
 local pending: {[number]: {token: string, choices: {[string]: boolean}}} = {}
@@ -53,7 +52,6 @@ local function getUnlockedTable(plr: Player)
 end
 
 local function setSpellAttr(plr: Player, spellId: string, level: number)
-	-- proste hooki pod inne systemy (opcjonalnie)
 	plr:SetAttribute(("Spell_%s_Level"):format(spellId), level)
 end
 
@@ -120,14 +118,12 @@ local function rollSpellChoices(plr: Player)
 	local upgrades = {}
 	local news = {}
 
-	-- New spells (unlocked but not in run)
 	for spellId, ok in pairs(unlocked) do
 		if ok == true and owned[spellId] == nil then
 			table.insert(news, spellId)
 		end
 	end
 
-	-- Upgrades (in run, not max)
 	for spellId, lv in pairs(owned) do
 		local def = SpellDefs.Get(spellId)
 		if def and lv < (def.maxLevel or 8) then
@@ -135,13 +131,10 @@ local function rollSpellChoices(plr: Player)
 		end
 	end
 
-	-- limit run spells
 	local runCount = 0
 	for _ in pairs(owned) do runCount += 1 end
-
 	local canAddNew = runCount < SpellDefs.MAX_RUN_SPELLS
 
-	-- helper pick
 	local function pickRandom(t)
 		if #t == 0 then return nil end
 		local idx = math.random(1, #t)
@@ -153,15 +146,12 @@ local function rollSpellChoices(plr: Player)
 	local picks = {}
 	local pickedSet = {}
 
-	-- prefer: 2 upgrades + 1 new (jeśli możliwe)
 	for _=1,3 do
 		local chosen
 
-		-- jeśli nie możemy już dodawać nowych, tylko upgrade
 		if not canAddNew then
 			chosen = pickRandom(upgrades)
 		else
-			-- ważenie: jeśli mamy upgrade’y, preferuj upgrade
 			if #upgrades > 0 and (#news == 0 or math.random() < 0.65) then
 				chosen = pickRandom(upgrades)
 			else
@@ -169,19 +159,14 @@ local function rollSpellChoices(plr: Player)
 			end
 		end
 
-		-- brak kandydatów
 		if not chosen then break end
 
-		-- dedupe
-		if pickedSet[chosen] then
-			-- spróbuj jeszcze raz w tej iteracji
-		else
+		if not pickedSet[chosen] then
 			pickedSet[chosen] = true
 			table.insert(picks, chosen)
 		end
 	end
 
-	-- jeśli wyszło mniej niż 3, dopełnij czym się da
 	while #picks < 3 do
 		local fallback = pickRandom(upgrades) or (canAddNew and pickRandom(news)) or nil
 		if not fallback then break end
@@ -191,7 +176,6 @@ local function rollSpellChoices(plr: Player)
 		end
 	end
 
-	-- map do UI
 	local uiChoices = {}
 	for _, spellId in ipairs(picks) do
 		local def = SpellDefs.Get(spellId)
@@ -201,7 +185,7 @@ local function rollSpellChoices(plr: Player)
 			table.insert(uiChoices, {
 				id = spellId,
 				name = def.name,
-				desc = nextText, -- ważne: gotowy tekst (bez %d)
+				desc = nextText,
 				value = nil,
 				rarity = (def.base and "Base Spell" or "Spell"),
 				color = (def.base and SpellDefs.COLOR_BASE or SpellDefs.COLOR_SHOP),
@@ -215,8 +199,6 @@ end
 local function openSpellChoice(plr: Player)
 	local token = ("%d_%d"):format(plr.UserId, math.floor(os.clock()*1000))
 	local choices = rollSpellChoices(plr)
-
-	-- jeśli nie ma absolutnie nic do wyboru, nie otwieraj
 	if #choices == 0 then return end
 
 	local allowed = {}
@@ -242,9 +224,7 @@ local function applyPick(plr: Player, token: string, spellId: string)
 	local nextLv = math.clamp(current + 1, 1, def.maxLevel or 8)
 	owned[spellId] = nextLv
 
-	-- ustaw atrybut do runtime (opcjonalny hook)
 	setSpellAttr(plr, spellId, nextLv)
-
 	pending[plr.UserId] = nil
 end
 
@@ -261,8 +241,8 @@ WitchShopEvent.OnServerEvent:Connect(function(plr: Player, payload)
 	if typeof(payload) ~= "table" then return end
 	local d = PlayerData.Get(plr)
 
-	-- gating: shop dopiero po tutorialu
-	if d.tutorialCompleted ~= true then
+	-- gating: shop dopiero po tutorialu (ATTR: TutorialComplete)
+	if plr:GetAttribute("TutorialComplete") ~= true then
 		WitchShopEvent:FireClient(plr, { type = "INFO", message = "Finish the tutorial first." })
 		return
 	end
