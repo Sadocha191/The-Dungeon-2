@@ -7,6 +7,9 @@ local Debris = game:GetService("Debris")
 local PhysicsService = game:GetService("PhysicsService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
+-- FIX: folder z modułami serwera
+local serverModules = ServerScriptService:WaitForChild("ModuleScript")
+
 local function findModule(name: string): ModuleScript?
 	local direct = ServerScriptService:FindFirstChild(name)
 	if direct and direct:IsA("ModuleScript") then
@@ -31,7 +34,7 @@ end
 
 local PlayerData = require(playerDataModule)
 local WeaponService = require(weaponServiceModule)
-local MissionProgress = require(serverModules:WaitForChild(\"MissionProgress\"))
+local MissionProgress = require(serverModules:WaitForChild("MissionProgress"))
 local function buildFallbackUpDefs()
 	local fallback = {}
 	fallback.POOL = {
