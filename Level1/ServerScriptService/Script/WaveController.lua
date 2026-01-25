@@ -394,6 +394,16 @@ local function spawnOrc(hp, dmg, spd, wave, tier, isElite, onKill)
 		end)
 
 		while hum.Health > 0 and orc.Parent do
+			waitIfPaused()
+			-- hard freeze movement during pause
+			if PauseState.Value then
+				hum:Move(Vector3.zero, true)
+				local hrp = orc:FindFirstChild('HumanoidRootPart')
+				if hrp then
+					hrp.AssemblyLinearVelocity = Vector3.zero
+					hrp.AssemblyAngularVelocity = Vector3.zero
+				end
+			end
 			task.wait(THINK_INTERVAL)
 
 			if root.Position.Y < KILL_BELOW_Y then
