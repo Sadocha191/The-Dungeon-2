@@ -99,11 +99,13 @@ end
 local function syncRunHud(plr: Player)
 	local r = getRun(plr)
 	PlayerProgressEvent:FireClient(plr, {
-		type = "runProgress",
-		runLevel = r.runLevel,
-		runXp = r.runXp,
-		runNextXp = r.nextXp,
-		runCoins = r.runCoins,
+		type = "progress",
+		-- map RUN -> HUD legacy fields
+		level = r.runLevel,
+		xp = r.runXp,
+		nextXp = r.nextXp,
+		coins = r.runCoins,
+		-- extra fields (optional)
 		kills = r.kills,
 	})
 end

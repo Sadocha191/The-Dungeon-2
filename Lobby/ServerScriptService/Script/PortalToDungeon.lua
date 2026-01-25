@@ -130,11 +130,30 @@ local function tutorialComplete(player: Player): boolean
 	return false
 end
 
+local function getProfileSafe(player: Player)
+	-- Twój ProfilesManager nie zawsze ma GetProfile (często jest GetActiveProfile)
+	if ProfilesManager.GetActiveProfile then
+		local p = ProfilesManager.GetActiveProfile(player)
+		if p then return p end
+	end
+	if ProfilesManager.LoadIfAny then
+		pcall(function() ProfilesManager.LoadIfAny(player) end)
+		if ProfilesManager.GetActiveProfile then
+			local p = ProfilesManager.GetActiveProfile(player)
+			if p then return p end
+		end
+	end
+	if ProfilesManager.GetProfile then
+		return ProfilesManager.GetProfile(player)
+	end
+	return nil
+end
+
 local function tryTeleport(player: Player, placeId: number)
 	if not canTeleport(player) then return end
 
 	-- profile do teleportdata
-	local profile = ProfilesManager.GetProfile(player)
+	local profile = getProfileSafe(player)
 	local st = PlayerStateStore.Get(player)
 
 	local weaponEntry = nil
