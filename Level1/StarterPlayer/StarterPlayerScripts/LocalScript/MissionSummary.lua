@@ -1,4 +1,5 @@
--- MissionSummary.client.lua (StarterPlayerScripts)
+-- MissionSummary.client.lua (Level1/StarterPlayerScripts)
+-- Game Over screen: czas runa, kille, monety zdobyte, XP do konta + Return to Village
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,6 +9,9 @@ local pg = plr:WaitForChild("PlayerGui")
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local MissionSummaryEvent = remotes:WaitForChild("MissionSummaryEvent")
+
+-- Return remote jest w root ReplicatedStorage (ReturnToLobby.server.lua)
+local ReturnToLobby = ReplicatedStorage:WaitForChild("ReturnToLobby")
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "MissionSummary"
@@ -27,7 +31,7 @@ dim.Parent = gui
 local card = Instance.new("Frame")
 card.AnchorPoint = Vector2.new(0.5,0.5)
 card.Position = UDim2.fromScale(0.5,0.5)
-card.Size = UDim2.fromOffset(520, 260)
+card.Size = UDim2.fromOffset(560, 320)
 card.BackgroundColor3 = Color3.fromRGB(14,14,16)
 card.BackgroundTransparency = 0.06
 card.BorderSizePixel = 0
@@ -37,50 +41,67 @@ Instance.new("UICorner", card).CornerRadius = UDim.new(0, 18)
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1
 title.Position = UDim2.fromOffset(22, 16)
-title.Size = UDim2.new(1, -44, 0, 26)
-title.Font = Enum.Font.GothamBlack
-title.TextSize = 20
-title.TextXAlignment = Enum.TextXAlignment.Left
+title.Size = UDim2.new(1, -44, 0, 28)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 22
 title.TextColor3 = Color3.fromRGB(245,245,245)
-title.Text = "Mission complete"
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Text = "Game Over"
 title.Parent = card
 
 local body = Instance.new("TextLabel")
 body.BackgroundTransparency = 1
-body.Position = UDim2.fromOffset(22, 56)
-body.Size = UDim2.new(1, -44, 1, -96)
+body.Position = UDim2.fromOffset(22, 58)
+body.Size = UDim2.new(1, -44, 1, -120)
 body.Font = Enum.Font.Gotham
-body.TextSize = 14
-body.TextXAlignment = Enum.TextXAlignment.Left
-body.TextYAlignment = Enum.TextYAlignment.Top
+body.TextSize = 15
 body.TextColor3 = Color3.fromRGB(220,220,220)
 body.TextWrapped = true
+body.TextYAlignment = Enum.TextYAlignment.Top
+body.TextXAlignment = Enum.TextXAlignment.Left
 body.Text = ""
 body.Parent = card
 
-local ok = Instance.new("TextButton")
-ok.AnchorPoint = Vector2.new(0.5,1)
-ok.Position = UDim2.new(0.5,0,1,-18)
-ok.Size = UDim2.fromOffset(220, 40)
-ok.BackgroundColor3 = Color3.fromRGB(96,165,250)
-ok.BorderSizePixel = 0
-ok.Font = Enum.Font.GothamBold
-ok.TextSize = 14
-ok.TextColor3 = Color3.fromRGB(10,10,12)
-ok.Text = "OK"
-ok.Parent = card
-Instance.new("UICorner", ok).CornerRadius = UDim.new(0, 14)
+local btn = Instance.new("TextButton")
+btn.AnchorPoint = Vector2.new(0.5, 1)
+btn.Position = UDim2.new(0.5, 0, 1, -22)
+btn.Size = UDim2.fromOffset(220, 40)
+btn.BackgroundColor3 = Color3.fromRGB(120,190,255)
+btn.BorderSizePixel = 0
+btn.Font = Enum.Font.GothamBold
+btn.TextSize = 15
+btn.TextColor3 = Color3.fromRGB(10,10,10)
+btn.Text = "Return to Village"
+btn.Parent = card
+Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 12)
 
-ok.MouseButton1Click:Connect(function()
-	gui.Enabled = false
+btn.MouseButton1Click:Connect(function()
+	ReturnToLobby:FireServer()
 end)
 
+local function fmtTime(sec)
+	sec = math.max(0, math.floor(sec or 0))
+	local m = math.floor(sec / 60)
+	local s = sec % 60
+	return string.format("%02d:%02d", m, s)
+end
+
 MissionSummaryEvent.OnClientEvent:Connect(function(payload)
-	if typeof(payload) ~= "table" or payload.type ~= "summary" then return end
-	local waves = tonumber(payload.waves) or 0
-	local sec = tonumber(payload.time) or 0
-	local lvl = tonumber(payload.level) or 1
-	local coins = tonumber(payload.coins) or 0
-	body.Text = ("Waves: %d\nTime: %ds\nLevel: %d\nCoins (global): %d"):format(waves, sec, lvl, coins)
-	gui.Enabled = true
+	if typeof(payload) ~= "table" then return end
+
+	if payload.type == "gameover" then
+		local sec = tonumber(payload.time) or 0
+		local kills = tonumber(payload.kills) or 0
+		local coins = tonumber(payload.coinsGained) or 0
+		local xp = tonumber(payload.accountXp) or 0
+		local lvl = tonumber(payload.accountLevel) or 1
+
+		body.Text = ("Run time: %s\nEnemies defeated: %d\nCoins gained: %d\nAccount XP gained: %d\nAccount level: %d"):format(
+			fmtTime(sec), kills, coins, xp, lvl
+		)
+		gui.Enabled = true
+	elseif payload.type == "summary" then
+		-- legacy fallback (nie używane po patchu)
+		gui.Enabled = true
+	end
 end)

@@ -1,9 +1,13 @@
--- SCRIPT: ReceiveTeleportLoadout.server.lua
--- DUNGEON: odbiera TeleportData (Profile + StarterWeaponName + StarterWeaponEntry)
--- ustawia atrybuty gracza + loadout
+-- ReceiveTeleportLoadout.server.lua
+-- Level1/ServerScriptService/Script/ReceiveTeleportLoadout.lua
+-- FIX:
+-- 1) Nie przerywaj, gdy TeleportData.Profile jest nil (teleport może nieść tylko loadout)
+-- 2) Ustaw UnlockedSpellsCSV na graczu (pod Spell roll)
+-- 3) StarterWeaponEntry z Lobby ma format instancji z PlayerStateStore (weaponId/rarity/level/prefix/rollStats)
 
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
+local HttpService = game:GetService("HttpService")
 
 local function findModule(name: string): ModuleScript?
 	local direct = ServerScriptService:FindFirstChild(name)
@@ -45,43 +49,51 @@ local function applyProfileAttributes(player: Player, profile: any)
 	end
 end
 
+local function safeCSV(list: any): string
+	if typeof(list) ~= "table" then return "" end
+	local out = {}
+	for _, id in ipairs(list) do
+		if typeof(id) == "string" and id ~= "" then
+			table.insert(out, id)
+		end
+	end
+	return table.concat(out, ",")
+end
+
 Players.PlayerAdded:Connect(function(player: Player)
 	local joinData = player:GetJoinData()
 	local tdata = joinData and joinData.TeleportData
 
-	if typeof(tdata) ~= "table" then
-		warn("[Dungeon] No TeleportData for", player.Name, "- using fallback loadout")
-		local data = PlayerData.Get(player)
+	local profile = nil
+	local weaponName = nil
+	local weaponEntry = nil
+	local equippedId = nil
+	local unlockedSpells = nil
+
+	if typeof(tdata) == "table" then
+		profile = tdata.Profile
+		weaponName = tdata.StarterWeaponName
+		weaponEntry = tdata.StarterWeaponEntry
+		equippedId = tdata.EquippedWeaponInstanceId
+		unlockedSpells = tdata.UnlockedSpells
+	end
+
+	-- Profile: jeśli brak, nie blokuj loadoutu.
+	if typeof(profile) ~= "table" then
+		local d = PlayerData.Get(player)
 		local fallbackProfile = {
 			Id = "Local",
 			Class = player:GetAttribute("Class") or "Default",
 			Race = player:GetAttribute("Race") or "Human",
-			Stats = { Level = data.level or 1 },
+			Stats = { Level = d.level or 1 },
 		}
 		applyProfileAttributes(player, fallbackProfile)
-
-		local fallbackWeapon = player:GetAttribute("StarterWeaponName")
-		if typeof(fallbackWeapon) ~= "string" or fallbackWeapon == "" then
-			fallbackWeapon = "Knight's Oath"
-			player:SetAttribute("StarterWeaponName", fallbackWeapon)
-		end
-
-		WeaponService.SyncLoadoutFromStarter(player)
-		WeaponService.EquipLoadout(player)
-		return
+	else
+		applyProfileAttributes(player, profile)
 	end
 
-	local profile = tdata.Profile
-	local weaponName = tdata.StarterWeaponName
-	local weaponEntry = tdata.StarterWeaponEntry
-	local equippedId = tdata.EquippedWeaponInstanceId
-
-	if typeof(profile) ~= "table" then
-		warn("[Dungeon] Bad TeleportData profile for", player.Name)
-		return
-	end
-
-	applyProfileAttributes(player, profile)
+	-- Spells unlocked (do losowania w runie)
+	player:SetAttribute("UnlockedSpellsCSV", safeCSV(unlockedSpells))
 
 	if typeof(equippedId) == "string" and equippedId ~= "" then
 		player:SetAttribute("EquippedWeaponInstanceId", equippedId)
@@ -89,8 +101,9 @@ Players.PlayerAdded:Connect(function(player: Player)
 
 	local data = PlayerData.Get(player)
 
-	-- ✅ instancja jeśli jest
+	-- Weapon loadout
 	if typeof(weaponEntry) == "table" then
+		-- normalize -> WeaponService rozumie id/weaponId/weaponName
 		local id = weaponEntry.id or weaponEntry.weaponId or weaponEntry.weaponName or weaponName
 		if typeof(id) == "string" and id ~= "" then
 			weaponEntry.id = id
@@ -100,9 +113,18 @@ Players.PlayerAdded:Connect(function(player: Player)
 			WeaponService.EquipLoadout(player)
 		else
 			warn("[Dungeon] StarterWeaponEntry missing id for", player.Name)
+			-- fallback
+			if typeof(weaponName) ~= "string" or weaponName == "" then
+				weaponName = "Knight's Oath"
+			end
+			player:SetAttribute("StarterWeaponName", weaponName)
+			WeaponService.SyncLoadoutFromStarter(player)
+			WeaponService.EquipLoadout(player)
 		end
 	else
-		-- fallback
+		if typeof(weaponName) ~= "string" or weaponName == "" then
+			weaponName = player:GetAttribute("StarterWeaponName")
+		end
 		if typeof(weaponName) ~= "string" or weaponName == "" then
 			weaponName = "Knight's Oath"
 		end
@@ -111,24 +133,7 @@ Players.PlayerAdded:Connect(function(player: Player)
 		WeaponService.EquipLoadout(player)
 	end
 
-	-- progres (jak było)
-	local profLevel = 1
-	if typeof(profile.Stats) == "table" and typeof(profile.Stats.Level) == "number" then
-		profLevel = math.max(1, math.floor(profile.Stats.Level))
-	end
-	local profCoins = tonumber(profile.Coins) or 0
-
-	if data.level < profLevel then
-		data.level = profLevel
-		data.nextXp = PlayerData.RollNextXp(data.level)
-		PlayerData.MarkDirty(player)
-	end
-	if data.coins < profCoins then
-		data.coins = profCoins
-		PlayerData.MarkDirty(player)
-	end
-
-	print("[Dungeon] Loaded:", player.Name, profile.Class, profile.Race, "Weapon=", player:GetAttribute("StarterWeaponName"))
+	print("[Dungeon] Loaded:", player.Name, "Weapon=", player:GetAttribute("StarterWeaponName"))
 end)
 
 Players.PlayerRemoving:Connect(function(player: Player)

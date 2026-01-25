@@ -134,3 +134,51 @@ end)
 OpenLevelSelect.OnClientEvent:Connect(openUI)
 
 print("[LevelSelectUI] Ready")
+
+
+-- === Teleporting overlay (patch) ===
+local TeleportStatus = (ReplicatedStorage:FindFirstChild("RemoteEvents") and ReplicatedStorage.RemoteEvents:FindFirstChild("TeleportStatus"))
+if TeleportStatus and TeleportStatus:IsA("RemoteEvent") then
+	local teleportGui = Instance.new("ScreenGui")
+	teleportGui.Name = "TeleportingGui"
+	teleportGui.ResetOnSpawn = false
+	teleportGui.IgnoreGuiInset = true
+	teleportGui.Enabled = false
+	teleportGui.Parent = pg
+
+	local dim2 = Instance.new("Frame")
+	dim2.Size = UDim2.fromScale(1,1)
+	dim2.BackgroundColor3 = Color3.fromRGB(0,0,0)
+	dim2.BackgroundTransparency = 0.4
+	dim2.BorderSizePixel = 0
+	dim2.Parent = teleportGui
+
+	local box = Instance.new("TextLabel")
+	box.AnchorPoint = Vector2.new(0.5,0.5)
+	box.Position = UDim2.fromScale(0.5,0.5)
+	box.Size = UDim2.fromOffset(420,60)
+	box.BackgroundColor3 = Color3.fromRGB(14,14,16)
+	box.BackgroundTransparency = 0.08
+	box.BorderSizePixel = 0
+	box.Font = Enum.Font.GothamBold
+	box.TextSize = 18
+	box.TextColor3 = Color3.fromRGB(245,245,245)
+	box.Text = "Teleporting..."
+	box.Parent = dim2
+	Instance.new("UICorner", box).CornerRadius = UDim.new(0,14)
+
+	TeleportStatus.OnClientEvent:Connect(function(payload)
+		if typeof(payload) ~= "table" then return end
+		if payload.type == "teleporting" then
+			teleportGui.Enabled = true
+		elseif payload.type == "failed" then
+			box.Text = "Teleport failed."
+			task.delay(1.2, function()
+				if teleportGui and teleportGui.Parent then
+					teleportGui.Enabled = false
+					box.Text = "Teleporting..."
+				end
+			end)
+		end
+	end)
+end

@@ -596,6 +596,7 @@ task.spawn(function()
 				local elite = spawnOrc(hp, dmg, spd, wave, eliteTier, true, function(pos)
 					alive = math.max(0, alive - 1)
 					pushUi(false)
+					if _G.RegisterEnemyKill then _G.RegisterEnemyKill(pos) end
 					if _G.SpawnDropsAt then _G.SpawnDropsAt(pos, xpDrop, coinDrop) end
 				end)
 				if elite then
@@ -613,6 +614,7 @@ task.spawn(function()
 					remaining = math.max(0, total - killed)
 					alive = math.max(0, alive - 1)
 					pushUi(false)
+					if _G.RegisterEnemyKill then _G.RegisterEnemyKill(pos) end
 					if _G.SpawnDropsAt then _G.SpawnDropsAt(pos, xpDrop, coinDrop) end
 				end)
 

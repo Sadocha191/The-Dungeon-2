@@ -34,6 +34,12 @@ end
 
 local PlayerData = require(playerDataModule)
 local WeaponService = require(weaponServiceModule)
+local SpellDefs
+local spellDefsModule = (ReplicatedStorage:FindFirstChild('ModuleScripts') or ReplicatedStorage:FindFirstChild('ModuleScript'))
+	and ((ReplicatedStorage:FindFirstChild('ModuleScripts') or ReplicatedStorage:FindFirstChild('ModuleScript')):FindFirstChild('SpellDefinitions'))
+if spellDefsModule and spellDefsModule:IsA('ModuleScript') then
+	SpellDefs = require(spellDefsModule)
+end
 local MissionProgress = require(serverModules:WaitForChild("MissionProgress"))
 local function buildFallbackUpDefs()
 	local fallback = {}
@@ -239,6 +245,12 @@ local function roll3(weaponType: string?)
 end
 
 local function openUpgrade(plr: Player)
+	-- disabled: upgrades removed (spells instead)
+	return
+end
+
+-- original openUpgrade disabled below
+local function __openUpgrade_DISABLED(plr: Player)
 	local token = ("%d_%d"):format(plr.UserId, math.floor(os.clock()*1000))
 	local char = plr.Character
 	local tool = char and char:FindFirstChildOfClass("Tool")
@@ -358,8 +370,162 @@ end)
 -- ===== Award =====
 local sessionStart = {} -- [uid] = {xp, coins, time}
 local sessionDeaths = {} -- [uid] = deaths in current run
+-- ===== Run rewards (XP/coins) + run level-ups -> SPELLS =====
+local runStats = {} -- [uid] = {startT, runLevel, runXp, nextXp, runCoins, kills}
+local spellOwned = {} -- [uid] = {[spellId]=level}
+local spellPending = {} -- [uid] = {token: string, choices: {string}}
+
+local function getRun(plr: Player)
+	local uid = plr.UserId
+	if not runStats[uid] then
+		runStats[uid] = { startT = time(), runLevel = 0, runXp = 0, nextXp = 25, runCoins = 0, kills = 0 }
+	end
+	if not spellOwned[uid] then spellOwned[uid] = {} end
+	return runStats[uid], spellOwned[uid]
+end
+
+local function rollNextRunXp(level: number): number
+	-- szybkie levelowanie na początku, wolniej później
+	return 25 + (level * 18)
+end
+
+local SpellEvent = getRemote("SpellEvent") -- nowy remote (Remotes/SpellEvent)
+
+local function parseUnlocked(plr: Player): {string}
+	local csv = plr:GetAttribute("UnlockedSpellsCSV")
+	if typeof(csv) ~= "string" or csv == "" then return {} end
+	local out = {}
+	for token in string.gmatch(csv, "([^,]+)") do
+		token = string.gsub(token, "^%s+", "")
+		token = string.gsub(token, "%s+$", "")
+		if token ~= "" then table.insert(out, token) end
+	end
+	return out
+end
+
+local function canOfferSpell(plr: Player, spellId: string): boolean
+	local def = SpellDefs and SpellDefs.SPELLS and SpellDefs.SPELLS[spellId]
+	if not def then return false end
+	local owned = (spellOwned[plr.UserId] and spellOwned[plr.UserId][spellId]) or 0
+	local maxLv = tonumber(def.maxLevel) or 1
+	if owned >= maxLv then return false end
+	return true
+end
+
+local function buildSpellPool(plr: Player): {string}
+	local unlocked = parseUnlocked(plr)
+	local pool = {}
+	-- jeśli gracz nic nie kupił u wiedźmy, pool będzie pusty
+	for _, id in ipairs(unlocked) do
+		if canOfferSpell(plr, id) then
+			table.insert(pool, id)
+		end
+	end
+	return pool
+end
+
+local function openSpellChoice(plr: Player)
+	local uid = plr.UserId
+	local pool = buildSpellPool(plr)
+	if #pool == 0 then
+		-- nie ma czego losować -> nic nie robimy (run dalej trwa)
+		return
+	end
+
+	-- wybierz max 3 unikalne
+	local choices = {}
+	local used = {}
+	while #choices < 3 and #choices < #pool do
+		local pick = pool[math.random(1, #pool)]
+		if not used[pick] then
+			used[pick] = true
+			table.insert(choices, pick)
+		end
+	end
+
+	local token = tostring(uid) .. ":" .. tostring(os.clock()) .. ":" .. tostring(math.random(100000,999999))
+	spellPending[uid] = { token = token, choices = choices }
+
+	PauseState.Value = true
+	SpellEvent:FireClient(plr, { type="offer", token=token, choices=choices })
+end
+
+SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
+	if typeof(payload) ~= "table" or payload.type ~= "pick" then return end
+	local uid = plr.UserId
+	local p = spellPending[uid]
+	if not p or payload.token ~= p.token then return end
+
+	local spellId = tostring(payload.spellId or "")
+	if spellId == "" then return end
+	local ok = false
+	for _, c in ipairs(p.choices) do
+		if c == spellId then ok = true break end
+	end
+	if not ok then return end
+
+	local def = SpellDefs and SpellDefs.SPELLS and SpellDefs.SPELLS[spellId]
+	if not def then return end
+
+	local owned = spellOwned[uid] or {}
+	local current = tonumber(owned[spellId]) or 0
+	local maxLv = tonumber(def.maxLevel) or 1
+	if current >= maxLv then return end
+
+	owned[spellId] = current + 1
+	spellOwned[uid] = owned
+	plr:SetAttribute(("Spell_%s_Level"):format(spellId), owned[spellId])
+
+	spellPending[uid] = nil
+	PauseState.Value = false
+end)
+
 function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	if not plr or not plr.Parent then return end
+	local rs, _ = getRun(plr)
+
+	rs.runXp += math.max(0, math.floor(xp or 0))
+	rs.runCoins += math.max(0, math.floor(coins or 0))
+
+	-- level-up (RUN)
+	local leveled = false
+	while rs.runXp >= rs.nextXp do
+		rs.runXp -= rs.nextXp
+		rs.runLevel += 1
+		rs.nextXp = rollNextRunXp(rs.runLevel)
+		leveled = true
+	end
+
+	-- HUD sync (RUN)
+	PlayerProgressEvent:FireClient(plr, {
+		type="runProgress",
+		runLevel = rs.runLevel,
+		runXp = rs.runXp,
+		runNextXp = rs.nextXp,
+		runCoins = rs.runCoins,
+		kills = rs.kills,
+	})
+
+	if leveled then
+		openSpellChoice(plr)
+	end
+end
+
+-- Kill register (WaveController calls it)
+function _G.RegisterEnemyKill(pos: Vector3?)
+	for _, plr in ipairs(Players:GetPlayers()) do
+		local rs, _ = getRun(plr)
+		rs.kills += 1
+		PlayerProgressEvent:FireClient(plr, {
+			type="runProgress",
+			runLevel = rs.runLevel,
+			runXp = rs.runXp,
+			runNextXp = rs.nextXp,
+			runCoins = rs.runCoins,
+			kills = rs.kills,
+		})
+	end
+end
 	local d = PlayerData.Get(plr)
 
 	d.xp += math.max(0, math.floor(xp or 0))
@@ -1132,14 +1298,54 @@ end)
 
 -- Mission summary: WaveController wyśle _G.MissionComplete(waves, seconds)
 function _G.MissionComplete(totalWaves: number, seconds: number)
-	for _,plr in ipairs(Players:GetPlayers()) do
+	seconds = tonumber(seconds) or 0
+	totalWaves = tonumber(totalWaves) or 0
+
+	-- rate: XP do konta = czas*0.35 + kille*5 (łatwe do zmiany)
+	local TIME_RATE = 0.35
+	local KILL_RATE = 5
+
+	for _, plr in ipairs(Players:GetPlayers()) do
 		local d = PlayerData.Get(plr)
-		local start = sessionStart[plr.UserId]
-		local gainedXp, gainedCoins = 0, 0
-		if start then
-			gainedXp = math.max(0, (d._sessionXp or 0) - start.xp)
-			gainedCoins = math.max(0, (d._sessionCoins or 0) - start.coins)
+		local rs = runStats[plr.UserId] or { runLevel = 0, runXp = 0, runCoins = 0, kills = 0 }
+
+		local accountXp = math.max(0, math.floor(seconds * TIME_RATE + (rs.kills or 0) * KILL_RATE))
+		local coinsGained = math.max(0, math.floor(rs.runCoins or 0))
+
+		-- dopisz do konta (GLOBAL)
+		d.xp += accountXp
+		d.coins += coinsGained
+
+		local leveled = false
+		while d.xp >= d.nextXp do
+			d.xp -= d.nextXp
+			d.level += 1
+			d.nextXp = PlayerData.RollNextXp(d.level)
+			leveled = true
 		end
+
+		PlayerData.MarkDirty(plr)
+		PlayerData.Save(plr, true)
+
+		MissionSummaryEvent:FireClient(plr, {
+			type="gameover",
+			time = seconds,
+			kills = rs.kills or 0,
+			coinsGained = coinsGained,
+			accountXp = accountXp,
+			accountLevel = d.level,
+		})
+
+		local died = (sessionDeaths[plr.UserId] or 0) > 0
+		MissionProgress.OnRunComplete(plr, totalWaves, seconds, died)
+
+		-- reset run state
+		runStats[plr.UserId] = nil
+		spellOwned[plr.UserId] = nil
+		spellPending[plr.UserId] = nil
+		sessionDeaths[plr.UserId] = 0
+	end
+end
 
 		MissionSummaryEvent:FireClient(plr, {
 			type="summary",

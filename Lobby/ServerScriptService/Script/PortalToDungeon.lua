@@ -1,18 +1,22 @@
--- SCRIPT: PortalToLevel1.server.lua
--- GDZIE: Lobby/ServerScriptService/Script/PortalToDungeon.lua
--- CO: ProximityPrompt na portalu + otwieranie LevelSelectUI + teleport z TeleportData.
+-- PortalToDungeon.server.lua
+-- Lobby/ServerScriptService/Script/PortalToDungeon.lua
+-- FIX:
+-- 1) ProfilesManager: używaj GetActiveProfile + LoadIfAny (GetProfile nie istnieje)
+-- 2) WeaponInstances to lista -> pobieraj instancję przez PlayerStateStore.GetWeaponInstance
+-- 3) TeleportData niesie: Profile, StarterWeaponEntry, EquippedWeaponInstanceId, UnlockedSpells
+-- 4) Dodaje RemoteEvent "TeleportStatus" do komunikatu "Teleporting..."
 
 local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
-local Players = game:GetService("Players")
 
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 local replicatedModules = ReplicatedStorage:WaitForChild("ModuleScripts")
 
 local ProfilesManager = require(serverModules:WaitForChild("ProfilesManager"))
 local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
+local PlayerData = require(serverModules:WaitForChild("PlayerData"))
 local Levels = require(replicatedModules:WaitForChild("Levels"))
 
 -- Remotes
@@ -34,19 +38,17 @@ end
 
 local OpenLevelSelect = ensureRemote("OpenLevelSelect")
 local RequestLevelTeleport = ensureRemote("RequestLevelTeleport")
+local TeleportStatus = ensureRemote("TeleportStatus") -- client shows "Teleporting..."
 
--- Portal może być w Workspace albo w ServerStorage. Nie używamy WaitForChild, żeby nie zawieszać skryptu.
+-- Portal resolver (nie używamy WaitForChild, żeby nie wieszać)
 local function resolvePortalPart(): BasePart?
 	local ws = workspace
-
-	-- 1) Workspace: Model "Portal" / "PortalModel" + part "PortalTeleport"
 	local portalModel = ws:FindFirstChild("Portal") or ws:FindFirstChild("PortalModel")
 	if portalModel and portalModel:IsA("Model") then
 		local part = portalModel:FindFirstChild("PortalTeleport")
 		if part and part:IsA("BasePart") then return part end
 	end
 
-	-- 2) ServerStorage: "Portal" -> clone do Workspace
 	local stored = ServerStorage:FindFirstChild("Portal")
 	if stored and stored:IsA("Model") then
 		local clone = stored:Clone()
@@ -55,19 +57,17 @@ local function resolvePortalPart(): BasePart?
 		if part and part:IsA("BasePart") then return part end
 	end
 
-	-- 3) Ostatni fallback: szukaj partu o nazwie PortalTeleport w całym Workspace
 	for _, d in ipairs(ws:GetDescendants()) do
 		if d:IsA("BasePart") and d.Name == "PortalTeleport" then
 			return d
 		end
 	end
-
 	return nil
 end
 
 local portalPart = resolvePortalPart()
 if not portalPart then
-	warn("[PortalToLevel1] PortalTeleport not found (Workspace/ServerStorage). Prompt will not be created.")
+	warn("[PortalToDungeon] PortalTeleport not found (Workspace/ServerStorage).")
 	return
 end
 
@@ -113,33 +113,49 @@ local function distanceOk(player: Player): boolean
 end
 
 local function tutorialComplete(player: Player): boolean
-	-- Twój “gate” na tutorial (jeśli chcesz blokować portal przed ukończeniem tutoriala)
 	local attr = player:GetAttribute("TutorialComplete")
-	if attr ~= nil then
-		return attr == true
-	end
+	if attr ~= nil then return attr == true end
+	local ok, state = pcall(function() return PlayerStateStore.GetTutorialState(player) end)
+	return (ok and state and state.Complete == true) or false
+end
 
-	-- fallback: jeśli atrybutu nie ma, patrzymy w store
-	local ok, state = pcall(function()
-		return PlayerStateStore.GetTutorialState(player)
-	end)
-	if ok and state and state.Complete == true then
-		return true
+local function getProfileSafe(player: Player)
+	if ProfilesManager.LoadIfAny then
+		pcall(function() ProfilesManager.LoadIfAny(player) end)
 	end
+	if ProfilesManager.GetActiveProfile then
+		return ProfilesManager.GetActiveProfile(player)
+	end
+	return nil
+end
 
-	return false
+local function buildUnlockedSpellsList(player: Player): {string}
+	local out = {}
+	local d = PlayerData.Get(player)
+	if typeof(d.spellsUnlocked) == "table" then
+		for id, v in pairs(d.spellsUnlocked) do
+			if v == true and typeof(id) == "string" and id ~= "" then
+				table.insert(out, id)
+			end
+		end
+	end
+	table.sort(out)
+	return out
 end
 
 local function tryTeleport(player: Player, placeId: number)
 	if not canTeleport(player) then return end
 
-	-- profile do teleportdata
-	local profile = ProfilesManager.GetProfile(player)
-	local st = PlayerStateStore.Get(player)
+	local st = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
+	local profile = getProfileSafe(player)
 
+	-- FIX: WeaponInstances to lista -> GetWeaponInstance
 	local weaponEntry = nil
-	if st and typeof(st.WeaponInstances) == "table" and st.EquippedWeaponInstanceId then
-		weaponEntry = st.WeaponInstances[st.EquippedWeaponInstanceId]
+	if st and typeof(st.EquippedWeaponInstanceId) == "string" and st.EquippedWeaponInstanceId ~= "" then
+		local inst = PlayerStateStore.GetWeaponInstance(player, st.EquippedWeaponInstanceId)
+		if typeof(inst) == "table" then
+			weaponEntry = inst
+		end
 	end
 
 	local tpData = {
@@ -147,33 +163,31 @@ local function tryTeleport(player: Player, placeId: number)
 		StarterWeaponName = st and st.StarterWeaponName or nil,
 		StarterWeaponEntry = weaponEntry,
 		EquippedWeaponInstanceId = st and st.EquippedWeaponInstanceId or nil,
+		UnlockedSpells = buildUnlockedSpellsList(player),
 	}
 
+	local options = Instance.new("TeleportOptions")
+	options:SetTeleportData(tpData)
+
+	TeleportStatus:FireClient(player, { type = "teleporting" })
+
 	local ok, err = pcall(function()
-		local options = Instance.new("TeleportOptions")
-		options:SetTeleportData(tpData)
 		TeleportService:TeleportAsync(placeId, { player }, options)
 	end)
 	if not ok then
-		warn("[PortalToLevel1] TeleportAsync failed:", err)
+		warn("[PortalToDungeon] TeleportAsync failed:", err)
+		TeleportStatus:FireClient(player, { type = "failed" })
 	end
 end
 
--- Otwieranie UI
 prompt.Triggered:Connect(function(player: Player)
 	if not player or not player.Parent then return end
 	if not distanceOk(player) then return end
 	if not canOpen(player) then return end
-
-	if not tutorialComplete(player) then
-		-- jak chcesz, możesz tu wysłać jakiś komunikat; na razie po prostu blokada
-		return
-	end
-
+	if not tutorialComplete(player) then return end
 	OpenLevelSelect:FireClient(player)
 end)
 
--- Wybór poziomu z UI
 RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: any)
 	if not player or not player.Parent then return end
 	if typeof(levelKey) ~= "string" then return end
@@ -182,11 +196,11 @@ RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: an
 
 	local entry = Levels.GetByKey(levelKey)
 	if not entry or typeof(entry.placeId) ~= "number" then
-		warn("[PortalToLevel1] Unknown level key:", levelKey)
+		warn("[PortalToDungeon] Unknown level key:", levelKey)
 		return
 	end
 
 	tryTeleport(player, entry.placeId)
 end)
 
-print("[PortalToLevel1] Ready -> Level selector")
+print("[PortalToDungeon] Ready")
