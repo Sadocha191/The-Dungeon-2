@@ -596,20 +596,24 @@ task.spawn(function()
 				local elite = spawnOrc(hp, dmg, spd, wave, eliteTier, true, function(pos)
 					alive = math.max(0, alive - 1)
 					pushUi(false)
-					-- fallback: award directly (if orbs disabled or pickup fails)
-					if _G.AwardPlayer then
-						local nearest, bestDist = nil, math.huge
+					if _G.RegisterEnemyKill then _G.RegisterEnemyKill(pos) end
+					-- fallback XP/coins (nie zależy od orbów)
+					if _G.AwardPlayer and (xpDrop > 0 or coinDrop > 0) then
+						local best, bestDist = nil, math.huge
 						for _,plr in ipairs(Players:GetPlayers()) do
 							local c = plr.Character
-							local hrp = c and c:FindFirstChild('HumanoidRootPart')
-							local h = c and c:FindFirstChildOfClass('Humanoid')
+							local hrp = c and c:FindFirstChild("HumanoidRootPart")
+							local h = c and c:FindFirstChildOfClass("Humanoid")
 							if hrp and h and h.Health > 0 then
 								local d = (hrp.Position - pos).Magnitude
-								if d < bestDist then bestDist = d; nearest = plr end
+								if d < bestDist then
+									bestDist = d
+									best = plr
+								end
 							end
 						end
-						if nearest then
-							_G.AwardPlayer(nearest, xpDrop, coinDrop)
+						if best then
+							_G.AwardPlayer(best, xpDrop, coinDrop)
 						end
 					end
 					if _G.SpawnDropsAt then _G.SpawnDropsAt(pos, xpDrop, coinDrop) end
@@ -629,20 +633,24 @@ task.spawn(function()
 					remaining = math.max(0, total - killed)
 					alive = math.max(0, alive - 1)
 					pushUi(false)
-					-- fallback: award directly (if orbs disabled or pickup fails)
-					if _G.AwardPlayer then
-						local nearest, bestDist = nil, math.huge
+					if _G.RegisterEnemyKill then _G.RegisterEnemyKill(pos) end
+					-- fallback XP/coins (nie zależy od orbów)
+					if _G.AwardPlayer and (xpDrop > 0 or coinDrop > 0) then
+						local best, bestDist = nil, math.huge
 						for _,plr in ipairs(Players:GetPlayers()) do
 							local c = plr.Character
-							local hrp = c and c:FindFirstChild('HumanoidRootPart')
-							local h = c and c:FindFirstChildOfClass('Humanoid')
+							local hrp = c and c:FindFirstChild("HumanoidRootPart")
+							local h = c and c:FindFirstChildOfClass("Humanoid")
 							if hrp and h and h.Health > 0 then
 								local d = (hrp.Position - pos).Magnitude
-								if d < bestDist then bestDist = d; nearest = plr end
+								if d < bestDist then
+									bestDist = d
+									best = plr
+								end
 							end
 						end
-						if nearest then
-							_G.AwardPlayer(nearest, xpDrop, coinDrop)
+						if best then
+							_G.AwardPlayer(best, xpDrop, coinDrop)
 						end
 					end
 					if _G.SpawnDropsAt then _G.SpawnDropsAt(pos, xpDrop, coinDrop) end

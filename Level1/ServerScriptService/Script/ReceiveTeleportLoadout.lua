@@ -1,44 +1,38 @@
 -- ReceiveTeleportLoadout.server.lua (Level1)
--- Fix pack v9:
--- - equips weapon AFTER CharacterAdded (Tool equips require character)
--- - does not require TeleportData.Profile to exist
--- - stores UnlockedSpellsCSV attribute
+-- FIX PACK 11:
+-- 1) NIE przerywaj jeśli TeleportData.Profile jest nil (broń ma się załadować i tak)
+-- 2) EquipLoadout dopiero po CharacterAdded (Tool wymaga postaci)
+-- 3) Logi w output: co przyszło z TeleportData
 
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local function findModule(name: string): ModuleScript?
-	local roots = { ServerScriptService, game:GetService("ReplicatedStorage") }
-	for _, root in ipairs(roots) do
-		local found = root:FindFirstChild(name, true)
-		if found and found:IsA("ModuleScript") then
-			return found
-		end
+	local direct = ServerScriptService:FindFirstChild(name)
+	if direct and direct:IsA("ModuleScript") then return direct end
+	local folder = ServerScriptService:FindFirstChild("ModuleScript") or ServerScriptService:FindFirstChild("ModuleScripts")
+	if folder then
+		local nested = folder:FindFirstChild(name)
+		if nested and nested:IsA("ModuleScript") then return nested end
 	end
+	-- deep find fallback
+	local found = ServerScriptService:FindFirstChild(name, true)
+	if found and found:IsA("ModuleScript") then return found end
 	return nil
 end
 
 local PlayerData = require(findModule("PlayerData") or error("Missing PlayerData"))
 local WeaponService = require(findModule("WeaponService") or error("Missing WeaponService"))
 
-local function safeCSV(list: any): string
-	if typeof(list) ~= "table" then return "" end
-	local out = {}
-	for _, id in ipairs(list) do
-		if typeof(id) == "string" and id ~= "" then table.insert(out, id) end
-	end
-	return table.concat(out, ",")
-end
-
 local function applyWeapon(plr: Player, weaponName: string?, weaponEntry: any)
-	local data = PlayerData.Get(plr)
+	local d = PlayerData.Get(plr)
 
 	if typeof(weaponEntry) == "table" then
 		local id = weaponEntry.id or weaponEntry.weaponId or weaponEntry.weaponName or weaponName
 		if typeof(id) == "string" and id ~= "" then
 			weaponEntry.id = id
 			plr:SetAttribute("StarterWeaponName", id)
-			data.Loadout = { weaponEntry }
+			d.Loadout = { weaponEntry }
 			if PlayerData.MarkDirty then PlayerData.MarkDirty(plr) end
 			return
 		end
@@ -51,49 +45,52 @@ local function applyWeapon(plr: Player, weaponName: string?, weaponEntry: any)
 	if WeaponService.SyncLoadoutFromStarter then
 		WeaponService.SyncLoadoutFromStarter(plr)
 	else
-		-- fallback: minimal loadout
-		data.Loadout = { { id = weaponName } }
+		d.Loadout = { { id = weaponName } }
 		if PlayerData.MarkDirty then PlayerData.MarkDirty(plr) end
 	end
 end
 
-Players.PlayerAdded:Connect(function(plr: Player)
-	local joinData = plr:GetJoinData()
+local function equipAfterSpawn(plr: Player)
+	if WeaponService.EquipLoadout then
+		pcall(function() WeaponService.EquipLoadout(plr) end)
+	end
+end
+
+Players.PlayerAdded:Connect(function(player: Player)
+	local joinData = player:GetJoinData()
 	local tdata = joinData and joinData.TeleportData
 
-	local weaponName, weaponEntry, unlocked = nil, nil, nil
+	local weaponName, weaponEntry, equippedId = nil, nil, nil
 	if typeof(tdata) == "table" then
 		weaponName = tdata.StarterWeaponName
 		weaponEntry = tdata.StarterWeaponEntry
-		unlocked = tdata.UnlockedSpells
+		equippedId = tdata.EquippedWeaponInstanceId
 	end
 
-	plr:SetAttribute("UnlockedSpellsCSV", safeCSV(unlocked))
+	print("[ReceiveTeleportLoadout] ", player.Name, "TeleportData.weaponName=", tostring(weaponName),
+		"weaponEntry.weaponId=", tostring(typeof(weaponEntry)=="table" and weaponEntry.weaponId or nil),
+		"equippedId=", tostring(equippedId))
 
-	applyWeapon(plr, weaponName, weaponEntry)
-
-	-- equip when character exists
-	local function equipNow()
-		if WeaponService.EquipLoadout then
-			pcall(function() WeaponService.EquipLoadout(plr) end)
-		end
+	if typeof(equippedId) == "string" and equippedId ~= "" then
+		player:SetAttribute("EquippedWeaponInstanceId", equippedId)
 	end
 
-	plr.CharacterAdded:Connect(function()
+	applyWeapon(player, weaponName, weaponEntry)
+
+	player.CharacterAdded:Connect(function()
 		task.wait(0.15)
-		equipNow()
+		equipAfterSpawn(player)
 	end)
 
-	-- if character already present
 	task.defer(function()
-		if plr.Character then equipNow() end
+		if player.Character then
+			equipAfterSpawn(player)
+		end
 	end)
 end)
 
-Players.PlayerRemoving:Connect(function(plr: Player)
-	if PlayerData.Save then
-		pcall(function() PlayerData.Save(plr) end)
-	end
+Players.PlayerRemoving:Connect(function(player: Player)
+	if PlayerData.Save then pcall(function() PlayerData.Save(player) end) end
 end)
 
-print("[ReceiveTeleportLoadout] Ready (v9)")
+print("[ReceiveTeleportLoadout] Ready (fix_pack11)")
