@@ -314,7 +314,7 @@ local function pickGoal(targetPos: Vector3, orc: Model, dist: number, forceDirec
 end
 
 local function dropsForWave(wave: number)
-	local xp = math.floor(10 + (wave-1)*4 + math.random(0,4))
+	local xp = math.floor(6 + (wave-1)*3 + math.random(0,3))
 	local coins = math.floor(2 + (wave-1)*1.0 + math.random(0,2))
 	return xp, coins
 end
@@ -394,7 +394,6 @@ local function spawnOrc(hp, dmg, spd, wave, tier, isElite, onKill)
 		end)
 
 		while hum.Health > 0 and orc.Parent do
-			waitIfPaused()
 			task.wait(THINK_INTERVAL)
 
 			if root.Position.Y < KILL_BELOW_Y then
@@ -444,7 +443,9 @@ local function spawnOrc(hp, dmg, spd, wave, tier, isElite, onKill)
 						end
 					end
 				end
-				targetHum:TakeDamage(finalDmg)
+				if not PauseState.Value then
+					targetHum:TakeDamage(finalDmg)
+				end
 				-- gdy bije, wymuś direct chwilę, żeby nie “odpływał” na offset
 				forceDirectUntil = math.max(forceDirectUntil, now + 0.8)
 			end
@@ -597,25 +598,6 @@ task.spawn(function()
 					alive = math.max(0, alive - 1)
 					pushUi(false)
 					if _G.RegisterEnemyKill then _G.RegisterEnemyKill(pos) end
-					-- fallback XP/coins (nie zależy od orbów)
-					if _G.AwardPlayer and (xpDrop > 0 or coinDrop > 0) then
-						local best, bestDist = nil, math.huge
-						for _,plr in ipairs(Players:GetPlayers()) do
-							local c = plr.Character
-							local hrp = c and c:FindFirstChild("HumanoidRootPart")
-							local h = c and c:FindFirstChildOfClass("Humanoid")
-							if hrp and h and h.Health > 0 then
-								local d = (hrp.Position - pos).Magnitude
-								if d < bestDist then
-									bestDist = d
-									best = plr
-								end
-							end
-						end
-						if best then
-							_G.AwardPlayer(best, xpDrop, coinDrop, 1)
-						end
-					end
 					if _G.SpawnDropsAt then _G.SpawnDropsAt(pos, xpDrop, coinDrop) end
 				end)
 				if elite then
@@ -634,25 +616,6 @@ task.spawn(function()
 					alive = math.max(0, alive - 1)
 					pushUi(false)
 					if _G.RegisterEnemyKill then _G.RegisterEnemyKill(pos) end
-					-- fallback XP/coins (nie zależy od orbów)
-					if _G.AwardPlayer and (xpDrop > 0 or coinDrop > 0) then
-						local best, bestDist = nil, math.huge
-						for _,plr in ipairs(Players:GetPlayers()) do
-							local c = plr.Character
-							local hrp = c and c:FindFirstChild("HumanoidRootPart")
-							local h = c and c:FindFirstChildOfClass("Humanoid")
-							if hrp and h and h.Health > 0 then
-								local d = (hrp.Position - pos).Magnitude
-								if d < bestDist then
-									bestDist = d
-									best = plr
-								end
-							end
-						end
-						if best then
-							_G.AwardPlayer(best, xpDrop, coinDrop, 1)
-						end
-					end
 					if _G.SpawnDropsAt then _G.SpawnDropsAt(pos, xpDrop, coinDrop) end
 				end)
 

@@ -1,58 +1,13 @@
 -- ProgressService.server.lua (Level1)
--- Fix:
--- - usuwa duplikaty/luźny kod (crash "attempt to index nil with UserId")
--- - run level start 0
--- - spelle losowane po level-up: tylko kupione u wiedźmy (UnlockedSpellsCSV)
--- - orby XP/coins: naliczanie odbywa się przez DropService -> _G.AwardPlayer (na pickup)
--- - pauza runa na czas wyboru spella (PauseState)
+-- v14:
+-- - slower run leveling
+-- - pauses RUN timer + wave spawns during spell choice (PauseState), but enemies keep moving (WaveController handles that)
+-- - spell unlock/upgrade logic respects MAX_RUN_SPELLS (distinct spells)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
--- === deps ===
-local function findModule(name: string): ModuleScript?
-	local roots = { ServerScriptService, ReplicatedStorage }
-	for _, root in ipairs(roots) do
-		local found = root:FindFirstChild(name, true)
-		if found and found:IsA("ModuleScript") then
-			return found
-		end
-	end
-	return nil
-end
-
-local function safeRequire(ms: ModuleScript?)
-	if not ms then return nil end
-	local ok, mod = pcall(require, ms)
-	if ok then return mod end
-	warn("[ProgressService] require failed:", ms:GetFullName(), mod)
-	return nil
-end
-
-local PlayerData = safeRequire(findModule("PlayerData"))
-local MissionProgress = safeRequire(findModule("MissionProgress"))
-
--- Spell definitions (ReplicatedStorage/ModuleScripts/SpellDefinitions)
-local SpellDefs = nil
-do
-	local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
-	if modFolder and modFolder:IsA("Folder") then
-		local s = modFolder:FindFirstChild("SpellDefinitions")
-		if s and s:IsA("ModuleScript") then
-			SpellDefs = safeRequire(s)
-		end
-	end
-end
-
-if not PlayerData then
-	error("[ProgressService] Missing PlayerData")
-end
-if not SpellDefs or not SpellDefs.SPELLS then
-	warn("[ProgressService] SpellDefinitions missing; spell rolls will be empty.")
-end
-
--- === remotes ===
 local function ensureFolder(parent: Instance, name: string): Folder
 	local f = parent:FindFirstChild(name)
 	if f and f:IsA("Folder") then return f end
@@ -71,12 +26,48 @@ local function ensureRemoteEvent(parent: Instance, name: string): RemoteEvent
 	return r
 end
 
+local function findModule(name: string): ModuleScript?
+	for _, root in ipairs({ServerScriptService, ReplicatedStorage}) do
+		local found = root:FindFirstChild(name, true)
+		if found and found:IsA("ModuleScript") then return found end
+	end
+	return nil
+end
+
+local function safeRequire(ms: ModuleScript?)
+	if not ms then return nil end
+	local ok, mod = pcall(require, ms)
+	if ok then return mod end
+	warn("[ProgressService] require failed:", ms:GetFullName(), mod)
+	return nil
+end
+
+local PlayerData = safeRequire(findModule("PlayerData"))
+local MissionProgress = safeRequire(findModule("MissionProgress"))
+
+if not PlayerData then
+	error("[ProgressService] Missing PlayerData module")
+end
+
+-- Spell defs
+local SpellDefs
+do
+	local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
+	if modFolder and modFolder:IsA("Folder") then
+		local s = modFolder:FindFirstChild("SpellDefinitions")
+		if s and s:IsA("ModuleScript") then
+			SpellDefs = safeRequire(s)
+		end
+	end
+end
+
+-- Remotes
 local Remotes = ensureFolder(ReplicatedStorage, "Remotes")
 local PlayerProgressEvent = ensureRemoteEvent(Remotes, "PlayerProgressEvent")
 local MissionSummaryEvent = ensureRemoteEvent(Remotes, "MissionSummaryEvent")
 local SpellEvent = ensureRemoteEvent(Remotes, "SpellEvent")
 
--- PauseState used by WaveController
+-- PauseState (shared)
 local PauseState = ReplicatedStorage:FindFirstChild("PauseState")
 if not PauseState then
 	PauseState = Instance.new("BoolValue")
@@ -85,38 +76,58 @@ if not PauseState then
 	PauseState.Parent = ReplicatedStorage
 end
 
--- === run state ===
-local run = {} -- [uid] = {startT, level, xp, nextXp, coins, kills, ended}
-local pending = {} -- [uid] = {token, choices}
+-- Run state
+local run = {} -- [uid] = {startT, pausedTotal, pauseStart, runLevel, runXp, nextXp, runCoins, kills, ended}
+
+local function rollNextRunXp(level: number): number
+	-- wolniej niż wcześniej: szybkie pierwsze lvle, ale nie "co chwilę"
+	-- L1: 70, L2: 105, L3: 140...
+	return 70 + (level * 35)
+end
 
 local function getRun(plr: Player)
-	if not plr then return nil end
 	local uid = plr.UserId
 	local r = run[uid]
 	if not r then
-		r = { startT = time(), level = 0, xp = 0, nextXp = 25, coins = 0, kills = 0, ended = false }
+		r = {
+			startT = time(),
+			pausedTotal = 0,
+			pauseStart = nil,
+			runLevel = 0,
+			runXp = 0,
+			nextXp = rollNextRunXp(0),
+			runCoins = 0,
+			kills = 0,
+			ended = false,
+		}
 		run[uid] = r
 	end
 	return r
 end
 
-local function rollNextRunXp(level: number): number
-	return 25 + (level * 18)
+local function runSeconds(plr: Player): number
+	local r = getRun(plr)
+	local t = time() - (r.startT or time())
+	if r.pauseStart then
+		t -= (time() - r.pauseStart)
+	end
+	t -= (r.pausedTotal or 0)
+	return math.max(0, math.floor(t))
 end
 
 local function syncHud(plr: Player)
 	local r = getRun(plr)
-	if not r then return end
+	-- HUD expects: type="progress" and fields level/xp/nextXp/coins
 	PlayerProgressEvent:FireClient(plr, {
 		type = "progress",
-		level = r.level,
-		xp = r.xp,
+		level = r.runLevel,
+		xp = r.runXp,
 		nextXp = r.nextXp,
-		coins = r.coins,
+		coins = r.runCoins,
+		kills = r.kills,
 	})
 end
 
--- === spells ===
 local function parseUnlocked(plr: Player): {string}
 	local csv = plr:GetAttribute("UnlockedSpellsCSV")
 	if typeof(csv) ~= "string" or csv == "" then return {} end
@@ -133,26 +144,48 @@ local function getSpellLevel(plr: Player, id: string): number
 	return tonumber(plr:GetAttribute(("Spell_%s_Level"):format(id))) or 0
 end
 
-local function canOfferSpell(plr: Player, id: string): boolean
+local function distinctOwnedCount(plr: Player): number
+	if not SpellDefs or not SpellDefs.SPELLS then return 0 end
+	local n = 0
+	for id, _ in pairs(SpellDefs.SPELLS) do
+		if getSpellLevel(plr, id) > 0 then n += 1 end
+	end
+	return n
+end
+
+local function canOffer(plr: Player, id: string): boolean
 	if not SpellDefs or not SpellDefs.SPELLS then return false end
 	local def = SpellDefs.SPELLS[id]
 	if not def then return false end
+
 	local lv = getSpellLevel(plr, id)
 	local maxLv = tonumber(def.maxLevel) or 1
-	return lv < maxLv
+	if lv >= maxLv then return false end
+
+	-- limit distinct spells (unlock only if slot available)
+	local maxSpells = tonumber(SpellDefs.MAX_RUN_SPELLS) or 6
+	if lv == 0 and distinctOwnedCount(plr) >= maxSpells then
+		return false
+	end
+
+	return true
 end
 
-local function rollSpellChoices(plr: Player): {string}
+local pending = {} -- [uid] = {token, choices}
+
+local function rollChoices(plr: Player): {string}
 	local unlocked = parseUnlocked(plr)
 	local pool = {}
+
 	for _, id in ipairs(unlocked) do
-		if canOfferSpell(plr, id) then
+		if canOffer(plr, id) then
 			table.insert(pool, id)
 		end
 	end
 	if #pool == 0 then return {} end
 
-	local choices, used = {}, {}
+	local choices = {}
+	local used = {}
 	while #choices < 3 and #choices < #pool do
 		local id = pool[math.random(1, #pool)]
 		if not used[id] then
@@ -163,14 +196,29 @@ local function rollSpellChoices(plr: Player): {string}
 	return choices
 end
 
+local function pauseBegin(plr: Player)
+	local r = getRun(plr)
+	if r.pauseStart then return end
+	PauseState.Value = true
+	r.pauseStart = time()
+end
+
+local function pauseEnd(plr: Player)
+	local r = getRun(plr)
+	if not r.pauseStart then return end
+	r.pausedTotal += (time() - r.pauseStart)
+	r.pauseStart = nil
+	PauseState.Value = false
+end
+
 local function openSpellMenu(plr: Player)
-	local choices = rollSpellChoices(plr)
+	local choices = rollChoices(plr)
 	if #choices == 0 then return end
 
-	local token = ("%d:%d:%d"):format(plr.UserId, math.floor(os.clock() * 1000), math.random(100000, 999999))
+	local token = ("%d:%d:%d"):format(plr.UserId, math.floor(os.clock()*1000), math.random(100000,999999))
 	pending[plr.UserId] = { token = token, choices = choices }
 
-	PauseState.Value = true
+	pauseBegin(plr)
 	SpellEvent:FireClient(plr, { type = "offer", token = token, choices = choices })
 end
 
@@ -187,32 +235,32 @@ SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 		if c == id then ok = true break end
 	end
 	if not ok then return end
-	if not canOfferSpell(plr, id) then return end
+	if not canOffer(plr, id) then return end
 
 	local lv = getSpellLevel(plr, id)
 	plr:SetAttribute(("Spell_%s_Level"):format(id), lv + 1)
 
 	pending[plr.UserId] = nil
-	PauseState.Value = false
+	pauseEnd(plr)
 end)
 
--- === public: called by DropService on orb pickup ===
+-- Public API for orbs (DropService calls _G.AwardPlayer)
 function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	if not plr or not plr.Parent then return end
 	local r = getRun(plr)
-	if not r or r.ended then return end
+	if r.ended then return end
 
 	xp = math.max(0, math.floor(tonumber(xp) or 0))
 	coins = math.max(0, math.floor(tonumber(coins) or 0))
 
-	r.xp += xp
-	r.coins += coins
+	r.runXp += xp
+	r.runCoins += coins
 
 	local leveled = false
-	while r.xp >= r.nextXp do
-		r.xp -= r.nextXp
-		r.level += 1
-		r.nextXp = rollNextRunXp(r.level)
+	while r.runXp >= r.nextXp do
+		r.runXp -= r.nextXp
+		r.runLevel += 1
+		r.nextXp = rollNextRunXp(r.runLevel)
 		leveled = true
 	end
 
@@ -223,31 +271,31 @@ function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	end
 end
 
--- called by WaveController on kill
 function _G.RegisterEnemyKill(_pos: Vector3?)
 	for _, plr in ipairs(Players:GetPlayers()) do
 		local r = getRun(plr)
-		if r and not r.ended then
+		if not r.ended then
 			r.kills += 1
+			syncHud(plr)
 		end
 	end
 end
 
--- === Game Over / End run ===
+-- GameOver / account XP (as before)
 local TIME_RATE = 0.35
 local KILL_RATE = 5
 
 local function endRunForPlayer(plr: Player, reason: string)
 	local r = getRun(plr)
-	if not r or r.ended then return end
+	if r.ended then return end
 	r.ended = true
 
-	PauseState.Value = false
-	pending[plr.UserId] = nil
+	-- ensure unpause accounting
+	pauseEnd(plr)
 
-	local seconds = math.max(0, math.floor(time() - (r.startT or time())))
+	local seconds = runSeconds(plr)
 	local accountXp = math.max(0, math.floor(seconds * TIME_RATE + (r.kills or 0) * KILL_RATE))
-	local coinsGained = math.max(0, math.floor(r.coins or 0))
+	local coinsGained = math.max(0, math.floor(r.runCoins or 0))
 
 	local d = PlayerData.Get(plr)
 	d.xp = (tonumber(d.xp) or 0) + accountXp
@@ -273,7 +321,6 @@ local function endRunForPlayer(plr: Player, reason: string)
 		accountXp = accountXp,
 		accountLevel = tonumber(d.level) or 1,
 	})
-
 	if MissionProgress and MissionProgress.OnRunComplete then
 		pcall(function() MissionProgress.OnRunComplete(plr, 0, seconds, true) end)
 	end
@@ -286,17 +333,17 @@ Players.PlayerAdded:Connect(function(plr: Player)
 	pending[plr.UserId] = nil
 
 	local r = getRun(plr)
-	if r then
-		r.startT = time()
-		r.level = 0
-		r.xp = 0
-		r.nextXp = 25
-		r.coins = 0
-		r.kills = 0
-		r.ended = false
-	end
+	r.startT = time()
+	r.pausedTotal = 0
+	r.pauseStart = nil
+	r.runLevel = 0
+	r.runXp = 0
+	r.nextXp = rollNextRunXp(0)
+	r.runCoins = 0
+	r.kills = 0
+	r.ended = false
 
-	-- reset run spell levels
+	-- reset spell levels for this run (only known defs)
 	if SpellDefs and SpellDefs.SPELLS then
 		for id, _ in pairs(SpellDefs.SPELLS) do
 			plr:SetAttribute(("Spell_%s_Level"):format(id), 0)
@@ -311,4 +358,4 @@ Players.PlayerRemoving:Connect(function(plr: Player)
 	pending[plr.UserId] = nil
 end)
 
-print("[ProgressService] Ready (orb pickup + spells on level-up)")
+print("[ProgressService] Ready (v14)")
