@@ -98,15 +98,13 @@ end
 
 local function syncRunHud(plr: Player)
 	local r = getRun(plr)
+	-- HUD expects type="progress" with fields level/xp/nextXp/coins
 	PlayerProgressEvent:FireClient(plr, {
 		type = "progress",
-		-- map RUN -> HUD legacy fields
 		level = r.runLevel,
 		xp = r.runXp,
 		nextXp = r.nextXp,
 		coins = r.runCoins,
-		-- extra fields (optional)
-		kills = r.kills,
 	})
 end
 
@@ -195,8 +193,35 @@ SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 end)
 
 -- ===== Public API used by other systems =====
-function _G.AwardPlayer(plr: Player, xp: number, coins: number)
+function _G.AwardPlayer(plr: Player, xp: number, coins: number, killsDelta: number?)
 	if not plr or not plr.Parent then return end
+	local r = getRun(plr)
+	if r.ended then return end
+
+	xp = math.max(0, math.floor(tonumber(xp) or 0))
+	coins = math.max(0, math.floor(tonumber(coins) or 0))
+	killsDelta = math.max(0, math.floor(tonumber(killsDelta) or 0))
+
+	r.runXp += xp
+	r.runCoins += coins
+	if killsDelta > 0 then
+		r.kills += killsDelta
+	end
+
+	local leveled = false
+	while r.runXp >= r.nextXp do
+		r.runXp -= r.nextXp
+		r.runLevel += 1
+		r.nextXp = rollNextRunXp(r.runLevel)
+		leveled = true
+	end
+
+	syncRunHud(plr)
+
+	if leveled then
+		openSpellMenu(plr)
+	end
+end
 	local r = getRun(plr)
 	if r.ended then return end
 

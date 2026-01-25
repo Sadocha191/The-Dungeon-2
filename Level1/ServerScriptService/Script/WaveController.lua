@@ -613,7 +613,7 @@ task.spawn(function()
 							end
 						end
 						if best then
-							_G.AwardPlayer(best, xpDrop, coinDrop)
+							_G.AwardPlayer(best, xpDrop, coinDrop, 1)
 						end
 					end
 					if _G.SpawnDropsAt then _G.SpawnDropsAt(pos, xpDrop, coinDrop) end
@@ -650,7 +650,7 @@ task.spawn(function()
 							end
 						end
 						if best then
-							_G.AwardPlayer(best, xpDrop, coinDrop)
+							_G.AwardPlayer(best, xpDrop, coinDrop, 1)
 						end
 					end
 					if _G.SpawnDropsAt then _G.SpawnDropsAt(pos, xpDrop, coinDrop) end
