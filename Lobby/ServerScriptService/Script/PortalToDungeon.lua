@@ -1,10 +1,8 @@
--- PortalToDungeon.server.lua
--- Lobby/ServerScriptService/Script/PortalToDungeon.lua
--- FIX:
--- 1) ProfilesManager: używaj GetActiveProfile + LoadIfAny (GetProfile nie istnieje)
--- 2) WeaponInstances to lista -> pobieraj instancję przez PlayerStateStore.GetWeaponInstance
--- 3) TeleportData niesie: Profile, StarterWeaponEntry, EquippedWeaponInstanceId, UnlockedSpells
--- 4) Dodaje RemoteEvent "TeleportStatus" do komunikatu "Teleporting..."
+-- PortalToDungeon.lua (Lobby)
+-- FIX: poprawne pobieranie wyposażonej broni (WeaponInstances to lista)
+-- - używa PlayerStateStore.GetEquippedWeaponInstance / GetWeaponInstance zamiast indeksowania [instanceId]
+-- - ustawia StarterWeaponName z inst.weaponId (pewne)
+-- - wysyła StarterWeaponEntry (cała instancja) do Level1
 
 local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16,10 +14,8 @@ local replicatedModules = ReplicatedStorage:WaitForChild("ModuleScripts")
 
 local ProfilesManager = require(serverModules:WaitForChild("ProfilesManager"))
 local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
-local PlayerData = require(serverModules:WaitForChild("PlayerData"))
 local Levels = require(replicatedModules:WaitForChild("Levels"))
 
--- Remotes
 local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
 if not remoteEvents then
 	remoteEvents = Instance.new("Folder")
@@ -38,9 +34,7 @@ end
 
 local OpenLevelSelect = ensureRemote("OpenLevelSelect")
 local RequestLevelTeleport = ensureRemote("RequestLevelTeleport")
-local TeleportStatus = ensureRemote("TeleportStatus") -- client shows "Teleporting..."
 
--- Portal resolver (nie używamy WaitForChild, żeby nie wieszać)
 local function resolvePortalPart(): BasePart?
 	local ws = workspace
 	local portalModel = ws:FindFirstChild("Portal") or ws:FindFirstChild("PortalModel")
@@ -67,11 +61,10 @@ end
 
 local portalPart = resolvePortalPart()
 if not portalPart then
-	warn("[PortalToDungeon] PortalTeleport not found (Workspace/ServerStorage).")
+	warn("[PortalToDungeon] PortalTeleport not found.")
 	return
 end
 
--- Prompt
 local prompt = portalPart:FindFirstChildOfClass("ProximityPrompt")
 if not prompt then
 	prompt = Instance.new("ProximityPrompt")
@@ -83,10 +76,22 @@ if not prompt then
 end
 prompt.ActionText = "Select level"
 
-local lastOpen: {[number]: number} = {}
-local lastTp: {[number]: number} = {}
-local OPEN_COOLDOWN = 0.6
-local TP_COOLDOWN = 2.0
+local lastOpen, lastTp = {}, {}
+local OPEN_COOLDOWN, TP_COOLDOWN = 0.6, 2.0
+
+local function distanceOk(player: Player): boolean
+	local char = player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return false end
+	return (hrp.Position - portalPart.Position).Magnitude <= 14
+end
+
+local function tutorialComplete(player: Player): boolean
+	local attr = player:GetAttribute("TutorialComplete")
+	if attr ~= nil then return attr == true end
+	local ok, state = pcall(function() return PlayerStateStore.GetTutorialState(player) end)
+	return ok and state and state.Complete == true or false
+end
 
 local function canOpen(player: Player): boolean
 	local now = os.clock()
@@ -104,43 +109,22 @@ local function canTeleport(player: Player): boolean
 	return true
 end
 
-local function distanceOk(player: Player): boolean
-	local char = player.Character
-	if not char then return false end
-	local hrp = char:FindFirstChild("HumanoidRootPart")
-	if not hrp then return false end
-	return (hrp.Position - portalPart.Position).Magnitude <= 14
-end
-
-local function tutorialComplete(player: Player): boolean
-	local attr = player:GetAttribute("TutorialComplete")
-	if attr ~= nil then return attr == true end
-	local ok, state = pcall(function() return PlayerStateStore.GetTutorialState(player) end)
-	return (ok and state and state.Complete == true) or false
-end
-
 local function getProfileSafe(player: Player)
+	-- w Twoim repo ProfilesManager ma różne API w zależności od wersji
+	if ProfilesManager.GetActiveProfile then
+		local p = ProfilesManager.GetActiveProfile(player)
+		if p then return p end
+	end
 	if ProfilesManager.LoadIfAny then
 		pcall(function() ProfilesManager.LoadIfAny(player) end)
-	end
-	if ProfilesManager.GetActiveProfile then
-		return ProfilesManager.GetActiveProfile(player)
-	end
-	return nil
-end
-
-local function buildUnlockedSpellsList(player: Player): {string}
-	local out = {}
-	local d = PlayerData.Get(player)
-	if typeof(d.spellsUnlocked) == "table" then
-		for id, v in pairs(d.spellsUnlocked) do
-			if v == true and typeof(id) == "string" and id ~= "" then
-				table.insert(out, id)
-			end
+		if ProfilesManager.GetActiveProfile then
+			return ProfilesManager.GetActiveProfile(player)
 		end
 	end
-	table.sort(out)
-	return out
+	if ProfilesManager.GetProfile then
+		return ProfilesManager.GetProfile(player)
+	end
+	return nil
 end
 
 local function tryTeleport(player: Player, placeId: number)
@@ -149,34 +133,36 @@ local function tryTeleport(player: Player, placeId: number)
 	local st = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
 	local profile = getProfileSafe(player)
 
-	-- FIX: WeaponInstances to lista -> GetWeaponInstance
 	local weaponEntry = nil
-	if st and typeof(st.EquippedWeaponInstanceId) == "string" and st.EquippedWeaponInstanceId ~= "" then
+	local weaponName = st and st.StarterWeaponName or nil
+
+	-- klucz: pobierz instancję po instanceId przez API store
+	if PlayerStateStore.GetEquippedWeaponInstance then
+		weaponEntry = PlayerStateStore.GetEquippedWeaponInstance(player)
+	elseif st and typeof(st.EquippedWeaponInstanceId) == "string" then
 		local inst = PlayerStateStore.GetWeaponInstance(player, st.EquippedWeaponInstanceId)
-		if typeof(inst) == "table" then
-			weaponEntry = inst
-		end
+		if typeof(inst) == "table" then weaponEntry = inst end
+	end
+
+	if typeof(weaponEntry) == "table" and typeof(weaponEntry.weaponId) == "string" then
+		weaponName = weaponEntry.weaponId
 	end
 
 	local tpData = {
 		Profile = profile,
-		StarterWeaponName = st and st.StarterWeaponName or nil,
+		StarterWeaponName = weaponName,
 		StarterWeaponEntry = weaponEntry,
 		EquippedWeaponInstanceId = st and st.EquippedWeaponInstanceId or nil,
-		UnlockedSpells = buildUnlockedSpellsList(player),
 	}
 
 	local options = Instance.new("TeleportOptions")
 	options:SetTeleportData(tpData)
-
-	TeleportStatus:FireClient(player, { type = "teleporting" })
 
 	local ok, err = pcall(function()
 		TeleportService:TeleportAsync(placeId, { player }, options)
 	end)
 	if not ok then
 		warn("[PortalToDungeon] TeleportAsync failed:", err)
-		TeleportStatus:FireClient(player, { type = "failed" })
 	end
 end
 
@@ -203,4 +189,4 @@ RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: an
 	tryTeleport(player, entry.placeId)
 end)
 
-print("[PortalToDungeon] Ready")
+print("[PortalToDungeon] Ready (fix_pack10)")
