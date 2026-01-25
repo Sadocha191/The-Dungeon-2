@@ -1,5 +1,5 @@
--- SpellMenu.client.lua (Level1/StarterPlayerScripts)
--- UI wyboru spella (3 opcje). Uruchamiane przez Remotes/SpellEvent payload {type="offer", token, choices}
+-- SpellMenu.client.lua (Level1)
+-- Fix pack v9: do not WaitForChild("ModuleScripts") forever; resolve folder safely.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,8 +7,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local plr = Players.LocalPlayer
 local pg = plr:WaitForChild("PlayerGui")
 
-local moduleFolder = ReplicatedStorage:WaitForChild("ModuleScripts")
-local SpellDefs = require(moduleFolder:WaitForChild("SpellDefinitions"))
+local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
+assert(modFolder and modFolder:IsA("Folder"), "Missing ReplicatedStorage.ModuleScripts/ModuleScript")
+
+local SpellDefs = require(modFolder:WaitForChild("SpellDefinitions"))
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local SpellEvent = remotes:WaitForChild("SpellEvent")
@@ -18,7 +20,6 @@ gui.Name = "SpellMenu"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.Enabled = false
-gui:SetAttribute("Modal", true)
 gui.Parent = pg
 
 local dim = Instance.new("Frame")
@@ -63,8 +64,17 @@ layout.Padding = UDim.new(0, 14)
 layout.Parent = list
 
 local currentToken = nil
+local optionFrames = {}
 
-local function makeOption()
+local function clearOptions()
+	for _, f in ipairs(optionFrames) do f:Destroy() end
+	table.clear(optionFrames)
+end
+
+local function makeOption(id: string)
+	local def = SpellDefs.SPELLS[id]
+	if not def then return end
+
 	local opt = Instance.new("Frame")
 	opt.Size = UDim2.fromOffset(180, 230)
 	opt.BackgroundColor3 = Color3.fromRGB(20,20,24)
@@ -80,6 +90,7 @@ local function makeOption()
 	name.TextSize = 16
 	name.TextColor3 = Color3.fromRGB(245,245,245)
 	name.TextXAlignment = Enum.TextXAlignment.Left
+	name.Text = def.name or id
 	name.Parent = opt
 
 	local desc = Instance.new("TextLabel")
@@ -92,6 +103,8 @@ local function makeOption()
 	desc.TextWrapped = true
 	desc.TextYAlignment = Enum.TextYAlignment.Top
 	desc.TextXAlignment = Enum.TextXAlignment.Left
+	local lv = plr:GetAttribute(("Spell_%s_Level"):format(id)) or 0
+	desc.Text = (def.nextDesc and def.nextDesc(lv)) or ""
 	desc.Parent = opt
 
 	local btn = Instance.new("TextButton")
@@ -106,43 +119,23 @@ local function makeOption()
 	btn.Parent = opt
 	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 12)
 
-	return opt, name, desc, btn
-end
+	btn.MouseButton1Click:Connect(function()
+		if not currentToken then return end
+		SpellEvent:FireServer({ type="pick", token=currentToken, spellId=id })
+		gui.Enabled = false
+		currentToken = nil
+	end)
 
-local optionFrames = {}
-
-local function clearOptions()
-	for _, f in ipairs(optionFrames) do
-		f:Destroy()
-	end
-	table.clear(optionFrames)
+	opt.Parent = list
+	table.insert(optionFrames, opt)
 end
 
 local function showOffer(token: string, choices: {string})
 	currentToken = token
 	clearOptions()
-
 	for _, id in ipairs(choices) do
-		local def = SpellDefs.SPELLS[id]
-		if def then
-			local opt, name, desc, btn = makeOption()
-			name.Text = def.name or id
-			local lv = plr:GetAttribute(("Spell_%s_Level"):format(id)) or 0
-			local nextText = def.nextDesc and def.nextDesc(lv) or ""
-			desc.Text = nextText
-
-			btn.MouseButton1Click:Connect(function()
-				if not currentToken then return end
-				SpellEvent:FireServer({ type="pick", token=currentToken, spellId=id })
-				gui.Enabled = false
-				currentToken = nil
-			end)
-
-			opt.Parent = list
-			table.insert(optionFrames, opt)
-		end
+		makeOption(id)
 	end
-
 	gui.Enabled = true
 end
 

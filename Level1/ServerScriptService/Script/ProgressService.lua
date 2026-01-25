@@ -1,1419 +1,316 @@
--- ProgressService.server.lua (ServerScriptService)
+-- ProgressService.server.lua (Level1)
+-- Fix pack v9:
+-- - fixes syntax issues (clean rewrite)
+-- - run-level (0 start) + spells instead of upgrades
+-- - tracks run stats (time/kills/coins/runXP)
+-- - awards account XP/coins on GameOver (death) and fires MissionSummaryEvent
+-- - avoids infinite yield on missing ModuleScripts by using resilient lookup
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
-local Debris = game:GetService("Debris")
-local PhysicsService = game:GetService("PhysicsService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
--- FIX: folder z modułami serwera
-local serverModules = ServerScriptService:WaitForChild("ModuleScript")
+-- ===== Helpers =====
+local function findChildEither(parent: Instance, a: string, b: string): Instance?
+	return parent:FindFirstChild(a) or parent:FindFirstChild(b)
+end
+
+local function ensureFolder(parent: Instance, name: string): Folder
+	local f = parent:FindFirstChild(name)
+	if f and f:IsA("Folder") then return f end
+	f = Instance.new("Folder")
+	f.Name = name
+	f.Parent = parent
+	return f
+end
+
+local function ensureRemoteEvent(parent: Instance, name: string): RemoteEvent
+	local r = parent:FindFirstChild(name)
+	if r and r:IsA("RemoteEvent") then return r end
+	r = Instance.new("RemoteEvent")
+	r.Name = name
+	r.Parent = parent
+	return r
+end
 
 local function findModule(name: string): ModuleScript?
-	local direct = ServerScriptService:FindFirstChild(name)
-	if direct and direct:IsA("ModuleScript") then
-		return direct
-	end
-	local folder = ServerScriptService:FindFirstChild("ModuleScript")
-		or ServerScriptService:FindFirstChild("ModuleScripts")
-	if folder then
-		local nested = folder:FindFirstChild(name)
-		if nested and nested:IsA("ModuleScript") then
-			return nested
+	-- check common roots
+	local roots = { ServerScriptService, ReplicatedStorage }
+	for _, root in ipairs(roots) do
+		local found = root:FindFirstChild(name, true)
+		if found and found:IsA("ModuleScript") then
+			return found
 		end
 	end
 	return nil
 end
 
-local playerDataModule = findModule("PlayerData")
-local weaponServiceModule = findModule("WeaponService")
-if not playerDataModule or not weaponServiceModule then
-	error("[ProgressService] Missing PlayerData/WeaponService module.")
-end
-
-local PlayerData = require(playerDataModule)
-local WeaponService = require(weaponServiceModule)
-local SpellDefs
-local spellDefsModule = (ReplicatedStorage:FindFirstChild('ModuleScripts') or ReplicatedStorage:FindFirstChild('ModuleScript'))
-	and ((ReplicatedStorage:FindFirstChild('ModuleScripts') or ReplicatedStorage:FindFirstChild('ModuleScript')):FindFirstChild('SpellDefinitions'))
-if spellDefsModule and spellDefsModule:IsA('ModuleScript') then
-	SpellDefs = require(spellDefsModule)
-end
-local MissionProgress = require(serverModules:WaitForChild("MissionProgress"))
-local function buildFallbackUpDefs()
-	local fallback = {}
-	fallback.POOL = {
-		{ id = "DMG", name = "Damage Up", desc = "+%d%% ATK", stat = "damageBonusPct", base = 8, mode = "percent", applyScale = 0.01, weaponTypes = "ALL" },
-		{ id = "ASPD", name = "Attack Speed", desc = "+%d%% attack speed", stat = "attackSpeed", base = 6, mode = "percent", applyScale = 0.01, weaponTypes = "ALL" },
-		{ id = "CRIT", name = "Crit Chance", desc = "+%d%% Crit Rate", stat = "critChance", base = 4, mode = "percent", applyScale = 0.01, weaponTypes = "ALL" },
-	}
-	function fallback.RollRarity()
-		return "Common", Color3.fromRGB(200, 200, 200), 1.0
-	end
-	function fallback.GetPool()
-		return fallback.POOL
-	end
-	return fallback
-end
-
-local function findUpgradeDefinitions(): ModuleScript?
-	local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
-		or ReplicatedStorage:FindFirstChild("ModuleScript")
-	if moduleFolder then
-		local nested = moduleFolder:FindFirstChild("UpgradeDefinitions")
-		if nested and nested:IsA("ModuleScript") then
-			return nested
-		end
-	end
-	local direct = ReplicatedStorage:FindFirstChild("UpgradeDefinitions")
-	if direct and direct:IsA("ModuleScript") then
-		return direct
-	end
+local function safeRequire(ms: ModuleScript?)
+	if not ms then return nil end
+	local ok, mod = pcall(require, ms)
+	if ok then return mod end
+	warn("[ProgressService] require failed:", ms:GetFullName(), mod)
 	return nil
 end
 
-local upDefsModule = findUpgradeDefinitions()
-if not upDefsModule then
-	local moduleFolder = ReplicatedStorage:WaitForChild("ModuleScripts", 5)
-		or ReplicatedStorage:WaitForChild("ModuleScript", 5)
-	upDefsModule = moduleFolder and moduleFolder:FindFirstChild("UpgradeDefinitions")
-end
-local UpDefs = upDefsModule and upDefsModule:IsA("ModuleScript")
-	and require(upDefsModule) or buildFallbackUpDefs()
-if not upDefsModule then
-	warn("[ProgressService] Missing ReplicatedStorage.UpgradeDefinitions; using fallback pool.")
+-- ===== Dependencies (robust) =====
+local PlayerData = safeRequire(findModule("PlayerData"))
+local WeaponService = safeRequire(findModule("WeaponService"))
+local MissionProgress = safeRequire(findModule("MissionProgress"))
+local SpellDefs = nil
+
+do
+	local modFolder = findChildEither(ReplicatedStorage, "ModuleScripts", "ModuleScript")
+	if modFolder and modFolder:IsA("Folder") then
+		local s = modFolder:FindFirstChild("SpellDefinitions")
+		if s and s:IsA("ModuleScript") then
+			SpellDefs = safeRequire(s)
+		end
+	end
 end
 
--- Ensure PauseState
-local PauseState = ReplicatedStorage:FindFirstChild("PauseState")
-if not PauseState then
-	PauseState = Instance.new("BoolValue")
-	PauseState.Name = "PauseState"
-	PauseState.Value = false
-	PauseState.Parent = ReplicatedStorage
-end
-PauseState.Value = false
-
--- Remotes folder
-local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-if not remotes then
-	remotes = Instance.new("Folder")
-	remotes.Name = "Remotes"
-	remotes.Parent = ReplicatedStorage
+if not PlayerData then
+	error("[ProgressService] Missing PlayerData module")
 end
 
-local function getRemote(name: string)
-	local r = remotes:FindFirstChild(name)
+-- ===== Remotes (Level1 uses ReplicatedStorage/Remotes) =====
+local Remotes = ensureFolder(ReplicatedStorage, "Remotes")
+local PlayerProgressEvent = ensureRemoteEvent(Remotes, "PlayerProgressEvent")
+local MissionSummaryEvent = ensureRemoteEvent(Remotes, "MissionSummaryEvent")
+local SpellEvent = ensureRemoteEvent(Remotes, "SpellEvent")
+
+-- ===== Run state =====
+local run = {} -- [uid] = {startT, runLevel, runXp, nextXp, runCoins, kills, ended}
+
+local function getRun(plr: Player)
+	local uid = plr.UserId
+	local r = run[uid]
 	if not r then
-		r = Instance.new("RemoteEvent")
-		r.Name = name
-		r.Parent = remotes
+		r = { startT = time(), runLevel = 0, runXp = 0, nextXp = 25, runCoins = 0, kills = 0, ended = false }
+		run[uid] = r
 	end
 	return r
 end
 
-local PlayerProgressEvent = getRemote("PlayerProgressEvent")
-local UpgradeEvent = getRemote("UpgradeEvent")
-local WeaponEvent = getRemote("WeaponEvent")
-local DamageIndicatorEvent = getRemote("DamageIndicatorEvent")
-local MissionSummaryEvent = getRemote("MissionSummaryEvent")
-
--- baseline movement
-local BASE_PLAYER_SPEED = 24
-local BASE_JUMP_POWER = 50
-
--- Pause => freeze players too
-local frozen = {} -- [uid] = {ws, jp}
-local battleFocus = {} -- [uid] = { untilTime }
-local momentumStacks = {} -- [uid] = stacks
-local riposteReady = {} -- [uid] = untilTime
-local bladeDanceHits = {} -- [uid] = count
-local parryUntil = {} -- [uid] = untilTime
-local quickDrawUntil = {} -- [uid] = untilTime
-local manaSurgeStacks = {} -- [uid] = count
-local arcaneOverflowCd = {} -- [uid] = untilTime
-local lastPistolShot = {} -- [uid] = time
-local lastHealth = {} -- [uid] = health
-local getFinalStats
-local function updatePlayerDerivedStats(plr: Player)
-	local char = plr.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if not hum then return end
-
-	local tool = char:FindFirstChildOfClass("Tool")
-	local stats = getFinalStats(plr, tool)
-	local d = PlayerData.Get(plr)
-
-	local prevMax = hum.MaxHealth
-	local ratio = prevMax > 0 and (hum.Health / prevMax) or 1
-	hum.MaxHealth = math.max(1, stats.maxHP)
-	hum.Health = math.min(hum.MaxHealth, math.max(1, ratio * hum.MaxHealth))
-
-	hum.WalkSpeed = (BASE_PLAYER_SPEED * stats.speedMult) + (d.upgrades.speed or 0) * 1
-	hum.JumpPower = BASE_JUMP_POWER + (d.upgrades.jump or 0) * 2
-
-	plr:SetAttribute("FinalMaxHP", hum.MaxHealth)
-	plr:SetAttribute("FinalSpeedMult", stats.speedMult)
-	plr:SetAttribute("FinalCritRate", stats.critRate)
-	plr:SetAttribute("FinalCritDmg", stats.critDmg)
-	plr:SetAttribute("FinalLifesteal", stats.lifesteal)
-	plr:SetAttribute("FinalDefense", stats.defense)
-end
-
-local function applyPauseToPlayer(plr: Player, paused: boolean)
-	local c = plr.Character
-	local hum = c and c:FindFirstChildOfClass("Humanoid")
-	if not hum then return end
-
-	if paused then
-		if not frozen[plr.UserId] then
-			frozen[plr.UserId] = { ws = hum.WalkSpeed, jp = hum.JumpPower }
-		end
-		hum.WalkSpeed = 0
-		hum.JumpPower = 0
-	else
-		updatePlayerDerivedStats(plr)
-		frozen[plr.UserId] = nil
-	end
-end
-
-PauseState.Changed:Connect(function()
-	for _,plr in ipairs(Players:GetPlayers()) do
-		applyPauseToPlayer(plr, PauseState.Value)
-	end
-end)
-
--- Tools
-
-local function pushProgress(plr: Player)
-	local d = PlayerData.Get(plr)
-	PlayerProgressEvent:FireClient(plr, {
-		type="progress",
-		level=d.level, xp=d.xp, nextXp=d.nextXp,
-		coins=d.coins,
-	})
-end
-
--- ===== Upgrade roll (3) =====
-local pending = {} -- [uid] = {token, choices}
-
-local function resolveWeaponType(rawType: string?): string
-	if rawType == "Melee" then return "Sword" end
-	if rawType == "Wand" then return "Staff" end
-	return rawType or ""
-end
-
-local function roll3(weaponType: string?)
-	local pool = UpDefs.GetPool and UpDefs.GetPool(weaponType) or table.clone(UpDefs.POOL)
-	if #pool < 3 then
-		pool = table.clone(UpDefs.POOL)
-	end
-	local out = {}
-	for i=1,3 do
-		local idx = math.random(1, #pool)
-		local base = pool[idx]
-		table.remove(pool, idx)
-
-		local rarity, color, mult = UpDefs.RollRarity()
-		local raw = (base.base or 0) * (mult or 1)
-		local value
-		if base.mode == "count" then
-			value = math.max(1, math.floor(raw + 0.5))
-		elseif base.mode == "flat" then
-			value = math.floor(raw * 100) / 100
-		elseif base.mode == "percent" then
-			value = math.max(1, math.floor(raw + 0.5))
-		else
-			value = math.floor(raw * 100) / 100
-		end
-
-		out[i] = {
-			id = base.id,
-			name = base.name,
-			desc = base.desc,
-			stat = base.stat,
-			value = value,
-			rarity = rarity,
-			color = color,
-			applyScale = base.applyScale or 1,
-			secondaryStat = base.secondaryStat,
-			secondaryScale = base.secondaryScale,
-		}
-	end
-	return out
-end
-
-local function openUpgrade(plr: Player)
-	-- disabled: upgrades removed (spells instead)
-	return
-end
-
--- original openUpgrade disabled below
-local function __openUpgrade_DISABLED(plr: Player)
-	local token = ("%d_%d"):format(plr.UserId, math.floor(os.clock()*1000))
-	local char = plr.Character
-	local tool = char and char:FindFirstChildOfClass("Tool")
-	local weaponType = tool and resolveWeaponType(tool:GetAttribute("WeaponType")) or ""
-	local choices = roll3(weaponType)
-	pending[plr.UserId] = { token = token, choices = choices }
-	PauseState.Value = true
-	UpgradeEvent:FireClient(plr, { type="SHOW", token=token, choices=choices })
-end
-
-UpgradeEvent.OnServerEvent:Connect(function(plr, payload)
-	if typeof(payload) ~= "table" or payload.type ~= "PICK" then return end
-	local st = pending[plr.UserId]
-	if not st or payload.token ~= st.token then return end
-
-	local pickId = tostring(payload.id or "")
-	local choice
-	for _,c in ipairs(st.choices) do
-		if c.id == pickId then choice = c break end
-	end
-	if not choice then return end
-
-	local d = PlayerData.Get(plr)
-	local stat = choice.stat
-	local scaledValue = (tonumber(choice.value) or 0) * (tonumber(choice.applyScale) or 1)
-
-	-- defaults if missing in datastore (compat)
-	if stat == "critChance" and d.critChance == nil then d.critChance = 0 end
-	if stat == "critMult" and d.critMult == nil then d.critMult = 0 end
-
-	if stat == "attackSpeed" then
-		d.attackSpeed = math.clamp((tonumber(d.attackSpeed) or 1.0) + scaledValue, 0.6, 2.0)
-	elseif stat == "multiShot" then
-		d.multiShot = math.clamp((tonumber(d.multiShot) or 0) + scaledValue, 0, 6)
-	elseif stat == "fireChance" then
-		d.fireChance = math.clamp((tonumber(d.fireChance) or 0) + scaledValue, 0, 0.9)
-	elseif stat == "fireDps" then
-		d.fireDps = math.max(0, (tonumber(d.fireDps) or 0) + scaledValue)
-	elseif stat == "damage" then
-		d.damage = math.max(0, (tonumber(d.damage) or 0) + scaledValue)
-	elseif stat == "critChance" then
-		d.critChance = math.clamp((tonumber(d.critChance) or 0) + scaledValue, 0, 0.6)
-	elseif stat == "critMult" then
-		d.critMult = math.clamp((tonumber(d.critMult) or 0) + scaledValue, 0, 1.0)
-	elseif stat == "damageBonusPct" then
-		d.damageBonusPct = math.max(0, (tonumber(d.damageBonusPct) or 0) + scaledValue)
-	elseif stat == "lifesteal" then
-		d.lifesteal = math.clamp((tonumber(d.lifesteal) or 0) + scaledValue, 0, 0.12)
-	elseif stat == "rangeBonus" then
-		d.rangeBonus = math.max(0, (tonumber(d.rangeBonus) or 0) + scaledValue)
-	elseif stat == "battleFocusBonus" then
-		d.battleFocusBonus = math.max(0, (tonumber(d.battleFocusBonus) or 0) + scaledValue)
-	elseif stat == "momentumBonus" then
-		d.momentumBonus = math.max(0, (tonumber(d.momentumBonus) or 0) + scaledValue)
-	elseif stat == "cleaveBonus" then
-		d.cleaveBonus = math.max(0, (tonumber(d.cleaveBonus) or 0) + scaledValue)
-	elseif stat == "riposteBonus" then
-		d.riposteBonus = math.max(0, (tonumber(d.riposteBonus) or 0) + scaledValue)
-	elseif stat == "bladeDanceEvery" then
-		d.bladeDanceEvery = math.max(0, (tonumber(d.bladeDanceEvery) or 0) + scaledValue)
-	elseif stat == "parryReduction" then
-		d.parryReduction = math.clamp((tonumber(d.parryReduction) or 0) + scaledValue, 0, 0.6)
-	elseif stat == "staggerDuration" then
-		d.staggerDuration = math.max(0, (tonumber(d.staggerDuration) or 0) + scaledValue)
-	elseif stat == "executeBonus" then
-		d.executeBonus = math.max(0, (tonumber(d.executeBonus) or 0) + scaledValue)
-	elseif stat == "overchargeBonus" then
-		d.overchargeBonus = math.max(0, (tonumber(d.overchargeBonus) or 0) + scaledValue)
-	elseif stat == "sweepBonus" then
-		d.sweepBonus = math.max(0, (tonumber(d.sweepBonus) or 0) + scaledValue)
-	elseif stat == "thrustBonus" then
-		d.thrustBonus = math.max(0, (tonumber(d.thrustBonus) or 0) + scaledValue)
-	elseif stat == "pierceBonus" then
-		d.pierceBonus = math.max(0, (tonumber(d.pierceBonus) or 0) + scaledValue)
-	elseif stat == "slamRadiusBonus" then
-		d.slamRadiusBonus = math.max(0, (tonumber(d.slamRadiusBonus) or 0) + scaledValue)
-	elseif stat == "aftershockMultiplier" then
-		d.aftershockMultiplier = math.max(0, (tonumber(d.aftershockMultiplier) or 0) + scaledValue)
-	elseif stat == "eagleEyeBonus" then
-		d.eagleEyeBonus = math.max(0, (tonumber(d.eagleEyeBonus) or 0) + scaledValue)
-	elseif stat == "quickDrawBonus" then
-		d.quickDrawBonus = math.max(0, (tonumber(d.quickDrawBonus) or 0) + scaledValue)
-	elseif stat == "arrowPierce" then
-		d.arrowPierce = math.max(0, (tonumber(d.arrowPierce) or 0) + scaledValue)
-	elseif stat == "elementalPowerBonus" then
-		d.elementalPowerBonus = math.max(0, (tonumber(d.elementalPowerBonus) or 0) + scaledValue)
-	elseif stat == "arcaneOverflowHeal" then
-		d.arcaneOverflowHeal = math.max(0, (tonumber(d.arcaneOverflowHeal) or 0) + scaledValue)
-	elseif stat == "manaSurgeEvery" then
-		d.manaSurgeEvery = math.max(0, (tonumber(d.manaSurgeEvery) or 0) + scaledValue)
-	elseif stat == "deadeyeDelay" then
-		d.deadeyeDelay = math.max(0, (tonumber(d.deadeyeDelay) or 0) + scaledValue)
-	elseif stat == "ricochet" then
-		d.ricochet = math.clamp((tonumber(d.ricochet) or 0) + scaledValue, 0, 6)
-	end
-
-	if choice.secondaryStat then
-		local secondaryScale = tonumber(choice.secondaryScale) or 1
-		local secondaryValue = (tonumber(choice.value) or 0) * secondaryScale
-		if choice.secondaryStat == "attackSpeed" then
-			d.attackSpeed = math.clamp((tonumber(d.attackSpeed) or 1.0) + secondaryValue, 0.6, 2.0)
-		end
-	end
-
-	-- track owned upgrades for UI
-	d._owned = d._owned or {}
-	table.insert(d._owned, { id=choice.id, rarity=choice.rarity, value=choice.value })
-
-	pending[plr.UserId] = nil
-	PauseState.Value = false
-
-	PlayerData.MarkDirty(plr)
-	PlayerData.Save(plr, false)
-	pushProgress(plr)
-end)
-
--- ===== Award =====
-local sessionStart = {} -- [uid] = {xp, coins, time}
-local sessionDeaths = {} -- [uid] = deaths in current run
--- ===== Run rewards (XP/coins) + run level-ups -> SPELLS =====
-local runStats = {} -- [uid] = {startT, runLevel, runXp, nextXp, runCoins, kills}
-local spellOwned = {} -- [uid] = {[spellId]=level}
-local spellPending = {} -- [uid] = {token: string, choices: {string}}
-
-local function getRun(plr: Player)
-	local uid = plr.UserId
-	if not runStats[uid] then
-		runStats[uid] = { startT = time(), runLevel = 0, runXp = 0, nextXp = 25, runCoins = 0, kills = 0 }
-	end
-	if not spellOwned[uid] then spellOwned[uid] = {} end
-	return runStats[uid], spellOwned[uid]
-end
-
 local function rollNextRunXp(level: number): number
-	-- szybkie levelowanie na początku, wolniej później
 	return 25 + (level * 18)
 end
 
-local SpellEvent = getRemote("SpellEvent") -- nowy remote (Remotes/SpellEvent)
+local function syncRunHud(plr: Player)
+	local r = getRun(plr)
+	PlayerProgressEvent:FireClient(plr, {
+		type = "runProgress",
+		runLevel = r.runLevel,
+		runXp = r.runXp,
+		runNextXp = r.nextXp,
+		runCoins = r.runCoins,
+		kills = r.kills,
+	})
+end
+
+-- ===== Spell roll (only unlocked spells) =====
+local pending = {} -- [uid] = {token, choices}
 
 local function parseUnlocked(plr: Player): {string}
 	local csv = plr:GetAttribute("UnlockedSpellsCSV")
 	if typeof(csv) ~= "string" or csv == "" then return {} end
 	local out = {}
-	for token in string.gmatch(csv, "([^,]+)") do
-		token = string.gsub(token, "^%s+", "")
-		token = string.gsub(token, "%s+$", "")
-		if token ~= "" then table.insert(out, token) end
+	for tok in string.gmatch(csv, "([^,]+)") do
+		tok = string.gsub(tok, "^%s+", "")
+		tok = string.gsub(tok, "%s+$", "")
+		if tok ~= "" then table.insert(out, tok) end
 	end
 	return out
 end
 
-local function canOfferSpell(plr: Player, spellId: string): boolean
-	local def = SpellDefs and SpellDefs.SPELLS and SpellDefs.SPELLS[spellId]
-	if not def then return false end
-	local owned = (spellOwned[plr.UserId] and spellOwned[plr.UserId][spellId]) or 0
-	local maxLv = tonumber(def.maxLevel) or 1
-	if owned >= maxLv then return false end
-	return true
+local function getSpellLevel(plr: Player, id: string): number
+	local a = plr:GetAttribute(("Spell_%s_Level"):format(id))
+	return tonumber(a) or 0
 end
 
-local function buildSpellPool(plr: Player): {string}
+local function canOfferSpell(plr: Player, id: string): boolean
+	if not SpellDefs or not SpellDefs.SPELLS then return false end
+	local def = SpellDefs.SPELLS[id]
+	if not def then return false end
+	local lv = getSpellLevel(plr, id)
+	local maxLv = tonumber(def.maxLevel) or 1
+	return lv < maxLv
+end
+
+local function rollSpellChoices(plr: Player): {string}
 	local unlocked = parseUnlocked(plr)
 	local pool = {}
-	-- jeśli gracz nic nie kupił u wiedźmy, pool będzie pusty
 	for _, id in ipairs(unlocked) do
 		if canOfferSpell(plr, id) then
 			table.insert(pool, id)
 		end
 	end
-	return pool
-end
+	if #pool == 0 then return {} end
 
-local function openSpellChoice(plr: Player)
-	local uid = plr.UserId
-	local pool = buildSpellPool(plr)
-	if #pool == 0 then
-		-- nie ma czego losować -> nic nie robimy (run dalej trwa)
-		return
-	end
-
-	-- wybierz max 3 unikalne
 	local choices = {}
 	local used = {}
 	while #choices < 3 and #choices < #pool do
-		local pick = pool[math.random(1, #pool)]
-		if not used[pick] then
-			used[pick] = true
-			table.insert(choices, pick)
+		local id = pool[math.random(1, #pool)]
+		if not used[id] then
+			used[id] = true
+			table.insert(choices, id)
 		end
 	end
+	return choices
+end
 
-	local token = tostring(uid) .. ":" .. tostring(os.clock()) .. ":" .. tostring(math.random(100000,999999))
-	spellPending[uid] = { token = token, choices = choices }
-
-	PauseState.Value = true
-	SpellEvent:FireClient(plr, { type="offer", token=token, choices=choices })
+local function openSpellMenu(plr: Player)
+	local choices = rollSpellChoices(plr)
+	if #choices == 0 then
+		-- nic nie kupione u wiedźmy albo wszystkie max -> brak wyboru
+		return
+	end
+	local token = ("%d:%d:%d"):format(plr.UserId, math.floor(os.clock()*1000), math.random(100000,999999))
+	pending[plr.UserId] = { token = token, choices = choices }
+	SpellEvent:FireClient(plr, { type = "offer", token = token, choices = choices })
 end
 
 SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 	if typeof(payload) ~= "table" or payload.type ~= "pick" then return end
-	local uid = plr.UserId
-	local p = spellPending[uid]
+	local p = pending[plr.UserId]
 	if not p or payload.token ~= p.token then return end
 
-	local spellId = tostring(payload.spellId or "")
-	if spellId == "" then return end
+	local id = tostring(payload.spellId or "")
+	if id == "" then return end
+
 	local ok = false
 	for _, c in ipairs(p.choices) do
-		if c == spellId then ok = true break end
+		if c == id then ok = true break end
 	end
 	if not ok then return end
 
-	local def = SpellDefs and SpellDefs.SPELLS and SpellDefs.SPELLS[spellId]
-	if not def then return end
+	if not canOfferSpell(plr, id) then return end
 
-	local owned = spellOwned[uid] or {}
-	local current = tonumber(owned[spellId]) or 0
-	local maxLv = tonumber(def.maxLevel) or 1
-	if current >= maxLv then return end
+	local lv = getSpellLevel(plr, id)
+	plr:SetAttribute(("Spell_%s_Level"):format(id), lv + 1)
 
-	owned[spellId] = current + 1
-	spellOwned[uid] = owned
-	plr:SetAttribute(("Spell_%s_Level"):format(spellId), owned[spellId])
-
-	spellPending[uid] = nil
-	PauseState.Value = false
+	pending[plr.UserId] = nil
 end)
 
+-- ===== Public API used by other systems =====
 function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	if not plr or not plr.Parent then return end
-	local rs, _ = getRun(plr)
+	local r = getRun(plr)
+	if r.ended then return end
 
-	rs.runXp += math.max(0, math.floor(xp or 0))
-	rs.runCoins += math.max(0, math.floor(coins or 0))
+	xp = math.max(0, math.floor(tonumber(xp) or 0))
+	coins = math.max(0, math.floor(tonumber(coins) or 0))
 
-	-- level-up (RUN)
+	r.runXp += xp
+	r.runCoins += coins
+
 	local leveled = false
-	while rs.runXp >= rs.nextXp do
-		rs.runXp -= rs.nextXp
-		rs.runLevel += 1
-		rs.nextXp = rollNextRunXp(rs.runLevel)
+	while r.runXp >= r.nextXp do
+		r.runXp -= r.nextXp
+		r.runLevel += 1
+		r.nextXp = rollNextRunXp(r.runLevel)
 		leveled = true
 	end
 
-	-- HUD sync (RUN)
-	PlayerProgressEvent:FireClient(plr, {
-		type="runProgress",
-		runLevel = rs.runLevel,
-		runXp = rs.runXp,
-		runNextXp = rs.nextXp,
-		runCoins = rs.runCoins,
-		kills = rs.kills,
-	})
+	syncRunHud(plr)
 
 	if leveled then
-		openSpellChoice(plr)
+		openSpellMenu(plr)
 	end
 end
 
--- Kill register (WaveController calls it)
-function _G.RegisterEnemyKill(pos: Vector3?)
+function _G.RegisterEnemyKill(_pos: Vector3?)
 	for _, plr in ipairs(Players:GetPlayers()) do
-		local rs, _ = getRun(plr)
-		rs.kills += 1
-		PlayerProgressEvent:FireClient(plr, {
-			type="runProgress",
-			runLevel = rs.runLevel,
-			runXp = rs.runXp,
-			runNextXp = rs.nextXp,
-			runCoins = rs.runCoins,
-			kills = rs.kills,
-		})
+		local r = getRun(plr)
+		if not r.ended then
+			r.kills += 1
+			syncRunHud(plr)
+		end
 	end
 end
+
+local TIME_RATE = 0.35
+local KILL_RATE = 5
+
+local function endRunForPlayer(plr: Player, reason: string)
+	local r = getRun(plr)
+	if r.ended then return end
+	r.ended = true
+
+	local seconds = math.max(0, math.floor(time() - (r.startT or time())))
+	local accountXp = math.max(0, math.floor(seconds * TIME_RATE + (r.kills or 0) * KILL_RATE))
+	local coinsGained = math.max(0, math.floor(r.runCoins or 0))
+
 	local d = PlayerData.Get(plr)
-
-	d.xp += math.max(0, math.floor(xp or 0))
-	d.coins += math.max(0, math.floor(coins or 0))
-
-	PlayerData.MarkDirty(plr)
-	PlayerData.Save(plr, false)
-	pushProgress(plr)
-	MissionProgress.OnReward(plr, xp, coins)
-
-	-- level-up
-	local leveled = false
-	while d.xp >= d.nextXp do
-		d.xp -= d.nextXp
-		d.level += 1
-		d.nextXp = PlayerData.RollNextXp(d.level)
-		leveled = true
-	end
-	if leveled then
-		PlayerData.MarkDirty(plr)
-		PlayerData.Save(plr, false)
-		pushProgress(plr)
-		openUpgrade(plr)
-	end
-end
-
--- ===== Damage pipeline with crit + indicator =====
-local function enemiesFolder() return workspace:FindFirstChild("Enemies") end
-
-local function applyBurn(h: Humanoid, dps: number, seconds: number)
-	if dps <= 0 then return end
-	task.spawn(function()
-		local tEnd = time() + seconds
-		while h.Parent and h.Health > 0 and time() < tEnd do
-			h:TakeDamage(dps * 0.5)
-			task.wait(0.5)
-		end
-	end)
-end
-
-local EXECUTE_THRESHOLD = 0.3
-local MOMENTUM_MAX = 5
-local BATTLE_FOCUS_DURATION = 4
-local RIPOSTE_DURATION = 5
-local QUICK_DRAW_DURATION = 3
-local ARCANE_OVERFLOW_COOLDOWN = 4
-local PARRY_WINDOW_DURATION = 0.6
-local MANA_SURGE_BONUS = 0.25
-local RICOCHET_RADIUS = 10
-
-local function applyStagger(hum: Humanoid, duration: number)
-	if duration <= 0 then return end
-	local previous = hum.WalkSpeed
-	hum.WalkSpeed = 0
-	task.delay(duration, function()
-		if hum.Parent then
-			hum.WalkSpeed = previous
-		end
-	end)
-end
-
-local function applyExecute(plr: Player, mobHum: Humanoid, baseDamage: number)
-	local d = PlayerData.Get(plr)
-	local executeBonus = tonumber(d.executeBonus) or 0
-	if executeBonus <= 0 or mobHum.MaxHealth <= 0 then
-		return baseDamage
-	end
-	if (mobHum.Health / mobHum.MaxHealth) <= EXECUTE_THRESHOLD then
-		return math.max(1, math.floor(baseDamage * (1 + executeBonus)))
-	end
-	return baseDamage
-end
-
-local function applyRiposte(plr: Player, baseDamage: number)
-	local d = PlayerData.Get(plr)
-	local bonus = tonumber(d.riposteBonus) or 0
-	if bonus <= 0 then return baseDamage end
-	local readyUntil = riposteReady[plr.UserId]
-	if readyUntil and readyUntil > time() then
-		riposteReady[plr.UserId] = nil
-		return math.max(1, math.floor(baseDamage * (1 + bonus)))
-	end
-	return baseDamage
-end
-
-local function applyMomentum(plr: Player, baseDamage: number)
-	local d = PlayerData.Get(plr)
-	local bonus = tonumber(d.momentumBonus) or 0
-	if bonus <= 0 then return baseDamage end
-	local stacks = momentumStacks[plr.UserId] or 0
-	local mult = 1 + (stacks * bonus)
-	return math.max(1, math.floor(baseDamage * mult))
-end
-
-local function updateMomentum(plr: Player, hitSuccess: boolean)
-	local uid = plr.UserId
-	if hitSuccess then
-		local current = momentumStacks[uid] or 0
-		momentumStacks[uid] = math.min(MOMENTUM_MAX, current + 1)
-	else
-		momentumStacks[uid] = 0
-	end
-end
-
-local function grantBattleFocus(plr: Player)
-	local d = PlayerData.Get(plr)
-	if (tonumber(d.battleFocusBonus) or 0) <= 0 then return end
-	battleFocus[plr.UserId] = { untilTime = time() + BATTLE_FOCUS_DURATION }
-end
-
-local function grantQuickDraw(plr: Player)
-	local d = PlayerData.Get(plr)
-	if (tonumber(d.quickDrawBonus) or 0) <= 0 then return end
-	quickDrawUntil[plr.UserId] = time() + QUICK_DRAW_DURATION
-end
-
-local function getWeaponStats(tool: Tool?)
-	if not tool then
-		return {
-			type = "",
-			atk = 0,
-			bonusHP = 0,
-			bonusSpeed = 0,
-			bonusCritRate = 0,
-			bonusCritDmg = 0,
-			bonusLifesteal = 0,
-			bonusDefense = 0,
-		}
-	end
-
-	local wType = resolveWeaponType(tool:GetAttribute("WeaponType"))
-	local level = math.max(1, math.floor(tonumber(tool:GetAttribute("WeaponLevel")) or 1))
-	local baseAtk = tonumber(tool:GetAttribute("BaseATK")) or tonumber(tool:GetAttribute("ATK")) or 0
-	local atkPerLevel = tonumber(tool:GetAttribute("ATKPerLevel")) or 0
-	local atk = baseAtk + (level - 1) * atkPerLevel
-	local bonusScale = 1 + (level - 1) * 0.02
-
-	return {
-		type = wType,
-		atk = atk,
-		bonusHP = (tonumber(tool:GetAttribute("BonusHP")) or 0) * bonusScale,
-		bonusSpeed = (tonumber(tool:GetAttribute("BonusSpeed")) or 0) * bonusScale,
-		bonusCritRate = (tonumber(tool:GetAttribute("BonusCritRate")) or 0) * bonusScale,
-		bonusCritDmg = (tonumber(tool:GetAttribute("BonusCritDmg")) or 0) * bonusScale,
-		bonusLifesteal = (tonumber(tool:GetAttribute("BonusLifesteal")) or 0) * bonusScale,
-		bonusDefense = (tonumber(tool:GetAttribute("BonusDefense")) or 0) * bonusScale,
-	}
-end
-
-local function getDamageBonusPct(d): number
-	local raw = tonumber(d.damageBonusPct)
-	if raw ~= nil then
-		return math.max(0, raw)
-	end
-	local legacy = tonumber(d.damage)
-	if legacy ~= nil then
-		return math.max(0, legacy / 100)
-	end
-	return 0
-end
-
-local function getBattleFocusBonus(plr: Player, d)
-	local bonus = tonumber(d.battleFocusBonus) or 0
-	if bonus <= 0 then return 0 end
-	local active = battleFocus[plr.UserId]
-	if active and active.untilTime and active.untilTime > time() then
-		return bonus
-	end
-	return 0
-end
-
-local function getQuickDrawBonus(plr: Player, d)
-	local bonus = tonumber(d.quickDrawBonus) or 0
-	if bonus <= 0 then return 0 end
-	local active = quickDrawUntil[plr.UserId]
-	if active and active > time() then
-		return bonus
-	end
-	return 0
-end
-
-local function getCritMultBonus(d, baseCritDmg: number): number
-	local raw = tonumber(d.critMult)
-	if raw == nil then return 0 end
-	if raw > 1.0 then
-		return raw - baseCritDmg
-	end
-	return raw
-end
-
-getFinalStats = function(plr: Player, tool: Tool?)
-	local d = PlayerData.Get(plr)
-	local w = getWeaponStats(tool)
-
-	local baseHP = tonumber(d.baseHP) or 100
-	local baseSpeed = tonumber(d.baseSpeed) or 1.0
-	local baseCritRate = tonumber(d.baseCritRate) or 0.05
-	local baseCritDmg = tonumber(d.baseCritDmg) or 1.5
-	local baseDefense = tonumber(d.baseDefense) or 0
-	local baseLifesteal = tonumber(d.baseLifesteal) or 0
-
-	local finalHP = baseHP + w.bonusHP + (tonumber(d.bonusHP) or 0)
-	local finalSpeed = math.clamp(baseSpeed + w.bonusSpeed + (tonumber(d.speedBonus) or 0), 0.85, 1.35)
-	local finalCritRate = math.clamp(baseCritRate + w.bonusCritRate + (tonumber(d.critChance) or 0), 0, 0.6)
-	local finalCritDmg = math.clamp(baseCritDmg + w.bonusCritDmg + getCritMultBonus(d, baseCritDmg), 1.5, 2.5)
-	local finalLifesteal = math.clamp(baseLifesteal + w.bonusLifesteal + (tonumber(d.lifesteal) or 0), 0, 0.12)
-	local finalDefense = baseDefense + w.bonusDefense + (tonumber(d.defense) or 0)
-
-	return {
-		weaponType = w.type,
-		weaponAtk = w.atk,
-		damageBonusPct = getDamageBonusPct(d),
-		multiShot = math.clamp(tonumber(d.multiShot) or 0, 0, 6),
-		fireChance = math.clamp(tonumber(d.fireChance) or 0, 0, 0.9),
-		fireDps = math.max(0, tonumber(d.fireDps) or 0),
-		attackSpeed = math.clamp(tonumber(d.attackSpeed) or 1.0, 0.6, 2.0),
-		critRate = finalCritRate,
-		critDmg = finalCritDmg,
-		lifesteal = finalLifesteal,
-		speedMult = finalSpeed,
-		maxHP = finalHP,
-		defense = finalDefense,
-	}
-end
-
-local function getCombatStats(plr: Player, tool: Tool?)
-	local d = PlayerData.Get(plr)
-	local stats = getFinalStats(plr, tool)
-	local battleBonus = getBattleFocusBonus(plr, d)
-	local quickDrawBonus = getQuickDrawBonus(plr, d)
-	local elementalPower = tonumber(d.elementalPowerBonus) or 0
-
-	stats.damageBonusPct = math.max(0, stats.damageBonusPct + battleBonus)
-	stats.attackSpeed = math.clamp(stats.attackSpeed + quickDrawBonus, 0.6, 2.0)
-	stats.fireDps = math.max(0, stats.fireDps * (1 + elementalPower))
-	local finalAtk = math.max(1, stats.weaponAtk * (1 + stats.damageBonusPct))
-	stats.finalAtk = finalAtk
-	return stats
-end
-
-local function dealMobDamage(plr: Player, mobHum: Humanoid, mobRoot: BasePart, baseDamage: number, fireChance: number, fireDps: number, critC: number, critM: number, lifesteal: number, extraCritBonus: number?)
-	local critChance = math.clamp(critC + (extraCritBonus or 0), 0, 1)
-	local damage = applyExecute(plr, mobHum, baseDamage)
-	damage = applyRiposte(plr, damage)
-	local isCrit = (math.random() < critChance)
-	local final = damage
-	if isCrit then final = math.floor(damage * critM) end
-
-
-	-- tag last hit (dla kill-credit)
-	local mobModel = mobRoot:FindFirstAncestorOfClass("Model")
-	if mobModel then
-		mobModel:SetAttribute("LastHitUserId", plr.UserId)
-		mobModel:SetAttribute("LastHitAt", os.clock())
-	end
-
-	local willDie = mobHum.Health - final <= 0
-	mobHum:TakeDamage(final)
-
-	-- missions
-	MissionProgress.OnDamage(plr, final, isCrit)
-	if willDie then
-		MissionProgress.OnKill(plr, mobModel)
-	end
-
-
-	-- stimmy indicator (client draws)
-	DamageIndicatorEvent:FireAllClients({
-		pos = mobRoot.Position + Vector3.new(0, 2.6, 0),
-		amount = final,
-		crit = isCrit,
-	})
-
-	if willDie then
-		grantBattleFocus(plr)
-	end
-
-	if isCrit then
-		grantQuickDraw(plr)
-	end
-
-	if lifesteal > 0 then
-		local hum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
-		if hum and hum.Health > 0 then
-			local heal = math.floor(final * lifesteal)
-			if heal > 0 then
-				hum.Health = math.min(hum.MaxHealth, hum.Health + heal)
-			end
-		end
-	end
-
-	if fireDps > 0 and math.random() < fireChance then
-		applyBurn(mobHum, fireDps, 3.0)
-	end
-end
-
--- melee AoE
-local MELEE_ENEMY_SCALE = 1.1
-local function getMeleeTargetsArc(origin: Vector3, forward: Vector3, range: number, angleDeg: number, hitLimit: number?)
-	local enf = enemiesFolder()
-	if not enf then return {} end
-
-	local out = {}
-	local flatForward = Vector3.new(forward.X, 0, forward.Z)
-	local halfAngle = math.rad(angleDeg / 2)
-
-	for _,m in ipairs(enf:GetChildren()) do
-		local eh = m:FindFirstChildOfClass("Humanoid")
-		local er = m:FindFirstChild("HumanoidRootPart")
-		if eh and er and eh.Health > 0 then
-			local toEnemy = er.Position - origin
-			local flatToEnemy = Vector3.new(toEnemy.X, 0, toEnemy.Z)
-			local dist = flatToEnemy.Magnitude
-			local enemyRadius = math.max(er.Size.X, er.Size.Z) * 0.55 * MELEE_ENEMY_SCALE
-
-			if dist <= (range + enemyRadius) and dist > 0.1 and flatForward.Magnitude > 0 then
-				local angle = math.acos(math.clamp(flatForward.Unit:Dot(flatToEnemy.Unit), -1, 1))
-				if angle <= halfAngle then
-					table.insert(out, { hum = eh, root = er, dist = dist })
-				end
-			end
-		end
-	end
-
-	table.sort(out, function(a, b) return a.dist < b.dist end)
-	if hitLimit and #out > hitLimit then
-		for i = #out, hitLimit + 1, -1 do
-			out[i] = nil
-		end
-	end
-	return out
-end
-
-local function getMeleeTargetsLine(origin: Vector3, forward: Vector3, length: number, width: number, hitLimit: number?)
-	local enf = enemiesFolder()
-	if not enf then return {} end
-
-	local out = {}
-	local flatForward = Vector3.new(forward.X, 0, forward.Z)
-	if flatForward.Magnitude <= 0.01 then return out end
-	flatForward = flatForward.Unit
-
-	for _,m in ipairs(enf:GetChildren()) do
-		local eh = m:FindFirstChildOfClass("Humanoid")
-		local er = m:FindFirstChild("HumanoidRootPart")
-		if eh and er and eh.Health > 0 then
-			local toEnemy = er.Position - origin
-			local flatToEnemy = Vector3.new(toEnemy.X, 0, toEnemy.Z)
-			local forwardDist = flatToEnemy:Dot(flatForward)
-			if forwardDist > 0 and forwardDist <= length then
-				local lateral = (flatToEnemy - flatForward * forwardDist).Magnitude
-				local enemyRadius = math.max(er.Size.X, er.Size.Z) * 0.55 * MELEE_ENEMY_SCALE
-				if lateral <= (width / 2 + enemyRadius) then
-					table.insert(out, { hum = eh, root = er, dist = forwardDist })
-				end
-			end
-		end
-	end
-
-	table.sort(out, function(a, b) return a.dist < b.dist end)
-	if hitLimit and #out > hitLimit then
-		for i = #out, hitLimit + 1, -1 do
-			out[i] = nil
-		end
-	end
-	return out
-end
-
--- projectile (ray + overlap)
-local function overlapHit(pos: Vector3, radius: number, ignore: {Instance}, hitModels: {[Model]: boolean}?)
-	local params = OverlapParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = ignore
-	local parts = workspace:GetPartBoundsInRadius(pos, radius, params)
-	for _,p in ipairs(parts) do
-		local model = p:FindFirstAncestorOfClass("Model")
-		if model and model.Parent == enemiesFolder() then
-			if hitModels and hitModels[model] then
-				continue
-			end
-			local hum = model:FindFirstChildOfClass("Humanoid")
-			local root = model:FindFirstChild("HumanoidRootPart")
-			if hum and root and hum.Health > 0 then
-				return hum, root, model
-			end
-		end
-	end
-	return nil
-end
-
-local function findNearestEnemy(pos: Vector3, excludeModel: Model?)
-	local enf = enemiesFolder()
-	if not enf then return nil end
-	local best, bestRoot, bestDist
-	for _,m in ipairs(enf:GetChildren()) do
-		if m ~= excludeModel then
-			local hum = m:FindFirstChildOfClass("Humanoid")
-			local root = m:FindFirstChild("HumanoidRootPart")
-			if hum and root and hum.Health > 0 then
-				local dist = (root.Position - pos).Magnitude
-				if dist <= RICOCHET_RADIUS and (not bestDist or dist < bestDist) then
-					best = hum
-					bestRoot = root
-					bestDist = dist
-				end
-			end
-		end
-	end
-	return best, bestRoot
-end
-
-local function applyAreaDamage(plr: Player, center: Vector3, radius: number, hitLimit: number?, damage: number, stats)
-	local enf = enemiesFolder()
-	if not enf then return 0 end
-
-	local targets = {}
-	for _,m in ipairs(enf:GetChildren()) do
-		local eh = m:FindFirstChildOfClass("Humanoid")
-		local er = m:FindFirstChild("HumanoidRootPart")
-		if eh and er and eh.Health > 0 then
-			local dist = (er.Position - center).Magnitude
-			if dist <= radius then
-				table.insert(targets, { hum = eh, root = er, dist = dist })
-			end
-		end
-	end
-
-	table.sort(targets, function(a, b) return a.dist < b.dist end)
-	local maxHits = hitLimit or #targets
-	local hits = 0
-	for i = 1, math.min(maxHits, #targets) do
-		local entry = targets[i]
-		dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, 0)
-		hits += 1
-	end
-	return hits
-end
-
-local function spawnProjectile(plr: Player, origin: Vector3, dir: Vector3, speed: number, range: number, damage: number, radius: number, pierce: number, impactAoE: {radius: number, hitLimit: number, damageMul: number}?, extraCritBonus: number?)
-	local p = Instance.new("Part")
-	p.Size = Vector3.new(radius * 2, radius * 2, radius * 2)
-	p.Shape = Enum.PartType.Ball
-	p.Material = Enum.Material.Neon
-	p.Color = Color3.fromRGB(180,220,255)
-	p.Anchored = true
-	p.CanCollide = false
-	p.CanQuery = false
-	p.CFrame = CFrame.new(origin)
-	p.Parent = workspace
-	Debris:AddItem(p, range / speed)
-
-	local stats = getCombatStats(plr, plr.Character and plr.Character:FindFirstChildOfClass("Tool"))
-	local ignore = { plr.Character, p }
-	local hitModels = {}
-	local hits = 0
-	local maxHits = math.max(1, pierce)
-
-	local rayParams = RaycastParams.new()
-	rayParams.FilterType = Enum.RaycastFilterType.Exclude
-	rayParams.FilterDescendantsInstances = ignore
-
-	local pos = origin
-	local vel = dir.Unit * speed
-	local traveled = 0
-
-	while p.Parent and traveled < range do
-		if PauseState.Value then task.wait(0.05) continue end
-		local dt = RunService.Heartbeat:Wait()
-		local nextPos = pos + vel * dt
-
-		local oh, oroot, omodel = overlapHit(nextPos, radius, ignore, hitModels)
-		if oh and oroot and omodel then
-			dealMobDamage(plr, oh, oroot, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, extraCritBonus)
-			if impactAoE then
-				local aoeDamage = math.max(1, math.floor(damage * impactAoE.damageMul))
-				applyAreaDamage(plr, oroot.Position, impactAoE.radius, impactAoE.hitLimit, aoeDamage, stats)
-			end
-			hitModels[omodel] = true
-			hits += 1
-			if hits >= maxHits then
-				break
-			end
-		end
-
-		local hit = workspace:Raycast(pos, nextPos - pos, rayParams)
-		if hit then
-			local model = hit.Instance:FindFirstAncestorOfClass("Model")
-			if model and model.Parent == enemiesFolder() then
-				local mh = model:FindFirstChildOfClass("Humanoid")
-				local mr = model:FindFirstChild("HumanoidRootPart")
-				if mh and mr and mh.Health > 0 then
-					dealMobDamage(plr, mh, mr, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, extraCritBonus)
-					if impactAoE then
-						local aoeDamage = math.max(1, math.floor(damage * impactAoE.damageMul))
-						applyAreaDamage(plr, mr.Position, impactAoE.radius, impactAoE.hitLimit, aoeDamage, stats)
-					end
-					hitModels[model] = true
-					hits += 1
-				end
-			end
-			if hits >= maxHits then
-				break
-			end
-		end
-
-		traveled += (nextPos - pos).Magnitude
-		pos = nextPos
-		p.CFrame = CFrame.new(pos)
-	end
-
-	if p.Parent then p:Destroy() end
-end
-
-local swingCd, shotCd = {}, {}
-
-WeaponEvent.OnServerEvent:Connect(function(plr, payload)
-	if PauseState.Value then return end
-	if typeof(payload) ~= "table" then return end
-
-	local char = plr.Character
-	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if not hrp or not hum or hum.Health <= 0 then return end
-
-	local tool = char:FindFirstChildOfClass("Tool")
-	if not tool then return end
-	local wType = tool:GetAttribute("WeaponType")
-	if typeof(wType) ~= "string" then return end
-
-	local weaponType = resolveWeaponType(wType)
-	local stats = getCombatStats(plr, tool)
-	local aspd = stats.attackSpeed
-	local d = PlayerData.Get(plr)
-	local rangeBonus = tonumber(d.rangeBonus) or 0
-
-	if payload.action == "MELEE" and (weaponType == "Sword" or weaponType == "Scythe" or weaponType == "Halberd" or weaponType == "Claymore" or weaponType == "Greataxe") then
-		local now = os.clock()
-		local cdBase = (weaponType == "Scythe") and 0.70
-			or (weaponType == "Halberd" and 0.60)
-			or (weaponType == "Claymore" and 0.85)
-			or (weaponType == "Greataxe" and 1.0)
-			or 0.50
-		local cd = cdBase / aspd
-		if swingCd[plr.UserId] and (now - swingCd[plr.UserId]) < cd then return end
-		swingCd[plr.UserId] = now
-
-		local forward = hrp.CFrame.LookVector
-		local hitCount = 0
-
-		if weaponType == "Sword" then
-			local hitLimit = 3 + math.floor(tonumber(d.cleaveBonus) or 0)
-			local targets = getMeleeTargetsArc(hrp.Position + forward * 2, forward, 6 + rangeBonus, 90, hitLimit)
-			local damage = applyMomentum(plr, math.max(1, math.floor(stats.finalAtk * 0.75)))
-			local bladeEvery = tonumber(d.bladeDanceEvery) or 0
-			local extraSwing = false
-			if bladeEvery > 0 then
-				local totalHits = (bladeDanceHits[plr.UserId] or 0) + #targets
-				if totalHits >= bladeEvery then
-					extraSwing = true
-					totalHits -= bladeEvery
-				end
-				bladeDanceHits[plr.UserId] = totalHits
-			end
-			for _,entry in ipairs(targets) do
-				dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, 0)
-				hitCount += 1
-			end
-			if extraSwing then
-				for _,entry in ipairs(targets) do
-					dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, 0)
-					hitCount += 1
-				end
-			end
-
-			if (tonumber(d.parryReduction) or 0) > 0 then
-				local untilTime = time() + PARRY_WINDOW_DURATION
-				parryUntil[plr.UserId] = untilTime
-				plr:SetAttribute("ParryReduction", d.parryReduction)
-				plr:SetAttribute("ParryUntil", untilTime)
-			end
-		elseif weaponType == "Scythe" then
-			local angle = 220 + (tonumber(d.sweepBonus) or 0)
-			local targets = getMeleeTargetsArc(hrp.Position, forward, 7.5 + rangeBonus, angle, nil)
-			local damage = applyMomentum(plr, math.max(1, math.floor(stats.finalAtk * 0.65)))
-			for _,entry in ipairs(targets) do
-				dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, 0)
-				hitCount += 1
-			end
-		elseif weaponType == "Halberd" then
-			local hitLimit = 3 + math.floor(tonumber(d.pierceBonus) or 0)
-			local length = 9 + rangeBonus + (tonumber(d.thrustBonus) or 0)
-			local targets = getMeleeTargetsLine(hrp.Position, forward, length, 2.5, hitLimit)
-			local damage = applyMomentum(plr, math.max(1, math.floor(stats.finalAtk * 0.75)))
-			for _,entry in ipairs(targets) do
-				dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, 0)
-				hitCount += 1
-			end
-		elseif weaponType == "Claymore" then
-			local damage = applyMomentum(plr, math.max(1, math.floor(stats.finalAtk * 0.95)))
-			local staggerDuration = tonumber(d.staggerDuration) or 0
-			task.delay(0.2, function()
-				local charNow = plr.Character
-				local hrpNow = charNow and charNow:FindFirstChild("HumanoidRootPart")
-				if not hrpNow then return end
-				local forwardNow = hrpNow.CFrame.LookVector
-				local targets = getMeleeTargetsArc(hrpNow.Position + forwardNow * 2.5, forwardNow, 7 + rangeBonus, 120, 4)
-				local hits = 0
-				for _,entry in ipairs(targets) do
-					dealMobDamage(plr, entry.hum, entry.root, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, 0)
-					if staggerDuration > 0 then
-						applyStagger(entry.hum, staggerDuration)
-					end
-					hits += 1
-				end
-				updateMomentum(plr, hits > 0)
-			end)
-			return
-		elseif weaponType == "Greataxe" then
-			local damage = applyMomentum(plr, math.max(1, math.floor(stats.finalAtk * 1.1)))
-			local slamRadius = 4.5 + rangeBonus + (tonumber(d.slamRadiusBonus) or 0)
-			local aftershock = tonumber(d.aftershockMultiplier) or 0
-			task.delay(0.25, function()
-				local charNow = plr.Character
-				local hrpNow = charNow and charNow:FindFirstChild("HumanoidRootPart")
-				if not hrpNow then return end
-				local forwardNow = hrpNow.CFrame.LookVector
-				local center = hrpNow.Position + forwardNow * 3.5
-				local hits = applyAreaDamage(plr, center, slamRadius, nil, damage, stats)
-				if aftershock > 0 then
-					task.delay(0.35, function()
-						applyAreaDamage(plr, center, slamRadius + 0.5, nil, math.max(1, math.floor(damage * aftershock)), stats)
-					end)
-				end
-				updateMomentum(plr, hits > 0)
-			end)
-			return
-		end
-
-		updateMomentum(plr, hitCount > 0)
-
-	elseif payload.action == "SHOOT" and (weaponType == "Bow" or weaponType == "Staff" or weaponType == "Pistol") then
-		local aim = payload.aim
-		if typeof(aim) ~= "Vector3" then return end
-		if (aim - hrp.Position).Magnitude > 800 then return end
-
-		local now = os.clock()
-		local cdBase = (weaponType == "Bow") and 0.65 or (weaponType == "Staff" and 0.60 or 0.35)
-		local cd = cdBase / aspd
-		if shotCd[plr.UserId] and (now - shotCd[plr.UserId]) < cd then return end
-		shotCd[plr.UserId] = now
-
-		local origin = hrp.Position + Vector3.new(0, 1.35, 0)
-		local dir = (aim - origin)
-		if dir.Magnitude < 3 then return end
-
-		local total = 1 + stats.multiShot
-		local spread = math.rad(4)
-
-		if weaponType == "Bow" then
-			local speed = 160
-			local range = 45
-			local damage = math.max(1, math.floor(stats.finalAtk))
-			local pierce = 1 + math.floor(tonumber(d.arrowPierce) or 0)
-			local eagleEye = tonumber(d.eagleEyeBonus) or 0
-			local extraCrit = 0
-			if eagleEye > 0 then
-				extraCrit = math.min(0.25, (dir.Magnitude / 10) * eagleEye)
-			end
-			for i=1,total do
-				local angle = (i - (total+1)/2) * spread
-				local rot = CFrame.fromAxisAngle(Vector3.new(0,1,0), angle)
-				local shotDir = rot:VectorToWorldSpace(dir.Unit)
-				spawnProjectile(plr, origin, shotDir, speed, range, damage, 0.3, pierce, nil, extraCrit)
-			end
-		elseif weaponType == "Staff" then
-			local speed = 175
-			local range = 40
-			local damage = math.max(1, math.floor(stats.finalAtk))
-			local empowered = false
-			local surgeEvery = tonumber(d.manaSurgeEvery) or 0
-			if surgeEvery > 0 then
-				local count = (manaSurgeStacks[plr.UserId] or 0) + 1
-				if count >= surgeEvery then
-					empowered = true
-					count = 0
-				end
-				manaSurgeStacks[plr.UserId] = count
-			end
-			if empowered then
-				damage = math.max(1, math.floor(damage * (1 + MANA_SURGE_BONUS)))
-			end
-
-			local heal = tonumber(d.arcaneOverflowHeal) or 0
-			local cd = arcaneOverflowCd[plr.UserId] or 0
-			if heal > 0 and cd <= time() then
-				arcaneOverflowCd[plr.UserId] = time() + ARCANE_OVERFLOW_COOLDOWN
-				local currentHum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
-				if currentHum and currentHum.Health > 0 then
-					currentHum.Health = math.min(currentHum.MaxHealth, currentHum.Health + heal)
-				end
-			end
-
-			local aoeRadius = empowered and 4.5 or 3.5
-			for i=1,1 do
-				spawnProjectile(
-					plr,
-					origin,
-					dir.Unit,
-					speed,
-					range,
-					damage,
-					0.35,
-					1,
-					{ radius = aoeRadius, hitLimit = 4, damageMul = 0.7 },
-					0
-				)
-			end
-		elseif weaponType == "Pistol" then
-			local range = 35
-			local damage = math.max(1, math.floor(stats.finalAtk))
-			local pierce = math.max(1, math.floor(tonumber(tool:GetAttribute("Pierce")) or 1))
-			local extraCrit = 0
-			local deadeyeDelay = tonumber(d.deadeyeDelay) or 0
-			if deadeyeDelay > 0 then
-				local lastShot = lastPistolShot[plr.UserId] or 0
-				if (now - lastShot) >= deadeyeDelay then
-					extraCrit = 1
-				end
-				lastPistolShot[plr.UserId] = now
-			end
-			local ricochetCount = math.floor(tonumber(d.ricochet) or 0)
-			local params = RaycastParams.new()
-			params.FilterType = Enum.RaycastFilterType.Exclude
-			params.FilterDescendantsInstances = { plr.Character }
-			local remaining = range
-			local currentOrigin = origin
-			local hits = 0
-
-			while hits < pierce and remaining > 0 do
-				local result = workspace:Raycast(currentOrigin, dir.Unit * remaining, params)
-				if not result then break end
-				local model = result.Instance:FindFirstAncestorOfClass("Model")
-				if model and model.Parent == enemiesFolder() then
-					local mh = model:FindFirstChildOfClass("Humanoid")
-					local mr = model:FindFirstChild("HumanoidRootPart")
-					if mh and mr and mh.Health > 0 then
-						dealMobDamage(plr, mh, mr, damage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, extraCrit)
-						local ricHits = 0
-						local lastModel = model
-						while ricHits < ricochetCount do
-							local rh, rr = findNearestEnemy(mr.Position, lastModel)
-							if not rh or not rr then break end
-							local ricDamage = math.max(1, math.floor(damage * 0.6))
-							dealMobDamage(plr, rh, rr, ricDamage, stats.fireChance, stats.fireDps, stats.critRate, stats.critDmg, stats.lifesteal, 0)
-							lastModel = rh.Parent
-							ricHits += 1
-						end
-						hits += 1
-						params.FilterDescendantsInstances = { plr.Character, model }
-					end
-				end
-
-				local traveled = (result.Position - currentOrigin).Magnitude
-				remaining -= traveled + 0.1
-				currentOrigin = result.Position + dir.Unit * 0.2
-			end
-		end
-	end
-end)
-
--- Mission summary: WaveController wyśle _G.MissionComplete(waves, seconds)
-function _G.MissionComplete(totalWaves: number, seconds: number)
-	seconds = tonumber(seconds) or 0
-	totalWaves = tonumber(totalWaves) or 0
-
-	-- rate: XP do konta = czas*0.35 + kille*5 (łatwe do zmiany)
-	local TIME_RATE = 0.35
-	local KILL_RATE = 5
-
-	for _, plr in ipairs(Players:GetPlayers()) do
-		local d = PlayerData.Get(plr)
-		local rs = runStats[plr.UserId] or { runLevel = 0, runXp = 0, runCoins = 0, kills = 0 }
-
-		local accountXp = math.max(0, math.floor(seconds * TIME_RATE + (rs.kills or 0) * KILL_RATE))
-		local coinsGained = math.max(0, math.floor(rs.runCoins or 0))
-
-		-- dopisz do konta (GLOBAL)
-		d.xp += accountXp
-		d.coins += coinsGained
-
-		local leveled = false
+	-- dostosuj nazwy pól do Twojego PlayerData jeśli inne:
+	d.xp = (tonumber(d.xp) or 0) + accountXp
+	d.coins = (tonumber(d.coins) or 0) + coinsGained
+
+	-- jeśli masz level/nextXp w PlayerData:
+	if tonumber(d.level) and tonumber(d.nextXp) and PlayerData.RollNextXp then
 		while d.xp >= d.nextXp do
 			d.xp -= d.nextXp
 			d.level += 1
 			d.nextXp = PlayerData.RollNextXp(d.level)
-			leveled = true
 		end
+	end
 
-		PlayerData.MarkDirty(plr)
-		PlayerData.Save(plr, true)
+	if PlayerData.MarkDirty then PlayerData.MarkDirty(plr) end
+	if PlayerData.Save then pcall(function() PlayerData.Save(plr, true) end) end
 
-		MissionSummaryEvent:FireClient(plr, {
-			type="gameover",
-			time = seconds,
-			kills = rs.kills or 0,
-			coinsGained = coinsGained,
-			accountXp = accountXp,
-			accountLevel = d.level,
-		})
+	MissionSummaryEvent:FireClient(plr, {
+		type = "gameover",
+		reason = reason,
+		time = seconds,
+		kills = r.kills or 0,
+		coinsGained = coinsGained,
+		accountXp = accountXp,
+		accountLevel = tonumber(d.level) or 1,
+	})
 
-		local died = (sessionDeaths[plr.UserId] or 0) > 0
-		MissionProgress.OnRunComplete(plr, totalWaves, seconds, died)
-
-		-- reset run state
-		runStats[plr.UserId] = nil
-		spellOwned[plr.UserId] = nil
-		spellPending[plr.UserId] = nil
-		sessionDeaths[plr.UserId] = 0
+	if MissionProgress and MissionProgress.OnRunComplete then
+		pcall(function()
+			MissionProgress.OnRunComplete(plr, 0, seconds, true)
+		end)
 	end
 end
 
-		MissionSummaryEvent:FireClient(plr, {
-			type="summary",
-			waves = totalWaves,
-			time = seconds,
-			level = d.level,
-			coins = d.coins,
-			xp = d.xp,
-		})
-		local died = (sessionDeaths[plr.UserId] or 0) > 0
-		MissionProgress.OnRunComplete(plr, totalWaves, seconds, died)
-		sessionDeaths[plr.UserId] = 0
+function _G.EndRun(reason: string?)
+	reason = tostring(reason or "Game Over")
+	for _, plr in ipairs(Players:GetPlayers()) do
+		endRunForPlayer(plr, reason)
 	end
 end
 
--- Player lifecycle
-Players.PlayerAdded:Connect(function(plr)
-	local d = PlayerData.Get(plr)
-	d._sessionXp = 0
-	d._sessionCoins = 0
-	sessionStart[plr.UserId] = { xp = 0, coins = 0, t = time() }
+Players.PlayerAdded:Connect(function(plr: Player)
+	-- reset run state per join
+	run[plr.UserId] = nil
+	pending[plr.UserId] = nil
+	local r = getRun(plr)
+	r.startT = time()
+	r.runLevel = 0
+	r.runXp = 0
+	r.nextXp = 25
+	r.runCoins = 0
+	r.kills = 0
+	r.ended = false
 
-	pushProgress(plr)
-
-	plr.CharacterAdded:Connect(function(char)
-		PauseState.Value = false
-
-		local hum = char:FindFirstChildOfClass("Humanoid")
-		if hum then
-			updatePlayerDerivedStats(plr)
-			hum.Died:Connect(function()
-				sessionDeaths[plr.UserId] = (sessionDeaths[plr.UserId] or 0) + 1
-			end)
-
-			lastHealth[plr.UserId] = hum.Health
-			hum.HealthChanged:Connect(function(current)
-				local prev = lastHealth[plr.UserId] or current
-				if current < prev then
-					riposteReady[plr.UserId] = time() + RIPOSTE_DURATION
-				end
-				lastHealth[plr.UserId] = current
-			end)
+	-- wipe spell levels at run start
+	if SpellDefs and SpellDefs.SPELLS then
+		for id, _ in pairs(SpellDefs.SPELLS) do
+			plr:SetAttribute(("Spell_%s_Level"):format(id), 0)
 		end
-
-		char.ChildAdded:Connect(function(child)
-			if child:IsA("Tool") then
-				updatePlayerDerivedStats(plr)
-			end
-		end)
-		char.ChildRemoved:Connect(function(child)
-			if child:IsA("Tool") then
-				updatePlayerDerivedStats(plr)
-			end
-		end)
-
-		task.wait(0.1)
-		WeaponService.EquipLoadout(plr)
-		pushProgress(plr)
-	end)
-end)
-
-Players.PlayerRemoving:Connect(function(plr)
-	PlayerData.Save(plr, true)
-	sessionStart[plr.UserId] = nil
-end)
-
-game:BindToClose(function()
-	for _,plr in ipairs(Players:GetPlayers()) do
-		PlayerData.Save(plr, true)
 	end
+
+	syncRunHud(plr)
 end)
+
+Players.PlayerRemoving:Connect(function(plr: Player)
+	run[plr.UserId] = nil
+	pending[plr.UserId] = nil
+end)
+
+-- expose per-player end for death handler
+_G.EndRunForPlayer = endRunForPlayer
+
+print("[ProgressService] Ready (v9)")

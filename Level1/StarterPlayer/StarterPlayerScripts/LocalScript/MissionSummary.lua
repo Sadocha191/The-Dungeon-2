@@ -1,5 +1,6 @@
--- MissionSummary.client.lua (Level1/StarterPlayerScripts)
--- Game Over screen: czas runa, kille, monety zdobyte, XP do konta + Return to Village
+-- MissionSummary.client.lua (Level1)
+-- Game Over UI. Listens on Remotes/MissionSummaryEvent type="gameover".
+-- If you already have ReturnToLobby RemoteEvent, it will use it; otherwise it only shows stats.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -10,15 +11,13 @@ local pg = plr:WaitForChild("PlayerGui")
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local MissionSummaryEvent = remotes:WaitForChild("MissionSummaryEvent")
 
--- Return remote jest w root ReplicatedStorage (ReturnToLobby.server.lua)
-local ReturnToLobby = ReplicatedStorage:WaitForChild("ReturnToLobby")
+local ReturnToLobby = ReplicatedStorage:FindFirstChild("ReturnToLobby")
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "MissionSummary"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.Enabled = false
-gui:SetAttribute("Modal", true)
 gui.Parent = pg
 
 local dim = Instance.new("Frame")
@@ -71,12 +70,16 @@ btn.BorderSizePixel = 0
 btn.Font = Enum.Font.GothamBold
 btn.TextSize = 15
 btn.TextColor3 = Color3.fromRGB(10,10,10)
-btn.Text = "Return to Village"
+btn.Text = ReturnToLobby and "Return to Village" or "Close"
 btn.Parent = card
 Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 12)
 
 btn.MouseButton1Click:Connect(function()
-	ReturnToLobby:FireServer()
+	if ReturnToLobby and ReturnToLobby:IsA("RemoteEvent") then
+		ReturnToLobby:FireServer()
+	else
+		gui.Enabled = false
+	end
 end)
 
 local function fmtTime(sec)
@@ -88,20 +91,17 @@ end
 
 MissionSummaryEvent.OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then return end
+	if payload.type ~= "gameover" then return end
 
-	if payload.type == "gameover" then
-		local sec = tonumber(payload.time) or 0
-		local kills = tonumber(payload.kills) or 0
-		local coins = tonumber(payload.coinsGained) or 0
-		local xp = tonumber(payload.accountXp) or 0
-		local lvl = tonumber(payload.accountLevel) or 1
+	local sec = tonumber(payload.time) or 0
+	local kills = tonumber(payload.kills) or 0
+	local coins = tonumber(payload.coinsGained) or 0
+	local xp = tonumber(payload.accountXp) or 0
+	local lvl = tonumber(payload.accountLevel) or 1
+	local reason = tostring(payload.reason or "Game Over")
 
-		body.Text = ("Run time: %s\nEnemies defeated: %d\nCoins gained: %d\nAccount XP gained: %d\nAccount level: %d"):format(
-			fmtTime(sec), kills, coins, xp, lvl
-		)
-		gui.Enabled = true
-	elseif payload.type == "summary" then
-		-- legacy fallback (nie używane po patchu)
-		gui.Enabled = true
-	end
+	body.Text = ("Reason: %s\nRun time: %s\nEnemies defeated: %d\nCoins gained: %d\nAccount XP gained: %d\nAccount level: %d"):format(
+		reason, fmtTime(sec), kills, coins, xp, lvl
+	)
+	gui.Enabled = true
 end)
