@@ -81,6 +81,6 @@ MissionSummaryEvent.OnClientEvent:Connect(function(payload)
 	local sec = tonumber(payload.time) or 0
 	local lvl = tonumber(payload.level) or 1
 	local coins = tonumber(payload.coins) or 0
-body.Text = ("Waves: %d\nTime: %ds\nLevel: %d\nCoins (global): %d"):format(waves, sec, lvl, coins)
+	body.Text = ("Waves: %d\nTime: %ds\nLevel: %d\nCoins (global): %d"):format(waves, sec, lvl, coins)
 	gui.Enabled = true
 end)

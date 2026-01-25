@@ -13,9 +13,6 @@ if not upDefsModule then
 	upDefsModule = waitFolder and waitFolder:FindFirstChild("UpgradeDefinitions")
 end
 local UpDefs = upDefsModule and upDefsModule:IsA("ModuleScript") and require(upDefsModule) or { POOL = {} }
-if not upDefsModule then
-	warn("[UpgradeViews] Missing ReplicatedStorage.UpgradeDefinitions; admin list disabled.")
-end
 
 local plr = Players.LocalPlayer
 local pg = plr:WaitForChild("PlayerGui")

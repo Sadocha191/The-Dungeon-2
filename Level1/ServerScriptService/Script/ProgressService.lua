@@ -6,8 +6,9 @@ local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
 local PhysicsService = game:GetService("PhysicsService")
 local ServerScriptService = game:GetService("ServerScriptService")
+
+-- FIX: folder z modułami serwera
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
-local ServerScriptService = game:GetService("ServerScriptService")
 
 local function findModule(name: string): ModuleScript?
 	local direct = ServerScriptService:FindFirstChild(name)
@@ -191,6 +192,12 @@ end
 -- ===== Upgrade roll (3) =====
 local pending = {} -- [uid] = {token, choices}
 
+local function resolveWeaponType(rawType: string?): string
+	if rawType == "Melee" then return "Sword" end
+	if rawType == "Wand" then return "Staff" end
+	return rawType or ""
+end
+
 local function roll3(weaponType: string?)
 	local pool = UpDefs.GetPool and UpDefs.GetPool(weaponType) or table.clone(UpDefs.POOL)
 	if #pool < 3 then
@@ -361,9 +368,7 @@ function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	PlayerData.MarkDirty(plr)
 	PlayerData.Save(plr, false)
 	pushProgress(plr)
-	if MissionProgress and typeof(MissionProgress.OnReward) == "function" then
-		MissionProgress.OnReward(plr, xp, coins)
-	end
+	MissionProgress.OnReward(plr, xp, coins)
 
 	-- level-up
 	local leveled = false
@@ -469,11 +474,6 @@ local function grantQuickDraw(plr: Player)
 	local d = PlayerData.Get(plr)
 	if (tonumber(d.quickDrawBonus) or 0) <= 0 then return end
 	quickDrawUntil[plr.UserId] = time() + QUICK_DRAW_DURATION
-end
-local function resolveWeaponType(rawType: string?): string
-	if rawType == "Melee" then return "Sword" end
-	if rawType == "Wand" then return "Staff" end
-	return rawType or ""
 end
 
 local function getWeaponStats(tool: Tool?)
@@ -1170,11 +1170,11 @@ Players.PlayerAdded:Connect(function(plr)
 		local hum = char:FindFirstChildOfClass("Humanoid")
 		if hum then
 			updatePlayerDerivedStats(plr)
-						hum.Died:Connect(function()
+			hum.Died:Connect(function()
 				sessionDeaths[plr.UserId] = (sessionDeaths[plr.UserId] or 0) + 1
 			end)
 
-lastHealth[plr.UserId] = hum.Health
+			lastHealth[plr.UserId] = hum.Health
 			hum.HealthChanged:Connect(function(current)
 				local prev = lastHealth[plr.UserId] or current
 				if current < prev then
