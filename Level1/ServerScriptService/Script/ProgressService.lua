@@ -222,28 +222,27 @@ function _G.AwardPlayer(plr: Player, xp: number, coins: number, killsDelta: numb
 		openSpellMenu(plr)
 	end
 end
-	local r = getRun(plr)
-	if r.ended then return end
+local r = getRun(plr)
+if r.ended then return end
 
-	xp = math.max(0, math.floor(tonumber(xp) or 0))
-	coins = math.max(0, math.floor(tonumber(coins) or 0))
+xp = math.max(0, math.floor(tonumber(xp) or 0))
+coins = math.max(0, math.floor(tonumber(coins) or 0))
 
-	r.runXp += xp
-	r.runCoins += coins
+r.runXp += xp
+r.runCoins += coins
 
-	local leveled = false
-	while r.runXp >= r.nextXp do
-		r.runXp -= r.nextXp
-		r.runLevel += 1
-		r.nextXp = rollNextRunXp(r.runLevel)
-		leveled = true
-	end
+local leveled = false
+while r.runXp >= r.nextXp do
+	r.runXp -= r.nextXp
+	r.runLevel += 1
+	r.nextXp = rollNextRunXp(r.runLevel)
+	leveled = true
+end
 
-	syncRunHud(plr)
+syncRunHud(plr)
 
-	if leveled then
-		openSpellMenu(plr)
-	end
+if leveled then
+	openSpellMenu(plr)
 end
 
 function _G.RegisterEnemyKill(_pos: Vector3?)
