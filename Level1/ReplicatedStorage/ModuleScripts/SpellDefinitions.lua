@@ -1,15 +1,20 @@
 -- SpellDefinitions.lua (ReplicatedStorage/ModuleScripts)
--- Definicje + opisy "next level" pod UI
 
 local SpellDefs = {}
 
 SpellDefs.MAX_RUN_SPELLS = 6
 
--- kolory pod UI (możesz zmienić)
+-- WAGI LOSOWANIA (sumują się do 1.0)
+SpellDefs.RARITY_WEIGHTS = {
+	Common = 0.50,
+	Uncommon = 0.335,
+	Rare = 0.115,
+	Epic = 0.05,
+}
+
 SpellDefs.COLOR_BASE  = Color3.fromRGB(120, 190, 255)
 SpellDefs.COLOR_SHOP  = Color3.fromRGB(190, 120, 255)
 
--- Bazowe 6 (dawane w tutorialu)
 SpellDefs.BASE_STARTER = {
 	"SeekerBolt",
 	"WardingSigils",
@@ -24,10 +29,10 @@ SpellDefs.SPELLS = {
 		id = "SeekerBolt",
 		name = "Seeker Bolt",
 		category = "Offense",
+		rarity = "Common",
 		maxLevel = 8,
 		costCoins = 0,
 		base = true,
-		-- przykładowe skale
 		scale = { dmg = 8, cd = 1.30, homing = 1 },
 		nextDesc = function(lv)
 			local dmg = 8 + (lv * 4)
@@ -40,6 +45,7 @@ SpellDefs.SPELLS = {
 		id = "WardingSigils",
 		name = "Warding Sigils",
 		category = "Offense",
+		rarity = "Common",
 		maxLevel = 8,
 		costCoins = 0,
 		base = true,
@@ -54,6 +60,7 @@ SpellDefs.SPELLS = {
 		id = "HexAura",
 		name = "Hex Aura",
 		category = "Control",
+		rarity = "Uncommon",
 		maxLevel = 8,
 		costCoins = 0,
 		base = true,
@@ -68,6 +75,7 @@ SpellDefs.SPELLS = {
 		id = "StormMark",
 		name = "Storm Mark",
 		category = "Offense",
+		rarity = "Uncommon",
 		maxLevel = 8,
 		costCoins = 0,
 		base = true,
@@ -82,6 +90,7 @@ SpellDefs.SPELLS = {
 		id = "CursedPuddle",
 		name = "Cursed Puddle",
 		category = "Control",
+		rarity = "Common",
 		maxLevel = 8,
 		costCoins = 0,
 		base = true,
@@ -96,6 +105,7 @@ SpellDefs.SPELLS = {
 		id = "RicochetShard",
 		name = "Ricochet Shard",
 		category = "Offense",
+		rarity = "Common",
 		maxLevel = 8,
 		costCoins = 0,
 		base = true,
@@ -106,11 +116,11 @@ SpellDefs.SPELLS = {
 		end,
 	},
 
-	-- Shop / unlocki (przykładowa pula)
 	ChainSpark = {
 		id = "ChainSpark",
 		name = "Chain Spark",
 		category = "Offense",
+		rarity = "Rare",
 		maxLevel = 8,
 		costCoins = 600,
 		base = false,
@@ -125,6 +135,7 @@ SpellDefs.SPELLS = {
 		id = "GravityWell",
 		name = "Gravity Well",
 		category = "Control",
+		rarity = "Epic",
 		maxLevel = 8,
 		costCoins = 800,
 		base = false,
@@ -139,6 +150,7 @@ SpellDefs.SPELLS = {
 		id = "FrostNeedle",
 		name = "Frost Needle",
 		category = "Control",
+		rarity = "Rare",
 		maxLevel = 8,
 		costCoins = 700,
 		base = false,

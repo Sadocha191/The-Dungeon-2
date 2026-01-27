@@ -1,8 +1,9 @@
 -- ProgressService.server.lua (Level1)
--- v14:
--- - slower run leveling
--- - pauses RUN timer + wave spawns during spell choice (PauseState), but enemies keep moving (WaveController handles that)
--- - spell unlock/upgrade logic respects MAX_RUN_SPELLS (distinct spells)
+-- v15:
+-- - weighted rarity offers (Common/Uncommon/Rare/Epic)
+-- - duplicates allowed
+-- - skip/reroll/banish supported
+-- - pauses run during choice (PauseState)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -44,7 +45,6 @@ end
 
 local PlayerData = safeRequire(findModule("PlayerData"))
 local MissionProgress = safeRequire(findModule("MissionProgress"))
-
 if not PlayerData then
 	error("[ProgressService] Missing PlayerData module")
 end
@@ -77,11 +77,10 @@ if not PauseState then
 end
 
 -- Run state
-local run = {} -- [uid] = {startT, pausedTotal, pauseStart, runLevel, runXp, nextXp, runCoins, kills, ended}
+local run = {} -- [uid] = {startT, pausedTotal, pauseStart, runLevel, runXp, nextXp, runCoins, kills, ended, banished}
+local pending = {} -- [uid] = {token, offers}
 
 local function rollNextRunXp(level: number): number
-	-- wolniej niż wcześniej: szybkie pierwsze lvle, ale nie "co chwilę"
-	-- L1: 70, L2: 105, L3: 140...
 	return 70 + (level * 35)
 end
 
@@ -99,6 +98,7 @@ local function getRun(plr: Player)
 			runCoins = 0,
 			kills = 0,
 			ended = false,
+			banished = {}, -- [spellId]=true
 		}
 		run[uid] = r
 	end
@@ -117,7 +117,6 @@ end
 
 local function syncHud(plr: Player)
 	local r = getRun(plr)
-	-- HUD expects: type="progress" and fields level/xp/nextXp/coins
 	PlayerProgressEvent:FireClient(plr, {
 		type = "progress",
 		level = r.runLevel,
@@ -158,42 +157,21 @@ local function canOffer(plr: Player, id: string): boolean
 	local def = SpellDefs.SPELLS[id]
 	if not def then return false end
 
+	local r = getRun(plr)
+	if r.banished and r.banished[id] then
+		return false
+	end
+
 	local lv = getSpellLevel(plr, id)
 	local maxLv = tonumber(def.maxLevel) or 1
 	if lv >= maxLv then return false end
 
-	-- limit distinct spells (unlock only if slot available)
 	local maxSpells = tonumber(SpellDefs.MAX_RUN_SPELLS) or 6
 	if lv == 0 and distinctOwnedCount(plr) >= maxSpells then
 		return false
 	end
 
 	return true
-end
-
-local pending = {} -- [uid] = {token, choices}
-
-local function rollChoices(plr: Player): {string}
-	local unlocked = parseUnlocked(plr)
-	local pool = {}
-
-	for _, id in ipairs(unlocked) do
-		if canOffer(plr, id) then
-			table.insert(pool, id)
-		end
-	end
-	if #pool == 0 then return {} end
-
-	local choices = {}
-	local used = {}
-	while #choices < 3 and #choices < #pool do
-		local id = pool[math.random(1, #pool)]
-		if not used[id] then
-			used[id] = true
-			table.insert(choices, id)
-		end
-	end
-	return choices
 end
 
 local function pauseBegin(plr: Player)
@@ -211,37 +189,160 @@ local function pauseEnd(plr: Player)
 	PauseState.Value = false
 end
 
+-- rarity rolling
+local RARITY_ORDER = { "Common", "Uncommon", "Rare", "Epic" }
+
+local function rollRarity(weights: table): string
+	local r = math.random()
+	local acc = 0
+	for _, key in ipairs(RARITY_ORDER) do
+		acc += (weights[key] or 0)
+		if r <= acc then return key end
+	end
+	return "Common"
+end
+
+local function buildPoolsByRarity(plr: Player)
+	local unlocked = parseUnlocked(plr)
+	local pools = { Common = {}, Uncommon = {}, Rare = {}, Epic = {} }
+
+	for _, id in ipairs(unlocked) do
+		if canOffer(plr, id) then
+			local def = SpellDefs.SPELLS[id]
+			local rarity = (def and def.rarity) or "Common"
+			if not pools[rarity] then rarity = "Common" end
+			table.insert(pools[rarity], id)
+		end
+	end
+
+	return pools
+end
+
+local function rollOffers(plr: Player)
+	if not SpellDefs or not SpellDefs.SPELLS then return {} end
+
+	local pools = buildPoolsByRarity(plr)
+	local weights = SpellDefs.RARITY_WEIGHTS or { Common=1, Uncommon=0, Rare=0, Epic=0 }
+
+	local offers = {}
+
+	for _ = 1, 3 do
+		local pickedId, pickedRarity
+
+		-- retry: wylosuj rarity, ale tylko jeśli w tej puli coś jest
+		for attempt = 1, 25 do
+			local rarity = rollRarity(weights)
+			local pool = pools[rarity]
+			if pool and #pool > 0 then
+				pickedId = pool[math.random(1, #pool)]
+				pickedRarity = rarity
+				break
+			end
+		end
+
+		-- fallback: dowolna niepusta pula
+		if not pickedId then
+			for _, rarity in ipairs(RARITY_ORDER) do
+				local pool = pools[rarity]
+				if pool and #pool > 0 then
+					pickedId = pool[math.random(1, #pool)]
+					pickedRarity = rarity
+					break
+				end
+			end
+		end
+
+		if pickedId then
+			table.insert(offers, { spellId = pickedId, rarity = pickedRarity or "Common" })
+		end
+	end
+
+	return offers
+end
+
 local function openSpellMenu(plr: Player)
-	local choices = rollChoices(plr)
-	if #choices == 0 then return end
+	local offers = rollOffers(plr)
+	if #offers == 0 then return end
 
 	local token = ("%d:%d:%d"):format(plr.UserId, math.floor(os.clock()*1000), math.random(100000,999999))
-	pending[plr.UserId] = { token = token, choices = choices }
+	pending[plr.UserId] = { token = token, offers = offers }
 
 	pauseBegin(plr)
-	SpellEvent:FireClient(plr, { type = "offer", token = token, choices = choices })
+	SpellEvent:FireClient(plr, { type = "offer", token = token, offers = offers })
+end
+
+local function newToken(plr: Player): string
+	return ("%d:%d:%d"):format(plr.UserId, math.floor(os.clock()*1000), math.random(100000,999999))
 end
 
 SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
-	if typeof(payload) ~= "table" or payload.type ~= "pick" then return end
+	if typeof(payload) ~= "table" then return end
 	local p = pending[plr.UserId]
 	if not p or payload.token ~= p.token then return end
 
-	local id = tostring(payload.spellId or "")
-	if id == "" then return end
+	local t = tostring(payload.type or "")
 
-	local ok = false
-	for _, c in ipairs(p.choices) do
-		if c == id then ok = true break end
+	-- helper: sprawdź czy spell był w aktualnych ofertach (walidacja)
+	local function offered(spellId: string): boolean
+		for _, off in ipairs(p.offers or {}) do
+			if off.spellId == spellId then
+				return true
+			end
+		end
+		return false
 	end
-	if not ok then return end
-	if not canOffer(plr, id) then return end
 
-	local lv = getSpellLevel(plr, id)
-	plr:SetAttribute(("Spell_%s_Level"):format(id), lv + 1)
+	if t == "pick" then
+		local id = tostring(payload.spellId or "")
+		if id == "" then return end
+		if not offered(id) then return end
+		if not canOffer(plr, id) then return end
 
-	pending[plr.UserId] = nil
-	pauseEnd(plr)
+		local lv = getSpellLevel(plr, id)
+		plr:SetAttribute(("Spell_%s_Level"):format(id), lv + 1)
+
+		pending[plr.UserId] = nil
+		pauseEnd(plr)
+		return
+	end
+
+	if t == "skip" then
+		pending[plr.UserId] = nil
+		pauseEnd(plr)
+		return
+	end
+
+	if t == "reroll" then
+		local offers = rollOffers(plr)
+		if #offers == 0 then return end
+
+		local token = newToken(plr)
+		pending[plr.UserId] = { token = token, offers = offers }
+		SpellEvent:FireClient(plr, { type="offer", token=token, offers=offers })
+		return
+	end
+
+	if t == "banish" then
+		local id = tostring(payload.spellId or "")
+		if id == "" then return end
+		if not offered(id) then return end
+
+		local r = getRun(plr)
+		r.banished[id] = true
+
+		local offers = rollOffers(plr)
+		if #offers == 0 then
+			-- jeśli po banishu nie ma już nic do oferowania, po prostu zamknij
+			pending[plr.UserId] = nil
+			pauseEnd(plr)
+			return
+		end
+
+		local token = newToken(plr)
+		pending[plr.UserId] = { token = token, offers = offers }
+		SpellEvent:FireClient(plr, { type="offer", token=token, offers=offers })
+		return
+	end
 end)
 
 -- Public API for orbs (DropService calls _G.AwardPlayer)
@@ -281,7 +382,7 @@ function _G.RegisterEnemyKill(_pos: Vector3?)
 	end
 end
 
--- GameOver / account XP (as before)
+-- GameOver / account XP
 local TIME_RATE = 0.35
 local KILL_RATE = 5
 
@@ -290,7 +391,6 @@ local function endRunForPlayer(plr: Player, reason: string)
 	if r.ended then return end
 	r.ended = true
 
-	-- ensure unpause accounting
 	pauseEnd(plr)
 
 	local seconds = runSeconds(plr)
@@ -342,8 +442,9 @@ Players.PlayerAdded:Connect(function(plr: Player)
 	r.runCoins = 0
 	r.kills = 0
 	r.ended = false
+	r.banished = {}
 
-	-- reset spell levels for this run (only known defs)
+	-- reset spell levels for this run
 	if SpellDefs and SpellDefs.SPELLS then
 		for id, _ in pairs(SpellDefs.SPELLS) do
 			plr:SetAttribute(("Spell_%s_Level"):format(id), 0)
@@ -358,4 +459,4 @@ Players.PlayerRemoving:Connect(function(plr: Player)
 	pending[plr.UserId] = nil
 end)
 
-print("[ProgressService] Ready (v14)")
+print("[ProgressService] Ready (v15)")
