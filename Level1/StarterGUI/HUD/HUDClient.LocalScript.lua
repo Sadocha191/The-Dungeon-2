@@ -20,7 +20,7 @@ local function setXP(level: number, xp: number, nextXp: number)
 	local ratio = math.clamp(xp / nextXp, 0, 1)
 	fill.Size = UDim2.new(ratio, 0, 1, 0)
 
-	lvlText.Text = ("LVL %d"):format(math.max(1, level))
+	lvlText.Text = ("LVL %d"):format((level or 0) + 1)
 	xpText.Text = ("%d/%d"):format(math.floor(xp), math.floor(nextXp))
 end
 
