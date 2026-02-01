@@ -26,6 +26,7 @@ ScytheStatic.Enabled = true
 
 Running = game:GetService("RunService")
 Debree = game:GetService("Debris")
+Players = game:GetService("Players")
 
 Remote = (Tool:FindFirstChild("Remote") or Instance.new("RemoteEvent"));Remote.Name = "Remote";Remote.Parent = Tool
 MouseInput = Tool.MouseInput
@@ -427,6 +428,11 @@ function ScytheHit(hit)
 				TagHumanoid(TempHum,Plyr)
 				if Scythe.Transparency == 1 and TempHum.Health - CurrentDamage <= 0 then
 					Scythe.GhostSound:Play()
+				end
+				-- No PvP in multiplayer runs
+				local targetPlr = Players:GetPlayerFromCharacter(TempHum.Parent)
+				if targetPlr and Plyr and Plyr:GetAttribute("RunMode") == "Multi" then
+					return
 				end
 				TempHum:TakeDamage(CurrentDamage)
 			end

@@ -11,6 +11,7 @@ local CurrentArrow = nil
 local Arrows = {}
 
 local Heartbeat = game:GetService("RunService").Heartbeat
+local Players = game:GetService("Players")
 
 local AttackDamage = 25
 local Charge = 0
@@ -207,6 +208,12 @@ function onDeactivate(targetPosition)
 			
 			if part.Parent and part.Parent:FindFirstChild("Humanoid") and not arrow:FindFirstChild("Cooldown") then
 				local human = part.Parent.Humanoid
+				-- No PvP in multiplayer runs
+				local targetPlr = Players:GetPlayerFromCharacter(human.Parent)
+				local attacker = getPlayer()
+				if targetPlr and attacker and attacker:GetAttribute("RunMode") == "Multi" then
+					return
+				end
 				tagHuman(human)
 				human:TakeDamage(AttackDamage)
 				

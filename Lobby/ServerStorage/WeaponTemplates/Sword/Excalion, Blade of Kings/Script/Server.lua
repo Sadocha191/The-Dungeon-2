@@ -379,6 +379,11 @@ function Attack(hit,Damage)
 		DecimateScript.Parent = Services.ServerScriptService
 		DecimateScript.Disabled = false
 	else
+		-- No PvP in multiplayer runs
+		local targetPlr = Services.Players:GetPlayerFromCharacter(Hum.Parent)
+		if targetPlr and Player and Player:GetAttribute("RunMode") == "Multi" then
+			return
+		end
 		UntagHumanoid(Hum)
 		TagHumanoid(Hum,Player)
 		Hum:TakeDamage(Damage or 0)

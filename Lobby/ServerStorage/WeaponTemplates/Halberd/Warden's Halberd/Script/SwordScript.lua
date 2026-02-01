@@ -81,6 +81,12 @@ function blow(hit)
 							local joint = right_arm:FindFirstChild("RightGrip")
 							if joint ~= nil and (joint.Part0 == sword or joint.Part1 == sword) then
 								tagHumanoid(humanoid,vPlayer)
+								-- No PvP in multiplayer runs
+								local targetPlr = game.Players:playerFromCharacter(humanoid.Parent)
+								if targetPlr and vPlayer:GetAttribute("RunMode") == "Multi" then
+									wait(.3)
+									return
+								end
 								humanoid:TakeDamage(damage)
 								wait(.3)
 							end

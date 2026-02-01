@@ -104,6 +104,10 @@ function Blow(Hit)
 		return
 	end
 	local player = Players:GetPlayerFromCharacter(character)
+	-- No PvP in multiplayer runs
+	if player and Player and Player:GetAttribute("RunMode") == "Multi" then
+		return
+	end
 	if player and (player == Player or IsTeamMate(Player, player)) then
 		return
 	end

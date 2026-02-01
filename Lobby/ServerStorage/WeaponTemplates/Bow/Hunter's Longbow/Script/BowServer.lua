@@ -1,5 +1,7 @@
 local cooldown = false
 
+local Players = game:GetService("Players")
+
 
 script.Parent.BowRE.OnServerEvent:Connect(function(plr, instruction, charge, mHit)
 	
@@ -34,6 +36,11 @@ script.Parent.BowRE.OnServerEvent:Connect(function(plr, instruction, charge, mHi
 				local humanoid = hit.Parent:FindFirstChild("Humanoid")
 				
 				if humanoid then
+					-- No PvP in multiplayer runs
+					local targetPlr = Players:GetPlayerFromCharacter(humanoid.Parent)
+					if targetPlr and plr:GetAttribute("RunMode") == "Multi" then
+						return
+					end
 					humanoid:TakeDamage(charge * 30)
 				end
 			end
