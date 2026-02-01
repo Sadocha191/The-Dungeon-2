@@ -175,6 +175,10 @@ local function canOffer(plr: Player, id: string): boolean
 end
 
 local function pauseBegin(plr: Player)
+	-- Multiplayer: do not pause the run during level-up (enemies keep moving).
+	if plr:GetAttribute("RunMode") == "Multi" then
+		return
+	end
 	local r = getRun(plr)
 	if r.pauseStart then return end
 	PauseState.Value = true
@@ -182,6 +186,9 @@ local function pauseBegin(plr: Player)
 end
 
 local function pauseEnd(plr: Player)
+	if plr:GetAttribute("RunMode") == "Multi" then
+		return
+	end
 	local r = getRun(plr)
 	if not r.pauseStart then return end
 	r.pausedTotal += (time() - r.pauseStart)
@@ -390,6 +397,7 @@ local function endRunForPlayer(plr: Player, reason: string)
 	local r = getRun(plr)
 	if r.ended then return end
 	r.ended = true
+	plr:SetAttribute("RunEnded", true)
 
 	pauseEnd(plr)
 
@@ -431,6 +439,7 @@ _G.EndRunForPlayer = endRunForPlayer
 Players.PlayerAdded:Connect(function(plr: Player)
 	run[plr.UserId] = nil
 	pending[plr.UserId] = nil
+	plr:SetAttribute("RunEnded", false)
 
 	local r = getRun(plr)
 	r.startT = time()

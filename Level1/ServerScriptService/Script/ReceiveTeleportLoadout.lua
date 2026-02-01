@@ -61,13 +61,30 @@ Players.PlayerAdded:Connect(function(plr: Player)
 	local tdata = joinData and joinData.TeleportData
 
 	local weaponName, weaponEntry, unlocked = nil, nil, nil
+	local runMode, partyId, partyLeader = nil, nil, nil
 	if typeof(tdata) == "table" then
 		weaponName = tdata.StarterWeaponName
 		weaponEntry = tdata.StarterWeaponEntry
 		unlocked = tdata.UnlockedSpells
+		runMode = tdata.RunMode
+		partyId = tdata.PartyId
+		partyLeader = tdata.PartyLeaderUserId
 	end
 
 	plr:SetAttribute("UnlockedSpellsCSV", safeCSV(unlocked))
+
+	-- run mode attrs for other systems (pause/death logic)
+	if runMode == "Multi" or runMode == "Single" then
+		plr:SetAttribute("RunMode", runMode)
+	else
+		plr:SetAttribute("RunMode", "Single")
+	end
+	if typeof(partyId) == "string" then
+		plr:SetAttribute("PartyId", partyId)
+	end
+	if typeof(partyLeader) == "number" then
+		plr:SetAttribute("PartyLeaderUserId", partyLeader)
+	end
 
 	applyWeapon(plr, weaponName, weaponEntry)
 

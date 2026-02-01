@@ -140,19 +140,18 @@ local function buildUnlockedSpells(player: Player): {string}
 	return out
 end
 
-local function tryTeleport(player: Player, placeId: number)
-	if not canTeleport(player) then return end
-
-	local st = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
-	local profile = getProfileSafe(player)
+-- TeleportData is based on the leader's profile/loadout; run-mode is included for Level1 logic.
+local function buildTeleportDataForLeader(leader: Player, runMode: string, partyId: string?, leaderUserId: number?)
+	local st = PlayerStateStore.Get(leader) or PlayerStateStore.Load(leader)
+	local profile = getProfileSafe(leader)
 
 	local weaponEntry = nil
 	local weaponName = st and st.StarterWeaponName or nil
 
 	if PlayerStateStore.GetEquippedWeaponInstance then
-		weaponEntry = PlayerStateStore.GetEquippedWeaponInstance(player)
+		weaponEntry = PlayerStateStore.GetEquippedWeaponInstance(leader)
 	elseif st and typeof(st.EquippedWeaponInstanceId) == "string" and PlayerStateStore.GetWeaponInstance then
-		local inst = PlayerStateStore.GetWeaponInstance(player, st.EquippedWeaponInstanceId)
+		local inst = PlayerStateStore.GetWeaponInstance(leader, st.EquippedWeaponInstanceId)
 		if typeof(inst) == "table" then weaponEntry = inst end
 	end
 
@@ -160,25 +159,46 @@ local function tryTeleport(player: Player, placeId: number)
 		weaponName = weaponEntry.weaponId
 	end
 
-	local tpData = {
+	return {
 		Profile = profile,
 		StarterWeaponName = weaponName,
 		StarterWeaponEntry = weaponEntry,
 		EquippedWeaponInstanceId = st and st.EquippedWeaponInstanceId or nil,
-		UnlockedSpells = buildUnlockedSpells(player),
+		UnlockedSpells = buildUnlockedSpells(leader),
+		RunMode = runMode,
+		PartyId = partyId,
+		PartyLeaderUserId = leaderUserId,
 	}
+end
+
+local function tryTeleport(players: {Player}, placeId: number, tpData: any)
+	if #players == 0 then return end
+	local leader = players[1]
+	if not canTeleport(leader) then return end
 
 	local options = Instance.new("TeleportOptions")
 	options:SetTeleportData(tpData)
+	-- Always use a reserved server so Single really means "only me",
+	-- and party runs don't mix with randoms.
+	local okReserve, code = pcall(function()
+		return TeleportService:ReserveServer(placeId)
+	end)
+	if okReserve and typeof(code) == "string" then
+		options.ReservedServerAccessCode = code
+	end
 
-	TeleportStatus:FireClient(player, { type = "teleporting" })
+	for _, plr in ipairs(players) do
+		TeleportStatus:FireClient(plr, { type = "teleporting" })
+	end
 
 	local ok, err = pcall(function()
-		TeleportService:TeleportAsync(placeId, { player }, options)
+		TeleportService:TeleportAsync(placeId, players, options)
 	end)
 	if not ok then
 		warn("[PortalToDungeon] TeleportAsync failed:", err)
-		TeleportStatus:FireClient(player, { type = "failed" })
+		for _, plr in ipairs(players) do
+			TeleportStatus:FireClient(plr, { type = "failed" })
+		end
 	end
 end
 
@@ -190,11 +210,15 @@ prompt.Triggered:Connect(function(player: Player)
 	OpenLevelSelect:FireClient(player)
 end)
 
-RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: any)
+-- levelKey: string
+-- mode: "Single" | "Multi" (optional; defaults to Single)
+RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: any, mode: any)
 	if not player or not player.Parent then return end
 	if typeof(levelKey) ~= "string" then return end
 	if not tutorialComplete(player) then return end
 	if not distanceOk(player) then return end
+
+	local runMode = (typeof(mode) == "string" and (mode == "Multi" or mode == "Single")) and mode or "Single"
 
 	local entry = Levels.GetByKey(levelKey)
 	if not entry or typeof(entry.placeId) ~= "number" then
@@ -202,7 +226,37 @@ RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: an
 		return
 	end
 
-	tryTeleport(player, entry.placeId)
+	-- Party support (optional): PartyService module can exist even if client UI isn't yet in place.
+	local partyId, leaderUserId = nil, nil
+	local group = { player }
+	if runMode == "Multi" then
+		local partyServiceMod = serverModules:FindFirstChild("PartyService")
+		if partyServiceMod and partyServiceMod:IsA("ModuleScript") then
+			local PartyService = require(partyServiceMod)
+			local party = PartyService.GetPartyForPlayer(player)
+			if not party then
+				TeleportStatus:FireClient(player, { type = "failed", reason = "no_party" })
+				return
+			end
+			if party.leaderUserId ~= player.UserId then
+				TeleportStatus:FireClient(player, { type = "failed", reason = "not_leader" })
+				return
+			end
+			group = PartyService.GetOnlinePartyPlayers(party)
+			if #group < 2 then
+				TeleportStatus:FireClient(player, { type = "failed", reason = "party_too_small" })
+				return
+			end
+			partyId = party.id
+			leaderUserId = party.leaderUserId
+		else
+			TeleportStatus:FireClient(player, { type = "failed", reason = "party_missing" })
+			return
+		end
+	end
+
+	local tpData = buildTeleportDataForLeader(player, runMode, partyId, leaderUserId)
+	tryTeleport(group, entry.placeId, tpData)
 end)
 
 print("[PortalToDungeon] Ready (spells+loadout)")
