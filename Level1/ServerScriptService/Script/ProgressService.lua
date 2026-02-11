@@ -80,6 +80,87 @@ end
 local run = {} -- [uid] = {startT, pausedTotal, pauseStart, runLevel, runXp, nextXp, runCoins, kills, ended, banished}
 local pending = {} -- [uid] = {token, offers}
 
+-- Party shared progression (Multi)
+local party = {} -- [partyId] = {level, xp, nextXp, pendingLevelUps, inLevelUp, waitingFor = {[uid]=true}}
+
+local function getPartyId(plr: Player): string?
+	local pid = plr:GetAttribute("PartyId")
+	if typeof(pid) == "string" and pid ~= "" then
+		return pid
+	end
+	return nil
+end
+
+local function isMulti(plr: Player): boolean
+	return plr:GetAttribute("RunMode") == "Multi"
+end
+
+local function getPartyState(partyId: string)
+	local p = party[partyId]
+	if p then return p end
+	p = {
+		level = 1,
+		xp = 0,
+		nextXp = rollNextRunXp(1),
+		pendingLevelUps = 0,
+		inLevelUp = false,
+		waitingFor = {},
+	}
+	party[partyId] = p
+	return p
+end
+
+local function getPartyPlayers(partyId: string): {Player}
+	local list = {}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr:GetAttribute("RunMode") == "Multi" and plr:GetAttribute("PartyId") == partyId then
+			local r = getRun(plr)
+			if not r.ended then
+				table.insert(list, plr)
+			end
+		end
+	end
+	return list
+end
+
+local function syncPartyHud(partyId: string)
+	local p = party[partyId]
+	if not p then return end
+	for _, plr in ipairs(getPartyPlayers(partyId)) do
+		local r = getRun(plr)
+		r.runLevel = p.level
+		r.runXp = p.xp
+		r.nextXp = p.nextXp
+		syncHud(plr)
+	end
+end
+
+
+local openSpellMenu -- forward declaration
+
+local function startPartyLevelUp(partyId: string)
+	local p = getPartyState(partyId)
+	if p.inLevelUp then return end
+
+	local members = getPartyPlayers(partyId)
+	if #members == 0 then return end
+
+	p.inLevelUp = true
+	p.waitingFor = {}
+
+	-- pause globally
+	PauseState.Value = true
+	local now = time()
+	for _, member in ipairs(members) do
+		local r = getRun(member)
+		if not r.pauseStart then
+			r.pauseStart = now
+		end
+		p.waitingFor[member.UserId] = true
+		openSpellMenu(member)
+	end
+end
+
 local function rollNextRunXp(level: number): number
 	return 70 + (level * 35)
 end
@@ -175,10 +256,6 @@ local function canOffer(plr: Player, id: string): boolean
 end
 
 local function pauseBegin(plr: Player)
-	-- Multiplayer: do not pause the run during level-up (enemies keep moving).
-	if plr:GetAttribute("RunMode") == "Multi" then
-		return
-	end
 	local r = getRun(plr)
 	if r.pauseStart then return end
 	PauseState.Value = true
@@ -186,15 +263,54 @@ local function pauseBegin(plr: Player)
 end
 
 local function pauseEnd(plr: Player)
-	if plr:GetAttribute("RunMode") == "Multi" then
-		return
-	end
 	local r = getRun(plr)
 	if not r.pauseStart then return end
 	r.pausedTotal += (time() - r.pauseStart)
 	r.pauseStart = nil
+	
 	PauseState.Value = false
 end
+
+
+local function finishUpgrade(plr: Player)
+	-- Single: normal unpause per player
+	if not isMulti(plr) then
+		pauseEnd(plr)
+		return
+	end
+
+	local pid = getPartyId(plr)
+	if not pid then
+		pauseEnd(plr)
+		return
+	end
+
+	local p = getPartyState(pid)
+	p.waitingFor[plr.UserId] = nil
+
+	-- If everyone picked, unpause globally and handle queued level-ups
+	if next(p.waitingFor) == nil then
+		local now = time()
+		for _, member in ipairs(getPartyPlayers(pid)) do
+			local r = getRun(member)
+			if r.pauseStart then
+				r.pausedTotal += (now - r.pauseStart)
+				r.pauseStart = nil
+			end
+		end
+		PauseState.Value = false
+
+		if p.pendingLevelUps > 0 then
+			p.pendingLevelUps -= 1
+		end
+		p.inLevelUp = false
+
+		if p.pendingLevelUps > 0 then
+			startPartyLevelUp(pid)
+		end
+	end
+end
+
 
 -- rarity rolling
 local RARITY_ORDER = { "Common", "Uncommon", "Rare", "Epic" }
@@ -267,14 +383,16 @@ local function rollOffers(plr: Player)
 	return offers
 end
 
-local function openSpellMenu(plr: Player)
+openSpellMenu = function(plr: Player)
 	local offers = rollOffers(plr)
 	if #offers == 0 then return end
 
 	local token = ("%d:%d:%d"):format(plr.UserId, math.floor(os.clock()*1000), math.random(100000,999999))
 	pending[plr.UserId] = { token = token, offers = offers }
 
-	pauseBegin(plr)
+	if not isMulti(plr) then
+		pauseBegin(plr)
+	end
 	SpellEvent:FireClient(plr, { type = "offer", token = token, offers = offers })
 end
 
@@ -309,13 +427,13 @@ SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 		plr:SetAttribute(("Spell_%s_Level"):format(id), lv + 1)
 
 		pending[plr.UserId] = nil
-		pauseEnd(plr)
+		finishUpgrade(plr)
 		return
 	end
 
 	if t == "skip" then
 		pending[plr.UserId] = nil
-		pauseEnd(plr)
+		finishUpgrade(plr)
 		return
 	end
 
@@ -355,11 +473,48 @@ end)
 -- Public API for orbs (DropService calls _G.AwardPlayer)
 function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	if not plr or not plr.Parent then return end
-	local r = getRun(plr)
-	if r.ended then return end
 
 	xp = math.max(0, math.floor(tonumber(xp) or 0))
 	coins = math.max(0, math.floor(tonumber(coins) or 0))
+
+	-- Multiplayer: shared party XP/Level
+	if isMulti(plr) then
+		local pid = getPartyId(plr)
+		if not pid then return end
+
+		local p = getPartyState(pid)
+
+		-- coins nadal per gracz (jak było)
+		local r = getRun(plr)
+		if r.ended then return end
+		r.runCoins += coins
+
+		p.xp += xp
+
+		-- queue level-ups
+		local leveledCount = 0
+		while p.xp >= p.nextXp do
+			p.xp -= p.nextXp
+			p.level += 1
+			p.nextXp = rollNextRunXp(p.level)
+			leveledCount += 1
+		end
+
+		if leveledCount > 0 then
+			p.pendingLevelUps += leveledCount
+			-- start only if not already in level-up flow
+			if not p.inLevelUp then
+				startPartyLevelUp(pid)
+			end
+		end
+
+		syncPartyHud(pid)
+		return
+	end
+
+	-- Single: original behavior (per player)
+	local r = getRun(plr)
+	if r.ended then return end
 
 	r.runXp += xp
 	r.runCoins += coins
