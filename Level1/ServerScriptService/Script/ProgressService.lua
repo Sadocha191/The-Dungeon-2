@@ -585,7 +585,8 @@ local function endRunForPlayer(plr: Player, reason: string)
 		accountLevel = tonumber(d.level) or 1,
 	})
 	if MissionProgress and MissionProgress.OnRunComplete then
-		pcall(function() MissionProgress.OnRunComplete(plr, 0, seconds, true) end)
+		local diedThisRun = (tostring(reason or "") ~= "Victory")
+		pcall(function() MissionProgress.OnRunComplete(plr, 0, seconds, diedThisRun) end)
 	end
 end
 

@@ -1,653 +1,556 @@
--- WaveController.server.lua (ServerScriptService) - FIX: mobs always commit to attack (anti-orbit/anti-stuck)
+-- WaveController.server.lua (Level1)
+-- Reworked: time-based horde spawning (VS / Mega Bonk style)
+-- No waves. Difficulty ramps with elapsed run time.
+-- Elites spawn every 10 minutes. After the 3rd elite is defeated -> Victory.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local PathfindingService = game:GetService("PathfindingService")
 local PhysicsService = game:GetService("PhysicsService")
 
+-- Shared pause flag (used by upgrade UI in single)
 local PauseState = ReplicatedStorage:FindFirstChild("PauseState")
 if not PauseState then
-	PauseState = Instance.new("BoolValue")
-	PauseState.Name = "PauseState"
-	PauseState.Value = false
-	PauseState.Parent = ReplicatedStorage
+    PauseState = Instance.new("BoolValue")
+    PauseState.Name = "PauseState"
+    PauseState.Value = false
+    PauseState.Parent = ReplicatedStorage
 end
 
+-- We keep the same RemoteEvent name so you don't need new remotes.
 local WaveStatusEvent = ReplicatedStorage:FindFirstChild("WaveStatusEvent")
 if not WaveStatusEvent then
-	WaveStatusEvent = Instance.new("RemoteEvent")
-	WaveStatusEvent.Name = "WaveStatusEvent"
-	WaveStatusEvent.Parent = ReplicatedStorage
+    WaveStatusEvent = Instance.new("RemoteEvent")
+    WaveStatusEvent.Name = "WaveStatusEvent"
+    WaveStatusEvent.Parent = ReplicatedStorage
 end
 
 local function broadcast(payload)
-	for _, plr in ipairs(Players:GetPlayers()) do
-		WaveStatusEvent:FireClient(plr, payload)
-	end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        WaveStatusEvent:FireClient(plr, payload)
+    end
 end
 
-local function waitIfPaused()
-	while PauseState.Value do task.wait(0.05) end
-end
-
-local ORC_TEMPLATE = ReplicatedStorage:WaitForChild("Enemies"):WaitForChild("Orc")
+-- Enemy templates
+local EnemiesRoot = ReplicatedStorage:WaitForChild("Enemies")
+local NormalFolder = EnemiesRoot:WaitForChild("Normal")
+local EliteFolder = EnemiesRoot:WaitForChild("Elite")
 
 local ENEMIES_FOLDER = workspace:FindFirstChild("Enemies")
 if not ENEMIES_FOLDER then
-	ENEMIES_FOLDER = Instance.new("Folder")
-	ENEMIES_FOLDER.Name = "Enemies"
-	ENEMIES_FOLDER.Parent = workspace
+    ENEMIES_FOLDER = Instance.new("Folder")
+    ENEMIES_FOLDER.Name = "Enemies"
+    ENEMIES_FOLDER.Parent = workspace
 end
 
-local DROPS_FOLDER = workspace:FindFirstChild("Drops")
-
--- Collision groups
+-- Collision group for mobs (no mob-mob collision)
 local MOBS_GROUP = "Mobs"
 pcall(function() PhysicsService:RegisterCollisionGroup(MOBS_GROUP) end)
 PhysicsService:CollisionGroupSetCollidable(MOBS_GROUP, MOBS_GROUP, false)
 
 local function setMobGroup(model: Model)
-	for _, d in ipairs(model:GetDescendants()) do
-		if d:IsA("BasePart") then
-			d.CollisionGroup = MOBS_GROUP
-		end
-	end
+    for _, d in ipairs(model:GetDescendants()) do
+        if d:IsA("BasePart") then
+            d.CollisionGroup = MOBS_GROUP
+        end
+    end
 end
 
--- CONFIG
-local PREP_TIME = 5
-local TOTAL_WAVES = 8
-local BETWEEN_WAVES_COUNTDOWN = 5
-
-local START_COUNT = 20
-local COUNT_ADD_PER_WAVE = 4
-local MAX_ALIVE_ON_MAP = 12
-local WAVE_DURATION = 40
-local ELITE_INTERVAL = 300 -- 5 min
-local ELITE_HP_MULT = 2.5
-local ELITE_DMG_MULT = 2.0
-local ELITE_SPEED_BONUS = 2
-
-local BASE_HP = 65
-local BASE_DAMAGE = 7
-local BASE_SPEED = 14
-local HP_GROWTH_PER_WAVE = 0.22
-local DMG_GROWTH_PER_WAVE = 0.14
-local SPEED_GROWTH_PER_WAVE = 0.07
-local SPEED_CAP = 22
-
--- Spawn safe
-local SPAWN_RING_MIN = 40
-local SPAWN_RING_MAX = 75
-local SPAWN_RAY_START_Y = 140
-local GROUND_RAY_DIST = 800
-local MAX_SPAWN_TRIES = 40
+-- Roblox-friendly spawn ring around nearest alive player
+local SPAWN_RING_MIN = 60
+local SPAWN_RING_MAX = 90
+local SPAWN_RAY_START_Y = 200
+local GROUND_RAY_DIST = 600
+local MAX_SPAWN_TRIES = 25
 local MAX_GROUND_SLOPE_DEG = 35
-local CLEARANCE_PADDING = Vector3.new(2, 1, 2)
 
--- AI
-local THINK_INTERVAL = 0.12
-local PATH_RECALC = 0.75
-local DIRECT_UPDATE_DT = 0.22
-local LOS_DIRECT_CHASE = 110
-local WAYPOINT_TIMEOUT = 1.0
+local function anyPlayersAlive(): boolean
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local c = plr.Character
+        local h = c and c:FindFirstChildOfClass("Humanoid")
+        if h and h.Health > 0 and plr:GetAttribute("RunEnded") ~= true then
+            return true
+        end
+    end
+    return false
+end
 
--- Combat
-local ATTACK_RANGE = 5.2
-local ATTACK_COOLDOWN = 1.0
+local function getAliveHRPs(): {BasePart}
+    local list = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local c = plr.Character
+        local h = c and c:FindFirstChildOfClass("Humanoid")
+        local hrp = c and c:FindFirstChild("HumanoidRootPart")
+        if h and hrp and h.Health > 0 and plr:GetAttribute("RunEnded") ~= true then
+            table.insert(list, hrp)
+        end
+    end
+    return list
+end
 
--- Critical FIX thresholds
-local OFFSET_ENABLE_DIST = 20        -- dopiero od tego dystansu “rozchodzą się”
-local FORCE_DIRECT_DIST = 12         -- poniżej tego zawsze idą prosto na gracza
-local ORBIT_DETECT_WINDOW = 1.8      -- jeśli przez tyle sekund nie maleje dystans -> ForceDirect
-local ORBIT_MIN_IMPROVEMENT = 1.6    -- ile musi się realnie zmniejszyć dystans
-local FORCE_DIRECT_SECONDS = 3.0
+local function getClosestLivingHRP(fromPos: Vector3): BasePart?
+    local best, bestDist = nil, math.huge
+    for _, hrp in ipairs(getAliveHRPs()) do
+        local d = (hrp.Position - fromPos).Magnitude
+        if d < bestDist then
+            bestDist = d
+            best = hrp
+        end
+    end
+    return best
+end
 
-local STUCK_CHECK_DT = 1.1
-local STUCK_MOVE_EPS = 0.35
-local STUCK_SECONDS = 2.2
+local function raycastGround(pos: Vector3)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    params.FilterDescendantsInstances = { ENEMIES_FOLDER }
+    local origin = Vector3.new(pos.X, SPAWN_RAY_START_Y, pos.Z)
+    return workspace:Raycast(origin, Vector3.new(0, -GROUND_RAY_DIST, 0), params)
+end
 
-local KILL_BELOW_Y = -25
-local TELEPORT_IF_FAR = 420
+local function slopeDeg(normal: Vector3)
+    local up = Vector3.new(0, 1, 0)
+    local dot = math.clamp(normal:Dot(up), -1, 1)
+    return math.deg(math.acos(dot))
+end
 
-local PATH_PARAMS = {
-	AgentRadius = 2,
-	AgentHeight = 5,
-	AgentCanJump = true,
-	AgentJumpHeight = 7,
-	AgentMaxSlope = 35,
+local function pickSpawnCFrame(): CFrame?
+    local hrps = getAliveHRPs()
+    if #hrps == 0 then return nil end
+    local anchor = hrps[math.random(1, #hrps)].Position
+
+    for _ = 1, MAX_SPAWN_TRIES do
+        local ang = math.random() * math.pi * 2
+        local r = SPAWN_RING_MIN + math.random() * (SPAWN_RING_MAX - SPAWN_RING_MIN)
+        local x = anchor.X + math.cos(ang) * r
+        local z = anchor.Z + math.sin(ang) * r
+        local hit = raycastGround(Vector3.new(x, 0, z))
+        if hit and hit.Position then
+            if slopeDeg(hit.Normal) <= MAX_GROUND_SLOPE_DEG then
+                return CFrame.new(hit.Position + Vector3.new(0, 2.5, 0))
+            end
+        end
+    end
+
+    return CFrame.new(anchor + Vector3.new(0, 2.5, -SPAWN_RING_MIN))
+end
+
+-- Enemy config (studs, Roblox Humanoid speeds)
+local ENEMY_CONFIGS = {
+    Slime =      { hp = 30,  speed = 9,  range = 3,  cd = 1.8, dmg = 6,  xp = 5,  coins = 1 },
+    Zombie =     { hp = 110, speed = 8,  range = 4,  cd = 2.2, dmg = 10, xp = 10, coins = 2 },
+    Skeleton =   { hp = 70,  speed = 12, range = 4,  cd = 1.4, dmg = 9,  xp = 12, coins = 2 },
+    Goblin =     { hp = 80,  speed = 16, range = 3,  cd = 1.2, dmg = 8,  xp = 15, coins = 2 },
+    Warewolf =   { hp = 240, speed = 18, range = 5,  cd = 1.1, dmg = 14, xp = 25, coins = 3 },
+    Harp =       { hp = 160, speed = 14, range = 25, cd = 2.0, dmg = 12, xp = 22, coins = 3, isRanged = true },
+    Demon =      { hp = 300, speed = 11, range = 6,  cd = 1.6, dmg = 16, xp = 28, coins = 4, hasFireball = true },
+    LandShark =  { hp = 260, speed = 20, range = 8,  cd = 3.0, dmg = 18, xp = 26, coins = 4, isBurrow = true },
+    Golem =      { hp = 550, speed = 6,  range = 6,  cd = 2.5, dmg = 20, xp = 35, coins = 5 },
+    Knight =     { hp = 280, speed = 12, range = 5,  cd = 1.3, dmg = 15, xp = 30, coins = 4 },
+    Ent =        { hp = 650, speed = 5,  range = 8,  cd = 3.0, dmg = 22, xp = 40, coins = 6 },
 }
 
-local UI_PUSH_DT = 0.25
-
-local function clamp(x,a,b)
-	if x < a then return a end
-	if x > b then return b end
-	return x
+local function timeScaleMult(elapsed: number)
+    -- Per minute: HP +5%, Damage +3%
+    local minutes = math.floor(math.max(0, elapsed) / 60)
+    local hpMult = (1.05) ^ minutes
+    local dmgMult = (1.03) ^ minutes
+    return hpMult, dmgMult
 end
 
-local function anyPlayersAlive()
-	for _, plr in ipairs(Players:GetPlayers()) do
-		local c = plr.Character
-		local h = c and c:FindFirstChildOfClass("Humanoid")
-		if h and h.Health > 0 then return true end
-	end
-	return false
+local function getPool(elapsed: number)
+    -- returns weighted pool (normal mobs)
+    if elapsed < 120 then
+        return { {"Slime", 100} }
+    elseif elapsed < 300 then
+        return { {"Slime", 70}, {"Zombie", 30} }
+    elseif elapsed < 480 then
+        return { {"Slime", 50}, {"Zombie", 30}, {"Skeleton", 20} }
+    elseif elapsed < 600 then
+        return { {"Slime", 35}, {"Zombie", 25}, {"Skeleton", 20}, {"Goblin", 20} }
+    elseif elapsed < 900 then
+        return { {"Zombie", 30}, {"Skeleton", 25}, {"Goblin", 25}, {"Warewolf", 20} }
+    elseif elapsed < 1200 then
+        return { {"Skeleton", 22}, {"Goblin", 22}, {"Warewolf", 22}, {"Harp", 18}, {"LandShark", 16} }
+    else
+        return { {"Goblin", 18}, {"Warewolf", 20}, {"Harp", 18}, {"LandShark", 16}, {"Golem", 14}, {"Ent", 14} }
+    end
 end
 
-local function getAlivePlayerHRPs()
-	local list = {}
-	for _, plr in ipairs(Players:GetPlayers()) do
-		local c = plr.Character
-		local h = c and c:FindFirstChildOfClass("Humanoid")
-		local hrp = c and c:FindFirstChild("HumanoidRootPart")
-		if h and hrp and h.Health > 0 then
-			list[#list+1] = hrp
-		end
-	end
-	return list
+local function pickWeighted(pool)
+    local total = 0
+    for _, it in ipairs(pool) do total += it[2] end
+    local r = math.random() * total
+    local acc = 0
+    for _, it in ipairs(pool) do
+        acc += it[2]
+        if r <= acc then
+            return it[1]
+        end
+    end
+    return pool[#pool][1]
 end
 
-local function getClosestLivingCharacter(fromPos: Vector3)
-	local bestChar, bestDist = nil, math.huge
-	for _, plr in ipairs(Players:GetPlayers()) do
-		local c = plr.Character
-		local hrp = c and c:FindFirstChild("HumanoidRootPart")
-		local h = c and c:FindFirstChildOfClass("Humanoid")
-		if hrp and h and h.Health > 0 then
-			local d = (hrp.Position - fromPos).Magnitude
-			if d < bestDist then bestDist = d; bestChar = c end
-		end
-	end
-	return bestChar, bestDist
+local function activeEnemiesCount()
+    local n = 0
+    for _, ch in ipairs(ENEMIES_FOLDER:GetChildren()) do
+        if ch:IsA("Model") then
+            local h = ch:FindFirstChildOfClass("Humanoid")
+            if h and h.Health > 0 then
+                n += 1
+            end
+        end
+    end
+    return n
 end
 
-local function makeWaveStats(wave: number)
-	local hp = math.floor(BASE_HP * (1 + HP_GROWTH_PER_WAVE*(wave-1)))
-	local dmg = math.floor(BASE_DAMAGE * (1 + DMG_GROWTH_PER_WAVE*(wave-1)))
-	local spd = math.floor(clamp(BASE_SPEED * (1 + SPEED_GROWTH_PER_WAVE*(wave-1)), BASE_SPEED, SPEED_CAP))
-	local total = START_COUNT + COUNT_ADD_PER_WAVE*(wave-1)
-	return hp, dmg, spd, total
+local PATH_PARAMS = {
+    AgentRadius = 2,
+    AgentHeight = 5,
+    AgentCanJump = true,
+    AgentJumpHeight = 7,
+    AgentMaxSlope = 35,
+}
+
+local function waitIfPaused()
+    while PauseState.Value do
+        task.wait(0.05)
+    end
 end
 
-
-local function pickTierForWave(wave: number): number
-	-- 10 wariantów: od słabszego do mocniejszego. Mapujemy 1..8 wave na zakresy tierów.
-	local ranges = {
-		{1,2},
-		{2,3},
-		{3,4},
-		{4,5},
-		{5,6},
-		{6,7},
-		{7,9},
-		{8,10},
-	}
-	local r = ranges[math.clamp(wave, 1, #ranges)] or {1,1}
-	return math.random(r[1], r[2])
+local function cleanupTemplateScripts(mob: Model)
+    -- Prevent the template "Respawn" scripts from duplicating mobs in a horde run.
+    for _, d in ipairs(mob:GetDescendants()) do
+        if d:IsA("Script") and string.lower(d.Name) == "respawn" then
+            d:Destroy()
+        end
+    end
 end
 
-local function applyTierMultipliers(hp: number, dmg: number, spd: number, tier: number, isElite: boolean)
-	-- tier: 1..10
-	local t = math.clamp(tier, 1, 10)
-	local hpMult = 1.0 + (t-1)*0.12
-	local dmgMult = 1.0 + (t-1)*0.10
-	local spdAdd = (t-1)*0.25
+local function startSimpleAI(mob: Model)
+    local hum = mob:FindFirstChildOfClass("Humanoid")
+    local hrp = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
+    if not hum or not hrp then return end
 
-	if isElite then
-		hpMult *= ELITE_HP_MULT
-		dmgMult *= ELITE_DMG_MULT
-		spdAdd += ELITE_SPEED_BONUS
-	end
+    -- Ensure server owns NPC physics (prevents \"one step then freeze\" when client ownership/streaming kicks in)
+    pcall(function() hrp:SetNetworkOwner(nil) end)
 
-	local outHp = math.floor(hp * hpMult)
-	local outDmg = math.floor(dmg * dmgMult)
-	local outSpd = math.floor(spd + spdAdd)
+    hum.AutoRotate = true
+    hum:ChangeState(Enum.HumanoidStateType.Running)
 
-	return outHp, outDmg, outSpd
+    local attackRange = tonumber(mob:GetAttribute("AttackRange")) or 4
+    local attackCD = tonumber(mob:GetAttribute("AttackCooldown")) or 1.5
+    local damage = tonumber(mob:GetAttribute("Damage")) or 8
+    local ranged = mob:GetAttribute("IsRanged") == true
+
+    local lastAttack = 0
+    local lastPathAt = 0
+    local currentWaypoints = nil
+    local currentIdx = 1
+    local stuckPos = hrp.Position
+    local stuckT = time()
+
+    local function getTarget()
+        return getClosestLivingHRP(hrp.Position)
+    end
+
+    local function computePath(goalPos: Vector3)
+        local path = PathfindingService:CreatePath(PATH_PARAMS)
+        path:ComputeAsync(hrp.Position, goalPos)
+        if path.Status == Enum.PathStatus.Success then
+            currentWaypoints = path:GetWaypoints()
+            currentIdx = 1
+        else
+            currentWaypoints = nil
+            currentIdx = 1
+        end
+    end
+
+    task.spawn(function()
+        while mob.Parent and hum.Health > 0 do
+            if not anyPlayersAlive() then
+                task.wait(0.2)
+                continue
+            end
+
+            waitIfPaused()
+
+            local targetHRP = getTarget()
+            if not targetHRP then
+                task.wait(0.2)
+                continue
+            end
+
+            local dist = (targetHRP.Position - hrp.Position).Magnitude
+
+            -- Attack
+            if dist <= attackRange then
+                if time() - lastAttack >= attackCD then
+                    lastAttack = time()
+                    local targetHum = targetHRP.Parent and targetHRP.Parent:FindFirstChildOfClass("Humanoid")
+                    if targetHum and targetHum.Health > 0 then
+                        -- In this project we keep it simple: direct damage.
+                        targetHum:TakeDamage(damage)
+                    end
+                end
+                -- keep slight pressure but don't path spam
+                hum:MoveTo(targetHRP.Position)
+                task.wait(0.12)
+                continue
+            end
+
+            -- Movement (horde-friendly)
+            -- Default: direct MoveTo (cheap). Only use pathfinding when stuck to avoid PathfindingService overload.
+            local now = time()
+
+            local function moveDirect()
+                hum:MoveTo(targetHRP.Position)
+            end
+
+            if currentWaypoints and currentWaypoints[currentIdx] then
+                local wp = currentWaypoints[currentIdx]
+                hum:MoveTo(wp.Position)
+                if (wp.Position - hrp.Position).Magnitude < 3 then
+                    currentIdx += 1
+                end
+                if not currentWaypoints[currentIdx] then
+                    currentWaypoints = nil
+                    currentIdx = 1
+                end
+            else
+                moveDirect()
+            end
+
+            -- Stuck handling (trigger pathfinding rarely)
+            if (hrp.Position - stuckPos).Magnitude < 0.5 then
+                if now - stuckT > 1.25 then
+                    if now - lastPathAt > 2.0 then
+                        lastPathAt = now
+                        computePath(targetHRP.Position)
+                    end
+                    stuckT = now
+                end
+            else
+                stuckPos = hrp.Position
+                stuckT = now
+            end
+
+            task.wait(0.2)
+        end
+    end)
 end
 
-local function randomPointInRing(center: Vector3)
-	local theta = math.random() * math.pi * 2
-	local r = SPAWN_RING_MIN + math.random()*(SPAWN_RING_MAX - SPAWN_RING_MIN)
-	return center + Vector3.new(math.cos(theta)*r, 0, math.sin(theta)*r)
+local function wireDropsAndKills(mob: Model, cfg, isElite: boolean)
+    local hum = mob:FindFirstChildOfClass("Humanoid")
+    local hrp = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
+    if not hum or not hrp then return end
+
+    hum.Died:Connect(function()
+        local pos = hrp.Position
+        if _G.RegisterEnemyKill then
+            pcall(function() _G.RegisterEnemyKill(pos) end)
+        end
+
+        -- Mission progress hooks
+        local ServerScriptService = game:GetService("ServerScriptService")
+        local mp = nil
+        pcall(function()
+            mp = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("MissionProgress"))
+        end)
+        if mp and mp.OnKill then
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr:GetAttribute("RunEnded") ~= true then
+                    pcall(function() mp.OnKill(plr, mob) end)
+                end
+            end
+        end
+
+        local xpDrop = cfg.xp or 5
+        local coinDrop = cfg.coins or 1
+        if isElite then
+            xpDrop = math.floor(xpDrop * 10)
+            coinDrop = math.floor(coinDrop * 8)
+        end
+        if _G.SpawnDropsAt then
+            pcall(function() _G.SpawnDropsAt(pos, xpDrop, coinDrop) end)
+        end
+
+        task.delay(3, function()
+            if mob and mob.Parent then mob:Destroy() end
+        end)
+    end)
 end
 
-local function getSlopeDegrees(normal: Vector3)
-	local up = Vector3.new(0,1,0)
-	local dot = math.clamp(normal:Dot(up), -1, 1)
-	return math.deg(math.acos(dot))
+local function spawnMob(mobName: string, isElite: boolean)
+    local templateFolder = isElite and EliteFolder or NormalFolder
+    local template = templateFolder:FindFirstChild(mobName)
+    if not template or not template:IsA("Model") then
+        warn("[Horde] Missing template:", (isElite and "Elite" or "Normal"), mobName)
+        return
+    end
+
+    local cfg = ENEMY_CONFIGS[mobName]
+    if not cfg then
+        warn("[Horde] Missing config for", mobName)
+        return
+    end
+
+    local cf = pickSpawnCFrame()
+    if not cf then return end
+
+    local mob = template:Clone()
+    mob.Name = mobName
+    mob.Parent = ENEMIES_FOLDER
+    mob:PivotTo(cf)
+
+    cleanupTemplateScripts(mob)
+    setMobGroup(mob)
+
+    local hum = mob:FindFirstChildOfClass("Humanoid")
+    if not hum then
+        warn("[Horde] Template has no Humanoid:", mobName)
+        mob:Destroy()
+        return
+    end
+
+    local hpMult, dmgMult = timeScaleMult(_G.GetRunSeconds and _G.GetRunSeconds() or 0)
+    local hp = math.floor(cfg.hp * hpMult)
+    local dmg = math.floor(cfg.dmg * dmgMult)
+
+    if isElite then
+        hp = math.floor(hp * 4)
+        dmg = math.floor(dmg * 2)
+    end
+
+    hum.MaxHealth = math.max(1, hp)
+    hum.Health = hum.MaxHealth
+    hum.WalkSpeed = cfg.speed
+
+    mob:SetAttribute("MobType", mobName)
+    mob:SetAttribute("Damage", dmg)
+    mob:SetAttribute("AttackRange", cfg.range)
+    mob:SetAttribute("AttackCooldown", cfg.cd)
+    mob:SetAttribute("IsElite", isElite)
+    mob:SetAttribute("IsRanged", cfg.isRanged == true)
+
+    wireDropsAndKills(mob, cfg, isElite)
+    startSimpleAI(mob)
+
+    return mob
 end
 
-local function raycastToGround(xzPoint: Vector3)
-	local origin = Vector3.new(xzPoint.X, SPAWN_RAY_START_Y, xzPoint.Z)
-	local dir = Vector3.new(0, -GROUND_RAY_DIST, 0)
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	local ex = { ENEMIES_FOLDER }
-	if DROPS_FOLDER then table.insert(ex, DROPS_FOLDER) end
-	params.FilterDescendantsInstances = ex
-	return workspace:Raycast(origin, dir, params)
+-- Run clock (server-side)
+local runStart = time()
+local function elapsed()
+    return time() - runStart
 end
 
-local function isClearAt(cf: CFrame, size: Vector3)
-	local params = OverlapParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	local ex = { ENEMIES_FOLDER }
-	if DROPS_FOLDER then table.insert(ex, DROPS_FOLDER) end
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr.Character then table.insert(ex, plr.Character) end
-	end
-	params.FilterDescendantsInstances = ex
-
-	for _, p in ipairs(workspace:GetPartBoundsInBox(cf, size, params)) do
-		if p.CanCollide and p.Transparency < 1 then return false end
-	end
-	return true
+-- Expose run seconds for other scripts if needed
+_G.GetRunSeconds = function()
+    return math.floor(elapsed())
 end
 
-local function getSafeSpawnCFrame(modelForSize: Model)
-	local hrps = getAlivePlayerHRPs()
-	if #hrps == 0 then return CFrame.new(0,10,0) end
-
-	local ext = modelForSize:GetExtentsSize()
-	local boxSize = Vector3.new(
-		math.max(4, ext.X) + CLEARANCE_PADDING.X,
-		math.max(6, ext.Y) + CLEARANCE_PADDING.Y,
-		math.max(4, ext.Z) + CLEARANCE_PADDING.Z
-	)
-
-	for _=1, MAX_SPAWN_TRIES do
-		local base = hrps[math.random(1,#hrps)].Position
-		local xz = randomPointInRing(base)
-		local hit = raycastToGround(xz)
-		if hit and getSlopeDegrees(hit.Normal) <= MAX_GROUND_SLOPE_DEG then
-			local pos = hit.Position + Vector3.new(0, (boxSize.Y*0.5)+0.5, 0)
-			local cf = CFrame.new(pos)
-			if isClearAt(cf, boxSize) then return cf end
-		end
-	end
-
-	local base = hrps[math.random(1,#hrps)].Position
-	return CFrame.new(base + Vector3.new(SPAWN_RING_MIN, 8, 0))
+local function desiredMaxAlive(t: number)
+    -- Starts low for fast leveling, grows steadily.
+    local base = 25
+    local add = math.floor(t / 60) * 5
+    return math.clamp(base + add, 25, 140)
 end
 
-local function clearAllMobs()
-	for _, m in ipairs(ENEMIES_FOLDER:GetChildren()) do m:Destroy() end
+local function spawnInterval(t: number)
+    -- Slightly faster over time, but not insane.
+    local minI = 0.28
+    local maxI = 0.60
+    local p = math.clamp(t / 1800, 0, 1)
+    return maxI - (maxI - minI) * p
 end
 
-local function hasLOS(fromPos: Vector3, toPos: Vector3, ignore: {Instance})
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = ignore
-	return workspace:Raycast(fromPos, (toPos-fromPos), params) == nil
+local eliteCount = 0
+local nextEliteAt = 600 -- 10 minutes
+local eliteOrder = { "Knight", "Demon", "Ent" }
+
+local function endRunVictory()
+    broadcast({ type = "complete", reason = "Victory" })
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Parent and plr:GetAttribute("RunEnded") ~= true then
+            if _G.EndRunForPlayer then
+                pcall(function() _G.EndRunForPlayer(plr, "Victory") end)
+            elseif _G.EndRun then
+                pcall(function() _G.EndRun("Victory") end)
+            end
+        end
+    end
 end
 
-local function computeWaypoints(fromPos: Vector3, toPos: Vector3)
-	local path = PathfindingService:CreatePath(PATH_PARAMS)
-	local ok = pcall(function() path:ComputeAsync(fromPos, toPos) end)
-	if not ok then return nil end
-	if path.Status ~= Enum.PathStatus.Success then return nil end
-	return path:GetWaypoints()
+local function watchEliteDeath(mob: Model)
+    local hum = mob and mob:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    hum.Died:Connect(function()
+        eliteCount += 1
+        broadcast({ type = "eliteProgress", elitesDefeated = eliteCount, elitesTotal = 3 })
+        if eliteCount >= 3 then
+            endRunVictory()
+        end
+    end)
 end
 
--- Goal selection: offset only far; always direct close; ForceDirect when orbiting/stuck
-local function pickGoal(targetPos: Vector3, orc: Model, dist: number, forceDirectUntil: number)
-	if dist <= FORCE_DIRECT_DIST or time() < forceDirectUntil then
-		return targetPos
-	end
-	if dist < OFFSET_ENABLE_DIST then
-		return targetPos
-	end
+-- Initial HUD ping
+broadcast({ type = "timeUpdate", seconds = 0, nextEliteIn = nextEliteAt, elitesDefeated = 0, elitesTotal = 3 })
 
-	local angle = orc:GetAttribute("SlotAngle")
-	local radius = orc:GetAttribute("SlotRadius")
-	if typeof(angle) ~= "number" then
-		angle = math.random() * math.pi * 2
-		orc:SetAttribute("SlotAngle", angle)
-	end
-	if typeof(radius) ~= "number" then
-		radius = 6 + math.random()*5
-		orc:SetAttribute("SlotRadius", radius)
-	end
-	return targetPos + Vector3.new(math.cos(angle)*radius, 0, math.sin(angle)*radius)
-end
+local lastHudPush = 0
+local lastSpawnAt = 0
 
-local function dropsForWave(wave: number)
-	local xp = math.floor(6 + (wave-1)*3 + math.random(0,3))
-	local coins = math.floor(2 + (wave-1)*1.0 + math.random(0,2))
-	return xp, coins
-end
+RunService.Heartbeat:Connect(function()
+    local t = elapsed()
 
--- ===== SPAWN ORC =====
-local function spawnOrc(hp, dmg, spd, wave, tier, isElite, onKill)
-	local orc = ORC_TEMPLATE:Clone()
-	orc.Parent = ENEMIES_FOLDER
-	setMobGroup(orc)
+    -- Stop if nobody is in a run / everyone ended.
+    if not anyPlayersAlive() then
+        return
+    end
 
-	local hum = orc:FindFirstChildOfClass("Humanoid")
-	local root = orc:FindFirstChild("HumanoidRootPart")
-	if not hum or not root then orc:Destroy() return nil end
+    -- HUD update (4x/sec max)
+    if t - lastHudPush >= 0.25 then
+        lastHudPush = t
+        local nextIn = math.max(0, nextEliteAt - t)
+        broadcast({
+            type = "timeUpdate",
+            seconds = math.floor(t),
+            nextEliteIn = math.floor(nextIn),
+            elitesDefeated = eliteCount,
+            elitesTotal = 3,
+        })
+    end
 
-	-- variant attributes (dla misji i debug)
-	orc:SetAttribute("VariantTier", tier or 1)
-	orc:SetAttribute("IsElite", isElite == true)
+    -- Elites
+    if eliteCount < 3 and t >= nextEliteAt then
+        local eliteName = eliteOrder[eliteCount + 1] or "Knight"
+        local elite = spawnMob(eliteName, true)
+        if elite then
+            broadcast({ type = "eliteSpawn", name = eliteName, elitesDefeated = eliteCount, elitesTotal = 3 })
+            watchEliteDeath(elite)
+        end
+        nextEliteAt += 600
+    end
 
-	-- delikatny wizual: większy elite + lekko większy tier
-	pcall(function()
-		local scale = 1 + (math.clamp(tonumber(tier) or 1, 1, 10) - 1) * 0.03
-		if isElite then scale += 0.15 end
-		orc:ScaleTo(scale)
-	end)
+    -- Normal spawns
+    local interval = spawnInterval(t)
+    if t - lastSpawnAt < interval then
+        return
+    end
+    lastSpawnAt = t
 
+    waitIfPaused()
 
-	hp, dmg, spd = applyTierMultipliers(hp, dmg, spd, tier or 1, isElite == true)
-	hum.MaxHealth = hp
-	hum.Health = hp
-	hum.WalkSpeed = spd
-	hum.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOn
-	hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.Viewer
-	pcall(function() root:SetNetworkOwner(nil) end)
+    local maxAlive = desiredMaxAlive(t)
+    if activeEnemiesCount() >= maxAlive then
+        return
+    end
 
-	root.CFrame = getSafeSpawnCFrame(orc)
-
-	local dead = false
-	local function markDead()
-		if dead then return end
-		dead = true
-		if onKill then onKill(root.Position) end
-		task.defer(function() if orc.Parent then orc:Destroy() end end)
-	end
-	hum.Died:Connect(markDead)
-	orc.AncestryChanged:Connect(function(_, parent) if parent == nil then markDead() end end)
-
-	task.spawn(function()
-		local lastAttack = 0
-		local lastPath = 0
-		local waypoints = nil
-		local wpIndex = 2
-
-		local lastDirect = 0
-		local lastMoveIssued = 0
-		local goalSetAt = 0
-		local currentGoal: Vector3? = nil
-
-		local lastPos = root.Position
-		local stuckAccum = 0
-
-		-- anti-orbit tracking
-		local orbitTimer = 0
-		local orbitStartDist = nil
-		local forceDirectUntil = 0
-
-		local moveConn = hum.MoveToFinished:Connect(function(reached)
-			if not reached then return end
-			if waypoints and wpIndex < #waypoints then
-				wpIndex += 1
-				local wp = waypoints[wpIndex]
-				if wp.Action == Enum.PathWaypointAction.Jump then hum.Jump = true end
-				hum:MoveTo(wp.Position)
-				currentGoal = wp.Position
-				goalSetAt = time()
-				lastMoveIssued = time()
-			end
-		end)
-
-		while hum.Health > 0 and orc.Parent do
-			waitIfPaused()
-			-- hard freeze movement during pause
-			if PauseState.Value then
-				hum:Move(Vector3.zero, true)
-				local hrp = orc:FindFirstChild('HumanoidRootPart')
-				if hrp then
-					hrp.AssemblyLinearVelocity = Vector3.zero
-					hrp.AssemblyAngularVelocity = Vector3.zero
-				end
-			end
-			task.wait(THINK_INTERVAL)
-
-			if root.Position.Y < KILL_BELOW_Y then
-				root.CFrame = getSafeSpawnCFrame(orc)
-				waypoints = nil
-				currentGoal = nil
-				forceDirectUntil = time() + 1.5
-			end
-
-			local targetChar, dist = getClosestLivingCharacter(root.Position)
-			if not targetChar then
-				waypoints = nil
-				currentGoal = nil
-				continue
-			end
-
-			local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
-			local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
-			if not targetRoot or not targetHum or targetHum.Health <= 0 then
-				waypoints = nil
-				currentGoal = nil
-				continue
-			end
-
-			if dist > TELEPORT_IF_FAR then
-				root.CFrame = getSafeSpawnCFrame(orc)
-				waypoints = nil
-				currentGoal = nil
-				forceDirectUntil = time() + 2.0
-				continue
-			end
-
-			local now = time()
-
-
-			-- ATTACK: always attempt in range
-			if dist <= ATTACK_RANGE and (now - lastAttack) >= ATTACK_COOLDOWN then
-				lastAttack = now
-				local finalDmg = dmg
-				local targetPlr = Players:GetPlayerFromCharacter(targetChar)
-				if targetPlr then
-					local parryUntil = targetPlr:GetAttribute("ParryUntil")
-					local parryReduction = targetPlr:GetAttribute("ParryReduction")
-					if typeof(parryUntil) == "number" and typeof(parryReduction) == "number" then
-						if parryUntil > time() and parryReduction > 0 then
-							finalDmg = math.max(1, math.floor(dmg * (1 - parryReduction)))
-						end
-					end
-				end
-				if not PauseState.Value then
-					targetHum:TakeDamage(finalDmg)
-				end
-				-- gdy bije, wymuś direct chwilę, żeby nie “odpływał” na offset
-				forceDirectUntil = math.max(forceDirectUntil, now + 0.8)
-			end
-
-			-- STUCK detect (movement)
-			if (now - goalSetAt) >= STUCK_CHECK_DT then
-				local moved = (root.Position - lastPos).Magnitude
-				lastPos = root.Position
-				if moved < STUCK_MOVE_EPS then
-					stuckAccum += STUCK_CHECK_DT
-				else
-					stuckAccum = 0
-				end
-				if stuckAccum >= STUCK_SECONDS then
-					waypoints = nil
-					currentGoal = nil
-					stuckAccum = 0
-					forceDirectUntil = now + 2.0
-				end
-			end
-
-			-- ORBIT detect: jeśli dystans nie maleje -> ForceDirect
-			do
-				orbitTimer += THINK_INTERVAL
-				if orbitStartDist == nil then orbitStartDist = dist end
-				if orbitTimer >= ORBIT_DETECT_WINDOW then
-					local improvement = (orbitStartDist or dist) - dist
-					if improvement < ORBIT_MIN_IMPROVEMENT then
-						forceDirectUntil = now + FORCE_DIRECT_SECONDS
-						waypoints = nil
-						currentGoal = nil
-					end
-					orbitTimer = 0
-					orbitStartDist = dist
-				end
-			end
-
-			local goal = pickGoal(targetRoot.Position, orc, dist, forceDirectUntil)
-
-			-- DIRECT chase (LOS) - very frequent
-			if dist <= LOS_DIRECT_CHASE and hasLOS(root.Position, targetRoot.Position, {orc}) then
-				waypoints = nil
-				if (now - lastDirect) >= DIRECT_UPDATE_DT or (now - lastMoveIssued) >= 0.30 then
-					lastDirect = now
-					hum:MoveTo(goal)
-					currentGoal = goal
-					goalSetAt = now
-					lastMoveIssued = now
-				end
-				continue
-			end
-
-			-- PATH
-			if (not waypoints) or (now - lastPath >= PATH_RECALC) then
-				lastPath = now
-				waypoints = computeWaypoints(root.Position, goal)
-				wpIndex = 2
-				currentGoal = nil
-
-				if waypoints and #waypoints >= 2 then
-					local wp = waypoints[wpIndex]
-					if wp.Action == Enum.PathWaypointAction.Jump then hum.Jump = true end
-					hum:MoveTo(wp.Position)
-					currentGoal = wp.Position
-					goalSetAt = now
-					lastMoveIssued = now
-				else
-					waypoints = nil
-					hum:MoveTo(goal)
-					currentGoal = goal
-					goalSetAt = now
-					lastMoveIssued = now
-				end
-			end
-
-			-- goal timeout -> reset
-			if currentGoal and (now - goalSetAt) > WAYPOINT_TIMEOUT then
-				waypoints = nil
-				currentGoal = nil
-			end
-
-			-- hard fail-safe: always re-issue sometimes
-			if (now - lastMoveIssued) > 0.55 then
-				hum:MoveTo(goal)
-				currentGoal = goal
-				goalSetAt = now
-				lastMoveIssued = now
-			end
-		end
-
-		moveConn:Disconnect()
-		if orc.Parent then orc:Destroy() end
-	end)
-
-	return orc
-end
-
--- ===== MAIN =====
-task.spawn(function()
-	local startTime = time()
-	local nextEliteAt = startTime + ELITE_INTERVAL
-
-	for t = PREP_TIME, 1, -1 do
-		waitIfPaused()
-		broadcast({type="prepTick", seconds=t})
-		task.wait(1)
-	end
-	broadcast({type="prepTick", seconds=0})
-
-	for wave = 1, TOTAL_WAVES do
-		while #Players:GetPlayers() == 0 or not anyPlayersAlive() do task.wait(0.5) end
-
-		if wave > 1 then
-			for t = BETWEEN_WAVES_COUNTDOWN, 1, -1 do
-				waitIfPaused()
-				broadcast({type="waveCountdown", nextWave=wave, totalWaves=TOTAL_WAVES, seconds=t})
-				task.wait(1)
-			end
-			broadcast({type="waveCountdown", nextWave=wave, totalWaves=TOTAL_WAVES, seconds=0})
-		end
-
-		local hp, dmg, spd, total = makeWaveStats(wave)
-		local killed, alive, spawned = 0, 0, 0
-		local remaining = total
-
-		broadcast({type="waveStart", wave=wave, totalWaves=TOTAL_WAVES, totalToKill=total, remaining=remaining})
-
-		local lastUi = 0
-		local function pushUi(force)
-			local now = time()
-			if force or (now - lastUi) >= UI_PUSH_DT then
-				lastUi = now
-				broadcast({type="waveUpdate", wave=wave, totalWaves=TOTAL_WAVES, totalToKill=total, remaining=remaining, alive=alive, spawned=spawned})
-			end
-		end
-
-		local spawnInterval = clamp(WAVE_DURATION / math.max(1, total), 0.55, 1.40)
-		local nextSpawnAt = time()
-
-		while killed < total do
-			waitIfPaused()
-			task.wait(0.15)
-
-			local now = time()
-			-- elite co 5 min (dodatkowy spawn, nie liczy się do kill targetu fali)
-			if now >= nextEliteAt and alive < MAX_ALIVE_ON_MAP then
-				local eliteTier = math.clamp(pickTierForWave(wave) + 2, 1, 10)
-				local xpDrop, coinDrop = dropsForWave(wave + 2)
-				local elite = spawnOrc(hp, dmg, spd, wave, eliteTier, true, function(pos)
-					alive = math.max(0, alive - 1)
-					pushUi(false)
-					if _G.RegisterEnemyKill then _G.RegisterEnemyKill(pos) end
-					if _G.SpawnDropsAt then _G.SpawnDropsAt(pos, xpDrop, coinDrop) end
-				end)
-				if elite then
-					alive += 1
-					nextEliteAt = now + ELITE_INTERVAL
-					pushUi(false)
-				end
-			end
-
-			while spawned < total and alive < MAX_ALIVE_ON_MAP and now >= nextSpawnAt do
-				local xpDrop, coinDrop = dropsForWave(wave)
-
-				local orc = spawnOrc(hp, dmg, spd, wave, pickTierForWave(wave), false, function(pos)
-					killed += 1
-					remaining = math.max(0, total - killed)
-					alive = math.max(0, alive - 1)
-					pushUi(false)
-					if _G.RegisterEnemyKill then _G.RegisterEnemyKill(pos) end
-					if _G.SpawnDropsAt then _G.SpawnDropsAt(pos, xpDrop, coinDrop) end
-				end)
-
-				if orc then
-					spawned += 1
-					alive += 1
-					pushUi(false)
-				end
-
-				nextSpawnAt += spawnInterval
-				now = time()
-			end
-
-			pushUi(false)
-		end
-
-		clearAllMobs()
-		pushUi(true)
-	end
-
-	broadcast({type="complete"})
-	if _G.MissionComplete then
-		_G.MissionComplete(TOTAL_WAVES, math.floor(time() - startTime))
-	end
+    local pool = getPool(t)
+    local mobName = pickWeighted(pool)
+    spawnMob(mobName, false)
 end)
+
+print("[HordeController] Ready (time-based)")
