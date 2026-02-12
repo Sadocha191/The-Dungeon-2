@@ -4,7 +4,6 @@ local SpellDefs = {}
 
 SpellDefs.MAX_RUN_SPELLS = 6
 
--- WAGI LOSOWANIA (sumują się do 1.0)
 SpellDefs.RARITY_WEIGHTS = {
 	Common = 0.50,
 	Uncommon = 0.335,
@@ -16,150 +15,435 @@ SpellDefs.COLOR_BASE  = Color3.fromRGB(120, 190, 255)
 SpellDefs.COLOR_SHOP  = Color3.fromRGB(190, 120, 255)
 
 SpellDefs.BASE_STARTER = {
-	"SeekerBolt",
-	"WardingSigils",
-	"HexAura",
-	"StormMark",
-	"CursedPuddle",
-	"RicochetShard",
+	"FireOrb",
+	"ShadowDagger",
+	"PoisonCloud",
+	"BoneSpear",
+	"WindBlades",
+	"IceShards",
 }
 
 SpellDefs.SPELLS = {
-	SeekerBolt = {
-		id = "SeekerBolt",
-		name = "Seeker Bolt",
+	FireOrb = {
+		id = "FireOrb",
+		name = "Fire Orb",
 		category = "Offense",
 		rarity = "Common",
-		maxLevel = 8,
+		maxLevel = 6,
 		costCoins = 0,
 		base = true,
-		scale = { dmg = 8, cd = 1.30, homing = 1 },
+		tags = {"orbit", "dot", "fire"},
 		nextDesc = function(lv)
-			local dmg = 8 + (lv * 4)
-			local cd  = math.max(0.35, 1.30 - (lv * 0.10))
-			return ("Homing bolt. Next: +DMG (%d), -CD (%.2fs)."):format(dmg, cd)
+			return "Upgrade this spell."
 		end,
 	},
 
-	WardingSigils = {
-		id = "WardingSigils",
-		name = "Warding Sigils",
+	ShadowDagger = {
+		id = "ShadowDagger",
+		name = "Shadow Dagger",
 		category = "Offense",
 		rarity = "Common",
-		maxLevel = 8,
+		maxLevel = 6,
 		costCoins = 0,
 		base = true,
+		tags = {"projectile", "single", "crit"},
 		nextDesc = function(lv)
-			local count = 2 + math.floor((lv+1)/2)
-			local dmg = 6 + (lv * 3)
-			return ("Orbiting sigils. Next: sigils=%d, dmg=%d."):format(count, dmg)
+			return "Upgrade this spell."
 		end,
 	},
 
-	HexAura = {
-		id = "HexAura",
-		name = "Hex Aura",
-		category = "Control",
-		rarity = "Uncommon",
-		maxLevel = 8,
-		costCoins = 0,
-		base = true,
-		nextDesc = function(lv)
-			local dps = 3 + (lv * 2)
-			local radius = 8 + (lv * 1.0)
-			return ("Damage aura. Next: dps=%d, radius=%.1f."):format(dps, radius)
-		end,
-	},
-
-	StormMark = {
-		id = "StormMark",
-		name = "Storm Mark",
-		category = "Offense",
-		rarity = "Uncommon",
-		maxLevel = 8,
-		costCoins = 0,
-		base = true,
-		nextDesc = function(lv)
-			local dmg = 10 + (lv * 5)
-			local cd = math.max(0.6, 2.0 - (lv * 0.15))
-			return ("Random strike. Next: dmg=%d, cd=%.2fs."):format(dmg, cd)
-		end,
-	},
-
-	CursedPuddle = {
-		id = "CursedPuddle",
-		name = "Cursed Puddle",
+	PoisonCloud = {
+		id = "PoisonCloud",
+		name = "Poison Cloud",
 		category = "Control",
 		rarity = "Common",
-		maxLevel = 8,
+		maxLevel = 6,
 		costCoins = 0,
 		base = true,
+		tags = {"zone", "dot", "poison"},
 		nextDesc = function(lv)
-			local dps = 4 + (lv * 2)
-			local dur = 2.5 + (lv * 0.35)
-			return ("Ground DoT. Next: dps=%d, duration=%.1fs."):format(dps, dur)
+			return "Upgrade this spell."
 		end,
 	},
 
-	RicochetShard = {
-		id = "RicochetShard",
-		name = "Ricochet Shard",
+	BoneSpear = {
+		id = "BoneSpear",
+		name = "Bone Spear",
 		category = "Offense",
 		rarity = "Common",
-		maxLevel = 8,
+		maxLevel = 6,
 		costCoins = 0,
 		base = true,
+		tags = {"projectile", "pierce"},
 		nextDesc = function(lv)
-			local bounces = 1 + math.floor((lv+1)/2)
-			local dmg = 7 + (lv * 3)
-			return ("Bouncing shard. Next: bounces=%d, dmg=%d."):format(bounces, dmg)
+			return "Upgrade this spell."
 		end,
 	},
 
-	ChainSpark = {
-		id = "ChainSpark",
-		name = "Chain Spark",
+	WindBlades = {
+		id = "WindBlades",
+		name = "Wind Blades",
 		category = "Offense",
-		rarity = "Rare",
-		maxLevel = 8,
-		costCoins = 600,
+		rarity = "Common",
+		maxLevel = 6,
+		costCoins = 0,
+		base = true,
+		tags = {"orbit", "control", "knockback"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	IceShards = {
+		id = "IceShards",
+		name = "Ice Shards",
+		category = "Control",
+		rarity = "Common",
+		maxLevel = 6,
+		costCoins = 250,
 		base = false,
+		tags = {"drop", "aoe", "slow", "freeze"},
 		nextDesc = function(lv)
-			local jumps = 2 + math.floor((lv+1)/2)
-			local dmg = 6 + (lv * 3)
-			return ("Chain hit. Next: jumps=%d, dmg=%d."):format(jumps, dmg)
+			return "Upgrade this spell."
 		end,
 	},
 
-	GravityWell = {
-		id = "GravityWell",
-		name = "Gravity Well",
-		category = "Control",
-		rarity = "Epic",
-		maxLevel = 8,
-		costCoins = 800,
+	EmberSpirits = {
+		id = "EmberSpirits",
+		name = "Ember Spirits",
+		category = "Offense",
+		rarity = "Common",
+		maxLevel = 6,
+		costCoins = 250,
 		base = false,
+		tags = {"orbit", "seek", "aoe", "fire"},
 		nextDesc = function(lv)
-			local radius = 7 + (lv * 1.1)
-			local dps = 3 + (lv * 2)
-			return ("Pull zone. Next: radius=%.1f, dps=%d."):format(radius, dps)
+			return "Upgrade this spell."
 		end,
 	},
 
-	FrostNeedle = {
-		id = "FrostNeedle",
-		name = "Frost Needle",
+	FlameTrail = {
+		id = "FlameTrail",
+		name = "Flame Trail",
 		category = "Control",
-		rarity = "Rare",
-		maxLevel = 8,
+		rarity = "Common",
+		maxLevel = 6,
+		costCoins = 250,
+		base = false,
+		tags = {"trail", "dot", "fire"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	LightningChain = {
+		id = "LightningChain",
+		name = "Lightning Chain",
+		category = "Offense",
+		rarity = "Uncommon",
+		maxLevel = 6,
 		costCoins = 700,
 		base = false,
+		tags = {"chain", "stun", "projectile"},
 		nextDesc = function(lv)
-			local dmg = 7 + (lv * 3)
-			local slow = math.min(0.55, 0.15 + (lv * 0.05))
-			return ("Fast projectile. Next: dmg=%d, slow=%.0f%%."):format(dmg, slow*100)
+			return "Upgrade this spell."
 		end,
 	},
+
+	FrostNova = {
+		id = "FrostNova",
+		name = "Frost Nova",
+		category = "Control",
+		rarity = "Uncommon",
+		maxLevel = 6,
+		costCoins = 700,
+		base = false,
+		tags = {"pulse", "slow", "freeze"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	ArcaneMissile = {
+		id = "ArcaneMissile",
+		name = "Arcane Missile",
+		category = "Offense",
+		rarity = "Uncommon",
+		maxLevel = 6,
+		costCoins = 700,
+		base = false,
+		tags = {"projectile", "homing", "salvo"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	GravityPulse = {
+		id = "GravityPulse",
+		name = "Gravity Pulse",
+		category = "Control",
+		rarity = "Uncommon",
+		maxLevel = 6,
+		costCoins = 700,
+		base = false,
+		tags = {"pulse", "knockback", "pull"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	ToxicBlades = {
+		id = "ToxicBlades",
+		name = "Toxic Blades",
+		category = "Offense",
+		rarity = "Uncommon",
+		maxLevel = 6,
+		costCoins = 700,
+		base = false,
+		tags = {"orbit", "dot", "poison"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	CrystalBarrage = {
+		id = "CrystalBarrage",
+		name = "Crystal Barrage",
+		category = "Offense",
+		rarity = "Uncommon",
+		maxLevel = 6,
+		costCoins = 700,
+		base = false,
+		tags = {"projectile", "cone", "ricochet"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	ChainHooks = {
+		id = "ChainHooks",
+		name = "Chain Hooks",
+		category = "Control",
+		rarity = "Uncommon",
+		maxLevel = 6,
+		costCoins = 700,
+		base = false,
+		tags = {"hook", "pull", "stun"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	IceWall = {
+		id = "IceWall",
+		name = "Ice Wall",
+		category = "Control",
+		rarity = "Uncommon",
+		maxLevel = 6,
+		costCoins = 700,
+		base = false,
+		tags = {"wall", "block", "slow", "freeze"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	ThunderTotem = {
+		id = "ThunderTotem",
+		name = "Thunder Totem",
+		category = "Offense",
+		rarity = "Rare",
+		maxLevel = 6,
+		costCoins = 1600,
+		base = false,
+		tags = {"totem", "projectile", "chain"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	SpiritWolves = {
+		id = "SpiritWolves",
+		name = "Spirit Wolves",
+		category = "Summon",
+		rarity = "Rare",
+		maxLevel = 6,
+		costCoins = 1600,
+		base = false,
+		tags = {"summon", "melee", "bleed"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	NecroSwarm = {
+		id = "NecroSwarm",
+		name = "Necro Swarm",
+		category = "Summon",
+		rarity = "Rare",
+		maxLevel = 6,
+		costCoins = 1600,
+		base = false,
+		tags = {"summon", "homing", "aoe"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	ArcaneMine = {
+		id = "ArcaneMine",
+		name = "Arcane Mine",
+		category = "Control",
+		rarity = "Rare",
+		maxLevel = 6,
+		costCoins = 1600,
+		base = false,
+		tags = {"mine", "aoe", "chain"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	DarkRift = {
+		id = "DarkRift",
+		name = "Dark Rift",
+		category = "Control",
+		rarity = "Rare",
+		maxLevel = 6,
+		costCoins = 1600,
+		base = false,
+		tags = {"rift", "pull", "dot"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	MeteorStrike = {
+		id = "MeteorStrike",
+		name = "Meteor Strike",
+		category = "Offense",
+		rarity = "Rare",
+		maxLevel = 6,
+		costCoins = 1600,
+		base = false,
+		tags = {"drop", "aoe", "fire"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	SolarBeam = {
+		id = "SolarBeam",
+		name = "Solar Beam",
+		category = "Offense",
+		rarity = "Rare",
+		maxLevel = 6,
+		costCoins = 1600,
+		base = false,
+		tags = {"beam", "pierce", "dot", "fire"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	VoidRing = {
+		id = "VoidRing",
+		name = "Void Ring",
+		category = "Control",
+		rarity = "Epic",
+		maxLevel = 6,
+		costCoins = 3500,
+		base = false,
+		tags = {"ring", "aoe", "pull"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	BloodNova = {
+		id = "BloodNova",
+		name = "Blood Nova",
+		category = "Offense",
+		rarity = "Epic",
+		maxLevel = 6,
+		costCoins = 3500,
+		base = false,
+		tags = {"pulse", "aoe", "lifesteal", "bleed"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	PhantomClone = {
+		id = "PhantomClone",
+		name = "Phantom Clone",
+		category = "Utility",
+		rarity = "Epic",
+		maxLevel = 6,
+		costCoins = 3500,
+		base = false,
+		tags = {"clone", "synergy"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	Starfall = {
+		id = "Starfall",
+		name = "Starfall",
+		category = "Offense",
+		rarity = "Epic",
+		maxLevel = 6,
+		costCoins = 3500,
+		base = false,
+		tags = {"drop", "aoe", "stun"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	RagePulse = {
+		id = "RagePulse",
+		name = "Rage Pulse",
+		category = "Utility",
+		rarity = "Epic",
+		maxLevel = 6,
+		costCoins = 3500,
+		base = false,
+		tags = {"aura", "buff", "lowhp"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	TimeFracture = {
+		id = "TimeFracture",
+		name = "Time Fracture",
+		category = "Control",
+		rarity = "Epic",
+		maxLevel = 6,
+		costCoins = 3500,
+		base = false,
+		tags = {"zone", "slow", "vuln"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
+	SoulLink = {
+		id = "SoulLink",
+		name = "Soul Link",
+		category = "Utility",
+		rarity = "Epic",
+		maxLevel = 6,
+		costCoins = 3500,
+		base = false,
+		tags = {"link", "aoe", "elite"},
+		nextDesc = function(lv)
+			return "Upgrade this spell."
+		end,
+	},
+
 }
 
 function SpellDefs.Get(id: string)

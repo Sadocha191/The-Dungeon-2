@@ -470,6 +470,73 @@ SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 	end
 end)
 
+
+-- === Run stat growth (per level) ===
+local STAT_HP_PER_LEVEL = 8
+local STAT_SPEED_PER_LEVEL = 0.35
+local STAT_ATK_PCT_PER_LEVEL = 0.04 -- 4% per level (applies to weapon base ATK & spells where supported)
+
+local function applyRunStatsNow(plr: Player)
+	local char = plr.Character
+	if not char then return end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
+
+	local baseHp = tonumber(plr:GetAttribute("BaseMaxHP")) or 100
+	local baseSpd = tonumber(plr:GetAttribute("BaseWalkSpeed")) or 16
+
+	local bonusHp = tonumber(plr:GetAttribute("RunBonusHP")) or 0
+	local bonusSpd = tonumber(plr:GetAttribute("RunBonusSpeed")) or 0
+
+	hum.MaxHealth = baseHp + bonusHp
+	if hum.Health > hum.MaxHealth then hum.Health = hum.MaxHealth end
+	hum.WalkSpeed = baseSpd + bonusSpd
+
+	-- scale equipped weapon ATK (best-effort, no breaking if templates ignore it)
+	local atkMult = tonumber(plr:GetAttribute("RunAtkMult")) or 1
+	for _, tool in ipairs(char:GetChildren()) do
+		if tool:IsA("Tool") then
+			local unscaledBase = tool:GetAttribute("BaseATK_Unscaled")
+			local unscaledPer = tool:GetAttribute("ATKPerLevel_Unscaled")
+			if not unscaledBase then
+				unscaledBase = tool:GetAttribute("BaseATK")
+				if typeof(unscaledBase) == "number" then
+					tool:SetAttribute("BaseATK_Unscaled", unscaledBase)
+				end
+			end
+			if not unscaledPer then
+				unscaledPer = tool:GetAttribute("ATKPerLevel")
+				if typeof(unscaledPer) == "number" then
+					tool:SetAttribute("ATKPerLevel_Unscaled", unscaledPer)
+				end
+			end
+			if typeof(unscaledBase) == "number" then
+				tool:SetAttribute("BaseATK", unscaledBase * atkMult)
+			end
+			if typeof(unscaledPer) == "number" then
+				tool:SetAttribute("ATKPerLevel", unscaledPer * atkMult)
+			end
+		end
+	end
+end
+
+local function grantLevelStatGains(plr: Player, levelsGained: number)
+	if levelsGained <= 0 then return end
+	local bonusHp = tonumber(plr:GetAttribute("RunBonusHP")) or 0
+	local bonusSpd = tonumber(plr:GetAttribute("RunBonusSpeed")) or 0
+	local atkMult = tonumber(plr:GetAttribute("RunAtkMult")) or 1
+
+	bonusHp += STAT_HP_PER_LEVEL * levelsGained
+	bonusSpd += STAT_SPEED_PER_LEVEL * levelsGained
+	atkMult *= (1 + STAT_ATK_PCT_PER_LEVEL) ^ levelsGained
+
+	plr:SetAttribute("RunBonusHP", bonusHp)
+	plr:SetAttribute("RunBonusSpeed", bonusSpd)
+	plr:SetAttribute("RunAtkMult", atkMult)
+
+	applyRunStatsNow(plr)
+end
+
 -- Public API for orbs (DropService calls _G.AwardPlayer)
 function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	if not plr or not plr.Parent then return end
@@ -501,6 +568,10 @@ function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 		end
 
 		if leveledCount > 0 then
+			-- apply stat gains to all party members (server-side)
+			for _, member in ipairs(getPartyPlayers(pid)) do
+				grantLevelStatGains(member, leveledCount)
+			end
 			p.pendingLevelUps += leveledCount
 			-- start only if not already in level-up flow
 			if not p.inLevelUp then
@@ -523,6 +594,7 @@ function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	while r.runXp >= r.nextXp do
 		r.runXp -= r.nextXp
 		r.runLevel += 1
+			grantLevelStatGains(plr, 1)
 		r.nextXp = rollNextRunXp(r.runLevel)
 		leveled = true
 	end
@@ -585,8 +657,7 @@ local function endRunForPlayer(plr: Player, reason: string)
 		accountLevel = tonumber(d.level) or 1,
 	})
 	if MissionProgress and MissionProgress.OnRunComplete then
-		local diedThisRun = (tostring(reason or "") ~= "Victory")
-		pcall(function() MissionProgress.OnRunComplete(plr, 0, seconds, diedThisRun) end)
+		pcall(function() MissionProgress.OnRunComplete(plr, 0, seconds, true) end)
 	end
 end
 

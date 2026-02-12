@@ -6,6 +6,11 @@
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
+local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions"))
+
+local BASE_WALKSPEED = 18
+local BASE_MAX_HP = 120
 
 local function findModule(name: string): ModuleScript?
 	local roots = { ServerScriptService, ReplicatedStorage }
@@ -71,7 +76,29 @@ Players.PlayerAdded:Connect(function(plr: Player)
 		partyLeader = tdata.PartyLeaderUserId
 	end
 
-	plr:SetAttribute("UnlockedSpellsCSV", safeCSV(unlocked))
+	do
+	local merged = {}
+	local seen = {}
+	-- base starters always available in run
+	if SpellDefs and SpellDefs.BASE_STARTER then
+		for _, id in ipairs(SpellDefs.BASE_STARTER) do
+			if not seen[id] then
+				seen[id] = true
+				table.insert(merged, id)
+			end
+		end
+	end
+	-- unlocked from lobby (witch purchases)
+	if typeof(unlocked) == "table" then
+		for _, id in ipairs(unlocked) do
+			if typeof(id) == "string" and id ~= "" and not seen[id] then
+				seen[id] = true
+				table.insert(merged, id)
+			end
+		end
+	end
+	plr:SetAttribute("UnlockedSpellsCSV", safeCSV(merged))
+end
 
 	-- run mode attrs for other systems (pause/death logic)
 	if runMode == "Multi" or runMode == "Single" then
@@ -94,8 +121,20 @@ Players.PlayerAdded:Connect(function(plr: Player)
 		end
 	end
 
-	plr.CharacterAdded:Connect(function()
+	plr.CharacterAdded:Connect(function(char)
 		task.wait(0.15)
+		-- base movement + hp for run (also used by level stat gains)
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hum then
+			plr:SetAttribute("BaseWalkSpeed", BASE_WALKSPEED)
+			plr:SetAttribute("BaseMaxHP", BASE_MAX_HP)
+			plr:SetAttribute("RunBonusHP", 0)
+			plr:SetAttribute("RunBonusSpeed", 0)
+			plr:SetAttribute("RunAtkMult", 1)
+			hum.WalkSpeed = BASE_WALKSPEED
+			hum.MaxHealth = BASE_MAX_HP
+			hum.Health = BASE_MAX_HP
+		end
 		equipNow()
 	end)
 
