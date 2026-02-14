@@ -185,14 +185,42 @@ local function makeCardInSlot(slot: Frame)
 	return cardBtn, title, desc, rarityText
 end
 
-local function nextDescForSpell(spellId: string): string
+-- Card copy rules:
+-- Title: spell name
+-- Desc:
+--   - if player doesn't own the spell yet (level 0): show full spell description (what it does)
+--   - if player already owns it (level 1+): show ONLY the next upgrade benefit
+--   - if max level: show MAX LEVEL
+local function cardDescForSpell(spellId: string): string
 	local def = SpellDefs.SPELLS[spellId]
 	if not def then return "" end
+
 	local lv = plr:GetAttribute(("Spell_%s_Level"):format(spellId)) or 0
-	if typeof(def.nextDesc) == "function" then
-		return def.nextDesc(lv)
+	local maxLv = def.maxLevel or 6
+
+	-- Maxed
+	if lv >= maxLv then
+		return "MAX LEVEL"
 	end
-	return ""
+
+	-- Unlock (level 0 -> picking level 1)
+	if lv <= 0 then
+		return def.description or ""
+	end
+
+	-- Upgrade (level 1+): show next level upgrade only
+	local nextLv = lv + 1
+	if def.upgrades and def.upgrades[nextLv] then
+		return def.upgrades[nextLv]
+	end
+	if typeof(def.nextDesc) == "function" then
+		local t = def.nextDesc(lv)
+		if t and t ~= "" then
+			return t
+		end
+	end
+
+	return "Upgrade available"
 end
 
 local function setBanishButtonState(on: boolean)
@@ -225,7 +253,7 @@ local function renderOffers(token: string, offers: {any})
 
 			title.Text = (def and def.name) or spellId
 			rarityText.Text = rarity
-			desc.Text = nextDescForSpell(spellId)
+			desc.Text = cardDescForSpell(spellId)
 
 			cardBtn.MouseButton1Click:Connect(function()
 				if not currentToken then return end
