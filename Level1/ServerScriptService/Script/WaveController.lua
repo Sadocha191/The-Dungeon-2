@@ -57,6 +57,8 @@ local function setMobGroup(model: Model)
     end
 end
 
+local rng = Random.new()
+
 -- Roblox-friendly spawn ring around nearest alive player
 local SPAWN_RING_MIN = 60
 local SPAWN_RING_MAX = 90
@@ -121,11 +123,13 @@ local function pickSpawnCFrame(): CFrame?
     local anchor = hrps[math.random(1, #hrps)].Position
 
     for _ = 1, MAX_SPAWN_TRIES do
-        local ang = math.random() * math.pi * 2
-        local r = SPAWN_RING_MIN + math.random() * (SPAWN_RING_MAX - SPAWN_RING_MIN)
-        local x = anchor.X + math.cos(ang) * r
-        local z = anchor.Z + math.sin(ang) * r
-        local hit = raycastGround(Vector3.new(x, 0, z))
+        -- Use Random.new() so we truly cover all quadrants around the player.
+        local dir = Vector3.new(rng:NextNumber(-1, 1), 0, rng:NextNumber(-1, 1))
+        if dir.Magnitude < 0.05 then dir = Vector3.new(1,0,0) end
+        dir = dir.Unit
+        local r = rng:NextNumber(SPAWN_RING_MIN, SPAWN_RING_MAX)
+        local p = anchor + dir * r
+        local hit = raycastGround(p)
         if hit and hit.Position then
             if slopeDeg(hit.Normal) <= MAX_GROUND_SLOPE_DEG then
                 return CFrame.new(hit.Position + Vector3.new(0, 2.5, 0))
@@ -348,6 +352,15 @@ local function wireDropsAndKills(mob: Model, cfg, isElite: boolean)
 
     hum.Died:Connect(function()
         local pos = hrp.Position
+        -- Disable collisions on dead enemies so players can't stand on corpses.
+        for _, d in ipairs(mob:GetDescendants()) do
+            if d:IsA("BasePart") then
+                d.CanCollide = false
+                d.CanTouch = false
+                d.CanQuery = false
+            end
+        end
+
         if _G.RegisterEnemyKill then
             pcall(function() _G.RegisterEnemyKill(pos) end)
         end
@@ -507,6 +520,11 @@ RunService.Heartbeat:Connect(function()
 
     -- Stop if nobody is in a run / everyone ended.
     if not anyPlayersAlive() then
+        return
+    end
+
+    -- Delay spawning for the first 5 seconds after run start.
+    if t < 5 then
         return
     end
 

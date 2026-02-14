@@ -40,7 +40,7 @@ title.Font = Enum.Font.GothamBold
 title.TextSize = 18
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.TextColor3 = Color3.fromRGB(245,245,245)
-title.Text = "Menu (E)"
+title.Text = "Menu (Tab)"
 title.Parent = panel
 
 local btnLobby = Instance.new("TextButton")
@@ -78,7 +78,7 @@ end
 
 UserInputService.InputBegan:Connect(function(input, gp)
 	if gp then return end
-	if input.KeyCode == Enum.KeyCode.E then
+	if input.KeyCode == Enum.KeyCode.Tab then
 		if gui.Enabled then close() else open() end
 	end
 end)

@@ -67,6 +67,7 @@ local rarityImage = {
 
 local currentToken: string? = nil
 local banishMode = false
+local choiceLockedUntil = 0 -- os.clock() time
 
 -- movement lock
 local savedWalkSpeed, savedJumpPower, savedJumpHeight
@@ -122,6 +123,8 @@ end
 local function showMenu()
 	main.Visible = true
 	lockMovement(true)
+	-- Prevent accidental clicks right as the menu pops up.
+	choiceLockedUntil = os.clock() + 2
 end
 
 local function clearSlot(slot: Instance)
@@ -185,42 +188,14 @@ local function makeCardInSlot(slot: Frame)
 	return cardBtn, title, desc, rarityText
 end
 
--- Card copy rules:
--- Title: spell name
--- Desc:
---   - if player doesn't own the spell yet (level 0): show full spell description (what it does)
---   - if player already owns it (level 1+): show ONLY the next upgrade benefit
---   - if max level: show MAX LEVEL
-local function cardDescForSpell(spellId: string): string
+local function nextDescForSpell(spellId: string): string
 	local def = SpellDefs.SPELLS[spellId]
 	if not def then return "" end
-
 	local lv = plr:GetAttribute(("Spell_%s_Level"):format(spellId)) or 0
-	local maxLv = def.maxLevel or 6
-
-	-- Maxed
-	if lv >= maxLv then
-		return "MAX LEVEL"
-	end
-
-	-- Unlock (level 0 -> picking level 1)
-	if lv <= 0 then
-		return def.description or ""
-	end
-
-	-- Upgrade (level 1+): show next level upgrade only
-	local nextLv = lv + 1
-	if def.upgrades and def.upgrades[nextLv] then
-		return def.upgrades[nextLv]
-	end
 	if typeof(def.nextDesc) == "function" then
-		local t = def.nextDesc(lv)
-		if t and t ~= "" then
-			return t
-		end
+		return def.nextDesc(lv)
 	end
-
-	return "Upgrade available"
+	return ""
 end
 
 local function setBanishButtonState(on: boolean)
@@ -253,9 +228,10 @@ local function renderOffers(token: string, offers: {any})
 
 			title.Text = (def and def.name) or spellId
 			rarityText.Text = rarity
-			desc.Text = cardDescForSpell(spellId)
+			desc.Text = nextDescForSpell(spellId)
 
 			cardBtn.MouseButton1Click:Connect(function()
+		if os.clock() < choiceLockedUntil then return end
 				if not currentToken then return end
 
 				if banishMode then
@@ -275,17 +251,20 @@ local function renderOffers(token: string, offers: {any})
 end
 
 btnSkip.MouseButton1Click:Connect(function()
+	if os.clock() < choiceLockedUntil then return end
 	if not currentToken then return end
 	SpellEvent:FireServer({ type="skip", token=currentToken })
 	hideMenu()
 end)
 
 btnReroll.MouseButton1Click:Connect(function()
+	if os.clock() < choiceLockedUntil then return end
 	if not currentToken then return end
 	SpellEvent:FireServer({ type="reroll", token=currentToken })
 end)
 
 btnBanish.MouseButton1Click:Connect(function()
+	if os.clock() < choiceLockedUntil then return end
 	if not currentToken then return end
 	banishMode = not banishMode
 	setBanishButtonState(banishMode)
