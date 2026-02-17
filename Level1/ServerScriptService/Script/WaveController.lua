@@ -49,6 +49,50 @@ local MOBS_GROUP = "Mobs"
 pcall(function() PhysicsService:RegisterCollisionGroup(MOBS_GROUP) end)
 PhysicsService:CollisionGroupSetCollidable(MOBS_GROUP, MOBS_GROUP, false)
 
+-- Collision group for players (lets us disable player<->corpse collision without breaking ground collision)
+local PLAYERS_GROUP = "Players"
+pcall(function() PhysicsService:RegisterCollisionGroup(PLAYERS_GROUP) end)
+
+-- Collision group for corpses (collides with world, not with players)
+local CORPSES_GROUP = "Corpses"
+pcall(function() PhysicsService:RegisterCollisionGroup(CORPSES_GROUP) end)
+
+-- Rules:
+-- - Mobs don't collide with each other
+-- - Corpses don't collide with players
+-- - Corpses don't collide with mobs (prevents corpse piles blocking mobs)
+pcall(function()
+    PhysicsService:CollisionGroupSetCollidable(CORPSES_GROUP, PLAYERS_GROUP, false)
+    PhysicsService:CollisionGroupSetCollidable(CORPSES_GROUP, MOBS_GROUP, false)
+    PhysicsService:CollisionGroupSetCollidable(CORPSES_GROUP, CORPSES_GROUP, false)
+end)
+
+-- Assign all character parts to PLAYERS_GROUP
+local function setPlayerGroup(char: Model)
+    for _, d in ipairs(char:GetDescendants()) do
+        if d:IsA("BasePart") then
+            d.CollisionGroup = PLAYERS_GROUP
+        end
+    end
+end
+
+Players.PlayerAdded:Connect(function(plr)
+    plr.CharacterAdded:Connect(function(char)
+        task.wait(0.1)
+        pcall(function() setPlayerGroup(char) end)
+    end)
+end)
+
+for _, plr in ipairs(Players:GetPlayers()) do
+    if plr.Character then
+        pcall(function() setPlayerGroup(plr.Character) end)
+    end
+    plr.CharacterAdded:Connect(function(char)
+        task.wait(0.1)
+        pcall(function() setPlayerGroup(char) end)
+    end)
+end
+
 local function setMobGroup(model: Model)
     for _, d in ipairs(model:GetDescendants()) do
         if d:IsA("BasePart") then
@@ -56,8 +100,6 @@ local function setMobGroup(model: Model)
         end
     end
 end
-
-local rng = Random.new()
 
 -- Roblox-friendly spawn ring around nearest alive player
 local SPAWN_RING_MIN = 60
@@ -123,13 +165,11 @@ local function pickSpawnCFrame(): CFrame?
     local anchor = hrps[math.random(1, #hrps)].Position
 
     for _ = 1, MAX_SPAWN_TRIES do
-        -- Use Random.new() so we truly cover all quadrants around the player.
-        local dir = Vector3.new(rng:NextNumber(-1, 1), 0, rng:NextNumber(-1, 1))
-        if dir.Magnitude < 0.05 then dir = Vector3.new(1,0,0) end
-        dir = dir.Unit
-        local r = rng:NextNumber(SPAWN_RING_MIN, SPAWN_RING_MAX)
-        local p = anchor + dir * r
-        local hit = raycastGround(p)
+        local ang = math.random() * math.pi * 2
+        local r = SPAWN_RING_MIN + math.random() * (SPAWN_RING_MAX - SPAWN_RING_MIN)
+        local x = anchor.X + math.cos(ang) * r
+        local z = anchor.Z + math.sin(ang) * r
+        local hit = raycastGround(Vector3.new(x, 0, z))
         if hit and hit.Position then
             if slopeDeg(hit.Normal) <= MAX_GROUND_SLOPE_DEG then
                 return CFrame.new(hit.Position + Vector3.new(0, 2.5, 0))
@@ -352,15 +392,6 @@ local function wireDropsAndKills(mob: Model, cfg, isElite: boolean)
 
     hum.Died:Connect(function()
         local pos = hrp.Position
-        -- Disable collisions on dead enemies so players can't stand on corpses.
-        for _, d in ipairs(mob:GetDescendants()) do
-            if d:IsA("BasePart") then
-                d.CanCollide = false
-                d.CanTouch = false
-                d.CanQuery = false
-            end
-        end
-
         if _G.RegisterEnemyKill then
             pcall(function() _G.RegisterEnemyKill(pos) end)
         end
@@ -389,7 +420,18 @@ local function wireDropsAndKills(mob: Model, cfg, isElite: boolean)
             pcall(function() _G.SpawnDropsAt(pos, xpDrop, coinDrop) end)
         end
 
-        task.delay(3, function()
+        
+        -- Make the corpse non-walkable for players, but keep it resting on the ground.
+        for _, d in ipairs(mob:GetDescendants()) do
+            if d:IsA("BasePart") then
+                d.CollisionGroup = CORPSES_GROUP
+                d.CanTouch = false
+                d.CanQuery = false
+                d.CanCollide = true
+            end
+        end
+
+task.delay(3, function()
             if mob and mob.Parent then mob:Destroy() end
         end)
     end)
@@ -520,11 +562,6 @@ RunService.Heartbeat:Connect(function()
 
     -- Stop if nobody is in a run / everyone ended.
     if not anyPlayersAlive() then
-        return
-    end
-
-    -- Delay spawning for the first 5 seconds after run start.
-    if t < 5 then
         return
     end
 
