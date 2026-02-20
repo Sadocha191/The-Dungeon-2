@@ -148,7 +148,16 @@ end
 local function raycastGround(pos: Vector3)
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Blacklist
-    params.FilterDescendantsInstances = { ENEMIES_FOLDER }
+
+    local blacklist = { ENEMIES_FOLDER }
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Character then
+            table.insert(blacklist, plr.Character)
+        end
+    end
+    params.FilterDescendantsInstances = blacklist
+    params.IgnoreWater = true
+
     local origin = Vector3.new(pos.X, SPAWN_RAY_START_Y, pos.Z)
     return workspace:Raycast(origin, Vector3.new(0, -GROUND_RAY_DIST, 0), params)
 end
@@ -159,25 +168,116 @@ local function slopeDeg(normal: Vector3)
     return math.deg(math.acos(dot))
 end
 
+-- Best-effort spawn bounds: scan anchored, collidable "ground-like" parts so we do not bias spawns when ring samples land in void.
+local _boundsCache = nil
+local _boundsCacheT = 0
+local BOUNDS_REFRESH_SEC = 10
+local MIN_GROUND_AREA = 20 * 20 -- studs^2 (ignore tiny parts)
+
+local function computeSpawnBounds()
+    local minX, maxX = math.huge, -math.huge
+    local minZ, maxZ = math.huge, -math.huge
+    local found = false
+
+    for _, inst in ipairs(workspace:GetDescendants()) do
+        if inst:IsA("BasePart") then
+            if inst.Anchored and inst.CanCollide and inst.CanQuery then
+                if not inst:IsDescendantOf(ENEMIES_FOLDER) then
+                    local model = inst:FindFirstAncestorOfClass("Model")
+                    local isCharacter = model and Players:GetPlayerFromCharacter(model) ~= nil
+                    if not isCharacter then
+                        local area = inst.Size.X * inst.Size.Z
+                        if area >= MIN_GROUND_AREA then
+                            local halfX, halfZ = inst.Size.X * 0.5, inst.Size.Z * 0.5
+                            local x1, x2 = inst.Position.X - halfX, inst.Position.X + halfX
+                            local z1, z2 = inst.Position.Z - halfZ, inst.Position.Z + halfZ
+                            if x1 < minX then minX = x1 end
+                            if x2 > maxX then maxX = x2 end
+                            if z1 < minZ then minZ = z1 end
+                            if z2 > maxZ then maxZ = z2 end
+                            found = true
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if not found then return nil end
+    return { minX = minX, maxX = maxX, minZ = minZ, maxZ = maxZ }
+end
+
+local function getSpawnBounds()
+    local now = os.clock()
+    if (not _boundsCache) or (now - _boundsCacheT) > BOUNDS_REFRESH_SEC then
+        _boundsCache = computeSpawnBounds()
+        _boundsCacheT = now
+    end
+    return _boundsCache
+end
+
+local function inBounds(bounds, x, z, margin)
+    margin = margin or 0
+    return x >= (bounds.minX + margin) and x <= (bounds.maxX - margin) and z >= (bounds.minZ + margin) and z <= (bounds.maxZ - margin)
+end
+
 local function pickSpawnCFrame(): CFrame?
     local hrps = getAliveHRPs()
     if #hrps == 0 then return nil end
     local anchor = hrps[math.random(1, #hrps)].Position
+
+    -- Optional explicit spawn points (best)
+    local spFolder = workspace:FindFirstChild("SpawnPoints")
+    if spFolder then
+        local pts = spFolder:GetChildren()
+        if #pts > 0 then
+            local p = pts[math.random(1, #pts)]
+            if p:IsA("BasePart") then
+                return CFrame.new(p.Position + Vector3.new(0, 2.5, 0))
+            elseif p:IsA("Attachment") then
+                return CFrame.new(p.WorldPosition + Vector3.new(0, 2.5, 0))
+            end
+        end
+    end
+
+    local bounds = getSpawnBounds()
+    local BOUNDS_MARGIN = 6
 
     for _ = 1, MAX_SPAWN_TRIES do
         local ang = math.random() * math.pi * 2
         local r = SPAWN_RING_MIN + math.random() * (SPAWN_RING_MAX - SPAWN_RING_MIN)
         local x = anchor.X + math.cos(ang) * r
         local z = anchor.Z + math.sin(ang) * r
+
+        if bounds and not inBounds(bounds, x, z, BOUNDS_MARGIN) then
+            continue
+        end
+
         local hit = raycastGround(Vector3.new(x, 0, z))
-        if hit and hit.Position then
-            if slopeDeg(hit.Normal) <= MAX_GROUND_SLOPE_DEG then
+        if hit and hit.Position and slopeDeg(hit.Normal) <= MAX_GROUND_SLOPE_DEG then
+            return CFrame.new(hit.Position + Vector3.new(0, 2.5, 0))
+        end
+    end
+
+    -- Fallback 1: force samples inside bounds so we do not collapse into one direction when outside area is void
+    if bounds then
+        for _ = 1, MAX_SPAWN_TRIES do
+            local ang = math.random() * math.pi * 2
+            local r = SPAWN_RING_MIN + math.random() * (SPAWN_RING_MAX - SPAWN_RING_MIN)
+            local x = math.clamp(anchor.X + math.cos(ang) * r, bounds.minX + BOUNDS_MARGIN, bounds.maxX - BOUNDS_MARGIN)
+            local z = math.clamp(anchor.Z + math.sin(ang) * r, bounds.minZ + BOUNDS_MARGIN, bounds.maxZ - BOUNDS_MARGIN)
+
+            local hit = raycastGround(Vector3.new(x, 0, z))
+            if hit and hit.Position and slopeDeg(hit.Normal) <= MAX_GROUND_SLOPE_DEG then
                 return CFrame.new(hit.Position + Vector3.new(0, 2.5, 0))
             end
         end
     end
 
-    return CFrame.new(anchor + Vector3.new(0, 2.5, -SPAWN_RING_MIN))
+    -- Fallback 2: last resort, still random direction (never fixed -Z)
+    local ang = math.random() * math.pi * 2
+    local dx, dz = math.cos(ang) * SPAWN_RING_MIN, math.sin(ang) * SPAWN_RING_MIN
+    return CFrame.new(anchor + Vector3.new(dx, 2.5, dz))
 end
 
 -- Enemy config (studs, Roblox Humanoid speeds)
