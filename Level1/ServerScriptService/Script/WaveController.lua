@@ -227,10 +227,12 @@ local function pickSpawnCFrame(): CFrame?
     local anchor = hrps[math.random(1, #hrps)].Position
 
     -- Optional explicit spawn points (best)
-    local spFolder = workspace:FindFirstChild("SpawnPoints")
+    local spFolder = workspace:FindFirstChild("SpawnPoints") or workspace:FindFirstChild("SpawnPoints", true)
     if spFolder then
         local pts = spFolder:GetChildren()
-        if #pts > 0 then
+        if #pts == 0 then
+            warn("[WaveController] SpawnPoints folder found but empty:", spFolder:GetFullName())
+        else
             local p = pts[math.random(1, #pts)]
             if p:IsA("BasePart") then
                 return CFrame.new(p.Position + Vector3.new(0, 2.5, 0))

@@ -39,8 +39,9 @@ local function popText(worldPos: Vector3, amount: number, crit: boolean)
 	t.Font = crit and Enum.Font.GothamBlack or Enum.Font.GothamBold
 	t.TextSize = crit and 22 or 18
 	t.TextStrokeTransparency = 0.6
-	t.TextColor3 = crit and Color3.fromRGB(255,180,60) or Color3.fromRGB(245,245,245)
-	t.Text = crit and ("CRIT %d"):format(amount) or tostring(amount)
+	-- normal: gray, crit: red
+	t.TextColor3 = crit and Color3.fromRGB(235, 60, 60) or Color3.fromRGB(170, 170, 170)
+	t.Text = tostring(amount)
 	t.Parent = bb
 
 	local goalPos = worldPos + Vector3.new((math.random()-0.5)*1.2, 1.6 + math.random()*0.6, (math.random()-0.5)*1.2)

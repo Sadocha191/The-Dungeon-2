@@ -9,6 +9,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
 
+local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+local DamageIndicatorEvent = remotesFolder and remotesFolder:FindFirstChild("DamageIndicatorEvent")
+
 local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
 local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions"))
 
@@ -27,6 +30,20 @@ local function safeDamage(hum: Humanoid, dmg: number)
 	dmg = math.floor(tonumber(dmg) or 0)
 	if dmg <= 0 then return end
 	pcall(function() hum:TakeDamage(dmg) end)
+end
+
+-- Floating dmg indicator (client-side Billboard). Call only on meaningful hits (not every DoT tick).
+local function fireDamageIndicator(plr: Player, enemy: Model, dmg: number, crit: boolean)
+	if not DamageIndicatorEvent then return end
+	if not plr or not plr.Parent then return end
+	if not enemy or not enemy.Parent then return end
+	local hrp = enemy:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+	DamageIndicatorEvent:FireClient(plr, {
+		pos = hrp.Position + Vector3.new(0, 2, 0),
+		amount = math.floor(tonumber(dmg) or 0),
+		crit = crit == true,
+	})
 end
 
 local function getEnemyModels()
@@ -192,6 +209,9 @@ local function projHitDamage(plr: Player, enemy: Model, dmg: number, opts)
 	end
 
 	safeDamage(hum, dmg)
+	if opts.showIndicator ~= false then
+		fireDamageIndicator(plr, enemy, dmg, opts.crit == true)
+	end
 
 	if opts.slowPct then
 		applySlow(enemy, opts.slowPct, opts.slowDuration or 1)
@@ -203,6 +223,7 @@ local function projHitDamage(plr: Player, enemy: Model, dmg: number, opts)
 		local endT = os.clock() + opts.burnDuration
 		task.spawn(function()
 			while os.clock() < endT and hum.Health > 0 do
+				-- DoT: no floating text spam
 				safeDamage(hum, opts.burnDps * 0.5) -- tick 0.5s
 				task.wait(0.5)
 			end
@@ -212,6 +233,7 @@ local function projHitDamage(plr: Player, enemy: Model, dmg: number, opts)
 		local endT = os.clock() + opts.poisonDuration
 		task.spawn(function()
 			while os.clock() < endT and hum.Health > 0 do
+				-- DoT: no floating text spam
 				safeDamage(hum, opts.poisonDps * 0.5)
 				task.wait(0.5)
 			end
@@ -313,8 +335,9 @@ local function tickOrbit(plr: Player, dt: number, id: string, count: number, rad
 		if nearest then
 			local hum = nearest:FindFirstChildOfClass("Humanoid")
 			if hum then
-				local key = tostring(nearest:GetDebugId())
-				local last = bucket.lastHit[key] or 0
+					-- GetDebugId() is plugin-only; use the Instance itself as a stable table key.
+					local key = nearest
+					local last = bucket.lastHit[key] or 0
 				if os.clock() - last >= hitCd then
 					bucket.lastHit[key] = os.clock()
 					safeDamage(hum, baseDmg * getAtkMult(plr))
@@ -441,7 +464,7 @@ local function stepPlayer(plr: Player, dt: number)
 							mult = 1.8
 						end
 						local pierce = (lv >= 6 and 2) or 0
-						fireProjectile(plr, pos + Vector3.new(0,2,0), dir, 85, 50, dmg*mult, pierce, {})
+						fireProjectile(plr, pos + Vector3.new(0,2,0), dir, 85, 50, dmg*mult, pierce, { crit = (mult > 1) })
 					end)
 				end
 			end
