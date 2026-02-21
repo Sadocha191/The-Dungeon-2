@@ -78,6 +78,8 @@ local function makeOrb(kind: "xp" | "coins", amount: number, pos: Vector3)
 	p.Anchored = true -- bez fizyki
 	p.CFrame = CFrame.new(getGroundedPosition(pos))
 	p.Parent = dropsFolder
+	p.AssemblyLinearVelocity = Vector3.new((math.random() - 0.5) * 6, math.random(5, 8), (math.random() - 0.5) * 6)
+	p.AssemblyAngularVelocity = Vector3.new((math.random() - 0.5) * 5, (math.random() - 0.5) * 5, (math.random() - 0.5) * 5)
 
 	active[p] = { type = kind, amount = math.max(1, math.floor(amount)) }
 	return p
