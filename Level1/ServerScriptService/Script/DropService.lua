@@ -25,12 +25,25 @@ GROUND_RAY_PARAMS.FilterType = Enum.RaycastFilterType.Blacklist
 GROUND_RAY_PARAMS.IgnoreWater = false
 
 local function getGroundedPosition(pos: Vector3)
-	GROUND_RAY_PARAMS.FilterDescendantsInstances = {dropsFolder}
-	local origin = pos + Vector3.new(0, 10, 0)
-	local result = workspace:Raycast(origin, Vector3.new(0, -80, 0), GROUND_RAY_PARAMS)
-	if result then
-		return Vector3.new(pos.X, result.Position.Y + ORB_HALF_HEIGHT + 0.04, pos.Z)
+	local ignore = {dropsFolder}
+
+	local enemiesFolder = workspace:FindFirstChild("Enemies")
+	if enemiesFolder then table.insert(ignore, enemiesFolder) end
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr.Character then table.insert(ignore, plr.Character) end
 	end
+
+	GROUND_RAY_PARAMS.FilterDescendantsInstances = ignore
+
+	local origin = pos + Vector3.new(0, 10, 0)
+	local direction = Vector3.new(0, -120, 0)
+	local result = workspace:Raycast(origin, direction, GROUND_RAY_PARAMS)
+	if result then
+		local grounded = result.Position + result.Normal * ORB_HALF_HEIGHT
+		return Vector3.new(grounded.X, grounded.Y, grounded.Z)
+	end
+
 	return pos + Vector3.new(0, ORB_SPAWN_HEIGHT, 0)
 end
 
