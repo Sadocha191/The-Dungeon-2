@@ -124,10 +124,8 @@ function MissionProgress.OnKill(plr: Player, mobModel: Model?)
 	if mobModel and mobModel:GetAttribute("IsElite") == true then
 		MissionProgress.Add(plr, "ELITE_KILLS", 1)
 	end
-	-- w obecnym designie run kończy się po 8 falach, więc "BOSSES" liczymy jako ukończone runy (finale)
-	if mobModel and mobModel:GetAttribute("IsBoss") == true then
-		MissionProgress.Add(plr, "BOSSES", 1)
-	end
+	-- Boss progress liczymy tylko za ukończony run (OnRunComplete),
+	-- żeby uniknąć podwójnego naliczania przy mapach z realnym bossem.
 end
 
 function MissionProgress.OnRunComplete(plr: Player, waves: number, seconds: number, diedThisRun: boolean)
@@ -137,9 +135,15 @@ function MissionProgress.OnRunComplete(plr: Player, waves: number, seconds: numb
 	MissionProgress.Add(plr, "RUNS", 1)
 	MissionProgress.Add(plr, "RUNS_WITH_WEAPON", 1)
 
-	if waves > 0 then
-		MissionProgress.Add(plr, "WAVES", waves)
-		MissionProgress.SetMax(plr, "WAVE_MAX", waves)
+	-- Tryb horde jest czasowy, ale utrzymujemy liczniki WAVE* pod stare questy:
+	-- 1 pseudo-fala = 30 sekund aktywnej gry.
+	local pseudoWaves = waves
+	if pseudoWaves <= 0 and seconds > 0 then
+		pseudoWaves = math.max(1, math.floor(seconds / 30))
+	end
+	if pseudoWaves > 0 then
+		MissionProgress.Add(plr, "WAVES", pseudoWaves)
+		MissionProgress.SetMax(plr, "WAVE_MAX", pseudoWaves)
 	end
 
 	if seconds > 0 then
@@ -150,12 +154,12 @@ function MissionProgress.OnRunComplete(plr: Player, waves: number, seconds: numb
 		MissionProgress.Add(plr, "NO_DEATH_RUNS", 1)
 	end
 
-	-- "FAST_RUNS": ukończ run <= 6 minut (360s)
-	if seconds > 0 and seconds <= 360 then
+	-- "FAST_RUNS": zgodnie z MissionConfigs -> ukończ run <= 12 minut (720s)
+	if seconds > 0 and seconds <= 720 then
 		MissionProgress.Add(plr, "FAST_RUNS", 1)
 	end
 
-	-- Boss missions: traktujemy ukończenie runa jako "boss" (bo nie ma dedykowanego bossa)
+	-- Boss missions: traktujemy ukończenie runa jako "boss".
 	MissionProgress.Add(plr, "BOSSES", 1)
 
 	PlayerData.Save(plr, false)
