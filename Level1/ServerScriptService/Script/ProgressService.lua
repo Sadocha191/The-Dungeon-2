@@ -348,34 +348,47 @@ local function rollOffers(plr: Player)
 	local weights = SpellDefs.RARITY_WEIGHTS or { Common=1, Uncommon=0, Rare=0, Epic=0 }
 
 	local offers = {}
+	local picked = {}
 
 	for _ = 1, 3 do
 		local pickedId, pickedRarity
 
-		-- retry: wylosuj rarity, ale tylko jeśli w tej puli coś jest
+		-- retry: wylosuj rarity, ale tylko jeśli w tej puli jest jeszcze unikalny spell
 		for attempt = 1, 25 do
 			local rarity = rollRarity(weights)
 			local pool = pools[rarity]
 			if pool and #pool > 0 then
-				pickedId = pool[math.random(1, #pool)]
-				pickedRarity = rarity
-				break
+				for _ = 1, 10 do
+					local candidate = pool[math.random(1, #pool)]
+					if candidate and not picked[candidate] then
+						pickedId = candidate
+						pickedRarity = rarity
+						break
+					end
+				end
+				if pickedId then break end
 			end
 		end
 
-		-- fallback: dowolna niepusta pula
+		-- fallback: dowolna niepusta pula z jeszcze nieużytym spell'em
 		if not pickedId then
 			for _, rarity in ipairs(RARITY_ORDER) do
 				local pool = pools[rarity]
 				if pool and #pool > 0 then
-					pickedId = pool[math.random(1, #pool)]
-					pickedRarity = rarity
-					break
+					for _, candidate in ipairs(pool) do
+						if candidate and not picked[candidate] then
+							pickedId = candidate
+							pickedRarity = rarity
+							break
+						end
+					end
+					if pickedId then break end
 				end
 			end
 		end
 
 		if pickedId then
+			picked[pickedId] = true
 			table.insert(offers, { spellId = pickedId, rarity = pickedRarity or "Common" })
 		end
 	end
@@ -657,7 +670,8 @@ local function endRunForPlayer(plr: Player, reason: string)
 		accountLevel = tonumber(d.level) or 1,
 	})
 	if MissionProgress and MissionProgress.OnRunComplete then
-		pcall(function() MissionProgress.OnRunComplete(plr, 0, seconds, true) end)
+		local diedThisRun = (reason ~= "Victory")
+		pcall(function() MissionProgress.OnRunComplete(plr, 0, seconds, diedThisRun) end)
 	end
 end
 
