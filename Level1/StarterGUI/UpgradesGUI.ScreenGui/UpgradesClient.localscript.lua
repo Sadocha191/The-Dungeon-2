@@ -55,7 +55,6 @@ local slot1 = offersContainer:WaitForChild("CardSlot1")
 local slot2 = offersContainer:WaitForChild("CardSlot2")
 local slot3 = offersContainer:WaitForChild("CardSlot3")
 local slots = { slot1, slot2, slot3 }
-local cardTemplate = offersContainer:FindFirstChild("CardTemplate")
 
 -- rarity images: ReplicatedStorage/Assets/UpgradeIcons/(Common/Uncommon/Rare/Epic)
 local iconsFolder = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("UpgradeIcons")
@@ -130,31 +129,10 @@ end
 
 local function clearSlot(slot: Instance)
 	for _, ch in ipairs(slot:GetChildren()) do
-		if ch.Name == "CardButton" then
+		if ch.Name == "CardButton" or ch.Name == "Title" or ch.Name == "Desc" or ch.Name == "RarityText" then
 			ch:Destroy()
 		end
 	end
-end
-
-local function makeFallbackLabel(parent: Instance, name: string, pos: UDim2, size: UDim2, bold: boolean)
-	local label = Instance.new("TextLabel")
-	label.Name = name
-	label.BackgroundTransparency = 1
-	label.Position = pos
-	label.Size = size
-	label.Font = bold and Enum.Font.GothamBold or Enum.Font.Gotham
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.TextColor3 = Color3.fromRGB(245,245,245)
-	label.TextWrapped = not bold
-	if bold then
-		label.TextSize = 20
-	else
-		label.TextSize = 14
-		label.TextYAlignment = Enum.TextYAlignment.Top
-	end
-	label.Text = ""
-	label.Parent = parent
-	return label
 end
 
 local function makeCardInSlot(slot: Frame)
@@ -169,41 +147,54 @@ local function makeCardInSlot(slot: Frame)
 	cardBtn.ScaleType = Enum.ScaleType.Stretch
 	cardBtn.Parent = slot
 
-	local title: TextLabel?
-	local desc: TextLabel?
+	local title = Instance.new("TextLabel")
+	title.Name = "Title"
+	title.BackgroundTransparency = 1
+	title.Position = UDim2.new(0, 16, 0, 16)
+	title.Size = UDim2.new(1, -32, 0, 28)
+	title.Font = Enum.Font.GothamBold
+	title.TextSize = 20
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.TextColor3 = Color3.fromRGB(245,245,245)
+	title.Text = ""
+	title.Parent = cardBtn
 
-	if cardTemplate and cardTemplate:IsA("GuiObject") then
-		local clone = cardTemplate:Clone()
-		clone.Name = "Template"
-		clone.Visible = true
-		clone.Parent = cardBtn
-		title = clone:FindFirstChild("Title", true)
-		desc = clone:FindFirstChild("Desc", true)
-	end
+	local rarityText = Instance.new("TextLabel")
+	rarityText.Name = "RarityText"
+	rarityText.BackgroundTransparency = 1
+	rarityText.Position = UDim2.new(0, 16, 0, 46)
+	rarityText.Size = UDim2.new(1, -32, 0, 20)
+	rarityText.Font = Enum.Font.Gotham
+	rarityText.TextSize = 14
+	rarityText.TextXAlignment = Enum.TextXAlignment.Left
+	rarityText.TextColor3 = Color3.fromRGB(210,210,210)
+	rarityText.Text = ""
+	rarityText.Parent = cardBtn
 
-	if not title then
-		title = makeFallbackLabel(cardBtn, "Title", UDim2.new(0, 16, 0, 16), UDim2.new(1, -32, 0, 28), true)
-	end
-	if not desc then
-		desc = makeFallbackLabel(cardBtn, "Desc", UDim2.new(0, 16, 0, 50), UDim2.new(1, -32, 1, -66), false)
-	end
+	local desc = Instance.new("TextLabel")
+	desc.Name = "Desc"
+	desc.BackgroundTransparency = 1
+	desc.Position = UDim2.new(0, 16, 0, 74)
+	desc.Size = UDim2.new(1, -32, 1, -90)
+	desc.Font = Enum.Font.Gotham
+	desc.TextSize = 14
+	desc.TextWrapped = true
+	desc.TextYAlignment = Enum.TextYAlignment.Top
+	desc.TextXAlignment = Enum.TextXAlignment.Left
+	desc.TextColor3 = Color3.fromRGB(235,235,235)
+	desc.Text = ""
+	desc.Parent = cardBtn
 
-	return cardBtn, title :: TextLabel, desc :: TextLabel
+	return cardBtn, title, desc, rarityText
 end
 
-local function cardDescForSpell(spellId: string): string
+local function nextDescForSpell(spellId: string): string
 	local def = SpellDefs.SPELLS[spellId]
 	if not def then return "" end
-
 	local lv = plr:GetAttribute(("Spell_%s_Level"):format(spellId)) or 0
-	if lv <= 0 then
-		return tostring(def.description or "")
-	end
-
 	if typeof(def.nextDesc) == "function" then
-		return tostring(def.nextDesc(lv) or "")
+		return def.nextDesc(lv)
 	end
-
 	return ""
 end
 
@@ -232,11 +223,12 @@ local function renderOffers(token: string, offers: {any})
 			local rarity = tostring(off.rarity or "Common")
 			local def = SpellDefs.SPELLS[spellId]
 
-			local cardBtn, title, desc = makeCardInSlot(slot)
+			local cardBtn, title, desc, rarityText = makeCardInSlot(slot)
 			cardBtn.Image = rarityImage[rarity] or rarityImage.Common
 
 			title.Text = (def and def.name) or spellId
-			desc.Text = cardDescForSpell(spellId)
+			rarityText.Text = rarity
+			desc.Text = nextDescForSpell(spellId)
 
 			cardBtn.MouseButton1Click:Connect(function()
 		if os.clock() < choiceLockedUntil then return end
