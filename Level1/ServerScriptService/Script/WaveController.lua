@@ -545,8 +545,24 @@ end
 
 -- Run clock (server-side)
 local runStart = time()
+local pausedAccum = 0
+local pauseStart = nil
+
 local function elapsed()
-    return time() - runStart
+    local now = time()
+    if PauseState.Value then
+        if not pauseStart then
+            pauseStart = now
+        end
+        return pauseStart - runStart - pausedAccum
+    end
+
+    if pauseStart then
+        pausedAccum += (now - pauseStart)
+        pauseStart = nil
+    end
+
+    return now - runStart - pausedAccum
 end
 
 -- Expose run seconds for other scripts if needed
@@ -608,6 +624,10 @@ local lastSpawnAt = 0
 RunService.Heartbeat:Connect(function()
     local t = elapsed()
 
+    if PauseState.Value then
+        return
+    end
+
     -- Stop if nobody is in a run / everyone ended.
     if not anyPlayersAlive() then
         return
@@ -643,8 +663,6 @@ RunService.Heartbeat:Connect(function()
         return
     end
     lastSpawnAt = t
-
-    waitIfPaused()
 
     local maxAlive = desiredMaxAlive(t)
     if activeEnemiesCount() >= maxAlive then
