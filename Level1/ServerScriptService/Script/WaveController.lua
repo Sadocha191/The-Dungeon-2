@@ -146,17 +146,33 @@ local function getClosestLivingHRP(fromPos: Vector3): BasePart?
 end
 
 local function raycastGround(pos: Vector3)
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Blacklist
-
-    local blacklist = { ENEMIES_FOLDER }
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr.Character then
-            table.insert(blacklist, plr.Character)
-        end
+    -- If you have Workspace.Terrain.Spawnable, we only allow spawns on those parts.
+    -- Otherwise fallback to a blacklist-based raycast.
+    if not workspace:GetAttribute("_SpawnableResolved") then
+        workspace:SetAttribute("_SpawnableResolved", true)
+        local terrainFolder = workspace:FindFirstChild("Terrain")
+        workspace:SetAttribute("_HasSpawnable", terrainFolder and terrainFolder:FindFirstChild("Spawnable") ~= nil)
     end
-    params.FilterDescendantsInstances = blacklist
+
+    local params = RaycastParams.new()
     params.IgnoreWater = true
+
+    local terrainFolder = workspace:FindFirstChild("Terrain")
+    local spawnable = terrainFolder and terrainFolder:FindFirstChild("Spawnable")
+
+    if spawnable then
+        params.FilterType = Enum.RaycastFilterType.Include
+        params.FilterDescendantsInstances = { spawnable }
+    else
+        params.FilterType = Enum.RaycastFilterType.Blacklist
+        local blacklist = { ENEMIES_FOLDER }
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr.Character then
+                table.insert(blacklist, plr.Character)
+            end
+        end
+        params.FilterDescendantsInstances = blacklist
+    end
 
     local origin = Vector3.new(pos.X, SPAWN_RAY_START_Y, pos.Z)
     return workspace:Raycast(origin, Vector3.new(0, -GROUND_RAY_DIST, 0), params)
@@ -168,43 +184,26 @@ local function slopeDeg(normal: Vector3)
     return math.deg(math.acos(dot))
 end
 
--- Best-effort spawn bounds: scan anchored, collidable "ground-like" parts so we do not bias spawns when ring samples land in void.
+-- Spawn bounds: use Workspace.Terrain.Spawnable.Map as the playable floor bounds.
+-- This prevents "spawn only in a quarter" when ring samples outside the arena.
 local _boundsCache = nil
 local _boundsCacheT = 0
-local BOUNDS_REFRESH_SEC = 10
-local MIN_GROUND_AREA = 20 * 20 -- studs^2 (ignore tiny parts)
+local BOUNDS_REFRESH_SEC = 2
 
 local function computeSpawnBounds()
-    local minX, maxX = math.huge, -math.huge
-    local minZ, maxZ = math.huge, -math.huge
-    local found = false
-
-    for _, inst in ipairs(workspace:GetDescendants()) do
-        if inst:IsA("BasePart") then
-            if inst.Anchored and inst.CanCollide and inst.CanQuery then
-                if not inst:IsDescendantOf(ENEMIES_FOLDER) then
-                    local model = inst:FindFirstAncestorOfClass("Model")
-                    local isCharacter = model and Players:GetPlayerFromCharacter(model) ~= nil
-                    if not isCharacter then
-                        local area = inst.Size.X * inst.Size.Z
-                        if area >= MIN_GROUND_AREA then
-                            local halfX, halfZ = inst.Size.X * 0.5, inst.Size.Z * 0.5
-                            local x1, x2 = inst.Position.X - halfX, inst.Position.X + halfX
-                            local z1, z2 = inst.Position.Z - halfZ, inst.Position.Z + halfZ
-                            if x1 < minX then minX = x1 end
-                            if x2 > maxX then maxX = x2 end
-                            if z1 < minZ then minZ = z1 end
-                            if z2 > maxZ then maxZ = z2 end
-                            found = true
-                        end
-                    end
-                end
-            end
-        end
+    local terrainFolder = workspace:FindFirstChild("Terrain")
+    local spawnable = terrainFolder and terrainFolder:FindFirstChild("Spawnable")
+    local mapPart = spawnable and spawnable:FindFirstChild("Map")
+    if mapPart and mapPart:IsA("BasePart") then
+        local halfX, halfZ = mapPart.Size.X * 0.5, mapPart.Size.Z * 0.5
+        return {
+            minX = mapPart.Position.X - halfX,
+            maxX = mapPart.Position.X + halfX,
+            minZ = mapPart.Position.Z - halfZ,
+            maxZ = mapPart.Position.Z + halfZ,
+        }
     end
-
-    if not found then return nil end
-    return { minX = minX, maxX = maxX, minZ = minZ, maxZ = maxZ }
+    return nil
 end
 
 local function getSpawnBounds()
@@ -226,21 +225,7 @@ local function pickSpawnCFrame(): CFrame?
     if #hrps == 0 then return nil end
     local anchor = hrps[math.random(1, #hrps)].Position
 
-    -- Optional explicit spawn points (best)
-    local spFolder = workspace:FindFirstChild("SpawnPoints") or workspace:FindFirstChild("SpawnPoints", true)
-    if spFolder then
-        local pts = spFolder:GetChildren()
-        if #pts == 0 then
-            warn("[WaveController] SpawnPoints folder found but empty:", spFolder:GetFullName())
-        else
-            local p = pts[math.random(1, #pts)]
-            if p:IsA("BasePart") then
-                return CFrame.new(p.Position + Vector3.new(0, 2.5, 0))
-            elseif p:IsA("Attachment") then
-                return CFrame.new(p.WorldPosition + Vector3.new(0, 2.5, 0))
-            end
-        end
-    end
+    -- We intentionally do NOT use SpawnPoints here (raycast-based spawning only).
 
     local bounds = getSpawnBounds()
     local BOUNDS_MARGIN = 6
@@ -251,8 +236,10 @@ local function pickSpawnCFrame(): CFrame?
         local x = anchor.X + math.cos(ang) * r
         local z = anchor.Z + math.sin(ang) * r
 
+        -- Clamp into Map bounds so we don't waste tries outside the playable area.
         if bounds and not inBounds(bounds, x, z, BOUNDS_MARGIN) then
-            continue
+            x = math.clamp(x, bounds.minX + BOUNDS_MARGIN, bounds.maxX - BOUNDS_MARGIN)
+            z = math.clamp(z, bounds.minZ + BOUNDS_MARGIN, bounds.maxZ - BOUNDS_MARGIN)
         end
 
         local hit = raycastGround(Vector3.new(x, 0, z))
@@ -261,14 +248,11 @@ local function pickSpawnCFrame(): CFrame?
         end
     end
 
-    -- Fallback 1: force samples inside bounds so we do not collapse into one direction when outside area is void
+    -- Fallback: random point inside Map bounds.
     if bounds then
         for _ = 1, MAX_SPAWN_TRIES do
-            local ang = math.random() * math.pi * 2
-            local r = SPAWN_RING_MIN + math.random() * (SPAWN_RING_MAX - SPAWN_RING_MIN)
-            local x = math.clamp(anchor.X + math.cos(ang) * r, bounds.minX + BOUNDS_MARGIN, bounds.maxX - BOUNDS_MARGIN)
-            local z = math.clamp(anchor.Z + math.sin(ang) * r, bounds.minZ + BOUNDS_MARGIN, bounds.maxZ - BOUNDS_MARGIN)
-
+            local x = (bounds.minX + BOUNDS_MARGIN) + math.random() * ((bounds.maxX - BOUNDS_MARGIN) - (bounds.minX + BOUNDS_MARGIN))
+            local z = (bounds.minZ + BOUNDS_MARGIN) + math.random() * ((bounds.maxZ - BOUNDS_MARGIN) - (bounds.minZ + BOUNDS_MARGIN))
             local hit = raycastGround(Vector3.new(x, 0, z))
             if hit and hit.Position and slopeDeg(hit.Normal) <= MAX_GROUND_SLOPE_DEG then
                 return CFrame.new(hit.Position + Vector3.new(0, 2.5, 0))
@@ -276,10 +260,7 @@ local function pickSpawnCFrame(): CFrame?
         end
     end
 
-    -- Fallback 2: last resort, still random direction (never fixed -Z)
-    local ang = math.random() * math.pi * 2
-    local dx, dz = math.cos(ang) * SPAWN_RING_MIN, math.sin(ang) * SPAWN_RING_MIN
-    return CFrame.new(anchor + Vector3.new(dx, 2.5, dz))
+    return CFrame.new(anchor + Vector3.new(0, 2.5, 0))
 end
 
 -- Enemy config (studs, Roblox Humanoid speeds)
