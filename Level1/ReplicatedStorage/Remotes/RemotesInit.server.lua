@@ -23,3 +23,6 @@ end
 ensureRemoteEvent("PartyLevelUp")        -- server -> all clients
 ensureRemoteEvent("PartyUpgradePicked")  -- client -> server (wybrano upgrade)
 ensureRemoteEvent("PartyXPUpdate")       -- server -> all clients (xp/level update opcjonalnie)
+
+-- Floating damage numbers
+ensureRemoteEvent("DamageIndicatorEvent")  -- server -> all clients (pos, amount, crit)
