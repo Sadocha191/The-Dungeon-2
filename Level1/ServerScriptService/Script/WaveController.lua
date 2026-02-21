@@ -420,7 +420,7 @@ local function startSimpleAI(mob: Model)
                 if dist <= attackRange and time() - lastAttack >= attackCD then
                     lastAttack = time()
                     local targetHum = targetHRP.Parent and targetHRP.Parent:FindFirstChildOfClass("Humanoid")
-                    if targetHum and targetHum.Health > 0 then
+                    if targetHum and targetHum.Health > 0 and not PauseState.Value then
                         targetHum:TakeDamage(damage)
                     end
                 end
