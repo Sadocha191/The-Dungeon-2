@@ -17,13 +17,26 @@ if not DamageIndicatorEvent then
 	DamageIndicatorEvent.Parent = remotes
 end
 
-local enemiesFolder = workspace:FindFirstChild("Enemies") or workspace:FindFirstChild("Mobs")
-if not enemiesFolder then
-	warn("[DamageIndicators] Missing Enemies/Mobs folder")
-	return
-end
-
 local lastHealthByHumanoid: {[Humanoid]: number} = {}
+local trackedModels: {[Model]: boolean} = {}
+
+local function getNearestPlayer(pos: Vector3, maxDist: number): Player?
+	local best: Player? = nil
+	local bestDist = maxDist
+	for _, plr in ipairs(Players:GetPlayers()) do
+		local char = plr.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hrp and hum and hum.Health > 0 then
+			local d = (hrp.Position - pos).Magnitude
+			if d < bestDist then
+				bestDist = d
+				best = plr
+			end
+		end
+	end
+	return best
+end
 
 local function getAttackerFromCreator(humanoid: Humanoid): Player?
 	local creator = humanoid:FindFirstChild("creator")
@@ -65,6 +78,12 @@ local function trackHumanoid(enemyModel: Model, humanoid: Humanoid)
 		if newHealth < oldHealth then
 			local dealt = oldHealth - newHealth
 			local attacker = getAttackerFromCreator(humanoid)
+			if not attacker then
+				local hrp = enemyModel:FindFirstChild("HumanoidRootPart")
+				if hrp then
+					attacker = getNearestPlayer(hrp.Position, 120)
+				end
+			end
 			if attacker and attacker.Parent == Players then
 				fireIndicator(attacker, enemyModel, dealt)
 			end
@@ -84,11 +103,14 @@ local function tryTrackEnemy(enemyModel: Instance)
 	if not enemyModel:IsA("Model") then
 		return
 	end
+	if trackedModels[enemyModel] then
+		return
+	end
+	trackedModels[enemyModel] = true
 
 	local humanoid = enemyModel:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		trackHumanoid(enemyModel, humanoid)
-		return
 	end
 
 	enemyModel.ChildAdded:Connect(function(child)
@@ -98,10 +120,28 @@ local function tryTrackEnemy(enemyModel: Instance)
 	end)
 end
 
-for _, enemy in ipairs(enemiesFolder:GetChildren()) do
-	tryTrackEnemy(enemy)
+local function bindEnemiesFolder(folder: Instance)
+	for _, d in ipairs(folder:GetDescendants()) do
+		if d:IsA("Model") then
+			tryTrackEnemy(d)
+		end
+	end
+	folder.DescendantAdded:Connect(function(d)
+		if d:IsA("Model") then
+			tryTrackEnemy(d)
+		elseif d:IsA("Humanoid") and d.Parent and d.Parent:IsA("Model") then
+			tryTrackEnemy(d.Parent)
+		end
+	end)
 end
 
-enemiesFolder.ChildAdded:Connect(function(child)
-	tryTrackEnemy(child)
-end)
+local enemiesFolder = workspace:FindFirstChild("Enemies") or workspace:FindFirstChild("Mobs")
+if enemiesFolder then
+	bindEnemiesFolder(enemiesFolder)
+else
+	workspace.ChildAdded:Connect(function(child)
+		if child.Name == "Enemies" or child.Name == "Mobs" then
+			bindEnemiesFolder(child)
+		end
+	end)
+end
