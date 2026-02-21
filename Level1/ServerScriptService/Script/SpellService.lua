@@ -9,8 +9,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
 
-local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes") or ReplicatedStorage:WaitForChild("Remotes", 5)
 local DamageIndicatorEvent = remotesFolder and remotesFolder:FindFirstChild("DamageIndicatorEvent")
+if remotesFolder and not DamageIndicatorEvent then
+	DamageIndicatorEvent = Instance.new("RemoteEvent")
+	DamageIndicatorEvent.Name = "DamageIndicatorEvent"
+	DamageIndicatorEvent.Parent = remotesFolder
+end
 
 local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
 local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions"))
