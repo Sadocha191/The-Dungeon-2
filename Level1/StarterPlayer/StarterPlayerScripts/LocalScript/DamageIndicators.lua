@@ -39,8 +39,7 @@ local function popText(worldPos: Vector3, amount: number, crit: boolean)
 	t.Font = crit and Enum.Font.GothamBlack or Enum.Font.GothamBold
 	t.TextSize = crit and 22 or 18
 	t.TextStrokeTransparency = 0.6
-	-- normal: gray, crit: red
-	t.TextColor3 = crit and Color3.fromRGB(235, 60, 60) or Color3.fromRGB(170, 170, 170)
+	t.TextColor3 = crit and Color3.fromRGB(255, 70, 70) or Color3.fromRGB(160, 160, 160)
 	t.Text = tostring(amount)
 	t.Parent = bb
 
