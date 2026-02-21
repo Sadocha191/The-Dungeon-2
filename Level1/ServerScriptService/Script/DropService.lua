@@ -14,7 +14,9 @@ local active = {} -- [part] = {type="xp"/"coins", amount=number}
 
 local ATTRACT_RADIUS = 8 -- przyciąganie dopiero z bliska
 local PICKUP_DIST = 2.5
-local ATTRACT_SPEED = 3.5 -- wolniejsze przyciąganie
+local ATTRACT_SPEED_MULT = 1.15 -- trochę szybciej od aktualnej prędkości gracza
+local ATTRACT_SPEED_BONUS = 4 -- zapas na przyszłe boosty prędkości
+local ATTRACT_SPEED_MIN = 22 -- minimalna prędkość przyciągania (studs/s)
 
 local ORB_SIZE = Vector3.new(1, 1, 1) -- większe orby
 local ORB_HALF_HEIGHT = ORB_SIZE.Y * 0.5
@@ -105,6 +107,7 @@ RunService.Heartbeat:Connect(function(dt)
 
 		local char = plr.Character
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
 		if not hrp then continue end
 
 		if dist <= PICKUP_DIST then
@@ -119,8 +122,14 @@ RunService.Heartbeat:Connect(function(dt)
 
 		if dist <= ATTRACT_RADIUS then
 			local target = hrp.Position + Vector3.new(0, 1.6, 0)
-			local alpha = math.clamp(dt * ATTRACT_SPEED, 0, 1)
-			orb.CFrame = CFrame.new(orb.Position:Lerp(target, alpha))
+			local toTarget = target - orb.Position
+			local toTargetDist = toTarget.Magnitude
+			if toTargetDist > 0 then
+				local walkSpeed = (hum and hum.WalkSpeed) or 16
+				local attractSpeed = math.max(ATTRACT_SPEED_MIN, walkSpeed * ATTRACT_SPEED_MULT + ATTRACT_SPEED_BONUS)
+				local step = math.min(toTargetDist, attractSpeed * dt)
+				orb.CFrame = CFrame.new(orb.Position + toTarget.Unit * step)
+			end
 		end
 	end
 end)
