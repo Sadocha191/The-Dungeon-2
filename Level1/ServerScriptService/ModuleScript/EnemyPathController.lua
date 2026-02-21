@@ -13,7 +13,7 @@ local DEFAULT_PATH_PARAMS = {
 	WaypointSpacing = 5,
 }
 
-local function waitForMoveTo(humanoid: Humanoid, timeoutSec: number): (boolean, string?)
+local function waitForMoveTo(humanoid: Humanoid, timeoutSec: number, shouldAbort): (boolean, string?)
 	local done = false
 	local reached = false
 	local conn: RBXScriptConnection? = nil
@@ -25,6 +25,12 @@ local function waitForMoveTo(humanoid: Humanoid, timeoutSec: number): (boolean, 
 
 	local startedAt = time()
 	while not done and (time() - startedAt) < timeoutSec do
+		if shouldAbort and shouldAbort() then
+			if conn then
+				conn:Disconnect()
+			end
+			return false, "aborted"
+		end
 		task.wait(0.03)
 	end
 
@@ -71,6 +77,8 @@ function EnemyPathController.new(mob: Model, options)
 	self.RepathReason = nil
 	self.ConsecutiveRepathFails = 0
 	self.LastLOSDirectMove = 0
+	self.StopMove = self.Options.StopMove
+	self.IsPaused = self.Options.IsPaused
 
 	return self
 end
@@ -170,8 +178,16 @@ function EnemyPathController:FollowPath()
 	end
 
 	self.Humanoid:MoveTo(waypoint.Position)
-	local ok, failReason = waitForMoveTo(self.Humanoid, self.MoveTimeout)
+	local ok, failReason = waitForMoveTo(self.Humanoid, self.MoveTimeout, function()
+		return self.IsPaused and self.IsPaused() == true
+	end)
 	if not ok then
+		if failReason == "aborted" then
+			if self.StopMove then
+				self.StopMove()
+			end
+			return false
+		end
 		self:RequestRepath(failReason or "move_failed")
 		self.ConsecutiveRepathFails += 1
 		return false
@@ -200,9 +216,17 @@ function EnemyPathController:TryUnstuckStep()
 end
 
 function EnemyPathController:Run()
-	task.spawn(function()
-		while self.Mob.Parent and self.Humanoid.Health > 0 do
-			local targetHRP = self:AcquireTarget()
+		task.spawn(function()
+			while self.Mob.Parent and self.Humanoid.Health > 0 do
+				if self.IsPaused and self.IsPaused() then
+					if self.StopMove then
+						self.StopMove()
+					end
+					task.wait(0.03)
+					continue
+				end
+
+				local targetHRP = self:AcquireTarget()
 			if not targetHRP then
 				task.wait(0.15)
 				continue

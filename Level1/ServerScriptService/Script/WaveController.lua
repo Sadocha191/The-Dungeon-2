@@ -368,8 +368,17 @@ local function startSimpleAI(mob: Model)
     local attackCD = tonumber(mob:GetAttribute("AttackCooldown")) or 1.5
     local damage = tonumber(mob:GetAttribute("Damage")) or 8
 
+    local function stopMovementNow()
+        hum:Move(Vector3.zero)
+        hum:MoveTo(hrp.Position)
+    end
+
     local controller = EnemyPathController.new(mob, {
         GetTarget = getClosestLivingHRP,
+        IsPaused = function()
+            return PauseState.Value
+        end,
+        StopMove = stopMovementNow,
         RepathDistance = 10,
         ComputeCooldown = 0.35,
         MoveTimeout = 2.0,
@@ -398,6 +407,12 @@ local function startSimpleAI(mob: Model)
             end
 
             waitIfPaused()
+
+            if PauseState.Value then
+                stopMovementNow()
+                task.wait(0.03)
+                continue
+            end
 
             local targetHRP = getClosestLivingHRP(hrp.Position)
             if targetHRP then
