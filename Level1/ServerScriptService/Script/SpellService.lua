@@ -9,13 +9,20 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
 
-local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes") or ReplicatedStorage:WaitForChild("Remotes", 5)
 local DamageIndicatorEvent = remotesFolder and remotesFolder:FindFirstChild("DamageIndicatorEvent")
+if remotesFolder and not DamageIndicatorEvent then
+	DamageIndicatorEvent = Instance.new("RemoteEvent")
+	DamageIndicatorEvent.Name = "DamageIndicatorEvent"
+	DamageIndicatorEvent.Parent = remotesFolder
+end
 
 local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
 local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions"))
 
-local enemiesFolder = workspace:FindFirstChild("Enemies") or workspace:FindFirstChild("Mobs")
+local function getEnemiesRoot()
+	return workspace:FindFirstChild("Enemies") or workspace:FindFirstChild("Mobs")
+end
 
 local vfxRoot = workspace:FindFirstChild("SpellVFX")
 if not vfxRoot then
@@ -48,12 +55,15 @@ end
 
 local function getEnemyModels()
 	local out = {}
-	if not enemiesFolder then return out end
-	for _, m in ipairs(enemiesFolder:GetChildren()) do
-		local hum = m:FindFirstChildOfClass("Humanoid")
-		local hrp = m:FindFirstChild("HumanoidRootPart")
-		if hum and hrp and hum.Health > 0 then
-			table.insert(out, m)
+	local enemiesRoot = getEnemiesRoot()
+	if not enemiesRoot then return out end
+	for _, d in ipairs(enemiesRoot:GetDescendants()) do
+		if d:IsA("Model") then
+			local hum = d:FindFirstChildOfClass("Humanoid")
+			local hrp = d:FindFirstChild("HumanoidRootPart")
+			if hum and hrp and hum.Health > 0 then
+				table.insert(out, d)
+			end
 		end
 	end
 	return out
@@ -117,9 +127,8 @@ end
 
 -- Status maintenance: slow/freeze
 RunService.Heartbeat:Connect(function()
-	if not enemiesFolder then return end
 	local now = os.clock()
-	for _, m in ipairs(enemiesFolder:GetChildren()) do
+	for _, m in ipairs(getEnemyModels()) do
 		local hum = m:FindFirstChildOfClass("Humanoid")
 		if hum and hum.Health > 0 then
 			local base = hum:GetAttribute("BaseWalkSpeed")
