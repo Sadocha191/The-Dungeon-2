@@ -19,6 +19,36 @@ if remotesFolder and not DamageIndicatorEvent then
 	DamageIndicatorEvent.Parent = remotesFolder
 end
 
+local PauseState = ReplicatedStorage:FindFirstChild("PauseState")
+if not PauseState then
+	PauseState = Instance.new("BoolValue")
+	PauseState.Name = "PauseState"
+	PauseState.Value = false
+	PauseState.Parent = ReplicatedStorage
+end
+
+local pauseAccum = 0
+local pauseStart: number? = nil
+
+local function isPaused(): boolean
+	return PauseState.Value == true
+end
+
+local function spellClock(): number
+	local realNow = os.clock()
+	if PauseState.Value then
+		if not pauseStart then
+			pauseStart = realNow
+		end
+		return pauseStart - pauseAccum
+	end
+	if pauseStart then
+		pauseAccum += (realNow - pauseStart)
+		pauseStart = nil
+	end
+	return realNow - pauseAccum
+end
+
 local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
 local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions"))
 
@@ -35,6 +65,7 @@ end
 
 -- ===== Utils =====
 local function safeDamage(hum: Humanoid, dmg: number)
+	if isPaused() then return end
 	if not hum or hum.Health <= 0 then return end
 	dmg = math.floor(tonumber(dmg) or 0)
 	if dmg <= 0 then return end
@@ -94,7 +125,7 @@ local function applySlow(model: Model, slowPct: number, duration: number)
 	slowPct = math.clamp(tonumber(slowPct) or 0, 0, 0.95)
 	duration = math.max(0.05, tonumber(duration) or 0.5)
 
-	local now = os.clock()
+	local now = spellClock()
 	local curEnd = hum:GetAttribute("SlowEnd") or 0
 	local curPct = hum:GetAttribute("SlowPct") or 0
 	local newEnd = math.max(curEnd, now + duration)
@@ -108,14 +139,14 @@ local function applyFreeze(model: Model, duration: number)
 	local hum = model and model:FindFirstChildOfClass("Humanoid")
 	if not hum then return end
 	duration = math.max(0.1, tonumber(duration) or 0.5)
-	local now = os.clock()
+	local now = spellClock()
 	local curEnd = hum:GetAttribute("FreezeEnd") or 0
 	hum:SetAttribute("FreezeEnd", math.max(curEnd, now + duration))
 end
 
 -- Status maintenance: slow/freeze
 RunService.Heartbeat:Connect(function()
-	local now = os.clock()
+	local now = spellClock()
 	for _, m in ipairs(getEnemyModels()) do
 		local hum = m:FindFirstChildOfClass("Humanoid")
 		if hum and hum.Health > 0 then
@@ -185,6 +216,7 @@ local function getAtkMult(plr: Player): number
 end
 
 local function projHitDamage(plr: Player, enemy: Model, dmg: number, opts)
+	if isPaused() then return end
 	opts = opts or {}
 	local hum = enemy and enemy:FindFirstChildOfClass("Humanoid")
 	if not hum then return end
@@ -222,18 +254,18 @@ local function projHitDamage(plr: Player, enemy: Model, dmg: number, opts)
 		applyFreeze(enemy, opts.freezeDuration or 0.8)
 	end
 	if opts.burnDps and opts.burnDuration then
-		local endT = os.clock() + opts.burnDuration
+		local endT = spellClock() + opts.burnDuration
 		task.spawn(function()
-			while os.clock() < endT and hum.Health > 0 do
+			while spellClock() < endT and hum.Health > 0 do
 				safeDamage(hum, opts.burnDps * 0.5) -- tick 0.5s
 				task.wait(0.5)
 			end
 		end)
 	end
 	if opts.poisonDps and opts.poisonDuration then
-		local endT = os.clock() + opts.poisonDuration
+		local endT = spellClock() + opts.poisonDuration
 		task.spawn(function()
-			while os.clock() < endT and hum.Health > 0 do
+			while spellClock() < endT and hum.Health > 0 do
 				safeDamage(hum, opts.poisonDps * 0.5)
 				task.wait(0.5)
 			end
@@ -337,8 +369,8 @@ local function tickOrbit(plr: Player, dt: number, id: string, count: number, rad
 			if hum then
 				local key = nearest
 				local last = bucket.lastHit[key] or 0
-				if os.clock() - last >= hitCd then
-					bucket.lastHit[key] = os.clock()
+				if spellClock() - last >= hitCd then
+					bucket.lastHit[key] = spellClock()
 					safeDamage(hum, baseDmg * getAtkMult(plr))
 					if onHit then onHit(nearest) end
 				end
@@ -365,6 +397,7 @@ end
 
 -- ===== Main loop per player =====
 local function stepPlayer(plr: Player, dt: number)
+	if isPaused() then return end
 	local char = plr.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
 	if not hrp then return end
@@ -387,9 +420,9 @@ local function stepPlayer(plr: Player, dt: number)
 				applySlow(enemy, 0.05, 0.5)
 				local hum = enemy:FindFirstChildOfClass("Humanoid")
 				if hum then
-					local endT = os.clock() + burnDur
+					local endT = spellClock() + burnDur
 					task.spawn(function()
-						while os.clock() < endT and hum.Health > 0 do
+						while spellClock() < endT and hum.Health > 0 do
 							safeDamage(hum, burnDps)
 							task.wait(0.5)
 						end
@@ -431,9 +464,9 @@ local function stepPlayer(plr: Player, dt: number)
 			applySlow(enemy, 0.10, 0.6)
 			local hum = enemy:FindFirstChildOfClass("Humanoid")
 			if hum then
-				local endT = os.clock() + poisonDur
+				local endT = spellClock() + poisonDur
 				task.spawn(function()
-					while os.clock() < endT and hum.Health > 0 do
+					while spellClock() < endT and hum.Health > 0 do
 						safeDamage(hum, poisonDps)
 						task.wait(0.5)
 					end
@@ -448,8 +481,8 @@ local function stepPlayer(plr: Player, dt: number)
 		local cd = 0.8 * (lv >= 2 and 0.9 or 1)
 		if lv >= 2 then cd = cd * (0.9 ^ (lv-1)) end
 		local nextT = s.cds.ShadowDagger or 0
-		if os.clock() >= nextT then
-			s.cds.ShadowDagger = os.clock() + cd
+		if spellClock() >= nextT then
+			s.cds.ShadowDagger = spellClock() + cd
 			local target = getNearestEnemy(pos, 40)
 			if target and target:FindFirstChild("HumanoidRootPart") then
 				local dir = (target.HumanoidRootPart.Position - pos).Unit
@@ -475,8 +508,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local cd = 1.4
 		local nextT = s.cds.BoneSpear or 0
-		if os.clock() >= nextT then
-			s.cds.BoneSpear = os.clock() + cd
+		if spellClock() >= nextT then
+			s.cds.BoneSpear = spellClock() + cd
 			local target = getNearestEnemy(pos, 60)
 			if target and target:FindFirstChild("HumanoidRootPart") then
 				local dir0 = (target.HumanoidRootPart.Position - pos).Unit
@@ -498,8 +531,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local cd = 2.0
 		local nextT = s.cds.IceShards or 0
-		if os.clock() >= nextT then
-			s.cds.IceShards = os.clock() + cd
+		if spellClock() >= nextT then
+			s.cds.IceShards = spellClock() + cd
 			local count = (lv >= 6 and 5) or (lv >= 3 and 3) or 2
 			local impactR = 5 * (lv >= 2 and 1.15 or 1.0)
 			local slowPct = 0.25
@@ -521,16 +554,16 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local interval = 2.5
 		local nextT = s.cds.PoisonCloud or 0
-		if os.clock() >= nextT then
-			s.cds.PoisonCloud = os.clock() + interval
+		if spellClock() >= nextT then
+			s.cds.PoisonCloud = spellClock() + interval
 			local radius = 7 * (lv >= 2 and 1.15 or 1.0)
 			local dur = (2.5 + (lv>=3 and 1 or 0))
 			local tick = (lv>=4 and 0.4 or 0.5)
 			local dps = 8 + lv*3
 			local cloud = spawnZone(pos - hrp.CFrame.LookVector*3, radius, dur)
-			local endT = os.clock() + dur
+			local endT = spellClock() + dur
 			task.spawn(function()
-				while os.clock() < endT and cloud.Parent do
+				while spellClock() < endT and cloud.Parent do
 					for _, enemy in ipairs(getEnemiesInRadius(cloud.Position, radius)) do
 						projHitDamage(plr, enemy, dps*tick, {poisonDps=0, poisonDuration=0})
 					end
@@ -552,9 +585,9 @@ local function stepPlayer(plr: Player, dt: number)
 			local size = 5 * (lv>=2 and 1.10 or 1.0)
 			local zone = spawnZone(pos, size/2, dur)
 			local dps = 10 + lv*4
-			local endT = os.clock() + dur
+			local endT = spellClock() + dur
 			task.spawn(function()
-				while os.clock() < endT and zone.Parent do
+				while spellClock() < endT and zone.Parent do
 					for _, enemy in ipairs(getEnemiesInRadius(zone.Position, size/2)) do
 						projHitDamage(plr, enemy, dps*tick, {burnDps=0,burnDuration=0})
 					end
@@ -569,8 +602,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local cd = 1.8
 		local nextT = s.cds.LightningChain or 0
-		if os.clock() >= nextT then
-			s.cds.LightningChain = os.clock() + cd
+		if spellClock() >= nextT then
+			s.cds.LightningChain = spellClock() + cd
 			local start = getNearestEnemy(pos, 55)
 			if start and start:FindFirstChild("HumanoidRootPart") then
 				local jumps = (lv >= 6 and 6) or (lv >= 3 and 4) or 3
@@ -607,8 +640,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local cd = 6.0 * (lv>=3 and 0.9 or 1.0)
 		local nextT = s.cds.FrostNova or 0
-		if os.clock() >= nextT then
-			s.cds.FrostNova = os.clock() + cd
+		if spellClock() >= nextT then
+			s.cds.FrostNova = spellClock() + cd
 			local radius = (10 * (lv>=2 and 1.15 or 1.0)) * (lv>=6 and 1.15 or 1.0)
 			local slowPct = 0.35
 			local slowDur = 1.5
@@ -623,8 +656,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local cd = 5.0 * (lv>=4 and 0.9 or 1.0)
 		local nextT = s.cds.GravityPulse or 0
-		if os.clock() >= nextT then
-			s.cds.GravityPulse = os.clock() + cd
+		if spellClock() >= nextT then
+			s.cds.GravityPulse = spellClock() + cd
 			local radius = (lv>=6 and 14) or (lv>=1 and 10)
 			local force = 40 * (lv>=2 and 1.2 or 1.0)
 			local dmg = 22 + lv*6
@@ -652,8 +685,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local cd = 2.2
 		local nextT = s.cds.ArcaneMissile or 0
-		if os.clock() >= nextT then
-			s.cds.ArcaneMissile = os.clock() + cd
+		if spellClock() >= nextT then
+			s.cds.ArcaneMissile = spellClock() + cd
 			local count = (lv>=6 and 5) or (lv>=3 and 3) or 2
 			local range = 60
 			local speed = 75 * (lv>=2 and 1.15 or 1.0)
@@ -683,8 +716,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local cd = 2.6
 		local nextT = s.cds.CrystalBarrage or 0
-		if os.clock() >= nextT then
-			s.cds.CrystalBarrage = os.clock() + cd
+		if spellClock() >= nextT then
+			s.cds.CrystalBarrage = spellClock() + cd
 			local target = getNearestEnemy(pos, 55)
 			if target and target:FindFirstChild("HumanoidRootPart") then
 				local dir0 = (target.HumanoidRootPart.Position - pos).Unit
@@ -712,8 +745,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local cd = 4.0
 		local nextT = s.cds.ChainHooks or 0
-		if os.clock() >= nextT then
-			s.cds.ChainHooks = os.clock() + cd
+		if spellClock() >= nextT then
+			s.cds.ChainHooks = spellClock() + cd
 			local hooks = (lv>=3 and 2) or 1
 			local range = 35 * (lv>=2 and 1.15 or 1.0)
 			local force = 60 * (lv>=4 and 1.2 or 1.0)
@@ -741,8 +774,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local cd = 8.0
 		local nextT = s.cds.IceWall or 0
-		if os.clock() >= nextT then
-			s.cds.IceWall = os.clock() + cd
+		if spellClock() >= nextT then
+			s.cds.IceWall = spellClock() + cd
 			local count = (lv>=3 and 2) or 1
 			local dur = (lv>=6 and 6) or (lv>=4 and 4) or 3
 			local size = Vector3.new(10, 8, 1.2)
@@ -764,8 +797,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local cd = 10.0
 		local nextT = s.cds.ThunderTotem or 0
-		if os.clock() >= nextT then
-			s.cds.ThunderTotem = os.clock() + cd
+		if spellClock() >= nextT then
+			s.cds.ThunderTotem = spellClock() + cd
 			local totems = (lv>=6 and 2) or 1
 			local dur = 10 + (lv>=3 and 2 or 0)
 			local range = 45
@@ -776,9 +809,9 @@ local function stepPlayer(plr: Player, dt: number)
 				local t = ensurePart("Totem", Vector3.new(1.2,4,1.2))
 				t.Position = pos + Vector3.new((i-1)*2,2,0)
 				t.Transparency = 0.2
-				local endT = os.clock() + dur
+				local endT = spellClock() + dur
 				task.spawn(function()
-					while os.clock() < endT and t.Parent do
+					while spellClock() < endT and t.Parent do
 						local target = getNearestEnemy(t.Position, range)
 						if target and target:FindFirstChild("HumanoidRootPart") then
 							projHitDamage(plr, target, baseDmg*getAtkMult(plr), {})
@@ -822,8 +855,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local interval = 1.6
 		local nextT = s.cds.NecroSwarm or 0
-		if os.clock() >= nextT then
-			s.cds.NecroSwarm = os.clock() + interval
+		if spellClock() >= nextT then
+			s.cds.NecroSwarm = spellClock() + interval
 			local count = (lv>=6 and 3) or (lv>=3 and 2) or 1
 			local speed = 55 * (lv>=2 and 1.15 or 1.0)
 			local dmg = 22 + lv*7
@@ -835,8 +868,8 @@ local function stepPlayer(plr: Player, dt: number)
 				local target = getNearestEnemy(pos, 70)
 				local life = 3.2
 				task.spawn(function()
-					local t0 = os.clock()
-					while os.clock() - t0 < life and skull.Parent do
+					local t0 = spellClock()
+					while spellClock() - t0 < life and skull.Parent do
 						local t = target
 						if not t or not t:FindFirstChild("HumanoidRootPart") or t:FindFirstChildOfClass("Humanoid").Health <= 0 then
 							t = getNearestEnemy(skull.Position, 70)
@@ -866,8 +899,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local interval = 3.5
 		local nextT = s.cds.ArcaneMine or 0
-		if os.clock() >= nextT then
-			s.cds.ArcaneMine = os.clock() + interval
+		if spellClock() >= nextT then
+			s.cds.ArcaneMine = spellClock() + interval
 			local mines = (lv>=6 and 5) or (lv>=3 and 3) or 2
 			local arm = 0.3
 			local trig = 4
@@ -884,8 +917,8 @@ local function stepPlayer(plr: Player, dt: number)
 				task.delay(arm, function() armed = true end)
 				local maxLife = 5
 				task.spawn(function()
-					local t0 = os.clock()
-					while os.clock() - t0 < maxLife and mine.Parent do
+					local t0 = spellClock()
+					while spellClock() - t0 < maxLife and mine.Parent do
 						if armed then
 							local e = getNearestEnemy(mine.Position, trig)
 							if e then
@@ -908,8 +941,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local interval = 7.0
 		local nextT = s.cds.DarkRift or 0
-		if os.clock() >= nextT then
-			s.cds.DarkRift = os.clock() + interval
+		if spellClock() >= nextT then
+			s.cds.DarkRift = spellClock() + interval
 			local count = (lv>=6 and 2) or 1
 			local radius = 10 * (lv>=2 and 1.15 or 1.0)
 			local dur = 4 + (lv>=3 and 1 or 0)
@@ -921,9 +954,9 @@ local function stepPlayer(plr: Player, dt: number)
 				local r = 8 + math.random()*8
 				local rpos = pos + Vector3.new(math.cos(ang)*r,0,math.sin(ang)*r)
 				local zone = spawnZone(rpos, radius, dur)
-				local endT = os.clock() + dur
+				local endT = spellClock() + dur
 				task.spawn(function()
-					while os.clock() < endT and zone.Parent do
+					while spellClock() < endT and zone.Parent do
 						for _, e in ipairs(getEnemiesInRadius(zone.Position, radius)) do
 							if e:FindFirstChild("HumanoidRootPart") then
 								local dir = (zone.Position - e.HumanoidRootPart.Position).Unit
@@ -943,8 +976,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local interval = 4.5 * (lv>=4 and 0.9 or 1.0)
 		local nextT = s.cds.MeteorStrike or 0
-		if os.clock() >= nextT then
-			s.cds.MeteorStrike = os.clock() + interval
+		if spellClock() >= nextT then
+			s.cds.MeteorStrike = spellClock() + interval
 			local count = (lv>=6 and 3) or (lv>=3 and 2) or 1
 			local aoe = 10 * (lv>=2 and 1.15 or 1.0)
 			local dmg = 50 + lv*16
@@ -957,9 +990,9 @@ local function stepPlayer(plr: Player, dt: number)
 					if lv>=5 then
 						-- fire pool 2s
 						local pool = spawnZone(p, aoe*0.7, 2)
-						local endT = os.clock()+2
+						local endT = spellClock()+2
 						task.spawn(function()
-							while os.clock()<endT and pool.Parent do
+							while spellClock()<endT and pool.Parent do
 								for _, e in ipairs(getEnemiesInRadius(pool.Position, aoe*0.7)) do
 									projHitDamage(plr, e, 12*0.5, {})
 								end
@@ -977,8 +1010,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local interval = 6.5
 		local nextT = s.cds.SolarBeam or 0
-		if os.clock() >= nextT then
-			s.cds.SolarBeam = os.clock() + interval
+		if spellClock() >= nextT then
+			s.cds.SolarBeam = spellClock() + interval
 			local dur = (lv>=6 and 2.2) or (lv>=3 and 1.6) or 1.2
 			local range = (lv>=6 and 90) or 70
 			local tick = 0.2
@@ -987,8 +1020,8 @@ local function stepPlayer(plr: Player, dt: number)
 			local target = getNearestEnemy(pos, 70)
 			if target and target:FindFirstChild("HumanoidRootPart") then
 				local dir = (target.HumanoidRootPart.Position - pos).Unit
-				local t0 = os.clock()
-				while os.clock()-t0 < dur do
+				local t0 = spellClock()
+				while spellClock()-t0 < dur do
 					-- damage all enemies close to beam line (cheap)
 					for _, e in ipairs(getEnemyModels()) do
 						local hrpE = e:FindFirstChild("HumanoidRootPart")
@@ -1016,8 +1049,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local interval = 5.5
 		local nextT = s.cds.VoidRing or 0
-		if os.clock() >= nextT then
-			s.cds.VoidRing = os.clock() + interval
+		if spellClock() >= nextT then
+			s.cds.VoidRing = spellClock() + interval
 			local endR = 18 * (lv>=2 and 1.15 or 1.0)
 			local dmg = 40 + lv*14
 			local pull = (lv>=5 and 30) or 0
@@ -1052,8 +1085,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local interval = 7.0 * (lv>=3 and 0.9 or 1.0)
 		local nextT = s.cds.BloodNova or 0
-		if os.clock() >= nextT then
-			s.cds.BloodNova = os.clock() + interval
+		if spellClock() >= nextT then
+			s.cds.BloodNova = spellClock() + interval
 			local hum = char:FindFirstChildOfClass("Humanoid")
 			if hum then
 				local hpPct = hum.Health / math.max(1, hum.MaxHealth)
@@ -1093,19 +1126,19 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local interval = 10
 		local nextT = s.cds.TimeFracture or 0
-		if os.clock() >= nextT then
-			s.cds.TimeFracture = os.clock() + interval
+		if spellClock() >= nextT then
+			s.cds.TimeFracture = spellClock() + interval
 			local radius = 14 * (lv>=2 and 1.15 or 1.0)
 			local dur = (lv>=6 and 5) or (lv>=4 and 4) or 3
 			local slowPct = (lv>=6 and 0.55) or (lv>=3 and 0.40) or 0.30
 			local vuln = (lv>=5 and 0.20) or 0
-			local endT = os.clock() + dur
+			local endT = spellClock() + dur
 			task.spawn(function()
-				while os.clock()<endT do
+				while spellClock()<endT do
 					for _, e in ipairs(getEnemiesInRadius(pos, radius)) do
 						applySlow(e, slowPct, 0.35)
 						if vuln > 0 then
-							e:SetAttribute("VulnerableUntil", os.clock()+0.4)
+							e:SetAttribute("VulnerableUntil", spellClock()+0.4)
 							e:SetAttribute("VulnerablePct", vuln)
 						end
 					end
@@ -1120,8 +1153,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local interval = 9
 		local nextT = s.cds.SoulLink or 0
-		if os.clock() >= nextT then
-			s.cds.SoulLink = os.clock() + interval
+		if spellClock() >= nextT then
+			s.cds.SoulLink = spellClock() + interval
 			local dur = 4 + (lv>=4 and 1.5 or 0)
 			local linkPct = (lv>=6 and 0.50) or (lv>=3 and 0.35) or 0.25
 			local radius = 14 * (lv>=2 and 1.15 or 1.0)
@@ -1146,8 +1179,8 @@ local function stepPlayer(plr: Player, dt: number)
 	if lv > 0 then
 		local interval = 8.5
 		local nextT = s.cds.Starfall or 0
-		if os.clock() >= nextT then
-			s.cds.Starfall = os.clock() + interval
+		if spellClock() >= nextT then
+			s.cds.Starfall = spellClock() + interval
 			local strikes = ({5,5,7,7,9,12})[math.clamp(lv,1,6)] or 5
 			local stun = (lv>=4 and 0.3) or 0
 			local aoe = 8 * (lv>=2 and 1.15 or 1.0)
@@ -1178,8 +1211,8 @@ local function stepPlayer(plr: Player, dt: number)
 		tickOrbit(plr, dt, "EmberSpirits", count, 4, 2.2, 999, 0, nil)
 		local interval = 1.2 * (lv>=4 and 0.9 or 1.0)
 		local nextT = s.cds.EmberSpirits or 0
-		if os.clock() >= nextT then
-			s.cds.EmberSpirits = os.clock() + interval
+		if spellClock() >= nextT then
+			s.cds.EmberSpirits = spellClock() + interval
 			local target = getNearestEnemy(pos, 50)
 			if target and target:FindFirstChild("HumanoidRootPart") then
 				local dir = (target.HumanoidRootPart.Position - pos).Unit
@@ -1196,6 +1229,9 @@ end
 
 -- Heartbeat driver
 RunService.Heartbeat:Connect(function(dt)
+	if isPaused() then
+		return
+	end
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr.Parent and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
 			stepPlayer(plr, dt)

@@ -6,8 +6,10 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local PathfindingService = game:GetService("PathfindingService")
 local PhysicsService = game:GetService("PhysicsService")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local EnemyPathController = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("EnemyPathController"))
 
 -- Shared pause flag (used by upgrade UI in single)
 local PauseState = ReplicatedStorage:FindFirstChild("PauseState")
@@ -332,14 +334,6 @@ local function activeEnemiesCount()
     return n
 end
 
-local PATH_PARAMS = {
-    AgentRadius = 2,
-    AgentHeight = 5,
-    AgentCanJump = true,
-    AgentJumpHeight = 7,
-    AgentMaxSlope = 35,
-}
-
 local function waitIfPaused()
     while PauseState.Value do
         task.wait(0.05)
@@ -360,8 +354,12 @@ local function startSimpleAI(mob: Model)
     local hrp = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
     if not hum or not hrp then return end
 
-    -- Ensure server owns NPC physics (prevents \"one step then freeze\" when client ownership/streaming kicks in)
-    pcall(function() hrp:SetNetworkOwner(nil) end)
+    -- Ensure server owns NPC physics (prevents jitter/freeze under client ownership)
+    for _, d in ipairs(mob:GetDescendants()) do
+        if d:IsA("BasePart") then
+            pcall(function() d:SetNetworkOwner(nil) end)
+        end
+    end
 
     hum.AutoRotate = true
     hum:ChangeState(Enum.HumanoidStateType.Running)
@@ -369,30 +367,37 @@ local function startSimpleAI(mob: Model)
     local attackRange = tonumber(mob:GetAttribute("AttackRange")) or 4
     local attackCD = tonumber(mob:GetAttribute("AttackCooldown")) or 1.5
     local damage = tonumber(mob:GetAttribute("Damage")) or 8
-    local ranged = mob:GetAttribute("IsRanged") == true
+
+    local function stopMovementNow()
+        hum:Move(Vector3.zero)
+        hum:MoveTo(hrp.Position)
+    end
+
+    local controller = EnemyPathController.new(mob, {
+        GetTarget = getClosestLivingHRP,
+        IsPaused = function()
+            return PauseState.Value
+        end,
+        StopMove = stopMovementNow,
+        RepathDistance = 10,
+        ComputeCooldown = 0.35,
+        MoveTimeout = 2.0,
+        LOSUpdateInterval = 0.12,
+        PathParams = {
+            AgentRadius = 2.5,
+            AgentHeight = 5,
+            AgentCanJump = true,
+            AgentCanClimb = true,
+            AgentJumpHeight = 7,
+            AgentMaxSlope = 35,
+            WaypointSpacing = 5,
+        },
+    })
+    if not controller then
+        return
+    end
 
     local lastAttack = 0
-    local lastPathAt = 0
-    local currentWaypoints = nil
-    local currentIdx = 1
-    local stuckPos = hrp.Position
-    local stuckT = time()
-
-    local function getTarget()
-        return getClosestLivingHRP(hrp.Position)
-    end
-
-    local function computePath(goalPos: Vector3)
-        local path = PathfindingService:CreatePath(PATH_PARAMS)
-        path:ComputeAsync(hrp.Position, goalPos)
-        if path.Status == Enum.PathStatus.Success then
-            currentWaypoints = path:GetWaypoints()
-            currentIdx = 1
-        else
-            currentWaypoints = nil
-            currentIdx = 1
-        end
-    end
 
     task.spawn(function()
         while mob.Parent and hum.Health > 0 do
@@ -403,69 +408,29 @@ local function startSimpleAI(mob: Model)
 
             waitIfPaused()
 
-            local targetHRP = getTarget()
-            if not targetHRP then
-                task.wait(0.2)
+            if PauseState.Value then
+                stopMovementNow()
+                task.wait(0.03)
                 continue
             end
 
-            local dist = (targetHRP.Position - hrp.Position).Magnitude
-
-            -- Attack
-            if dist <= attackRange then
-                if time() - lastAttack >= attackCD then
+            local targetHRP = getClosestLivingHRP(hrp.Position)
+            if targetHRP then
+                local dist = (targetHRP.Position - hrp.Position).Magnitude
+                if dist <= attackRange and time() - lastAttack >= attackCD then
                     lastAttack = time()
                     local targetHum = targetHRP.Parent and targetHRP.Parent:FindFirstChildOfClass("Humanoid")
-                    if targetHum and targetHum.Health > 0 then
-                        -- In this project we keep it simple: direct damage.
+                    if targetHum and targetHum.Health > 0 and not PauseState.Value then
                         targetHum:TakeDamage(damage)
                     end
                 end
-                -- keep slight pressure but don't path spam
-                hum:MoveTo(targetHRP.Position)
-                task.wait(0.12)
-                continue
             end
 
-            -- Movement (horde-friendly)
-            -- Default: direct MoveTo (cheap). Only use pathfinding when stuck to avoid PathfindingService overload.
-            local now = time()
-
-            local function moveDirect()
-                hum:MoveTo(targetHRP.Position)
-            end
-
-            if currentWaypoints and currentWaypoints[currentIdx] then
-                local wp = currentWaypoints[currentIdx]
-                hum:MoveTo(wp.Position)
-                if (wp.Position - hrp.Position).Magnitude < 3 then
-                    currentIdx += 1
-                end
-                if not currentWaypoints[currentIdx] then
-                    currentWaypoints = nil
-                    currentIdx = 1
-                end
-            else
-                moveDirect()
-            end
-
-            -- Stuck handling (trigger pathfinding rarely)
-            if (hrp.Position - stuckPos).Magnitude < 0.5 then
-                if now - stuckT > 1.25 then
-                    if now - lastPathAt > 2.0 then
-                        lastPathAt = now
-                        computePath(targetHRP.Position)
-                    end
-                    stuckT = now
-                end
-            else
-                stuckPos = hrp.Position
-                stuckT = now
-            end
-
-            task.wait(0.2)
+            task.wait(0.08)
         end
     end)
+
+    controller:Run()
 end
 
 local function wireDropsAndKills(mob: Model, cfg, isElite: boolean)
