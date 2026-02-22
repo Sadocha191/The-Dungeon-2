@@ -18,6 +18,7 @@ gui.Name = "MissionSummary"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.Enabled = false
+gui:SetAttribute("Modal", true)
 gui.Parent = pg
 
 local dim = Instance.new("Frame")

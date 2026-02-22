@@ -40,6 +40,7 @@ local SpellDefs = require(modFolder:WaitForChild("SpellDefinitions"))
 local gui = script.Parent
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
+gui:SetAttribute("Modal", true) -- used by camera/mouse lock script
 
 local main = gui:WaitForChild("Main") -- ImageLabel
 local bottom = main:WaitForChild("BottomButtons")
@@ -71,6 +72,7 @@ local choiceLockedUntil = 0 -- os.clock() time
 
 -- movement lock
 local savedWalkSpeed, savedJumpPower, savedJumpHeight
+local movementLocked = false
 
 local function getHumanoid()
 	local char = plr.Character
@@ -78,8 +80,28 @@ local function getHumanoid()
 	return char:FindFirstChildOfClass("Humanoid")
 end
 
+
+local function applyHumanoidLock(hum, on)
+	if not hum then return end
+	if on then
+		hum.WalkSpeed = 0
+		hum.JumpPower = 0
+		hum.JumpHeight = 0
+	else
+		if savedWalkSpeed ~= nil then hum.WalkSpeed = savedWalkSpeed end
+		if savedJumpPower ~= nil then hum.JumpPower = savedJumpPower end
+		if savedJumpHeight ~= nil then hum.JumpHeight = savedJumpHeight end
+	end
+end
+
 local function lockMovement(on: boolean)
 	if on then
+		if movementLocked then
+			-- already locked (e.g. reroll re-renders offers). Don't overwrite saved values.
+			applyHumanoidLock(getHumanoid(), true)
+			return
+		end
+		movementLocked = true
 		-- Sink standard movement inputs
 		ContextActionService:BindActionAtPriority(
 			"UpgradeMenuLock",
@@ -98,18 +120,13 @@ local function lockMovement(on: boolean)
 			savedWalkSpeed = hum.WalkSpeed
 			savedJumpPower = hum.JumpPower
 			savedJumpHeight = hum.JumpHeight
-			hum.WalkSpeed = 0
-			hum.JumpPower = 0
-			hum.JumpHeight = 0
+			applyHumanoidLock(hum, true)
 		end
 	else
+		movementLocked = false
 		ContextActionService:UnbindAction("UpgradeMenuLock")
-		local hum = getHumanoid()
-		if hum then
-			if savedWalkSpeed then hum.WalkSpeed = savedWalkSpeed end
-			if savedJumpPower then hum.JumpPower = savedJumpPower end
-			if savedJumpHeight then hum.JumpHeight = savedJumpHeight end
-		end
+		applyHumanoidLock(getHumanoid(), false)
+		savedWalkSpeed, savedJumpPower, savedJumpHeight = nil, nil, nil
 	end
 end
 
@@ -271,6 +288,15 @@ btnBanish.MouseButton1Click:Connect(function()
 end)
 
 main.Visible = false
+
+-- If the player respawns while the menu is open, keep them locked.
+plr.CharacterAdded:Connect(function()
+	if main.Visible then
+		lockMovement(true)
+	else
+		lockMovement(false)
+	end
+end)
 
 SpellEvent.OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then return end

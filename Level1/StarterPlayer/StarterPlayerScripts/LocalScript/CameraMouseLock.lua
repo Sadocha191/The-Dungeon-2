@@ -11,6 +11,23 @@ local playerGui = player:WaitForChild("PlayerGui")
 local upgradesGui = playerGui:WaitForChild("UpgradesGUI")
 local main = upgradesGui:WaitForChild("Main")
 
+-- Any ScreenGui with attribute Modal=true should unlock the mouse (menus, game over, etc.)
+local function anyModalGuiOpen(): boolean
+	for _, ch in ipairs(playerGui:GetChildren()) do
+		if ch:IsA("ScreenGui") and ch.Enabled then
+			if ch:GetAttribute("Modal") == true then
+				return true
+			end
+			-- fallback for known modals that may not set the attribute
+			local n = ch.Name
+			if n == "MissionSummary" or n == "EscMenu" or n == "EKeyMenu" then
+				return true
+			end
+		end
+	end
+	return false
+end
+
 local cam = Workspace.CurrentCamera
 
 -- USTAWIENIA
@@ -50,7 +67,8 @@ local function setUiInput()
 end
 
 local function orbitStep(dt)
-	if main.Visible then
+	-- If any modal UI is open (upgrades, game over, esc menu), free the cursor and freeze camera.
+	if main.Visible or anyModalGuiOpen() then
 		if not frozenCFrame then frozenCFrame = cam.CFrame end
 		cam.CameraType = Enum.CameraType.Scriptable
 		cam.CFrame = frozenCFrame
