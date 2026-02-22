@@ -13,15 +13,31 @@ local main = upgradesGui:WaitForChild("Main")
 
 -- Any ScreenGui with attribute Modal=true should unlock the mouse (menus, game over, etc.)
 local function anyModalGuiOpen(): boolean
+	local function isActuallyOpen(screenGui: ScreenGui): boolean
+		-- Many of your menus keep ScreenGui.Enabled=true permanently and only toggle
+		-- a top-level Frame.Visible. Treat the GUI as "open" only if it has a visible
+		-- GuiObject somewhere.
+		for _, d in ipairs(screenGui:GetDescendants()) do
+			if d:IsA("GuiObject") and d.Visible then
+				return true
+			end
+		end
+		return false
+	end
+
 	for _, ch in ipairs(playerGui:GetChildren()) do
 		if ch:IsA("ScreenGui") and ch.Enabled then
 			if ch:GetAttribute("Modal") == true then
-				return true
+				if isActuallyOpen(ch) then
+					return true
+				end
 			end
 			-- fallback for known modals that may not set the attribute
 			local n = ch.Name
 			if n == "MissionSummary" or n == "EscMenu" or n == "EKeyMenu" then
-				return true
+				if isActuallyOpen(ch) then
+					return true
+				end
 			end
 		end
 	end
@@ -68,6 +84,7 @@ end
 
 local function orbitStep(dt)
 	-- If any modal UI is open (upgrades, game over, esc menu), free the cursor and freeze camera.
+	-- Note: UpgradesGUI keeps ScreenGui enabled and toggles Main.Visible, so check Main explicitly.
 	if main.Visible or anyModalGuiOpen() then
 		if not frozenCFrame then frozenCFrame = cam.CFrame end
 		cam.CameraType = Enum.CameraType.Scriptable

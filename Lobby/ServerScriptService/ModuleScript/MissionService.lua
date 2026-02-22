@@ -114,13 +114,29 @@ local function ensureSelectionFresh(player: Player, state)
 	resetDailyIfNeeded(player, state)
 	resetWeeklyIfNeeded(player, state)
 
-	if #state.SelectedDaily == 0 then
+	-- If the mission pool changes between versions (new missions added), players may
+	-- still have an old shorter selection stored in data. Force re-pick if the
+	-- selection size is wrong or contains unknown ids.
+	local function selectionInvalid(selected: {any}, expectedCount: number): boolean
+		if typeof(selected) ~= "table" then return true end
+		if #selected ~= expectedCount then
+			return true
+		end
+		for _, id in ipairs(selected) do
+			if MissionConfigs.Get(id) == nil then
+				return true
+			end
+		end
+		return false
+	end
+
+	if selectionInvalid(state.SelectedDaily, DAILY_COUNT) then
 		local seed = (player.UserId % 1000000) + state.DailyKey * 1000003
 		state.SelectedDaily = pickIds(MissionConfigs.GetPool("Daily"), DAILY_COUNT, seed)
 		PlayerData.MarkDirty(player)
 	end
 
-	if #state.SelectedWeekly == 0 then
+	if selectionInvalid(state.SelectedWeekly, WEEKLY_COUNT) then
 		local seed = (player.UserId % 1000000) + state.WeeklyKey * 2000003
 		state.SelectedWeekly = pickIds(MissionConfigs.GetPool("Weekly"), WEEKLY_COUNT, seed)
 		PlayerData.MarkDirty(player)

@@ -922,4 +922,45 @@ SpellDefs.SPELLS = {
 	},
 }
 
+-- =========================
+-- Helpers used by Lobby SpellService / Witch shop
+-- =========================
+
+function SpellDefs.Get(id: string)
+	return SpellDefs.SPELLS[id]
+end
+
+function SpellDefs.IsValid(id: string): boolean
+	return SpellDefs.SPELLS[id] ~= nil
+end
+
+-- List of spells that should appear in the witch shop.
+-- Includes all non-base spells with a coin cost.
+function SpellDefs.GetShopList(): {string}
+	local list = {}
+	for id, def in pairs(SpellDefs.SPELLS) do
+		if typeof(def) == "table" then
+			local cost = tonumber(def.costCoins) or 0
+			local isBase = def.base == true
+			if (not isBase) and cost > 0 then
+				table.insert(list, id)
+			end
+		end
+	end
+	-- stable ordering (cheaper first, then name) so the shop doesn't jump around
+	table.sort(list, function(a, b)
+		local da = SpellDefs.SPELLS[a]
+		local db = SpellDefs.SPELLS[b]
+		local ca = tonumber(da and da.costCoins) or 0
+		local cb = tonumber(db and db.costCoins) or 0
+		if ca ~= cb then
+			return ca < cb
+		end
+		local na = tostring(da and da.name or a)
+		local nb = tostring(db and db.name or b)
+		return na < nb
+	end)
+	return list
+end
+
 return SpellDefs
