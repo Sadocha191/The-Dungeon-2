@@ -11,35 +11,28 @@ local playerGui = player:WaitForChild("PlayerGui")
 local upgradesGui = playerGui:WaitForChild("UpgradesGUI")
 local main = upgradesGui:WaitForChild("Main")
 
--- A modal gui counts as "open" only if it is Enabled AND actually has any visible GuiObject.
-local function screenGuiHasVisibleContent(gui: ScreenGui): boolean
-	for _, d in ipairs(gui:GetDescendants()) do
-		if d:IsA("GuiObject") and d.Visible then
-			-- AbsoluteSize is only valid once rendered; in edge cases it can be 0 for one frame.
-			local s = d.AbsoluteSize
-			if s.X > 0 and s.Y > 0 then
-				return true
-			end
-		end
+-- Whitelist only: UpgradesGUI + end-of-run menus.
+-- Your HUD (HP/XP/timers) is always enabled, so scanning for generic "modal" GUIs can freeze the camera.
+local function isBlockingUIOpen(): boolean
+	-- Upgrades
+	if upgradesGui.Enabled and main.Visible then
+		return true
 	end
-	return false
-end
 
--- Any ScreenGui with attribute Modal=true (or known modal names) should free the cursor and freeze the camera,
--- but ONLY while it is actually visible.
-local function anyModalGuiOpen(): boolean
-	for _, ch in ipairs(playerGui:GetChildren()) do
-		if ch:IsA("ScreenGui") and ch.Enabled then
-			local isModal = (ch:GetAttribute("Modal") == true)
-			local n = ch.Name
-			if n == "MissionSummary" or n == "EscMenu" or n == "EKeyMenu" then
-				isModal = true
-			end
-			if isModal and screenGuiHasVisibleContent(ch) then
-				return true
-			end
-		end
+	-- End/escape menus are created by scripts at runtime.
+	local ms = playerGui:FindFirstChild("MissionSummary")
+	if ms and ms:IsA("ScreenGui") and ms.Enabled then
+		return true
 	end
+	local esc = playerGui:FindFirstChild("EscMenu")
+	if esc and esc:IsA("ScreenGui") and esc.Enabled then
+		return true
+	end
+	local ekey = playerGui:FindFirstChild("EKeyMenu")
+	if ekey and ekey:IsA("ScreenGui") and ekey.Enabled then
+		return true
+	end
+
 	return false
 end
 
@@ -82,8 +75,8 @@ local function setUiInput()
 end
 
 local function orbitStep(dt)
-	-- If any modal UI is open (upgrades, game over, esc menu), free the cursor and freeze camera.
-	if main.Visible or anyModalGuiOpen() then
+	-- Only freeze/unlock for Upgrades + end-of-run menus (whitelist).
+	if isBlockingUIOpen() then
 		if not frozenCFrame then frozenCFrame = cam.CFrame end
 		cam.CameraType = Enum.CameraType.Scriptable
 		cam.CFrame = frozenCFrame
@@ -104,7 +97,7 @@ local function orbitStep(dt)
 	local delta = UIS:GetMouseDelta()
 	targetYaw -= delta.X * SENSITIVITY
 
-	-- FIX: bez inverta (góra = patrzy w górę)
+	-- bez inverta (góra = patrzy w górę)
 	targetPitch = math.clamp(targetPitch + delta.Y * SENSITIVITY, MIN_PITCH, MAX_PITCH)
 
 	local a = 1 - math.exp(-LAG_SPEED * dt)
@@ -122,7 +115,6 @@ local function orbitStep(dt)
 	if dist > 0.001 then
 		local result = Workspace:Raycast(focusPos, dir, rayParams)
 		if result then
-			-- cofnij kamerę trochę od przeszkody
 			local hitDist = (result.Position - focusPos).Magnitude
 			local safeDist = math.max(2, hitDist - CAMERA_RADIUS)
 			desiredPos = focusPos + dir.Unit * safeDist
