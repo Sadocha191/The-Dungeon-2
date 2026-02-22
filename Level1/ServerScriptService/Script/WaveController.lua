@@ -13,6 +13,13 @@ local EnemyPathController = require(ServerScriptService:WaitForChild("ModuleScri
 
 -- Shared pause flag (used by upgrade UI in single)
 local PauseState = ReplicatedStorage:FindFirstChild("PauseState")
+local RunStarted = ReplicatedStorage:FindFirstChild("RunStarted")
+if not RunStarted then
+	RunStarted = Instance.new("BoolValue")
+	RunStarted.Name = "RunStarted"
+	RunStarted.Value = false
+	RunStarted.Parent = ReplicatedStorage
+end
 if not PauseState then
     PauseState = Instance.new("BoolValue")
     PauseState.Name = "PauseState"
@@ -544,11 +551,17 @@ local function spawnMob(mobName: string, isElite: boolean)
 end
 
 -- Run clock (server-side)
-local runStart = time()
+local runStart = 0 -- set when RunStarted becomes true
 local pausedAccum = 0
 local pauseStart = nil
 
 local function elapsed()
+    if not RunStarted.Value then
+        return 0
+    end
+    if runStart == 0 then
+        runStart = time()
+    end
     local now = time()
     if PauseState.Value then
         if not pauseStart then
@@ -622,6 +635,9 @@ local lastHudPush = 0
 local lastSpawnAt = 0
 
 RunService.Heartbeat:Connect(function()
+    if not RunStarted.Value then
+        return
+    end
     local t = elapsed()
 
     if PauseState.Value then

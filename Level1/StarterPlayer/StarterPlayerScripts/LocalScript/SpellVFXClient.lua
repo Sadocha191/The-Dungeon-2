@@ -91,7 +91,10 @@ RunService.RenderStepped:Connect(function(dt)
 	local hrp = getHRP()
 	if not hrp then return end
 
-	local baseCF = hrp.CFrame
+	-- IMPORTANT:
+	-- Orbit must be independent from character rotation.
+	-- Use world-space offsets from HRP position, not HRP.CFrame (which would add rotation).
+	local basePos = hrp.Position
 	for id, cfg in pairs(active) do
 		local count = cfg.count or 0
 		if count <= 0 then
@@ -111,7 +114,7 @@ RunService.RenderStepped:Connect(function(dt)
 				if p then
 					local ang = t0 + (i / math.max(1, count)) * math.pi * 2
 					local offset = Vector3.new(math.cos(ang) * radius, height, math.sin(ang) * radius)
-					p.CFrame = baseCF * CFrame.new(offset)
+					p.CFrame = CFrame.new(basePos + offset)
 				end
 			end
 		end

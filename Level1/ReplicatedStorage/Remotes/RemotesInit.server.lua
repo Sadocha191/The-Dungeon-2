@@ -26,6 +26,5 @@ ensureRemoteEvent("PartyXPUpdate")       -- server -> all clients (xp/level upda
 
 -- Floating damage numbers
 ensureRemoteEvent("DamageIndicatorEvent")  -- server -> all clients (pos, amount, crit)
-
--- Client-side spell VFX (orbiting, etc.)
-ensureRemoteEvent("SpellVFXEvent")        -- server -> client (id, enabled, params)
+-- Loading gate (client preload handshake)
+ensureRemoteEvent("ClientReady")          -- client -> server (loaded/preloaded)
