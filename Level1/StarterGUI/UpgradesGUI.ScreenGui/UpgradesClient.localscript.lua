@@ -57,6 +57,13 @@ local slot2 = offersContainer:WaitForChild("CardSlot2")
 local slot3 = offersContainer:WaitForChild("CardSlot3")
 local slots = { slot1, slot2, slot3 }
 
+-- Template card (ImageButton) with:
+-- CardTemplate
+--  ├ DescBox (Frame) -> Desc (TextLabel)
+--  └ TitleBox (Frame) -> Title (TextLabel)
+local cardTemplate = offersContainer:WaitForChild("CardTemplate")
+cardTemplate.Visible = false
+
 -- rarity images: ReplicatedStorage/Assets/UpgradeIcons/(Common/Uncommon/Rare/Epic)
 local iconsFolder = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("UpgradeIcons")
 local rarityImage = {
@@ -146,63 +153,14 @@ end
 
 local function clearSlot(slot: Instance)
 	for _, ch in ipairs(slot:GetChildren()) do
-		if ch.Name == "CardButton" or ch.Name == "Title" or ch.Name == "Desc" or ch.Name == "RarityText" then
+		-- keep constraints/layout helpers that belong to the slot
+		if ch:IsA("UIAspectRatioConstraint") or ch:IsA("UIListLayout") or ch:IsA("UIGridLayout") or ch:IsA("UIPadding") then
+			continue
+		end
+		if ch:IsA("GuiObject") then
 			ch:Destroy()
 		end
 	end
-end
-
-local function makeCardInSlot(slot: Frame)
-	clearSlot(slot)
-
-	local cardBtn = Instance.new("ImageButton")
-	cardBtn.Name = "CardButton"
-	cardBtn.Size = UDim2.fromScale(1, 1)
-	cardBtn.Position = UDim2.fromScale(0, 0)
-	cardBtn.BackgroundTransparency = 1
-	cardBtn.AutoButtonColor = false
-	cardBtn.ScaleType = Enum.ScaleType.Stretch
-	cardBtn.Parent = slot
-
-	local title = Instance.new("TextLabel")
-	title.Name = "Title"
-	title.BackgroundTransparency = 1
-	title.Position = UDim2.new(0, 16, 0, 16)
-	title.Size = UDim2.new(1, -32, 0, 28)
-	title.Font = Enum.Font.GothamBold
-	title.TextSize = 20
-	title.TextXAlignment = Enum.TextXAlignment.Left
-	title.TextColor3 = Color3.fromRGB(245,245,245)
-	title.Text = ""
-	title.Parent = cardBtn
-
-	local rarityText = Instance.new("TextLabel")
-	rarityText.Name = "RarityText"
-	rarityText.BackgroundTransparency = 1
-	rarityText.Position = UDim2.new(0, 16, 0, 46)
-	rarityText.Size = UDim2.new(1, -32, 0, 20)
-	rarityText.Font = Enum.Font.Gotham
-	rarityText.TextSize = 14
-	rarityText.TextXAlignment = Enum.TextXAlignment.Left
-	rarityText.TextColor3 = Color3.fromRGB(210,210,210)
-	rarityText.Text = ""
-	rarityText.Parent = cardBtn
-
-	local desc = Instance.new("TextLabel")
-	desc.Name = "Desc"
-	desc.BackgroundTransparency = 1
-	desc.Position = UDim2.new(0, 16, 0, 74)
-	desc.Size = UDim2.new(1, -32, 1, -90)
-	desc.Font = Enum.Font.Gotham
-	desc.TextSize = 14
-	desc.TextWrapped = true
-	desc.TextYAlignment = Enum.TextYAlignment.Top
-	desc.TextXAlignment = Enum.TextXAlignment.Left
-	desc.TextColor3 = Color3.fromRGB(235,235,235)
-	desc.Text = ""
-	desc.Parent = cardBtn
-
-	return cardBtn, title, desc, rarityText
 end
 
 local function nextDescForSpell(spellId: string): string
@@ -213,6 +171,31 @@ local function nextDescForSpell(spellId: string): string
 		return def.nextDesc(lv)
 	end
 	return ""
+end
+
+local function mountCardInSlot(slot: Frame, spellId: string, rarity: string, def)
+	clearSlot(slot)
+
+	local card = cardTemplate:Clone()
+	card.Name = "Card"
+	card.Visible = true
+	card.Parent = slot
+	card.Size = UDim2.fromScale(1, 1)
+	card.Position = UDim2.fromScale(0, 0)
+	card.BackgroundTransparency = 1
+	card.AutoButtonColor = false
+
+	-- rarity background
+	card.Image = rarityImage[rarity] or rarityImage.Common
+
+	-- write into the dedicated boxes
+	local titleLabel = card:WaitForChild("TitleBox"):WaitForChild("Title")
+	local descLabel = card:WaitForChild("DescBox"):WaitForChild("Desc")
+
+	titleLabel.Text = (def and def.name) or spellId
+	descLabel.Text = nextDescForSpell(spellId)
+
+	return card
 end
 
 local function setBanishButtonState(on: boolean)
@@ -240,12 +223,7 @@ local function renderOffers(token: string, offers: {any})
 			local rarity = tostring(off.rarity or "Common")
 			local def = SpellDefs.SPELLS[spellId]
 
-			local cardBtn, title, desc, rarityText = makeCardInSlot(slot)
-			cardBtn.Image = rarityImage[rarity] or rarityImage.Common
-
-			title.Text = (def and def.name) or spellId
-			rarityText.Text = rarity
-			desc.Text = nextDescForSpell(spellId)
+			local cardBtn = mountCardInSlot(slot, spellId, rarity, def)
 
 			cardBtn.MouseButton1Click:Connect(function()
 		if os.clock() < choiceLockedUntil then return end
