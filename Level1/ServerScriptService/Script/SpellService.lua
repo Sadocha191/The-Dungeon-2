@@ -8,6 +8,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local DamageIndicatorEvent = Remotes:WaitForChild("DamageIndicatorEvent")
+local SpellVFXEvent = Remotes:FindFirstChild("SpellVFXEvent")
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
 
@@ -17,6 +18,14 @@ if remotesFolder and not DamageIndicatorEvent then
 	DamageIndicatorEvent = Instance.new("RemoteEvent")
 	DamageIndicatorEvent.Name = "DamageIndicatorEvent"
 	DamageIndicatorEvent.Parent = remotesFolder
+end
+
+-- Ensure SpellVFXEvent exists (server -> client VFX sync)
+local SpellVFXEvent = remotesFolder and remotesFolder:FindFirstChild("SpellVFXEvent")
+if remotesFolder and not SpellVFXEvent then
+	SpellVFXEvent = Instance.new("RemoteEvent")
+	SpellVFXEvent.Name = "SpellVFXEvent"
+	SpellVFXEvent.Parent = remotesFolder
 end
 
 local PauseState = ReplicatedStorage:FindFirstChild("PauseState")
@@ -183,7 +192,8 @@ local function getState(plr: Player)
 	local s = state[plr.UserId]
 	if not s then
 		s = {
-			orbit = {}, -- id -> {parts={...}, lastHit = {[enemy]=t}}
+			orbit = {}, -- id -> {t=number, lastHit = {[enemy]=t}}
+			vfx = {},   -- id -> last sent VFX params
 			cds = {},   -- id -> nextFire
 			timers = {},-- id -> acc
 			cloneDelay = 0.15,
@@ -332,24 +342,55 @@ local function fireProjectile(plr: Player, origin: Vector3, dir: Vector3, speed:
 end
 
 -- ===== Spell implementations (best-effort, gameplay first) =====
+
+-- Server tells client to render orbit VFX locally (so it stays glued to the player, no replication lag)
+local function syncOrbitVFX(plr: Player, id: string, enabled: boolean, params)
+	if not SpellVFXEvent then return end
+	local s = getState(plr)
+	s.vfx[id] = s.vfx[id] or {}
+	local last = s.vfx[id]
+
+	if not enabled then
+		if last.enabled ~= false then
+			last.enabled = false
+			SpellVFXEvent:FireClient(plr, id, false)
+		end
+		return
+	end
+
+	params = params or {}
+	local changed = (last.enabled ~= true)
+	for k, v in pairs(params) do
+		if last[k] ~= v then
+			changed = true
+			break
+		end
+	end
+
+	if changed then
+		last.enabled = true
+		for k, v in pairs(params) do last[k] = v end
+		SpellVFXEvent:FireClient(plr, id, true, params)
+	end
+end
+
 local function tickOrbit(plr: Player, dt: number, id: string, count: number, radius: number, orbitSpeed: number, hitCd: number, baseDmg: number, onHit)
 	local s = getState(plr)
 	local bucket = s.orbit[id]
 	if not bucket then
-		bucket = { parts = {}, lastHit = {} }
+		bucket = { lastHit = {} }
 		s.orbit[id] = bucket
 	end
 
-	-- ensure parts
-	while #bucket.parts < count do
-		local p = ensurePart(id.."_Orb", Vector3.new(1.2,1.2,1.2))
-		p.Transparency = 0.25
-		table.insert(bucket.parts, p)
-	end
-	while #bucket.parts > count do
-		local p = table.remove(bucket.parts)
-		p:Destroy()
-	end
+	-- client-side orbit visuals (no server parts)
+	syncOrbitVFX(plr, id, count > 0, {
+		count = count,
+		radius = radius,
+		orbitSpeed = orbitSpeed,
+		height = 1.5,
+		size = 1.2,
+		transparency = 0.25,
+	})
 
 	local char = plr.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -358,10 +399,10 @@ local function tickOrbit(plr: Player, dt: number, id: string, count: number, rad
 	bucket.t = (bucket.t or 0) + orbitSpeed * (dt or 0.016)
 
 	local t0 = bucket.t
-	for i, p in ipairs(bucket.parts) do
+	for i = 1, count do
 		local ang = t0 + (i / math.max(1, count)) * math.pi * 2
-		local pos = hrp.Position + Vector3.new(math.cos(ang), 0.5, math.sin(ang)) * radius
-		p.Position = pos
+		-- IMPORTANT: Y is constant (not multiplied by radius) so orbits don't float too high
+		local pos = hrp.Position + Vector3.new(math.cos(ang) * radius, 1.5, math.sin(ang) * radius)
 
 		local nearest, d = getNearestEnemy(pos, 3)
 		if nearest then
@@ -430,6 +471,8 @@ local function stepPlayer(plr: Player, dt: number)
 				end
 			end
 		end)
+	else
+		syncOrbitVFX(plr, "FireOrb", false)
 	end
 
 	-- COMMON: Wind Blades
@@ -448,6 +491,8 @@ local function stepPlayer(plr: Player, dt: number)
 				enemy.HumanoidRootPart.AssemblyLinearVelocity += dir * 12
 			end
 		end)
+	else
+		syncOrbitVFX(plr, "WindBlades", false)
 	end
 
 	-- UNCOMMON: Toxic Blades
@@ -473,6 +518,8 @@ local function stepPlayer(plr: Player, dt: number)
 				end)
 			end
 		end)
+	else
+		syncOrbitVFX(plr, "ToxicBlades", false)
 	end
 
 	-- COMMON: Shadow Dagger
@@ -848,6 +895,8 @@ local function stepPlayer(plr: Player, dt: number)
 		tickOrbit(plr, dt, "SpiritWolves", count, 9, 1.6, hitCd, dmg, function(enemy)
 			applySlow(enemy, 0.15, 0.8)
 		end)
+	else
+		syncOrbitVFX(plr, "SpiritWolves", false)
 	end
 
 	-- RARE: Necro Swarm (homing skulls)
@@ -1224,6 +1273,8 @@ local function stepPlayer(plr: Player, dt: number)
 				end)
 			end
 		end
+	else
+		syncOrbitVFX(plr, "EmberSpirits", false)
 	end
 end
 
