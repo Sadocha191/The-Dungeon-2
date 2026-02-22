@@ -80,6 +80,13 @@ end
 local run = {} -- [uid] = {startT, pausedTotal, pauseStart, runLevel, runXp, nextXp, runCoins, kills, ended, banished}
 local pending = {} -- [uid] = {token, offers}
 
+-- extra per-run stats used by missions
+-- fields per run (best-effort):
+-- startClock, rerollsUsed, skipsUsed, minHpRatio, lastDamageClock, maxNoDamageStreak,
+-- lowHpSeconds, damageTaken, healAmount, bossNoHit20Failed, killTimes,
+-- multikill30_5Done, multikill60_20Done
+
+
 -- Party shared progression (Multi)
 local party = {} -- [partyId] = {level, xp, nextXp, pendingLevelUps, inLevelUp, waitingFor = {[uid]=true}}
 
@@ -171,6 +178,7 @@ local function getRun(plr: Player)
 	if not r then
 		r = {
 			startT = time(),
+			startClock = os.clock(),
 			pausedTotal = 0,
 			pauseStart = nil,
 			runLevel = 0,
@@ -178,12 +186,85 @@ local function getRun(plr: Player)
 			nextXp = rollNextRunXp(0),
 			runCoins = 0,
 			kills = 0,
+			rerollsUsed = 0,
+			skipsUsed = 0,
+			minHpRatio = 1,
+			lastDamageClock = nil,
+			maxNoDamageStreak = 0,
+			lowHpSeconds = 0,
+			damageTaken = 0,
+			healAmount = 0,
+			bossNoHit20Failed = false,
+			killTimes = {},
+			multikill30_5Done = false,
+			multikill60_20Done = false,
 			ended = false,
 			banished = {}, -- [spellId]=true
 		}
 		run[uid] = r
 	end
 	return r
+end
+
+local function hookHealthForMissions(plr: Player)
+	local function attach(char: Model)
+		local r = getRun(plr)
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		if not hum then return end
+		local lastHealth = hum.Health
+		r.minHpRatio = 1
+		plr:SetAttribute("LastDamageClock", 0)
+
+		hum.HealthChanged:Connect(function(newHealth)
+			local now = os.clock()
+			local maxH = hum.MaxHealth > 0 and hum.MaxHealth or 1
+			local ratio = newHealth / maxH
+			if ratio < (r.minHpRatio or 1) then
+				r.minHpRatio = ratio
+			end
+
+			local delta = newHealth - lastHealth
+			if delta < 0 then
+				local dmg = math.floor(-delta)
+				r.damageTaken = (r.damageTaken or 0) + dmg
+				plr:SetAttribute("LastDamageClock", now)
+
+				local streakStart = r.lastDamageClock or (r.startClock or now)
+				r.maxNoDamageStreak = math.max(r.maxNoDamageStreak or 0, now - streakStart)
+				r.lastDamageClock = now
+
+				-- boss no-hit window (first 20s after 20:00)
+				local bossSpawnClock = (r.startClock or now) + 1200
+				if now >= bossSpawnClock and now <= bossSpawnClock + 20 then
+					r.bossNoHit20Failed = true
+				end
+			elseif delta > 0 then
+				r.healAmount = (r.healAmount or 0) + math.floor(delta)
+			end
+
+			lastHealth = newHealth
+		end)
+
+		-- low HP sampling (4Hz)
+		task.spawn(function()
+			while char.Parent and hum.Parent and hum.Health > 0 do
+				local rr = getRun(plr)
+				if rr.ended then break end
+				if PauseState.Value then
+					task.wait(0.25)
+					continue
+				end
+				local maxH = hum.MaxHealth > 0 and hum.MaxHealth or 1
+				if (hum.Health / maxH) < 0.30 then
+					rr.lowHpSeconds = (rr.lowHpSeconds or 0) + 0.25
+				end
+				task.wait(0.25)
+			end
+		end)
+	end
+
+	if plr.Character then attach(plr.Character) end
+	plr.CharacterAdded:Connect(attach)
 end
 
 local function runSeconds(plr: Player): number
@@ -439,18 +520,33 @@ SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 		local lv = getSpellLevel(plr, id)
 		plr:SetAttribute(("Spell_%s_Level"):format(id), lv + 1)
 
+		-- Missions: count picked upgrades
+		if MissionProgress and MissionProgress.Add then
+			pcall(function() MissionProgress.Add(plr, "UPGRADES_CHOSEN", 1) end)
+		end
+
 		pending[plr.UserId] = nil
 		finishUpgrade(plr)
 		return
 	end
 
 	if t == "skip" then
+		local r = getRun(plr)
+		r.skipsUsed = (r.skipsUsed or 0) + 1
+		if MissionProgress and MissionProgress.Add then
+			pcall(function() MissionProgress.Add(plr, "SKIPS_USED", 1) end)
+		end
 		pending[plr.UserId] = nil
 		finishUpgrade(plr)
 		return
 	end
 
 	if t == "reroll" then
+		local r = getRun(plr)
+		r.rerollsUsed = (r.rerollsUsed or 0) + 1
+		if MissionProgress and MissionProgress.Add then
+			pcall(function() MissionProgress.Add(plr, "REROLLS_USED", 1) end)
+		end
 		local offers = rollOffers(plr)
 		if #offers == 0 then return end
 
@@ -624,6 +720,35 @@ function _G.RegisterEnemyKill(_pos: Vector3?)
 		local r = getRun(plr)
 		if not r.ended then
 			r.kills += 1
+			-- multikill windows (shared kills in current design)
+			local now = os.clock()
+			r.killTimes = r.killTimes or {}
+			table.insert(r.killTimes, now)
+			-- prune older than 20s
+			local kt = r.killTimes
+			local j = 1
+			for i = 1, #kt do
+				if now - kt[i] <= 20 then
+					kt[j] = kt[i]
+					j += 1
+				end
+			end
+			for i = j, #kt do kt[i] = nil end
+
+			-- 30 kills / 5s
+			if not r.multikill30_5Done then
+				local c5 = 0
+				for i = #kt, 1, -1 do
+					if now - kt[i] <= 5 then c5 += 1 else break end
+				end
+				if c5 >= 30 then
+					r.multikill30_5Done = true
+				end
+			end
+			-- 60 kills / 20s
+			if not r.multikill60_20Done and #kt >= 60 then
+				r.multikill60_20Done = true
+			end
 			syncHud(plr)
 		end
 	end
@@ -671,7 +796,59 @@ local function endRunForPlayer(plr: Player, reason: string)
 	})
 	if MissionProgress and MissionProgress.OnRunComplete then
 		local diedThisRun = (reason ~= "Victory")
-		pcall(function() MissionProgress.OnRunComplete(plr, 0, seconds, diedThisRun) end)
+		-- finalize no-damage streak
+		local nowClock = os.clock()
+		local streakStart = r.lastDamageClock or (r.startClock or nowClock)
+		r.maxNoDamageStreak = math.max(r.maxNoDamageStreak or 0, nowClock - streakStart)
+
+		local hum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
+		local maxH = (hum and hum.MaxHealth > 0) and hum.MaxHealth or 1
+		local hpRatio = (hum and hum.Health or 0) / maxH
+
+		-- count spells active (>= 3 different spells leveled)
+		local spellsCount = 0
+		if SpellDefs and SpellDefs.SPELLS then
+			for id, _ in pairs(SpellDefs.SPELLS) do
+				local lv = tonumber(plr:GetAttribute(("Spell_%s_Level"):format(id))) or 0
+				if lv > 0 then spellsCount += 1 end
+			end
+		end
+
+		-- win streak (simple server memory per session)
+		r.winStreak = r.winStreak or 0
+		if diedThisRun then
+			r.winStreak = 0
+		else
+			r.winStreak += 1
+		end
+
+		local extra = {
+			coinsGained = coinsGained,
+			runLevel = r.runLevel or 0,
+			rerollsUsed = r.rerollsUsed or 0,
+			skipsUsed = r.skipsUsed or 0,
+			damageTaken = r.damageTaken or 0,
+			healAmount = r.healAmount or 0,
+			lowHpSeconds = r.lowHpSeconds or 0,
+			minHpRatio = r.minHpRatio or 1,
+			multikill30_5 = r.multikill30_5Done == true,
+			multikill60_20 = r.multikill60_20Done == true,
+			noDamage5min = (r.maxNoDamageStreak or 0) >= 300,
+			bossNoHit20 = (not diedThisRun) and seconds >= 1200 and (r.bossNoHit20Failed ~= true),
+			bossClutch = (not diedThisRun) and hpRatio < 0.30,
+			burst90 = (not diedThisRun) and seconds >= 1200 and seconds <= 1290,
+			burst120 = (not diedThisRun) and seconds >= 1200 and seconds <= 1320,
+			noRerollWin = (not diedThisRun) and (r.rerollsUsed or 0) == 0,
+			max1RerollWin = (not diedThisRun) and (r.rerollsUsed or 0) <= 1,
+			max1SkipWin = (not diedThisRun) and (r.skipsUsed or 0) <= 1,
+			level10 = (r.runLevel or 0) >= 10,
+			spells3 = spellsCount >= 3,
+			hp50plusWin = (not diedThisRun) and (r.minHpRatio or 1) >= 0.50,
+			winStreak3 = (r.winStreak or 0) >= 3,
+		}
+
+		pcall(function() MissionProgress.OnRunComplete(plr, 0, seconds, diedThisRun, extra) end)
+		pcall(function() MissionProgress.OnReward(plr, accountXp, coinsGained) end)
 	end
 end
 
@@ -681,9 +858,11 @@ Players.PlayerAdded:Connect(function(plr: Player)
 	run[plr.UserId] = nil
 	pending[plr.UserId] = nil
 	plr:SetAttribute("RunEnded", false)
+	hookHealthForMissions(plr)
 
 	local r = getRun(plr)
 	r.startT = time()
+	r.startClock = os.clock()
 	r.pausedTotal = 0
 	r.pauseStart = nil
 	r.runLevel = 0
@@ -691,6 +870,18 @@ Players.PlayerAdded:Connect(function(plr: Player)
 	r.nextXp = rollNextRunXp(0)
 	r.runCoins = 0
 	r.kills = 0
+	r.rerollsUsed = 0
+	r.skipsUsed = 0
+	r.minHpRatio = 1
+	r.lastDamageClock = nil
+	r.maxNoDamageStreak = 0
+	r.lowHpSeconds = 0
+	r.damageTaken = 0
+	r.healAmount = 0
+	r.bossNoHit20Failed = false
+	r.killTimes = {}
+	r.multikill30_5Done = false
+	r.multikill60_20Done = false
 	r.ended = false
 	r.banished = {}
 

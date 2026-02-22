@@ -9,6 +9,43 @@ local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 
 local CurrencyService = {}
 
+local function utcDayKey(t: number?): number
+	local dt = os.date("!*t", t or os.time())
+	return (dt.year * 1000) + (dt.yday or 0)
+end
+
+local function utcWeekKey(t: number?): number
+	local dt = os.date("!*t", t or os.time())
+	local week = math.floor(((dt.yday or 1) - 1) / 7) + 1
+	return (dt.year * 100) + week
+end
+
+local function addMissionCounter(player: Player, key: string, amount: number)
+	if amount == 0 then return end
+	local data = getData(player)
+	data.Missions = data.Missions or {}
+	local m = data.Missions
+	m.DailyKey = tonumber(m.DailyKey) or 0
+	m.WeeklyKey = tonumber(m.WeeklyKey) or 0
+	m.CountersDaily = (typeof(m.CountersDaily) == "table") and m.CountersDaily or {}
+	m.CountersWeekly = (typeof(m.CountersWeekly) == "table") and m.CountersWeekly or {}
+
+	local dk = utcDayKey()
+	if m.DailyKey ~= dk then
+		m.DailyKey = dk
+		m.CountersDaily = {}
+	end
+	local wk = utcWeekKey()
+	if m.WeeklyKey ~= wk then
+		m.WeeklyKey = wk
+		m.CountersWeekly = {}
+	end
+
+	m.CountersDaily[key] = (tonumber(m.CountersDaily[key]) or 0) + amount
+	m.CountersWeekly[key] = (tonumber(m.CountersWeekly[key]) or 0) + amount
+	PlayerData.MarkDirty(player)
+end
+
 local function getData(player: Player)
 	return PlayerData.Get(player)
 end
@@ -55,6 +92,9 @@ function CurrencyService.SpendCoins(player: Player, amount: number): boolean
 	if data.coins < amount then return false end
 	data.coins -= amount
 	PlayerData.MarkDirty(player)
+	pcall(function()
+		addMissionCounter(player, "COINS_SPENT", amount)
+	end)
 	return true
 end
 

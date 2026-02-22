@@ -15,7 +15,7 @@ local PlayerData = require(serverModules:WaitForChild("PlayerData"))
 local MissionService = {}
 
 local DAILY_COUNT = 6
-local WEEKLY_COUNT = 12
+local WEEKLY_COUNT = 3
 
 local function utcDayKey(t: number?): number
 	local dt = os.date("!*t", t or os.time())

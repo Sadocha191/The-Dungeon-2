@@ -1,6 +1,6 @@
 -- MissionConfigs.lua (ReplicatedStorage/ModuleScripts)
 -- Pools of Daily + Weekly missions.
--- UI shows 6 Daily and 12 Weekly picked from these pools.
+-- UI shows 6 Daily and 3 Weekly picked from these pools.
 
 local MissionConfigs = {}
 
@@ -19,181 +19,69 @@ local function add(def)
 	end
 end
 
--- ===== DAILY (17) =====
-add({
-	Id = "D_FIRST_BLOOD",
-	Type = "Daily",
-	Title = "First Blood",
-	Description = "Kill 50 enemies.",
-	Reward = { Coins = 1500, WeaponPoints = 25 },
-	Goal = { Type = "Counter", Key = "KILLS", Target = 50 },
-	Repeatable = false,
-})
+-- NOTE: Keys are updated in Level1/ServerScriptService/ModuleScript/MissionProgress.lua
+-- via ProgressService + WaveController hooks.
 
-add({
-	Id = "D_DUNGEON_CLEAR",
-	Type = "Daily",
-	Title = "Dungeon Clear",
-	Description = "Complete 1 run.",
-	Reward = { Coins = 1800, WeaponPoints = 30 },
-	Goal = { Type = "Counter", Key = "RUNS", Target = 1 },
-	Repeatable = false,
-})
+-- =========================
+-- DAILY (30)
+-- =========================
 
-add({
-	Id = "D_WEAPON_MASTERY",
-	Type = "Daily",
-	Title = "Weapon Mastery",
-	Description = "Complete 1 run with your equipped weapon.",
-	Reward = { Coins = 1800, WeaponPoints = 30 },
-	Goal = { Type = "Counter", Key = "RUNS_WITH_WEAPON", Target = 1 },
-	Repeatable = false,
-})
+-- Kills / Elites / Boss
+add({ Id="D_FIRST_BLOOD", Type="Daily", Title="First Blood", Description="Kill 150 enemies.", Reward={Coins=500,WeaponPoints=100}, Goal={Type="Counter",Key="KILLS",Target=150}, Repeatable=false })
+add({ Id="D_MASSACRE", Type="Daily", Title="Massacre", Description="Kill 350 enemies.", Reward={Coins=800,WeaponPoints=120}, Goal={Type="Counter",Key="KILLS",Target=350}, Repeatable=false })
+add({ Id="D_ELITE_HUNTER", Type="Daily", Title="Elite Hunter", Description="Kill 8 elite enemies.", Reward={Coins=700,WeaponPoints=80}, Goal={Type="Counter",Key="ELITE_KILLS",Target=8}, Repeatable=false })
+add({ Id="D_ELITE_SWEEP", Type="Daily", Title="Elite Sweep", Description="Kill 15 elite enemies.", Reward={Coins=900,WeaponPoints=100}, Goal={Type="Counter",Key="ELITE_KILLS",Target=15}, Repeatable=false })
+add({ Id="D_ELITE_STREAK", Type="Daily", Title="Elite Streak", Description="Kill 5 elite enemies.", Reward={Coins=600,WeaponPoints=90}, Goal={Type="Counter",Key="ELITE_KILLS",Target=5}, Repeatable=false })
+add({ Id="D_BOSS_ATTEMPT", Type="Daily", Title="Boss Attempt", Description="Survive until the boss appears (20:00).", Reward={Coins=600,WeaponPoints=60}, Goal={Type="Counter",Key="BOSS_SPAWN_REACHED",Target=1}, Repeatable=false })
+add({ Id="D_BOSS_SLAYER", Type="Daily", Title="Boss Slayer", Description="Defeat the boss (win a run).", Reward={Coins=1000,WeaponPoints=100}, Goal={Type="Counter",Key="BOSSES",Target=1}, Repeatable=false })
+add({ Id="D_BOSS_BURST", Type="Daily", Title="Boss Burst", Description="Defeat the boss within 90s of spawn.", Reward={Coins=1200,WeaponPoints=120}, Goal={Type="Counter",Key="BOSS_BURST_90",Target=1}, Repeatable=false })
+add({ Id="D_BOSS_CLUTCH", Type="Daily", Title="Boss Clutch", Description="Win a run with less than 30% HP at the end.", Reward={Coins=900,WeaponPoints=110}, Goal={Type="Counter",Key="BOSS_CLUTCH",Target=1}, Repeatable=false })
+add({ Id="D_BOSS_NO_HIT", Type="Daily", Title="Boss Focus", Description="Win a run without taking damage in first 20s after boss spawn.", Reward={Coins=900,WeaponPoints=110}, Goal={Type="Counter",Key="BOSS_NO_HIT_20S",Target=1}, Repeatable=false })
 
-add({
-	Id = "D_ELITE_HUNTER",
-	Type = "Daily",
-	Title = "Elite Hunter",
-	Description = "Kill 3 elite enemies.",
-	Reward = { Coins = 1700, WeaponPoints = 25 },
-	Goal = { Type = "Counter", Key = "ELITE_KILLS", Target = 3 },
-	Repeatable = false,
-})
+-- Coins / Upgrades
+add({ Id="D_COINS_COLLECTOR", Type="Daily", Title="Coins Collector", Description="Earn 2,500 coins.", Reward={Coins=0,WeaponPoints=70}, Goal={Type="Counter",Key="COINS_EARNED",Target=2500}, Repeatable=false })
+add({ Id="D_BIG_PAYOUT", Type="Daily", Title="Big Payout", Description="Earn 6,000 coins.", Reward={Coins=0,WeaponPoints=90}, Goal={Type="Counter",Key="COINS_EARNED",Target=6000}, Repeatable=false })
+add({ Id="D_WEALTHY_RUN", Type="Daily", Title="Wealthy Run", Description="Earn 4,000 coins in a single run.", Reward={Coins=400,WeaponPoints=90}, Goal={Type="MaxCounter",Key="COINS_RUN_MAX",Target=4000}, Repeatable=false })
+add({ Id="D_SPEND_SMART", Type="Daily", Title="Spend Smart", Description="Spend 3,000 coins in the lobby.", Reward={Coins=0,WeaponPoints=80}, Goal={Type="Counter",Key="COINS_SPENT",Target=3000}, Repeatable=false })
+add({ Id="D_UPGRADE_ADDICT", Type="Daily", Title="Upgrade Addict", Description="Pick 12 upgrades.", Reward={Coins=600,WeaponPoints=60}, Goal={Type="Counter",Key="UPGRADES_CHOSEN",Target=12}, Repeatable=false })
+add({ Id="D_UPGRADE_RUSH", Type="Daily", Title="Upgrade Rush", Description="Reach level 10 in a single run.", Reward={Coins=700,WeaponPoints=80}, Goal={Type="Counter",Key="LEVEL10_RUNS",Target=1}, Repeatable=false })
 
-add({
-	Id = "D_BOSS_SLAYER",
-	Type = "Daily",
-	Title = "Boss Slayer",
-	Description = "Defeat 1 boss (finish a run).",
-	Reward = { Coins = 2200, WeaponPoints = 40 },
-	Goal = { Type = "Counter", Key = "BOSSES", Target = 1 },
-	Repeatable = false,
-})
+-- Rerolls / Skips
+add({ Id="D_NO_REROLL", Type="Daily", Title="No Reroll", Description="Win a run without rerolling.", Reward={Coins=900,WeaponPoints=120}, Goal={Type="Counter",Key="NO_REROLL_WINS",Target=1}, Repeatable=false })
+add({ Id="D_REROLL_SAVER", Type="Daily", Title="Reroll Saver", Description="Win a run using at most 1 reroll.", Reward={Coins=800,WeaponPoints=100}, Goal={Type="Counter",Key="MAX1_REROLL_WINS",Target=1}, Repeatable=false })
+add({ Id="D_SKIP_DISCIPLINE", Type="Daily", Title="Skip Discipline", Description="Win a run using at most 1 skip.", Reward={Coins=800,WeaponPoints=100}, Goal={Type="Counter",Key="MAX1_SKIP_WINS",Target=1}, Repeatable=false })
+add({ Id="D_REROLL_SPREE", Type="Daily", Title="Reroll Spree", Description="Use 3 rerolls (any runs).", Reward={Coins=400,WeaponPoints=70}, Goal={Type="Counter",Key="REROLLS_USED",Target=3}, Repeatable=false })
 
-add({
-	Id = "D_CRIT_ENJOYER",
-	Type = "Daily",
-	Title = "Crit Enjoyer",
-	Description = "Land 30 critical hits.",
-	Reward = { Coins = 1400, WeaponPoints = 20 },
-	Goal = { Type = "Counter", Key = "CRITS", Target = 30 },
-	Repeatable = false,
-})
+-- Survival / Damage / Skill
+add({ Id="D_CLOSE_CALL", Type="Daily", Title="Close Call", Description="Spend 60s below 30% HP.", Reward={Coins=700,WeaponPoints=90}, Goal={Type="Counter",Key="LOW_HP_SECONDS",Target=60}, Repeatable=false })
+add({ Id="D_GLASS_CANNON", Type="Daily", Title="Glass Cannon", Description="Win a run without dropping below 50% HP.", Reward={Coins=900,WeaponPoints=120}, Goal={Type="Counter",Key="HP50PLUS_WINS",Target=1}, Repeatable=false })
+add({ Id="D_HEAL_CHECK", Type="Daily", Title="Heal Check", Description="Heal 500 HP total.", Reward={Coins=600,WeaponPoints=80}, Goal={Type="Counter",Key="HEAL_AMOUNT",Target=500}, Repeatable=false })
+add({ Id="D_DODGE_TIME", Type="Daily", Title="Dodge Time", Description="Go 5 minutes without taking damage (in a run).", Reward={Coins=800,WeaponPoints=110}, Goal={Type="Counter",Key="NO_DAMAGE_5MIN",Target=1}, Repeatable=false })
+add({ Id="D_CROWD_CONTROL", Type="Daily", Title="Crowd Control", Description="Get 30 kills within 5 seconds.", Reward={Coins=600,WeaponPoints=100}, Goal={Type="Counter",Key="MULTIKILL_30_5",Target=1}, Repeatable=false })
+add({ Id="D_CHAIN_KILLER", Type="Daily", Title="Chain Killer", Description="Get 60 kills within 20 seconds.", Reward={Coins=900,WeaponPoints=120}, Goal={Type="Counter",Key="MULTIKILL_60_20",Target=1}, Repeatable=false })
+add({ Id="D_REVENGE", Type="Daily", Title="Revenge", Description="Kill an elite within 10s after taking damage.", Reward={Coins=600,WeaponPoints=100}, Goal={Type="Counter",Key="REVENGE_ELITE",Target=1}, Repeatable=false })
+add({ Id="D_TANK_TEST", Type="Daily", Title="Tank Test", Description="Take 2,000 damage total.", Reward={Coins=700,WeaponPoints=90}, Goal={Type="Counter",Key="DAMAGE_TAKEN",Target=2000}, Repeatable=false })
+add({ Id="D_DPS_CHECK", Type="Daily", Title="DPS Check", Description="Deal 30,000 total damage.", Reward={Coins=700,WeaponPoints=90}, Goal={Type="Counter",Key="DAMAGE",Target=30000}, Repeatable=false })
+add({ Id="D_SPELL_MASTERY", Type="Daily", Title="Spell Mastery", Description="In a run, have at least 3 different spells active.", Reward={Coins=600,WeaponPoints=90}, Goal={Type="Counter",Key="SPELLS_3",Target=1}, Repeatable=false })
 
-add({
-	Id = "D_SURVIVOR",
-	Type = "Daily",
-	Title = "Survivor",
-	Description = "Finish a run without dying.",
-	Reward = { Coins = 2000, WeaponPoints = 35 },
-	Goal = { Type = "Counter", Key = "NO_DEATH_RUNS", Target = 1 },
-	Repeatable = false,
-})
-
--- +10 daily ode mnie (na tych samych licznikach)
-add({ Id="D_WAVE_PUSHER", Type="Daily", Title="Wave Pusher", Description="Clear 40 waves total.", Reward={Coins=1700,WeaponPoints=25}, Goal={Type="Counter",Key="WAVES",Target=40}, Repeatable=false })
-add({ Id="D_DAMAGE_DEALER", Type="Daily", Title="Damage Dealer", Description="Deal 10,000 total damage.", Reward={Coins=1700,WeaponPoints=25}, Goal={Type="Counter",Key="DAMAGE",Target=10000}, Repeatable=false })
-add({ Id="D_GOLD_RUSH", Type="Daily", Title="Gold Rush", Description="Earn 6,000 coins.", Reward={Coins=1800,WeaponPoints=25}, Goal={Type="Counter",Key="COINS_EARNED",Target=6000}, Repeatable=false })
-add({ Id="D_XP_HUNT", Type="Daily", Title="XP Hunt", Description="Earn 600 XP.", Reward={Coins=1500,WeaponPoints=20}, Goal={Type="Counter",Key="XP_EARNED",Target=600}, Repeatable=false })
-add({ Id="D_CRIT_DAMAGE", Type="Daily", Title="Crit Damage", Description="Deal 2,500 damage via critical hits.", Reward={Coins=1700,WeaponPoints=25}, Goal={Type="Counter",Key="CRIT_DAMAGE",Target=2500}, Repeatable=false })
-add({ Id="D_FAST_CLEAR", Type="Daily", Title="Fast Clear", Description="Complete 1 run in under 12 minutes.", Reward={Coins=1900,WeaponPoints=30}, Goal={Type="Counter",Key="FAST_RUNS",Target=1}, Repeatable=false })
-add({ Id="D_DOUBLE_RUN", Type="Daily", Title="Double Run", Description="Complete 2 runs.", Reward={Coins=2100,WeaponPoints=35}, Goal={Type="Counter",Key="RUNS",Target=2}, Repeatable=false })
-add({ Id="D_MASSACRE_LITE", Type="Daily", Title="Massacre (Lite)", Description="Kill 150 enemies.", Reward={Coins=2000,WeaponPoints=30}, Goal={Type="Counter",Key="KILLS",Target=150}, Repeatable=false })
-add({ Id="D_TIME_ON_TASK", Type="Daily", Title="Time On Task", Description="Spend 20 minutes in dungeons.", Reward={Coins=1700,WeaponPoints=25}, Goal={Type="Counter",Key="SECONDS",Target=1200}, Repeatable=false })
-add({ Id="D_CRIT_STREAK", Type="Daily", Title="Crit Streak", Description="Land 60 critical hits.", Reward={Coins=1900,WeaponPoints=30}, Goal={Type="Counter",Key="CRITS",Target=60}, Repeatable=false })
-
--- ===== WEEKLY (18) =====
-add({
-	Id = "W_DUNGEON_GRINDER",
-	Type = "Weekly",
-	Title = "Dungeon Grinder",
-	Description = "Complete 10 runs.",
-	Reward = { Coins = 25000, WeaponPoints = 200 },
-	Goal = { Type = "Counter", Key = "RUNS", Target = 10 },
-	Repeatable = false,
-})
-
-add({
-	Id = "W_MASSACRE",
-	Type = "Weekly",
-	Title = "Massacre",
-	Description = "Kill 1,000 enemies.",
-	Reward = { Coins = 32000, WeaponPoints = 250 },
-	Goal = { Type = "Counter", Key = "KILLS", Target = 1000 },
-	Repeatable = false,
-})
-
-add({
-	Id = "W_ELITE_EXTERMINATOR",
-	Type = "Weekly",
-	Title = "Elite Exterminator",
-	Description = "Kill 25 elite enemies.",
-	Reward = { Coins = 28000, WeaponPoints = 200 },
-	Goal = { Type = "Counter", Key = "ELITE_KILLS", Target = 25 },
-	Repeatable = false,
-})
-
-add({
-	Id = "W_BOSS_HUNTER",
-	Type = "Weekly",
-	Title = "Boss Hunter",
-	Description = "Defeat 7 bosses.",
-	Reward = { Coins = 42000, WeaponPoints = 300 },
-	Goal = { Type = "Counter", Key = "BOSSES", Target = 7 },
-	Repeatable = false,
-})
-
-add({
-	Id = "W_ENDLESS_CHALLENGER",
-	Type = "Weekly",
-	Title = "Endless Challenger",
-	Description = "Reach wave 20 in Endless mode.",
-	Reward = { Coins = 35000, WeaponPoints = 250 },
-	Goal = { Type = "MaxCounter", Key = "WAVE_MAX", Target = 20 },
-	Repeatable = false,
-})
-
-add({
-	Id = "W_WEAPON_SPECIALIST",
-	Type = "Weekly",
-	Title = "Weapon Specialist",
-	Description = "Complete 5 runs with the same weapon.",
-	Reward = { Coins = 30000, WeaponPoints = 200 },
-	Goal = { Type = "WeaponRunsAny", Target = 5 },
-	Repeatable = false,
-})
-
-add({
-	Id = "W_CRIT_MACHINE",
-	Type = "Weekly",
-	Title = "Crit Machine",
-	Description = "Deal 5,000 damage via critical hits.",
-	Reward = { Coins = 26000, WeaponPoints = 180 },
-	Goal = { Type = "Counter", Key = "CRIT_DAMAGE", Target = 5000 },
-	Repeatable = false,
-})
-
-add({
-	Id = "W_WEEKLY_COMMITMENT",
-	Type = "Weekly",
-	Title = "Weekly Commitment",
-	Description = "Complete 5 daily quests.",
-	Reward = { Coins = 22000, WeaponPoints = 150 },
-	Goal = { Type = "Counter", Key = "DAILY_CLAIMS", Target = 5 },
-	Repeatable = false,
-})
-
--- +10 weekly ode mnie
-add({ Id="W_DAMAGE_MARATHON", Type="Weekly", Title="Damage Marathon", Description="Deal 250,000 total damage.", Reward={Coins=36000,WeaponPoints=220}, Goal={Type="Counter",Key="DAMAGE",Target=250000}, Repeatable=false })
-add({ Id="W_GOLD_HOARDER", Type="Weekly", Title="Gold Hoarder", Description="Earn 150,000 coins.", Reward={Coins=38000,WeaponPoints=240}, Goal={Type="Counter",Key="COINS_EARNED",Target=150000}, Repeatable=false })
-add({ Id="W_WAVE_MASTER", Type="Weekly", Title="Wave Master", Description="Clear 250 waves.", Reward={Coins=32000,WeaponPoints=200}, Goal={Type="Counter",Key="WAVES",Target=250}, Repeatable=false })
-add({ Id="W_CRIT_ADDICT", Type="Weekly", Title="Crit Addict", Description="Land 600 critical hits.", Reward={Coins=34000,WeaponPoints=220}, Goal={Type="Counter",Key="CRITS",Target=600}, Repeatable=false })
-add({ Id="W_XP_GRINDER", Type="Weekly", Title="XP Grinder", Description="Earn 10,000 XP.", Reward={Coins=32000,WeaponPoints=200}, Goal={Type="Counter",Key="XP_EARNED",Target=10000}, Repeatable=false })
-add({ Id="W_SURVIVALIST", Type="Weekly", Title="Survivalist", Description="Finish 15 runs without dying.", Reward={Coins=38000,WeaponPoints=250}, Goal={Type="Counter",Key="NO_DEATH_RUNS",Target=15}, Repeatable=false })
-add({ Id="W_SPEEDRUNNER", Type="Weekly", Title="Speedrunner", Description="Complete 10 fast runs (under 12 min).", Reward={Coins=34000,WeaponPoints=220}, Goal={Type="Counter",Key="FAST_RUNS",Target=10}, Repeatable=false })
-add({ Id="W_ELITE_SWEEP", Type="Weekly", Title="Elite Sweep", Description="Kill 80 elite enemies.", Reward={Coins=36000,WeaponPoints=240}, Goal={Type="Counter",Key="ELITE_KILLS",Target=80}, Repeatable=false })
-add({ Id="W_PLAYTIME", Type="Weekly", Title="Playtime", Description="Spend 4 hours in dungeons.", Reward={Coins=28000,WeaponPoints=180}, Goal={Type="Counter",Key="SECONDS",Target=14400}, Repeatable=false })
-add({ Id="W_BATTLE_TEMPO", Type="Weekly", Title="Battle Tempo", Description="Complete 20 runs.", Reward={Coins=45000,WeaponPoints=300}, Goal={Type="Counter",Key="RUNS",Target=20}, Repeatable=false })
+-- =========================
+-- WEEKLY (15)
+-- =========================
+add({ Id="W_CONSISTENCY", Type="Weekly", Title="Consistency", Description="Win 5 runs.", Reward={Coins=4000,WeaponPoints=500}, Goal={Type="Counter",Key="BOSSES",Target=5}, Repeatable=false })
+add({ Id="W_GRINDER", Type="Weekly", Title="Grinder", Description="Win 10 runs.", Reward={Coins=7000,WeaponPoints=700}, Goal={Type="Counter",Key="BOSSES",Target=10}, Repeatable=false })
+add({ Id="W_BOSS_SPECIALIST", Type="Weekly", Title="Boss Specialist", Description="Defeat 7 bosses.", Reward={Coins=6000,WeaponPoints=600}, Goal={Type="Counter",Key="BOSSES",Target=7}, Repeatable=false })
+add({ Id="W_BOSS_FARMER", Type="Weekly", Title="Boss Farmer", Description="Reach boss spawn (20:00) 15 times.", Reward={Coins=4500,WeaponPoints=450}, Goal={Type="Counter",Key="BOSS_SPAWN_REACHED",Target=15}, Repeatable=false })
+add({ Id="W_QUICK_FINISHER", Type="Weekly", Title="Quick Finisher", Description="Defeat the boss within 120s of spawn 5 times.", Reward={Coins=5000,WeaponPoints=600}, Goal={Type="Counter",Key="BOSS_BURST_120",Target=5}, Repeatable=false })
+add({ Id="W_ELITE_EXTERMINATOR", Type="Weekly", Title="Elite Exterminator", Description="Kill 80 elite enemies.", Reward={Coins=4500,WeaponPoints=500}, Goal={Type="Counter",Key="ELITE_KILLS",Target=80}, Repeatable=false })
+add({ Id="W_ELITE_OVERKILL", Type="Weekly", Title="Elite Overkill", Description="Kill 150 elite enemies.", Reward={Coins=7000,WeaponPoints=700}, Goal={Type="Counter",Key="ELITE_KILLS",Target=150}, Repeatable=false })
+add({ Id="W_MASSACRE", Type="Weekly", Title="Massacre", Description="Kill 12,000 enemies.", Reward={Coins=6000,WeaponPoints=600}, Goal={Type="Counter",Key="KILLS",Target=12000}, Repeatable=false })
+add({ Id="W_BLOODBATH", Type="Weekly", Title="Bloodbath", Description="Kill 20,000 enemies.", Reward={Coins=9000,WeaponPoints=900}, Goal={Type="Counter",Key="KILLS",Target=20000}, Repeatable=false })
+add({ Id="W_SURVIVOR", Type="Weekly", Title="Survivor", Description="Spend 180 minutes in dungeons.", Reward={Coins=3500,WeaponPoints=400}, Goal={Type="Counter",Key="SECONDS",Target=10800}, Repeatable=false })
+add({ Id="W_MARATHON", Type="Weekly", Title="Marathon", Description="Spend 300 minutes in dungeons.", Reward={Coins=5000,WeaponPoints=500}, Goal={Type="Counter",Key="SECONDS",Target=18000}, Repeatable=false })
+add({ Id="W_ECONOMY", Type="Weekly", Title="Economy", Description="Earn 60,000 coins.", Reward={Coins=0,WeaponPoints=400}, Goal={Type="Counter",Key="COINS_EARNED",Target=60000}, Repeatable=false })
+add({ Id="W_RICH_WEEK", Type="Weekly", Title="Rich Week", Description="Earn 100,000 coins.", Reward={Coins=0,WeaponPoints=600}, Goal={Type="Counter",Key="COINS_EARNED",Target=100000}, Repeatable=false })
+add({ Id="W_UPGRADE_ADDICT", Type="Weekly", Title="Upgrade Addict", Description="Pick 120 upgrades.", Reward={Coins=3000,WeaponPoints=400}, Goal={Type="Counter",Key="UPGRADES_CHOSEN",Target=120}, Repeatable=false })
+add({ Id="W_WIN_STREAK", Type="Weekly", Title="Win Streak", Description="Win 3 runs in a row.", Reward={Coins=7000,WeaponPoints=800}, Goal={Type="Counter",Key="WIN_STREAK_3",Target=1}, Repeatable=false })
 
 function MissionConfigs.Get(id: string)
 	return defs[id]

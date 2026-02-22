@@ -123,12 +123,23 @@ function MissionProgress.OnKill(plr: Player, mobModel: Model?)
 	MissionProgress.Add(plr, "KILLS", 1)
 	if mobModel and mobModel:GetAttribute("IsElite") == true then
 		MissionProgress.Add(plr, "ELITE_KILLS", 1)
+		-- Revenge: elite kill within 10s after player took damage (best-effort)
+		local lastD = tonumber(plr:GetAttribute("LastDamageClock")) or 0
+		if lastD > 0 and (os.clock() - lastD) <= 10 then
+			MissionProgress.Add(plr, "REVENGE_ELITE", 1)
+		end
 	end
 	-- Boss progress liczymy tylko za ukończony run (OnRunComplete),
 	-- żeby uniknąć podwójnego naliczania przy mapach z realnym bossem.
 end
 
-function MissionProgress.OnRunComplete(plr: Player, waves: number, seconds: number, diedThisRun: boolean)
+-- extraStats (optional table) can include:
+--  coinsGained, runLevel, rerollsUsed, skipsUsed, damageTaken, healAmount,
+--  lowHpSeconds, maxNoDamageStreak, minHpRatio,
+--  bossNoHit20, bossClutch, burst90, burst120,
+--  noRerollWin, max1RerollWin, max1SkipWin, level10,
+--  multikill30_5, multikill60_20, spells3, winStreak3
+function MissionProgress.OnRunComplete(plr: Player, waves: number, seconds: number, diedThisRun: boolean, extraStats: any?)
 	waves = math.floor(tonumber(waves) or 0)
 	seconds = math.floor(tonumber(seconds) or 0)
 
@@ -157,6 +168,49 @@ function MissionProgress.OnRunComplete(plr: Player, waves: number, seconds: numb
 	-- "FAST_RUNS": zgodnie z MissionConfigs -> ukończ run <= 12 minut (720s)
 	if seconds > 0 and seconds <= 720 then
 		MissionProgress.Add(plr, "FAST_RUNS", 1)
+	end
+
+	-- Boss spawn reached (20:00)
+	if seconds >= 1200 then
+		MissionProgress.Add(plr, "BOSS_SPAWN_REACHED", 1)
+	end
+
+	-- Optional per-run derived stats
+	if typeof(extraStats) == "table" then
+		local coinsGained = math.floor(tonumber(extraStats.coinsGained) or 0)
+		if coinsGained > 0 then
+			MissionProgress.SetMax(plr, "COINS_RUN_MAX", coinsGained)
+		end
+
+		local lowHp = math.floor(tonumber(extraStats.lowHpSeconds) or 0)
+		if lowHp > 0 then
+			MissionProgress.Add(plr, "LOW_HP_SECONDS", lowHp)
+		end
+
+		local dmgTaken = math.floor(tonumber(extraStats.damageTaken) or 0)
+		if dmgTaken > 0 then
+			MissionProgress.Add(plr, "DAMAGE_TAKEN", dmgTaken)
+		end
+
+		local healed = math.floor(tonumber(extraStats.healAmount) or 0)
+		if healed > 0 then
+			MissionProgress.Add(plr, "HEAL_AMOUNT", healed)
+		end
+
+		if extraStats.multikill30_5 then MissionProgress.Add(plr, "MULTIKILL_30_5", 1) end
+		if extraStats.multikill60_20 then MissionProgress.Add(plr, "MULTIKILL_60_20", 1) end
+		if extraStats.noDamage5min then MissionProgress.Add(plr, "NO_DAMAGE_5MIN", 1) end
+		if extraStats.bossNoHit20 then MissionProgress.Add(plr, "BOSS_NO_HIT_20S", 1) end
+		if extraStats.bossClutch then MissionProgress.Add(plr, "BOSS_CLUTCH", 1) end
+		if extraStats.burst90 then MissionProgress.Add(plr, "BOSS_BURST_90", 1) end
+		if extraStats.burst120 then MissionProgress.Add(plr, "BOSS_BURST_120", 1) end
+		if extraStats.noRerollWin then MissionProgress.Add(plr, "NO_REROLL_WINS", 1) end
+		if extraStats.max1RerollWin then MissionProgress.Add(plr, "MAX1_REROLL_WINS", 1) end
+		if extraStats.max1SkipWin then MissionProgress.Add(plr, "MAX1_SKIP_WINS", 1) end
+		if extraStats.level10 then MissionProgress.Add(plr, "LEVEL10_RUNS", 1) end
+		if extraStats.spells3 then MissionProgress.Add(plr, "SPELLS_3", 1) end
+		if extraStats.hp50plusWin then MissionProgress.Add(plr, "HP50PLUS_WINS", 1) end
+		if extraStats.winStreak3 then MissionProgress.Add(plr, "WIN_STREAK_3", 1) end
 	end
 
 	-- Boss missions: traktujemy ukończenie runa jako "boss".
