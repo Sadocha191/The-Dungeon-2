@@ -5,6 +5,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -16,6 +17,17 @@ local RF_GetTutorialState = remoteFunctions:WaitForChild("RF_GetTutorialState")
 
 local DAILY_MAX = 6
 local WEEKLY_MAX = 12
+
+local dailyResetAt: number? = nil
+local weeklyResetAt: number? = nil
+
+local function formatCountdown(seconds: number): string
+	seconds = math.max(0, math.floor(seconds))
+	local h = math.floor(seconds / 3600)
+	local m = math.floor((seconds % 3600) / 60)
+	local s = seconds % 60
+	return ("%02d:%02d:%02d"):format(h, m, s)
+end
 
 local function tutorialComplete(): boolean
 	local ok, t = pcall(function()
@@ -95,6 +107,18 @@ title.TextXAlignment = Enum.TextXAlignment.Left
 title.Text = "Missions"
 title.Parent = panel
 
+local resetInfo = Instance.new("TextLabel")
+resetInfo.BackgroundTransparency = 1
+resetInfo.AnchorPoint = Vector2.new(1, 0)
+resetInfo.Position = UDim2.new(1, -56, 0, 18)
+resetInfo.Size = UDim2.fromOffset(360, 20)
+resetInfo.Font = Enum.Font.Gotham
+resetInfo.TextSize = 12
+resetInfo.TextColor3 = Color3.fromRGB(190, 190, 190)
+resetInfo.TextXAlignment = Enum.TextXAlignment.Right
+resetInfo.Text = ""
+resetInfo.Parent = panel
+
 local closeBtn = Instance.new("TextButton")
 closeBtn.AnchorPoint = Vector2.new(1, 0)
 closeBtn.Position = UDim2.new(1, -16, 0, 16)
@@ -169,7 +193,8 @@ tabWeekly.MouseButton1Click:Connect(function() setTab("Weekly") end)
 
 local function makeList(parent: Instance)
 	local list = Instance.new("ScrollingFrame")
-	list.Size = UDim2.fromScale(1, 1)
+	list.Size = UDim2.new(1, 0, 1, -22)
+	list.Position = UDim2.fromOffset(0, 22)
 	list.BackgroundTransparency = 1
 	list.BorderSizePixel = 0
 	list.ScrollBarThickness = 6
@@ -185,6 +210,29 @@ end
 
 local dailyList = makeList(pageDaily)
 local weeklyList = makeList(pageWeekly)
+
+-- per-page reset labels
+local dailyResetLabel = Instance.new("TextLabel")
+dailyResetLabel.BackgroundTransparency = 1
+dailyResetLabel.Position = UDim2.fromOffset(0, 0)
+dailyResetLabel.Size = UDim2.new(1, 0, 0, 18)
+dailyResetLabel.Font = Enum.Font.Gotham
+dailyResetLabel.TextSize = 12
+dailyResetLabel.TextColor3 = Color3.fromRGB(190, 190, 190)
+dailyResetLabel.TextXAlignment = Enum.TextXAlignment.Left
+dailyResetLabel.Text = ""
+dailyResetLabel.Parent = pageDaily
+
+local weeklyResetLabel = Instance.new("TextLabel")
+weeklyResetLabel.BackgroundTransparency = 1
+weeklyResetLabel.Position = UDim2.fromOffset(0, 0)
+weeklyResetLabel.Size = UDim2.new(1, 0, 0, 18)
+weeklyResetLabel.Font = Enum.Font.Gotham
+weeklyResetLabel.TextSize = 12
+weeklyResetLabel.TextColor3 = Color3.fromRGB(190, 190, 190)
+weeklyResetLabel.TextXAlignment = Enum.TextXAlignment.Left
+weeklyResetLabel.Text = ""
+weeklyResetLabel.Parent = pageWeekly
 
 local function clearList(list: ScrollingFrame)
 	for _, ch in ipairs(list:GetChildren()) do
@@ -257,14 +305,30 @@ local function makeMissionRow(parentList: ScrollingFrame, mission: any, onClaim)
 	claim.Parent = row
 	addCorner(claim, 12)
 
-	local claimable = (mission.Claimable == true)
-	if claimable then
+	local claimCount = tonumber(mission.ClaimCount) or 0
+	local repeatable = (mission.Repeatable == true)
+	local completed = (claimCount > 0 and not repeatable)
+	local claimable = (mission.Claimable == true) and (not completed)
+
+	if completed then
+		claim.BackgroundColor3 = Color3.fromRGB(32, 46, 32)
+		claim.Text = "Completed"
+		claim.Active = false
+		-- pokaż pełny progress dla czytelności
+		local prog = mission.Progress
+		if typeof(prog) == "table" then
+			local tgt = tonumber(prog.Target) or 0
+			if tgt > 0 then
+				p.Text = ("Progress: %d/%d"):format(tgt, tgt)
+			end
+		end
+	elseif claimable then
 		claim.BackgroundColor3 = Color3.fromRGB(60, 140, 255)
 		claim.Text = "Claim"
 		claim.Active = true
 	else
 		claim.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
-		claim.Text = "Not ready"
+		claim.Text = "In progress"
 		claim.Active = false
 	end
 
@@ -302,6 +366,11 @@ local function refreshUI()
 	local payload = getPayload()
 	if typeof(payload) ~= "table" then return end
 
+	if typeof(payload.resets) == "table" then
+		dailyResetAt = tonumber(payload.resets.dailyAt)
+		weeklyResetAt = tonumber(payload.resets.weeklyAt)
+	end
+
 	local missions = payload.missions
 	if typeof(missions) ~= "table" then return end
 
@@ -326,6 +395,38 @@ local function refreshUI()
 	for _, m in ipairs(weekly) do makeMissionRow(weeklyList, m, onClaim) end
 end
 
+local timerConn: RBXScriptConnection? = nil
+local function startTimer()
+	if timerConn then timerConn:Disconnect() end
+	local acc = 0
+	timerConn = RunService.Heartbeat:Connect(function(dt)
+		if not gui.Enabled then return end
+		acc += dt
+		if acc < 0.25 then return end
+		acc = 0
+		local now = os.time()
+		if dailyResetAt then
+			dailyResetLabel.Text = "Daily resets in: " .. formatCountdown(dailyResetAt - now)
+		end
+		if weeklyResetAt then
+			weeklyResetLabel.Text = "Weekly resets in: " .. formatCountdown(weeklyResetAt - now)
+		end
+		-- top-right summary
+		if dailyResetAt and weeklyResetAt then
+			resetInfo.Text = ("Daily %s | Weekly %s"):format(
+				formatCountdown(dailyResetAt - now),
+				formatCountdown(weeklyResetAt - now)
+			)
+		elseif dailyResetAt then
+			resetInfo.Text = "Daily " .. formatCountdown(dailyResetAt - now)
+		elseif weeklyResetAt then
+			resetInfo.Text = "Weekly " .. formatCountdown(weeklyResetAt - now)
+		else
+			resetInfo.Text = ""
+		end
+	end)
+end
+
 local function openUI()
 	if not tutorialComplete() then
 		-- w trakcie tutoriala nie otwieramy
@@ -334,6 +435,7 @@ local function openUI()
 	gui.Enabled = true
 	setTab("Daily")
 	refreshUI()
+	startTimer()
 end
 
 local function closeUI()

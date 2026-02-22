@@ -30,12 +30,38 @@ end
 local RF_GetMissions = ensureFunction("RF_GetMissions")
 local RF_ClaimMission = ensureFunction("RF_ClaimMission")
 
+-- === Reset timers (UTC) ===
+local function nextDailyResetAt(now: number): number
+	local dt = os.date("!*t", now)
+	-- next day at 00:00:00 UTC
+	dt.hour, dt.min, dt.sec = 0, 0, 0
+	local todayMidnight = os.time(dt)
+	return todayMidnight + 24 * 60 * 60
+end
+
+local function nextWeeklyResetAt(now: number): number
+	-- aligns with MissionService.utcWeekKey(): weeks are 7-day blocks starting Jan 1 (UTC)
+	local dt = os.date("!*t", now)
+	local yday = dt.yday or 1
+	local dayIndex = (yday - 1) % 7
+	local daysUntilNextBlock = 7 - dayIndex
+	-- next reset at next block start 00:00 UTC
+	dt.hour, dt.min, dt.sec = 0, 0, 0
+	local midnight = os.time(dt)
+	return midnight + daysUntilNextBlock * 24 * 60 * 60
+end
+
 RF_GetMissions.OnServerInvoke = function(player: Player)
+	local now = os.time()
 	local missions = MissionService.GetMissions(player)
 	local currencies = CurrencyService.GetBalances(player)
 	return {
 		missions = missions,
 		currencies = currencies,
+		resets = {
+			dailyAt = nextDailyResetAt(now),
+			weeklyAt = nextWeeklyResetAt(now),
+		},
 	}
 end
 
