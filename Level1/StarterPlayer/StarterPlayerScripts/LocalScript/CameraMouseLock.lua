@@ -11,33 +11,32 @@ local playerGui = player:WaitForChild("PlayerGui")
 local upgradesGui = playerGui:WaitForChild("UpgradesGUI")
 local main = upgradesGui:WaitForChild("Main")
 
--- Any ScreenGui with attribute Modal=true should unlock the mouse (menus, game over, etc.)
-local function anyModalGuiOpen(): boolean
-	local function isActuallyOpen(screenGui: ScreenGui): boolean
-		-- Many of your menus keep ScreenGui.Enabled=true permanently and only toggle
-		-- a top-level Frame.Visible. Treat the GUI as "open" only if it has a visible
-		-- GuiObject somewhere.
-		for _, d in ipairs(screenGui:GetDescendants()) do
-			if d:IsA("GuiObject") and d.Visible then
+-- A modal gui counts as "open" only if it is Enabled AND actually has any visible GuiObject.
+local function screenGuiHasVisibleContent(gui: ScreenGui): boolean
+	for _, d in ipairs(gui:GetDescendants()) do
+		if d:IsA("GuiObject") and d.Visible then
+			-- AbsoluteSize is only valid once rendered; in edge cases it can be 0 for one frame.
+			local s = d.AbsoluteSize
+			if s.X > 0 and s.Y > 0 then
 				return true
 			end
 		end
-		return false
 	end
+	return false
+end
 
+-- Any ScreenGui with attribute Modal=true (or known modal names) should free the cursor and freeze the camera,
+-- but ONLY while it is actually visible.
+local function anyModalGuiOpen(): boolean
 	for _, ch in ipairs(playerGui:GetChildren()) do
 		if ch:IsA("ScreenGui") and ch.Enabled then
-			if ch:GetAttribute("Modal") == true then
-				if isActuallyOpen(ch) then
-					return true
-				end
-			end
-			-- fallback for known modals that may not set the attribute
+			local isModal = (ch:GetAttribute("Modal") == true)
 			local n = ch.Name
 			if n == "MissionSummary" or n == "EscMenu" or n == "EKeyMenu" then
-				if isActuallyOpen(ch) then
-					return true
-				end
+				isModal = true
+			end
+			if isModal and screenGuiHasVisibleContent(ch) then
+				return true
 			end
 		end
 	end
@@ -84,7 +83,6 @@ end
 
 local function orbitStep(dt)
 	-- If any modal UI is open (upgrades, game over, esc menu), free the cursor and freeze camera.
-	-- Note: UpgradesGUI keeps ScreenGui enabled and toggles Main.Visible, so check Main explicitly.
 	if main.Visible or anyModalGuiOpen() then
 		if not frozenCFrame then frozenCFrame = cam.CFrame end
 		cam.CameraType = Enum.CameraType.Scriptable
