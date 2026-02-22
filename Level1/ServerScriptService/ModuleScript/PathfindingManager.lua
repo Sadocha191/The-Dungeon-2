@@ -29,6 +29,13 @@ local function removeQueuedItem(item)
 		return
 	end
 
+	for i = #queue, 1, -1 do
+		if queue[i] == item then
+			table.remove(queue, i)
+			break
+		end
+	end
+
 	if queuedByNpc[item.npcModel] == item then
 		queuedByNpc[item.npcModel] = nil
 	end
@@ -42,8 +49,11 @@ end
 local function dequeueNextItem()
 	local bestIndex = nil
 	local bestScore = -math.huge
-	for i, item in ipairs(queue) do
-		if not item.cancelled then
+	for i = #queue, 1, -1 do
+		local item = queue[i]
+		if item.cancelled then
+			table.remove(queue, i)
+		else
 			local score = scoreRequest(item)
 			if score > bestScore then
 				bestScore = score
