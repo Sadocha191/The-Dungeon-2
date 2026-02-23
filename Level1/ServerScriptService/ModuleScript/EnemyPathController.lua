@@ -63,6 +63,7 @@ function EnemyPathController.new(mobModel: Model)
 	self.Humanoid = mobModel:FindFirstChildOfClass("Humanoid")
 
 	self.TargetPlayer = nil
+	self._nextTargetScanT = 0
 
 	self._nextMoveT = 0
 	self._nextMantleT = 0
@@ -76,6 +77,42 @@ function EnemyPathController.new(mobModel: Model)
 	self._rayParams = params
 
 	return self
+end
+
+local function getLivingHRP(plr: Player): BasePart?
+	local ch = plr.Character
+	if not ch then return nil end
+	local hum = ch:FindFirstChildOfClass("Humanoid")
+	if not hum or hum.Health <= 0 then return nil end
+	return ch:FindFirstChild("HumanoidRootPart")
+end
+
+function EnemyPathController:AcquireTarget()
+	if not self.Root then return nil end
+	local now = os.clock()
+	if now < (self._nextTargetScanT or 0) then
+		return self.TargetPlayer
+	end
+	-- scan not too often (server perf)
+	self._nextTargetScanT = now + 0.5
+
+	local bestPlr = nil
+	local bestD = math.huge
+	local myPos = self.Root.Position
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		local hrp = getLivingHRP(plr)
+		if hrp then
+			local d = (hrp.Position - myPos).Magnitude
+			if d < bestD then
+				bestD = d
+				bestPlr = plr
+			end
+		end
+	end
+
+	self.TargetPlayer = bestPlr
+	return bestPlr
 end
 
 function EnemyPathController:Destroy()
@@ -194,10 +231,12 @@ function EnemyPathController:Update(dt: number)
 	if not self.Mob or not self.Root or not self.Humanoid then return end
 
 	local plr = self.TargetPlayer
-	if not plr or not plr.Character then return end
-
-	local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
-	if not hrp then return end
+	local hrp = plr and getLivingHRP(plr) or nil
+	if not hrp then
+		plr = self:AcquireTarget()
+		hrp = plr and getLivingHRP(plr) or nil
+		if not hrp then return end
+	end
 
 	local playerPos = hrp.Position
 	local dist = flatDist(self.Root.Position, playerPos)
