@@ -1,302 +1,255 @@
-local ServerScriptService = game:GetService("ServerScriptService")
+-- EnemyPathController.lua (SCRAPE VERSION)
+-- No pathfinding. Chase straight to player.
+-- If blocked by a wall/ledge, do smooth mantle (slow climb) to top surface, then step onto platform.
+-- Includes Run/Stop to match WaveController expectations.
 
-local PathfindingManager = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PathfindingManager"))
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 
 local EnemyPathController = {}
 EnemyPathController.__index = EnemyPathController
 
-local DEFAULT_PATH_PARAMS = {
-	AgentRadius = 2.5,
-	AgentHeight = 5,
-	AgentCanJump = true,
-	AgentCanClimb = false,
-	AgentJumpHeight = 7,
-	AgentMaxSlope = 35,
-	WaypointSpacing = 10,
-}
+-- ======================
+-- TUNING
+-- ======================
+local MOVE_UPDATE_NEAR = 0.10   -- how often we call MoveTo when near
+local MOVE_UPDATE_FAR  = 0.25   -- how often we call MoveTo when far
+local NEAR_DIST = 40
 
-function EnemyPathController.new(mob: Model, options)
-	local hum = mob:FindFirstChildOfClass("Humanoid")
-	local hrp = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
-	if not hum or not hrp then
-		return nil
+-- Mantle detection
+local FORWARD_CHECK_DIST = 3.0  -- how far ahead to check for a wall
+local CHEST_Y = 2.2             -- ray origin height above root
+local MAX_MANTLE_HEIGHT = 30.0  -- max climb height (set 25-40)
+local MIN_MANTLE_HEIGHT = 0.75  -- ignore tiny bumps
+
+-- Mantle motion (smooth)
+local MANTLE_UP_TIME = 0.30
+local MANTLE_FWD_TIME = 0.20
+local MANTLE_FORWARD_STEP = 1.5
+local MANTLE_COOLDOWN = 0.8
+
+-- Clearance check
+local CLEARANCE_UP = 4.0
+
+-- ======================
+-- helpers
+-- ======================
+local function flatDist(a: Vector3, b: Vector3)
+	local d = a - b
+	return math.sqrt(d.X*d.X + d.Z*d.Z)
+end
+
+local function unitXZ(v: Vector3)
+	local xz = Vector3.new(v.X, 0, v.Z)
+	if xz.Magnitude < 1e-6 then
+		return Vector3.new(0, 0, -1)
 	end
+	return xz.Unit
+end
 
+local function getEnemiesFolder()
+	return workspace:FindFirstChild("Enemies") or workspace:FindFirstChild("Mobs")
+end
+
+-- ======================
+-- Controller
+-- ======================
+function EnemyPathController.new(mobModel: Model)
 	local self = setmetatable({}, EnemyPathController)
-	self.Mob = mob
-	self.Humanoid = hum
-	self.RootPart = hrp
-	self.Options = options or {}
-	self.PathParams = self.Options.PathParams or DEFAULT_PATH_PARAMS
-	self.StopMove = self.Options.StopMove
-	self.IsPaused = self.Options.IsPaused
 
-	self.RepathDistance = self.Options.RepathDistance or 10
-	self.RepathCooldown = self.Options.RepathCooldown or 1.2
-	self.NoLOSRepathDelay = self.Options.NoLOSRepathDelay or 0.45
-	self.StuckCheckWindow = self.Options.StuckCheckWindow or 0.55
-	self.StuckProgressDistance = self.Options.StuckProgressDistance or 1.2
-	self.WaypointReachedDistance = self.Options.WaypointReachedDistance or 3
-	self.LOSDirectMoveInterval = self.Options.LOSDirectMoveInterval or 0.12
-	self.IdleUpdateInterval = self.Options.IdleUpdateInterval or 0.08
-	self.FullUpdateRadius = self.Options.FullUpdateRadius or 90
-	self.FarNoPathRadius = self.Options.FarNoPathRadius or 120
-	self.MidUpdateInterval = self.Options.MidUpdateInterval or 0.5
-	self.FarUpdateInterval = self.Options.FarUpdateInterval or 0.8
+	self.Mob = mobModel
+	self.Root = mobModel:FindFirstChild("HumanoidRootPart") or mobModel.PrimaryPart
+	self.Humanoid = mobModel:FindFirstChildOfClass("Humanoid")
 
-	self.LastTargetPos = nil
-	self.LastRepathAt = 0
-	self.LastLOSDirectMove = 0
-	self.LastProgressCheckAt = 0
-	self.LastProgressPos = hrp.Position
-	self.LastNoLOSAt = nil
+	self.TargetPlayer = nil
 
-	self.CurrentPath = nil
-	self.CurrentWaypoints = nil
-	self.CurrentWaypointIndex = 1
-	self.BlockedConnection = nil
+	self._nextMoveT = 0
+	self._nextMantleT = 0
+	self._mantling = false
+	self._hbConn = nil
 
-	self.PathRequestToken = nil
-	self.PendingPath = false
+	-- cached raycast params (ignore self + other mobs folder)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.IgnoreWater = true
+	self._rayParams = params
 
 	return self
 end
 
-function EnemyPathController:AcquireTarget(): BasePart?
-	local getter = self.Options.GetTarget
-	if typeof(getter) == "function" then
-		return getter(self.RootPart.Position)
-	end
-	return nil
+function EnemyPathController:Destroy()
+	self:Stop()
 end
 
-function EnemyPathController:CanRaycastTo(targetPos: Vector3, targetParent: Instance?): boolean
-	local rayParams = RaycastParams.new()
-	rayParams.FilterType = Enum.RaycastFilterType.Exclude
-	rayParams.FilterDescendantsInstances = { self.Mob }
-	rayParams.IgnoreWater = true
-
-	local origin = self.RootPart.Position
-	local result = workspace:Raycast(origin, targetPos - origin, rayParams)
-	if not result then
-		return true
-	end
-
-	return targetParent ~= nil and result.Instance and result.Instance:IsDescendantOf(targetParent)
+function EnemyPathController:SetTargetPlayer(plr: Player?)
+	self.TargetPlayer = plr
 end
 
-function EnemyPathController:HasLineOfSight(targetHRP: BasePart): boolean
-	return self:CanRaycastTo(targetHRP.Position, targetHRP.Parent)
+local function setRaycastIgnore(self)
+	local enemiesFolder = getEnemiesFolder()
+	self._rayParams.FilterDescendantsInstances = { self.Mob, enemiesFolder }
 end
 
-function EnemyPathController:DisconnectPathSignals()
-	if self.BlockedConnection then
-		self.BlockedConnection:Disconnect()
-		self.BlockedConnection = nil
-	end
-end
+local function smoothMantle(self, upPos: Vector3, forwardPos: Vector3, forwardDir: Vector3)
+	local root = self.Root
+	local hum = self.Humanoid
+	if not root or not hum then return false end
 
-function EnemyPathController:ClearPath()
-	self:DisconnectPathSignals()
-	self.CurrentPath = nil
-	self.CurrentWaypoints = nil
-	self.CurrentWaypointIndex = 1
-	self.PendingPath = false
-end
+	-- cooldown
+	local now = os.clock()
+	if now < (self._nextMantleT or 0) then return false end
+	self._nextMantleT = now + MANTLE_COOLDOWN
 
-function EnemyPathController:IsStuck(now: number): boolean
-	if (now - self.LastProgressCheckAt) < self.StuckCheckWindow then
-		return false
-	end
+	self._mantling = true
 
-	local progress = (self.RootPart.Position - self.LastProgressPos).Magnitude
-	self.LastProgressPos = self.RootPart.Position
-	self.LastProgressCheckAt = now
-	return progress < self.StuckProgressDistance
-end
+	-- freeze physics briefly for stable tween
+	local oldAutoRotate = hum.AutoRotate
+	hum.AutoRotate = false
 
-function EnemyPathController:ShouldRequestPath(now: number, targetPos: Vector3, hasLOS: boolean): boolean
-	if self.PendingPath then
-		return false
-	end
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+	root.Anchored = true
 
-	if (now - self.LastRepathAt) < self.RepathCooldown then
-		return false
-	end
+	local f = unitXZ(forwardDir)
+	local look = CFrame.lookAt(Vector3.zero, Vector3.new(f.X, 0, f.Z))
+	local function cf(p) return CFrame.new(p) * look end
 
-	if hasLOS then
-		self.LastNoLOSAt = nil
-		return false
-	end
-
-	if not self.LastNoLOSAt then
-		self.LastNoLOSAt = now
-	end
-
-	if self.LastTargetPos and (targetPos - self.LastTargetPos).Magnitude > self.RepathDistance then
-		return true
-	end
-
-	if (now - self.LastNoLOSAt) >= self.NoLOSRepathDelay then
-		return true
-	end
-
-	if self:IsStuck(now) then
-		return true
-	end
-
-	return not self.CurrentWaypoints or not self.CurrentWaypoints[self.CurrentWaypointIndex]
-end
-
-function EnemyPathController:ComputePriority(targetDistance: number): number
-	local base = 100
-	if self.Mob:GetAttribute("IsBoss") then
-		base = 400
-	elseif self.Mob:GetAttribute("IsElite") then
-		base = 250
-	end
-
-	local proximityBoost = math.clamp(200 - targetDistance, 0, 200)
-	return base + proximityBoost
-end
-
-function EnemyPathController:RequestPath(targetPos: Vector3, priority: number)
-	self.PendingPath = true
-	self.PathRequestToken = PathfindingManager.RequestPath(
-		self.Mob,
-		self.RootPart.Position,
-		targetPos,
-		self.PathParams,
-		priority,
-		function(result)
-			if not self.Mob.Parent then
-				return
-			end
-
-			if result.token ~= self.PathRequestToken then
-				return
-			end
-
-			self.PendingPath = false
-			self.LastRepathAt = time()
-			if result.status ~= Enum.PathStatus.Success or not result.waypoints then
-				self:ClearPath()
-				return
-			end
-
-			self:DisconnectPathSignals()
-			self.CurrentPath = result.path
-			self.CurrentWaypoints = result.waypoints
-			self.CurrentWaypointIndex = 1
-			self.LastTargetPos = targetPos
-
-			self.BlockedConnection = result.path.Blocked:Connect(function(blockedIdx)
-				if blockedIdx >= self.CurrentWaypointIndex then
-					self.LastRepathAt = 0
-				end
-			end)
-		end
+	local t1 = TweenService:Create(
+		root,
+		TweenInfo.new(MANTLE_UP_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ CFrame = cf(upPos) }
 	)
-end
+	local t2 = TweenService:Create(
+		root,
+		TweenInfo.new(MANTLE_FWD_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ CFrame = cf(forwardPos) }
+	)
 
-function EnemyPathController:StepPath()
-	if not self.CurrentWaypoints then
-		return false
-	end
+	t1:Play()
+	t1.Completed:Wait()
 
-	local current = self.CurrentWaypoints[self.CurrentWaypointIndex]
-	if not current then
-		self:ClearPath()
-		return false
-	end
+	t2:Play()
+	t2.Completed:Wait()
 
-	while self.CurrentWaypoints[self.CurrentWaypointIndex + 1] do
-		local nextWaypoint = self.CurrentWaypoints[self.CurrentWaypointIndex + 1]
-		if self:CanRaycastTo(nextWaypoint.Position, nil) then
-			self.CurrentWaypointIndex += 1
-			current = self.CurrentWaypoints[self.CurrentWaypointIndex]
-		else
-			break
-		end
-	end
+	root.Anchored = false
+	hum.AutoRotate = oldAutoRotate
 
-	if (current.Position - self.RootPart.Position).Magnitude <= self.WaypointReachedDistance then
-		self.CurrentWaypointIndex += 1
-		current = self.CurrentWaypoints[self.CurrentWaypointIndex]
-		if not current then
-			self:ClearPath()
-			return false
-		end
-	end
-
-	if current.Action == Enum.PathWaypointAction.Jump then
-		self.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-	end
-
-	self.Humanoid:MoveTo(current.Position)
+	self._mantling = false
 	return true
 end
 
-function EnemyPathController:Run()
-	task.spawn(function()
-		while self.Mob.Parent and self.Humanoid.Health > 0 do
-			if self.IsPaused and self.IsPaused() then
-				if self.StopMove then
-					self.StopMove()
-				end
-				task.wait(0.05)
-				continue
-			end
+function EnemyPathController:TryMantleToward(playerPos: Vector3)
+	if self._mantling then return false end
+	if not self.Root or not self.Humanoid then return false end
+	if self.Humanoid.FloorMaterial == Enum.Material.Air then return false end
 
-			local targetHRP = self:AcquireTarget()
-			if not targetHRP then
-				task.wait(0.15)
-				continue
-			end
+	setRaycastIgnore(self)
 
-			local now = time()
-			local targetPos = targetHRP.Position
-			local distanceToTarget = (targetPos - self.RootPart.Position).Magnitude
+	local root = self.Root
+	local hum = self.Humanoid
 
-			if distanceToTarget > self.FarNoPathRadius then
-				self:ClearPath()
-				self.Humanoid:MoveTo(targetPos)
-				task.wait(self.FarUpdateInterval)
-				continue
-			end
+	local forward = unitXZ(playerPos - root.Position)
 
-			if distanceToTarget > self.FullUpdateRadius then
-				self:ClearPath()
-				self.Humanoid:MoveTo(targetPos)
-				task.wait(self.MidUpdateInterval)
-				continue
-			end
+	-- 1) detect wall in front at chest height
+	local chestOrigin = root.Position + Vector3.new(0, CHEST_Y, 0)
+	local wallHit = workspace:Raycast(chestOrigin, forward * FORWARD_CHECK_DIST, self._rayParams)
+	if not wallHit then
+		return false
+	end
 
-			local hasLOS = self:HasLineOfSight(targetHRP)
-			if hasLOS then
-				self:ClearPath()
-				if (now - self.LastLOSDirectMove) >= self.LOSDirectMoveInterval then
-					self.Humanoid:MoveTo(targetPos)
-					self.LastLOSDirectMove = now
-				end
-				task.wait(self.IdleUpdateInterval)
-				continue
-			end
+	-- 2) find top surface by raycasting down from above the hit point
+	local above = wallHit.Position + Vector3.new(0, MAX_MANTLE_HEIGHT + 3.0, 0)
+	local downHit = workspace:Raycast(above, Vector3.new(0, -(MAX_MANTLE_HEIGHT + 6.0), 0), self._rayParams)
+	if not downHit then
+		return false
+	end
 
-			if self:ShouldRequestPath(now, targetPos, hasLOS) then
-				self:RequestPath(targetPos, self:ComputePriority(distanceToTarget))
-			end
+	local height = downHit.Position.Y - root.Position.Y
+	if height < MIN_MANTLE_HEIGHT or height > MAX_MANTLE_HEIGHT then
+		return false
+	end
 
-			if not self:StepPath() then
-				self.Humanoid:MoveTo(targetPos)
-			end
+	-- 3) clearance (no ceiling immediately above landing)
+	local clearanceOrigin = downHit.Position + Vector3.new(0, hum.HipHeight + 1.5, 0)
+	local clearanceHit = workspace:Raycast(clearanceOrigin, Vector3.new(0, CLEARANCE_UP, 0), self._rayParams)
+	if clearanceHit then
+		return false
+	end
 
-			task.wait(self.IdleUpdateInterval)
+	-- 4) compute mantle positions: climb up in place then step forward onto platform
+	local start = root.Position
+	local upPos = Vector3.new(start.X, downHit.Position.Y + hum.HipHeight + 0.5, start.Z)
+
+	local forwardPos = Vector3.new(
+		upPos.X + forward.X * MANTLE_FORWARD_STEP,
+		upPos.Y,
+		upPos.Z + forward.Z * MANTLE_FORWARD_STEP
+	)
+
+	return smoothMantle(self, upPos, forwardPos, forward)
+end
+
+function EnemyPathController:Update(dt: number)
+	if not self.Mob or not self.Root or not self.Humanoid then return end
+
+	local plr = self.TargetPlayer
+	if not plr or not plr.Character then return end
+
+	local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	local playerPos = hrp.Position
+	local dist = flatDist(self.Root.Position, playerPos)
+
+	local now = os.clock()
+	local cadence = (dist <= NEAR_DIST) and MOVE_UPDATE_NEAR or MOVE_UPDATE_FAR
+	if now < self._nextMoveT then return end
+	self._nextMoveT = now + cadence
+
+	-- if something blocks us, try mantle (slow climb). If mantling, do nothing else this tick.
+	if self:TryMantleToward(playerPos) then
+		return
+	end
+
+	-- otherwise, just go straight at the player
+	self.Humanoid:MoveTo(playerPos)
+end
+
+-- ======================
+-- Compatibility API (WaveController expects Run)
+-- ======================
+function EnemyPathController:Run(target)
+	-- target może być Player albo Model/HRP – próbujemy wywnioskować Playera
+	if typeof(target) == "Instance" then
+		if target:IsA("Player") then
+			self:SetTargetPlayer(target)
+		elseif target:IsA("Model") then
+			local p = Players:GetPlayerFromCharacter(target)
+			if p then self:SetTargetPlayer(p) end
+		elseif target:IsA("BasePart") then
+			local p = Players:GetPlayerFromCharacter(target.Parent)
+			if p then self:SetTargetPlayer(p) end
 		end
+	end
 
-		PathfindingManager.CancelForNpc(self.Mob)
-		self:DisconnectPathSignals()
+	self:Stop()
+	self._hbConn = RunService.Heartbeat:Connect(function(dt)
+		if not self.Mob or not self.Mob.Parent then
+			self:Stop()
+			return
+		end
+		self:Update(dt)
 	end)
+
+	return self
+end
+
+function EnemyPathController:Stop()
+	if self._hbConn then
+		self._hbConn:Disconnect()
+		self._hbConn = nil
+	end
 end
 
 return EnemyPathController
