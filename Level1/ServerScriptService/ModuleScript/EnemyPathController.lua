@@ -6,7 +6,6 @@
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
-
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PauseState = ReplicatedStorage:WaitForChild("PauseState") -- BoolValue
 
@@ -65,12 +64,27 @@ function EnemyPathController.new(mobModel: Model)
 	self.Root = mobModel:FindFirstChild("HumanoidRootPart") or mobModel.PrimaryPart
 	self.Humanoid = mobModel:FindFirstChildOfClass("Humanoid")
 
+	-- Hard-disable Humanoid jumping (prevents AutoJump and "hop" behavior when mob piles form)
+	if self.Humanoid then
+		pcall(function() self.Humanoid.AutoJumpEnabled = false end)
+		pcall(function() self.Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false) end)
+		pcall(function() self.Humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true) end)
+		pcall(function()
+			self.Humanoid.StateChanged:Connect(function(_, newState)
+				if newState == Enum.HumanoidStateType.Jumping then
+					self.Humanoid:ChangeState(Enum.HumanoidStateType.Running)
+				end
+			end)
+		end)
+	end
+
 	self.TargetPlayer = nil
 	self._nextTargetScanT = 0
 
 	self._nextMoveT = 0
 	self._nextMantleT = 0
 	self._mantling = false
+	self._mantleTweens = nil
 	self._hbConn = nil
 
 	-- cached raycast params (ignore self + other mobs folder)
@@ -80,6 +94,22 @@ function EnemyPathController.new(mobModel: Model)
 	self._rayParams = params
 
 	return self
+end
+
+function EnemyPathController:AbortMantle()
+	-- Cancel any active mantle tweens and ensure the mob isn't left anchored.
+	if self._mantleTweens then
+		for _, tw in ipairs(self._mantleTweens) do
+			pcall(function() tw:Cancel() end)
+		end
+		self._mantleTweens = nil
+	end
+	self._mantling = false
+	if self.Root then
+		self.Root.Anchored = false
+		self.Root.AssemblyLinearVelocity = Vector3.zero
+		self.Root.AssemblyAngularVelocity = Vector3.zero
+	end
 end
 
 local function getLivingHRP(plr: Player): BasePart?
@@ -166,6 +196,8 @@ local function smoothMantle(self, upPos: Vector3, forwardPos: Vector3, forwardDi
 		{ CFrame = cf(forwardPos) }
 	)
 
+	self._mantleTweens = { t1, t2 }
+
 	t1:Play()
 	t1.Completed:Wait()
 
@@ -174,25 +206,10 @@ local function smoothMantle(self, upPos: Vector3, forwardPos: Vector3, forwardDi
 
 	root.Anchored = false
 	hum.AutoRotate = oldAutoRotate
+	self._mantleTweens = nil
 
 	self._mantling = false
 	return true
-end
-
-function EnemyPathController:AbortMantle()
-	-- Cancel any active mantle tweens and ensure the mob isn't left anchored.
-	if self._mantleTweens then
-		for _, tw in ipairs(self._mantleTweens) do
-			pcall(function() tw:Cancel() end)
-		end
-		self._mantleTweens = nil
-	end
-	self._mantling = false
-	if self.Root then
-		self.Root.Anchored = false
-		self.Root.AssemblyLinearVelocity = Vector3.zero
-		self.Root.AssemblyAngularVelocity = Vector3.zero
-	end
 end
 
 function EnemyPathController:TryMantleToward(playerPos: Vector3)
@@ -249,6 +266,7 @@ end
 function EnemyPathController:Update(dt: number)
 	if not self.Mob or not self.Root or not self.Humanoid then return end
 
+	-- Global pause: stop NPCs cleanly and don't leave them mid-mantle.
 	if PauseState.Value == true then
 		self:AbortMantle()
 		self.Humanoid:MoveTo(self.Root.Position)

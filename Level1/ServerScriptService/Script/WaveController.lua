@@ -68,9 +68,11 @@ pcall(function() PhysicsService:RegisterCollisionGroup(CORPSES_GROUP) end)
 
 -- Rules:
 -- - Mobs don't collide with each other
+-- - Mobs don't collide with players (prevents mob piles / "jumping" onto the player)
 -- - Corpses don't collide with players
 -- - Corpses don't collide with mobs (prevents corpse piles blocking mobs)
 pcall(function()
+    PhysicsService:CollisionGroupSetCollidable(MOBS_GROUP, PLAYERS_GROUP, false)
     PhysicsService:CollisionGroupSetCollidable(CORPSES_GROUP, PLAYERS_GROUP, false)
     PhysicsService:CollisionGroupSetCollidable(CORPSES_GROUP, MOBS_GROUP, false)
     PhysicsService:CollisionGroupSetCollidable(CORPSES_GROUP, CORPSES_GROUP, false)
