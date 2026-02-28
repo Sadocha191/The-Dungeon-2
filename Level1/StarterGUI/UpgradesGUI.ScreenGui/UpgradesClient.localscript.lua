@@ -32,6 +32,7 @@ local pg = plr:WaitForChild("PlayerGui")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local SpellEvent = Remotes:WaitForChild("SpellEvent")
 
+local PauseState = ReplicatedStorage:WaitForChild("PauseState") -- BoolValue
 local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
 assert(modFolder and modFolder:IsA("Folder"), "Missing ReplicatedStorage.ModuleScripts/ModuleScript")
 local SpellDefs = require(modFolder:WaitForChild("SpellDefinitions"))
@@ -47,6 +48,30 @@ local bottom = main:WaitForChild("BottomButtons")
 local btnSkip = bottom:WaitForChild("Skip")
 local btnReroll = bottom:WaitForChild("Reroll")
 local btnBanish = bottom:WaitForChild("Banish")
+
+-- waiting overlay (created if missing)
+local waitingLabel = main:FindFirstChild("WaitingLabel")
+if not waitingLabel then
+	waitingLabel = Instance.new("TextLabel")
+	waitingLabel.Name = "WaitingLabel"
+	waitingLabel.BackgroundTransparency = 0.35
+	waitingLabel.BackgroundColor3 = Color3.fromRGB(0,0,0)
+	waitingLabel.TextColor3 = Color3.fromRGB(255,255,255)
+	waitingLabel.Font = Enum.Font.GothamBold
+	waitingLabel.TextScaled = true
+	waitingLabel.Size = UDim2.new(0.6, 0, 0.12, 0)
+	waitingLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+	waitingLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
+	waitingLabel.Visible = false
+	waitingLabel.ZIndex = 50
+	waitingLabel.Parent = main
+	local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 10); c.Parent = waitingLabel
+end
+
+local function isMultiRun()
+	local v = plr:GetAttribute("RunMode")
+	return typeof(v) == "string" and string.lower(v) == "multi"
+end
 
 -- kontener ofert: u Ciebie jest UpgradeOffers
 local offersContainer = main:FindFirstChild("UpgradeOffers") or main:FindFirstChild("Cards")
@@ -237,6 +262,21 @@ local function renderOffers(token: string, offers: {any})
 				end
 
 				SpellEvent:FireServer({ type="pick", token=currentToken, spellId=spellId })
+
+				if isMultiRun() then
+					-- pokazuj waiting aż serwer zwolni pauzę (PauseState=false)
+					choiceLockedUntil = os.clock() + 9999
+					if waitingLabel then
+						waitingLabel.Text = "Waiting for other players..."
+						waitingLabel.Visible = true
+					end
+
+					-- schowaj sloty, zablokuj guziki
+					for _, s in ipairs(slots) do s.Visible = false end
+					btnSkip.Active = false; btnReroll.Active = false; btnBanish.Active = false
+					return
+				end
+
 				hideMenu()
 			end)
 		end
@@ -280,5 +320,15 @@ SpellEvent.OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then return end
 	if payload.type == "offer" and typeof(payload.token) == "string" and typeof(payload.offers) == "table" then
 		renderOffers(payload.token, payload.offers)
+	end
+end)
+
+
+-- auto-close waiting when pause ends
+PauseState:GetPropertyChangedSignal("Value"):Connect(function()
+	if PauseState.Value == false and main.Visible == true then
+		for _, s in ipairs(slots) do s.Visible = true end
+		btnSkip.Active = true; btnReroll.Active = true; btnBanish.Active = true
+		hideMenu()
 	end
 end)

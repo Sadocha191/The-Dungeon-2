@@ -7,6 +7,9 @@ local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local PauseState = ReplicatedStorage:WaitForChild("PauseState") -- BoolValue
+
 local EnemyPathController = {}
 EnemyPathController.__index = EnemyPathController
 
@@ -176,6 +179,22 @@ local function smoothMantle(self, upPos: Vector3, forwardPos: Vector3, forwardDi
 	return true
 end
 
+function EnemyPathController:AbortMantle()
+	-- Cancel any active mantle tweens and ensure the mob isn't left anchored.
+	if self._mantleTweens then
+		for _, tw in ipairs(self._mantleTweens) do
+			pcall(function() tw:Cancel() end)
+		end
+		self._mantleTweens = nil
+	end
+	self._mantling = false
+	if self.Root then
+		self.Root.Anchored = false
+		self.Root.AssemblyLinearVelocity = Vector3.zero
+		self.Root.AssemblyAngularVelocity = Vector3.zero
+	end
+end
+
 function EnemyPathController:TryMantleToward(playerPos: Vector3)
 	if self._mantling then return false end
 	if not self.Root or not self.Humanoid then return false end
@@ -229,6 +248,12 @@ end
 
 function EnemyPathController:Update(dt: number)
 	if not self.Mob or not self.Root or not self.Humanoid then return end
+
+	if PauseState.Value == true then
+		self:AbortMantle()
+		self.Humanoid:MoveTo(self.Root.Position)
+		return
+	end
 
 	local plr = self.TargetPlayer
 	local hrp = plr and getLivingHRP(plr) or nil

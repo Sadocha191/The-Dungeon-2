@@ -99,7 +99,10 @@ local function getPartyId(plr: Player): string?
 end
 
 local function isMulti(plr: Player): boolean
-	return plr:GetAttribute("RunMode") == "Multi"
+	local v = plr:GetAttribute("RunMode")
+	if typeof(v) ~= "string" then return false end
+	v = string.lower(v)
+	return v == "multi"
 end
 
 local function getPartyState(partyId: string)
