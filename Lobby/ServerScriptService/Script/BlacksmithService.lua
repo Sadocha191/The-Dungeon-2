@@ -1,6 +1,6 @@
 -- BlacksmithService.server.lua
 -- Forge: losuje broń (max Epic), losuje prefix jakości (modyfikuje WSZYSTKIE staty), tworzy instancję.
--- Upgrade: x1 lub +10 (zatrzymuje się na maxLevel albo gdy brakuje Coins).
+-- Upgrade: x1 lub +10 (zatrzymuje się na maxLevel albo gdy brakuje Silver).
 -- UI: Sync wysyła listę instancji + computed stats + dane do forge panelu.
 
 local Players = game:GetService("Players")
@@ -204,7 +204,7 @@ local lastForgedByUser: {[number]: string} = {} -- instanceId
 
 local function buildSnapshot(player: Player)
 	local balances = CurrencyService.GetBalances(player)
-	local coins = balances.Coins or 0
+	local coins = balances.Silver or 0
 
 	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
 	local equippedInst = PlayerStateStore.GetEquippedWeaponInstance(player)
@@ -293,7 +293,7 @@ local function tryUpgradeSteps(player: Player, instanceId: string, steps: number
 		if lvl >= maxLevel then break end
 
 		local cost = computeUpgradeCost(rarity, lvl)
-		if not CurrencyService.RemoveCurrency(player, "Coins", cost) then
+		if not CurrencyService.RemoveCurrency(player, "Silver", cost) then
 			break
 		end
 
@@ -313,14 +313,14 @@ BlacksmithAction.OnServerEvent:Connect(function(player: Player, payload: any)
 	end
 
 	if t == "forge" then
-		if not CurrencyService.RemoveCurrency(player, "Coins", CRAFT_COST) then
+		if not CurrencyService.RemoveCurrency(player, "Silver", CRAFT_COST) then
 			sync(player)
 			return
 		end
 
 		local def = pickRandomForgeWeapon()
 		if not def then
-			CurrencyService.AddCoins(player, CRAFT_COST)
+			CurrencyService.AddSilver(player, CRAFT_COST)
 			sync(player)
 			return
 		end

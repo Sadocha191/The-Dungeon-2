@@ -23,7 +23,7 @@ gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = false
 gui.Parent = pg
 
--- Coins (left)
+-- Silver (left)
 local coinsBox = Instance.new("Frame")
 coinsBox.Position = UDim2.fromOffset(18, 150)
 coinsBox.Size = UDim2.fromOffset(200, 36)
@@ -43,7 +43,7 @@ coinsText.TextSize = 14
 coinsText.TextXAlignment = Enum.TextXAlignment.Left
 coinsText.TextYAlignment = Enum.TextYAlignment.Center
 coinsText.TextColor3 = Color3.fromRGB(245, 245, 245)
-coinsText.Text = "Coins: 0"
+coinsText.Text = "Silver: 0"
 coinsText.Parent = coinsBox
 
 -- Name + level + race (right) - autosize width
@@ -160,7 +160,7 @@ end
 local function render()
 	race = tostring(plr:GetAttribute("Race") or race or "-")
 	nameText.Text = ("%s • Lv. %d • Race: %s"):format(plr.Name, level, race)
-	coinsText.Text = ("Coins: %d"):format(coins)
+	coinsText.Text = ("Silver: %d"):format(coins)
 
 	local n = math.max(1, nextXp)
 	xpLabel.Text = ("EXP: %d/%d"):format(xp, n)

@@ -255,10 +255,10 @@ function MissionService.ClaimMission(player: Player, missionId: string)
 	end
 
 	local reward = def.Reward or {}
-	local coins = math.max(0, math.floor(tonumber(reward.Coins) or 0))
+	local coins = math.max(0, math.floor(tonumber(reward.Silver) or 0))
 	local weaponPoints = math.max(0, math.floor(tonumber(reward.WeaponPoints) or 0))
 
-	if coins > 0 then CurrencyService.AddCoins(player, coins) end
+	if coins > 0 then CurrencyService.AddSilver(player, coins) end
 	if weaponPoints > 0 then CurrencyService.AddWeaponPoints(player, weaponPoints) end
 
 	state.ClaimCounts[missionId] = (tonumber(state.ClaimCounts[missionId]) or 0) + 1

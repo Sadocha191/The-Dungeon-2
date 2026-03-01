@@ -54,10 +54,10 @@ end
 
 local function formatReward(reward: any): string
 	if typeof(reward) ~= "table" then return "" end
-	local coins = tonumber(reward.Coins) or 0
+	local coins = tonumber(reward.Silver) or 0
 	local wp = tonumber(reward.WeaponPoints) or 0
 	local parts = {}
-	if coins > 0 then table.insert(parts, ("Coins +%d"):format(coins)) end
+	if coins > 0 then table.insert(parts, ("Silver +%d"):format(coins)) end
 	if wp > 0 then table.insert(parts, ("WP +%d"):format(wp)) end
 	return table.concat(parts, " | ")
 end

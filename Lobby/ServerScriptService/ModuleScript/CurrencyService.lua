@@ -1,6 +1,6 @@
 -- CurrencyService.lua
 -- Spójne waluty dla Lobby:
--- Coins -> PlayerData.coins
+-- Silver -> PlayerData.silver
 -- WeaponPoints -> PlayerData.weaponPoints
 -- Tickets -> PlayerData.tickets
 -- (100 WP = 1 Ticket)
@@ -57,7 +57,7 @@ local function clamp0(n)
 end
 
 local function ensure(data)
-	data.coins = clamp0(data.coins)
+	data.silver = clamp0(data.silver)
 	data.weaponPoints = clamp0(data.weaponPoints)
 	data.tickets = clamp0(data.tickets)
 end
@@ -66,7 +66,8 @@ function CurrencyService.GetBalances(player: Player)
 	local data = getData(player)
 	ensure(data)
 	return {
-		Coins = data.coins,
+		Silver = data.silver,
+		Coins = data.silver,
 		WeaponPoints = data.weaponPoints,
 		Tickets = data.tickets,
 	}
@@ -74,14 +75,14 @@ end
 
 function CurrencyService.GetCoins(player: Player): number
 	local data = getData(player); ensure(data)
-	return data.coins
+	return data.silver
 end
 
 function CurrencyService.AddCoins(player: Player, amount: number)
 	amount = math.floor(tonumber(amount) or 0)
 	if amount == 0 then return end
 	local data = getData(player); ensure(data)
-	data.coins = math.max(0, data.coins + amount)
+	data.silver = math.max(0, data.silver + amount)
 	PlayerData.MarkDirty(player)
 end
 
@@ -89,8 +90,8 @@ function CurrencyService.SpendCoins(player: Player, amount: number): boolean
 	amount = clamp0(amount)
 	if amount == 0 then return true end
 	local data = getData(player); ensure(data)
-	if data.coins < amount then return false end
-	data.coins -= amount
+	if data.silver < amount then return false end
+	data.silver -= amount
 	PlayerData.MarkDirty(player)
 	pcall(function()
 		addMissionCounter(player, "COINS_SPENT", amount)
@@ -131,7 +132,7 @@ function CurrencyService.AddCurrency(player: Player, currency: string, amount: n
 	local data = getData(player); ensure(data)
 
 	if currency == "Coins" then
-		data.coins += amount
+		data.silver += amount
 	elseif currency == "WeaponPoints" then
 		data.weaponPoints += amount
 	elseif currency == "Tickets" then
@@ -150,8 +151,8 @@ function CurrencyService.RemoveCurrency(player: Player, currency: string, amount
 	local data = getData(player); ensure(data)
 
 	if currency == "Coins" then
-		if data.coins < amount then return false end
-		data.coins -= amount
+		if data.silver < amount then return false end
+		data.silver -= amount
 	elseif currency == "WeaponPoints" then
 		if data.weaponPoints < amount then return false end
 		data.weaponPoints -= amount
@@ -196,6 +197,30 @@ function CurrencyService.ConvertWeaponPointsToTickets(player: Player, amountWeap
 		spentWP = spendWp,
 		balances = CurrencyService.GetBalances(player),
 	}
+end
+
+
+-- Silver API (canonical)
+function CurrencyService.GetSilver(plr)
+	local data = PlayerData.Get(plr)
+	return data.silver
+end
+
+function CurrencyService.AddSilver(plr, amount)
+	amount = clamp0(amount)
+	local data = PlayerData.Get(plr)
+	data.silver = math.max(0, (data.silver or 0) + amount)
+	PlayerData.MarkDirty(plr)
+	return data.silver
+end
+
+function CurrencyService.SpendSilver(plr, amount)
+	amount = clamp0(amount)
+	local data = PlayerData.Get(plr)
+	if (data.silver or 0) < amount then return false end
+	data.silver -= amount
+	PlayerData.MarkDirty(plr)
+	return true
 end
 
 return CurrencyService

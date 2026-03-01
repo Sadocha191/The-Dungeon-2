@@ -14,7 +14,7 @@ local function defaultProfile()
 		level = 1,
 		xp = 0,
 		nextXp = 120,
-		coins = 0, -- SILVER (lobby currency)
+		silver = 0, -- SILVER (lobby currency)
 		souls = 0, -- purple currency (witch)
 		upgradePoints = 0,
 		upgrades = { dmg = 0, speed = 0, jump = 0 },
@@ -124,7 +124,7 @@ function PlayerData.Get(plr)
 	data.level = math.max(1, clampInt(data.level))
 	data.xp = math.max(0, clampInt(data.xp))
 	data.nextXp = math.max(50, clampInt(data.nextXp) or 120)
-	data.coins = math.max(0, clampInt(data.coins))
+	data.silver = math.max(0, clampInt(data.silver))
 	data.souls = math.max(0, clampInt(data.souls))
 	data.upgradePoints = clampInt(data.upgradePoints)
 	if typeof(data.upgrades) ~= "table" then

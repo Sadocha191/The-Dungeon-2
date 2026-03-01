@@ -77,7 +77,7 @@ if not PauseState then
 end
 
 -- Run state
-local run = {} -- [uid] = {startT, pausedTotal, pauseStart, runLevel, runXp, nextXp, runCoins, kills, ended, banished}
+local run = {} -- [uid] = {startT, pausedTotal, pauseStart, runLevel, runXp, nextXp, runSilver, kills, ended, banished}
 local pending = {} -- [uid] = {token, offers}
 
 -- extra per-run stats used by missions
@@ -187,7 +187,7 @@ local function getRun(plr: Player)
 			runLevel = 0,
 			runXp = 0,
 			nextXp = rollNextRunXp(0),
-			runCoins = 0,
+			runSilver = 0,
 			kills = 0,
 			rerollsUsed = 0,
 			skipsUsed = 0,
@@ -288,7 +288,7 @@ local function syncHud(plr: Player)
 		level = r.runLevel,
 		xp = r.runXp,
 		nextXp = r.nextXp,
-		coins = r.runCoins,
+		coins = r.runSilver,
 		kills = r.kills,
 		souls = (d and tonumber(d.souls)) or 0,
 	})
@@ -668,7 +668,7 @@ function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 		-- coins nadal per gracz (jak było)
 		local r = getRun(plr)
 		if r.ended then return end
-		r.runCoins += coins
+		r.runSilver += coins
 
 		p.xp += xp
 
@@ -702,7 +702,7 @@ function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	if r.ended then return end
 
 	r.runXp += xp
-	r.runCoins += coins
+	r.runSilver += coins
 
 	local leveled = false
 	while r.runXp >= r.nextXp do
@@ -788,8 +788,8 @@ local function endRunForPlayer(plr: Player, reason: string)
 	local seconds = runSeconds(plr)
 	local accountXp = math.max(0, math.floor(seconds * TIME_RATE + (r.kills or 0) * KILL_RATE))
 	-- Gold coins are run-only. Convert to lobby silver at 1/3.
-	local goldCoins = math.max(0, math.floor(r.runCoins or 0))
-	local coinsGained = math.max(0, math.floor(goldCoins / 3))
+	local goldSilver = math.max(0, math.floor(r.runSilver or 0))
+	local coinsGained = math.max(0, math.floor(goldSilver / 3))
 
 	local d = PlayerData.Get(plr)
 	d.xp = (tonumber(d.xp) or 0) + accountXp
@@ -813,7 +813,7 @@ local function endRunForPlayer(plr: Player, reason: string)
 		time = seconds,
 		kills = r.kills or 0,
 		coinsGained = coinsGained, -- silver gained
-		goldEarned = goldCoins,
+		goldEarned = goldSilver,
 		accountXp = accountXp,
 		accountLevel = tonumber(d.level) or 1,
 	})
@@ -891,7 +891,7 @@ Players.PlayerAdded:Connect(function(plr: Player)
 	r.runLevel = 0
 	r.runXp = 0
 	r.nextXp = rollNextRunXp(0)
-	r.runCoins = 0
+	r.runSilver = 0
 	r.kills = 0
 	r.rerollsUsed = 0
 	r.skipsUsed = 0

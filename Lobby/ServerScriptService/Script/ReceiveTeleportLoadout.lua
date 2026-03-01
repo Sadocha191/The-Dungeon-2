@@ -106,15 +106,15 @@ Players.PlayerAdded:Connect(function(player: Player)
 	if typeof(profile.Stats) == "table" and typeof(profile.Stats.Level) == "number" then
 		profLevel = math.max(1, math.floor(profile.Stats.Level))
 	end
-	local profCoins = tonumber(profile.Coins) or 0
+	local profSilver = tonumber(profile.Silver) or 0
 
 	if data.level < profLevel then
 		data.level = profLevel
 		data.nextXp = PlayerData.RollNextXp(data.level)
 		PlayerData.MarkDirty(player)
 	end
-	if data.coins < profCoins then
-		data.coins = profCoins
+	if data.silver < profSilver then
+		data.silver = profSilver
 		PlayerData.MarkDirty(player)
 	end
 

@@ -60,7 +60,7 @@ coinsLabel.Font = Enum.Font.Gotham
 coinsLabel.TextSize = 12
 coinsLabel.TextXAlignment = Enum.TextXAlignment.Left
 coinsLabel.TextColor3 = Color3.fromRGB(210,210,210)
-coinsLabel.Text = "Coins: 0"
+coinsLabel.Text = "Silver: 0"
 coinsLabel.Parent = panel
 
 local list = Instance.new("ScrollingFrame")
@@ -270,7 +270,7 @@ BlacksmithSync.OnClientEvent:Connect(function(data)
 	if typeof(data) ~= "table" then return end
 	snapshot = data
 
-	coinsLabel.Text = string.format("Coins: %d | Forge cost: %d", tonumber(data.coins) or 0, tonumber(data.craftCost) or 0)
+	coinsLabel.Text = string.format("Silver: %d | Forge cost: %d", tonumber(data.silver) or 0, tonumber(data.craftCost) or 0)
 
 	clearList()
 	for _, row in ipairs(data.instances or {}) do

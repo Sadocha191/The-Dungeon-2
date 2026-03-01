@@ -306,7 +306,7 @@ coinsLabel.Font = Enum.Font.Gotham
 coinsLabel.TextSize = 13
 coinsLabel.TextColor3 = Color3.fromRGB(235, 235, 235)
 coinsLabel.TextXAlignment = Enum.TextXAlignment.Left
-coinsLabel.Text = "Coins: 0"
+coinsLabel.Text = "Silver: 0"
 coinsLabel.Parent = currenciesFrame
 
 local wpLabel = Instance.new("TextLabel")
@@ -868,7 +868,7 @@ local function updatePlayerInfo()
 	local raceName = tostring(plr:GetAttribute("Race") or "-")
 	raceLabel.Text = ("Race: %s"):format(raceName)
 	refreshFinalStats(raceName)
-	coinsLabel.Text = ("Coins: %d"):format(coins)
+	coinsLabel.Text = ("Silver: %d"):format(coins)
 	wpLabel.Text = ("WP: %d"):format(weaponPoints)
 end
 
@@ -1183,7 +1183,7 @@ local function loadSnapshot()
 	nextXp = tonumber(info.nextXp) or nextXp
 
 	local currencies = payload.currencies or {}
-	coins = tonumber(currencies.Coins) or coins
+	coins = tonumber(currencies.Silver) or coins
 	weaponPoints = tonumber(currencies.WeaponPoints) or weaponPoints
 
 	equippedWeaponId = payload.equippedId

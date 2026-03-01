@@ -101,7 +101,7 @@ MissionSummaryEvent.OnClientEvent:Connect(function(payload)
 	local lvl = tonumber(payload.accountLevel) or 1
 	local reason = tostring(payload.reason or "Game Over")
 
-	body.Text = ("Reason: %s\nRun time: %s\nEnemies defeated: %d\nCoins gained: %d\nAccount XP gained: %d\nAccount level: %d"):format(
+	body.Text = ("Reason: %s\nRun time: %s\nEnemies defeated: %d\nSilver gained: %d\nAccount XP gained: %d\nAccount level: %d"):format(
 		reason, fmtTime(sec), kills, coins, xp, lvl
 	)
 	gui.Enabled = true

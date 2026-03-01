@@ -1,5 +1,5 @@
 -- PlayerData (ServerScriptService) - globalny profil (bez armora)
--- Używane do: coins, XP/level, gacha (Weapons/Pity), tickets, weaponPoints.
+-- Używane do: silver, XP/level, gacha (Weapons/Pity), tickets, weaponPoints.
 
 local DataStoreService = game:GetService("DataStoreService")
 local store = DataStoreService:GetDataStore("GlobalPlayerProgress_v1")
@@ -17,7 +17,7 @@ local function defaultProfile()
 		nextXp = 120,
 
 		-- currencies
-		coins = 0, -- SILVER (lobby currency)
+		silver = 0, -- SILVER (lobby currency)
 		souls = 0, -- purple currency (witch)
 		weaponPoints = 0, -- premium
 		tickets = 0,      -- gacha tickets
@@ -109,7 +109,13 @@ function PlayerData.Get(plr)
 		for k, v in pairs(saved) do
 			data[k] = v
 		end
-		if typeof(saved.upgrades) == "table" then
+		
+		-- MIGRATE_COINS_TO_SILVER
+		if data.silver == nil and data.silver ~= nil then
+			data.silver = tonumber(data.silver) or 0
+		end
+		data.silver = nil
+if typeof(saved.upgrades) == "table" then
 			data.upgrades = data.upgrades or { dmg = 0, speed = 0, jump = 0 }
 			data.upgrades.dmg = clampInt(saved.upgrades.dmg)
 			data.upgrades.speed = clampInt(saved.upgrades.speed)
@@ -123,7 +129,13 @@ function PlayerData.Get(plr)
 			for k, v in pairs(legacySaved) do
 				data[k] = v
 			end
-			if typeof(legacySaved.upgrades) == "table" then
+			
+			-- MIGRATE_LEGACY_COINS_TO_SILVER
+			if data.silver == nil and data.silver ~= nil then
+				data.silver = tonumber(data.silver) or 0
+			end
+			data.silver = nil
+if typeof(legacySaved.upgrades) == "table" then
 				data.upgrades = data.upgrades or { dmg = 0, speed = 0, jump = 0 }
 				data.upgrades.dmg = clampInt(legacySaved.upgrades.dmg)
 				data.upgrades.speed = clampInt(legacySaved.upgrades.speed)
@@ -140,7 +152,7 @@ function PlayerData.Get(plr)
 	data.xp = math.max(0, clampInt(data.xp))
 	data.nextXp = math.max(50, clampInt(data.nextXp) or 120)
 
-	data.coins = math.max(0, clampInt(data.coins))
+	data.silver = math.max(0, clampInt(data.silver))
 	data.souls = math.max(0, clampInt(data.souls))
 	data.weaponPoints = math.max(0, clampInt(data.weaponPoints))
 	data.tickets = math.max(0, clampInt(data.tickets))
