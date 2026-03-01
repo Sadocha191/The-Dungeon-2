@@ -10,7 +10,7 @@ if not dropsFolder then
 	dropsFolder.Parent = workspace
 end
 
-local active = {} -- [part] = {type="xp"/"coins", amount=number}
+local active = {} -- [part] = {type="xp"/"coins"/"souls", amount=number}
 
 local ATTRACT_RADIUS = 8 -- przyciąganie dopiero z bliska
 local PICKUP_DIST = 2.5
@@ -66,12 +66,24 @@ local function nearestAlivePlayer(pos: Vector3)
 	return bestPlr, bestDist
 end
 
-local function makeOrb(kind: "xp" | "coins", amount: number, pos: Vector3)
+local function makeOrb(kind: "xp" | "coins" | "souls", amount: number, pos: Vector3)
 	local p = Instance.new("Part")
-	p.Name = (kind == "xp") and "XPOrb" or "CoinOrb"
+	if kind == "xp" then
+		p.Name = "XPOrb"
+	elseif kind == "coins" then
+		p.Name = "CoinOrb"
+	else
+		p.Name = "SoulOrb"
+	end
 	p.Shape = Enum.PartType.Ball
 	p.Material = Enum.Material.Neon
-	p.Color = (kind == "xp") and Color3.fromRGB(96, 165, 250) or Color3.fromRGB(255, 180, 60)
+	if kind == "xp" then
+		p.Color = Color3.fromRGB(96, 165, 250)
+	elseif kind == "coins" then
+		p.Color = Color3.fromRGB(255, 180, 60)
+	else
+		p.Color = Color3.fromRGB(168, 85, 247) -- purple
+	end
 	p.Size = ORB_SIZE
 	p.CanCollide = false
 	p.CanQuery = false
@@ -85,12 +97,13 @@ local function makeOrb(kind: "xp" | "coins", amount: number, pos: Vector3)
 	return p
 end
 
-function _G.SpawnDropsAt(pos: Vector3, xp: number, coins: number)
+function _G.SpawnDropsAt(pos: Vector3, xp: number, coins: number, souls: number)
 	local function jitter()
 		return Vector3.new((math.random() - 0.5) * 2.6, 0, (math.random() - 0.5) * 2.6)
 	end
 	if xp and xp > 0 then makeOrb("xp", xp, pos + jitter()) end
 	if coins and coins > 0 then makeOrb("coins", coins, pos + jitter()) end
+	if souls and souls > 0 then makeOrb("souls", souls, pos + jitter()) end
 end
 
 RunService.Heartbeat:Connect(function(dt)
@@ -111,9 +124,12 @@ RunService.Heartbeat:Connect(function(dt)
 		if not hrp then continue end
 
 		if dist <= PICKUP_DIST then
-			if _G.AwardPlayer then
-				if meta.type == "xp" then _G.AwardPlayer(plr, meta.amount, 0)
-				else _G.AwardPlayer(plr, 0, meta.amount) end
+			if meta.type == "xp" then
+				if _G.AwardPlayer then _G.AwardPlayer(plr, meta.amount, 0) end
+			elseif meta.type == "coins" then
+				if _G.AwardPlayer then _G.AwardPlayer(plr, 0, meta.amount) end
+			elseif meta.type == "souls" then
+				if _G.AwardSouls then _G.AwardSouls(plr, meta.amount) end
 			end
 			orb:Destroy()
 			active[orb] = nil

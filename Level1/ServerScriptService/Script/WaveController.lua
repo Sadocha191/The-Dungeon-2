@@ -551,15 +551,16 @@ local function wireDropsAndKills(mob: Model, cfg, isElite: boolean)
                 end
             end
         end
-
         local xpDrop = cfg.xp or 5
         local coinDrop = cfg.coins or 1
+        local soulsDrop = 0
         if isElite then
             xpDrop = math.floor(xpDrop * 10)
             coinDrop = math.floor(coinDrop * 8)
+            soulsDrop = math.random(5, 10)
         end
         if _G.SpawnDropsAt then
-            pcall(function() _G.SpawnDropsAt(pos, xpDrop, coinDrop) end)
+            pcall(function() _G.SpawnDropsAt(pos, xpDrop, coinDrop, soulsDrop) end)
         end
 
         
@@ -733,9 +734,11 @@ local function spawnInterval(t: number)
 end
 
 local eliteCount = 0
-local nextEliteAt = 600 -- 10 minutes
-local eliteOrder = { "Knight", "Demon", "Ent" }
-
+local eliteTimes = { 300, 600 } -- 5 min, 10 min
+local eliteTotal = #eliteTimes
+local eliteIndex = 1 -- next elite to spawn
+local nextEliteAt = eliteTimes[eliteIndex] or math.huge
+local eliteOrder = { "Knight", "Demon" }
 -- === Portal + Boss end condition ===
 local portalModel: Model? = nil
 local portalActivated = false
@@ -769,7 +772,7 @@ local function watchEliteDeath(mob: Model)
     if not hum then return end
     hum.Died:Connect(function()
         eliteCount += 1
-        broadcast({ type = "eliteProgress", elitesDefeated = eliteCount, elitesTotal = 3 })
+        broadcast({ type = "eliteProgress", elitesDefeated = eliteCount, elitesTotal = eliteTotal })
 			-- Elites are now "pressure" progression only. Ending the run happens via Portal + Boss.
     end)
 end
@@ -951,7 +954,7 @@ do
 		overtime = over,
 		nextEliteIn = nextEliteAt,
 		elitesDefeated = 0,
-		elitesTotal = 3,
+		elitesTotal = eliteTotal,
 		kills = 0,
 		coins = 0,
 		portalActivated = portalActivated,
@@ -989,22 +992,24 @@ RunService.Heartbeat:Connect(function()
 			overtime = math.floor(over),
             nextEliteIn = math.floor(nextIn),
             elitesDefeated = eliteCount,
-            elitesTotal = 3,
+            elitesTotal = eliteTotal,
 			kills = runKills,
 			coins = runCoins,
 			portalActivated = portalActivated,
 			bossDefeated = bossDefeated,
         })
     end
-
-    -- Elites
-    if eliteCount < 3 and t >= nextEliteAt then
-        local eliteName = eliteOrder[eliteCount + 1] or "Knight"
+    -- Elites (only at 5:00 and 10:00)
+    if eliteIndex <= eliteTotal and t >= nextEliteAt then
+        local eliteName = eliteOrder[eliteIndex] or "Knight"
         local elite = spawnMob(eliteName, true)
         if elite then
-            broadcast({ type = "eliteSpawn", name = eliteName, elitesDefeated = eliteCount, elitesTotal = 3 })
+            broadcast({ type = "eliteSpawn", name = eliteName, elitesDefeated = eliteCount, elitesTotal = eliteTotal })
             watchEliteDeath(elite)
         end
+        eliteIndex += 1
+        nextEliteAt = eliteTimes[eliteIndex] or math.huge
+    end
         nextEliteAt += 600
     end
 

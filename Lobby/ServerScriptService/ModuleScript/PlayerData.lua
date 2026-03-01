@@ -17,7 +17,8 @@ local function defaultProfile()
 		nextXp = 120,
 
 		-- currencies
-		coins = 0,
+		coins = 0, -- SILVER (lobby currency)
+		souls = 0, -- purple currency (witch)
 		weaponPoints = 0, -- premium
 		tickets = 0,      -- gacha tickets
 
@@ -140,6 +141,7 @@ function PlayerData.Get(plr)
 	data.nextXp = math.max(50, clampInt(data.nextXp) or 120)
 
 	data.coins = math.max(0, clampInt(data.coins))
+	data.souls = math.max(0, clampInt(data.souls))
 	data.weaponPoints = math.max(0, clampInt(data.weaponPoints))
 	data.tickets = math.max(0, clampInt(data.tickets))
 

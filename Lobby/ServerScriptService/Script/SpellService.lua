@@ -250,7 +250,7 @@ WitchShopEvent.OnServerEvent:Connect(function(plr: Player, payload)
 	if payload.type == "OPEN" then
 		WitchShopEvent:FireClient(plr, {
 			type = "OPEN",
-			coins = d.coins,
+			souls = d.souls,
 			spells = buildShopPayload(plr),
 		})
 		return
@@ -263,17 +263,17 @@ WitchShopEvent.OnServerEvent:Connect(function(plr: Player, payload)
 
 		d.spellsUnlocked = d.spellsUnlocked or {}
 		if d.spellsUnlocked[spellId] == true then
-			WitchShopEvent:FireClient(plr, { type = "BOUGHT", id = spellId, coins = d.coins })
+			WitchShopEvent:FireClient(plr, { type = "BOUGHT", id = spellId, souls = d.souls })
 			return
 		end
 
-		local cost = math.max(0, tonumber(def.costCoins) or 0)
-		if d.coins < cost then
-			WitchShopEvent:FireClient(plr, { type = "ERROR", message = "Not enough coins." })
+		local cost = math.max(0, tonumber(def.costCoins) or 0) -- now treated as Souls cost
+		if (tonumber(d.souls) or 0) < cost then
+			WitchShopEvent:FireClient(plr, { type = "ERROR", message = "Not enough souls." })
 			return
 		end
 
-		d.coins -= cost
+		d.souls = (tonumber(d.souls) or 0) - cost
 		d.spellsUnlocked[spellId] = true
 
 		PlayerData.MarkDirty(plr)
@@ -282,7 +282,7 @@ WitchShopEvent.OnServerEvent:Connect(function(plr: Player, payload)
 		WitchShopEvent:FireClient(plr, {
 			type = "BOUGHT",
 			id = spellId,
-			coins = d.coins,
+			souls = d.souls,
 			spells = buildShopPayload(plr),
 		})
 	end

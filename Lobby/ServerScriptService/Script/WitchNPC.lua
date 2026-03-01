@@ -2,7 +2,7 @@
 -- Odpowiada za:
 -- 1) gating sklepu po tutorialu (ATTR: TutorialComplete)
 -- 2) nadanie starter spellbooka przy pierwszej interakcji (jeśli masz _G.Spells_GrantStarterBook)
--- 3) otwieranie UI klientowi przez WitchShopEvent:FireClient({type="OPEN", coins=..., spells=...})
+-- 3) otwieranie UI klientowi przez WitchShopEvent:FireClient({type="OPEN", souls=..., spells=...})
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -193,7 +193,7 @@ prompt.Triggered:Connect(function(plr: Player)
 
 	WitchShopEvent:FireClient(plr, {
 		type = "OPEN",
-		coins = (d and d.coins) or 0,
+		souls = (d and d.souls) or 0,
 		spells = buildShopPayload(plr, d),
 	})
 end)

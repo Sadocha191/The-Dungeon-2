@@ -282,6 +282,7 @@ end
 
 local function syncHud(plr: Player)
 	local r = getRun(plr)
+	local d = PlayerData.Get(plr)
 	PlayerProgressEvent:FireClient(plr, {
 		type = "progress",
 		level = r.runLevel,
@@ -289,6 +290,7 @@ local function syncHud(plr: Player)
 		nextXp = r.nextXp,
 		coins = r.runCoins,
 		kills = r.kills,
+		souls = (d and tonumber(d.souls)) or 0,
 	})
 end
 
@@ -718,6 +720,20 @@ function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	end
 end
 
+-- Public API for soul orbs (DropService calls _G.AwardSouls)
+function _G.AwardSouls(plr: Player, souls: number)
+	if not plr or not plr.Parent then return end
+	souls = math.max(0, math.floor(tonumber(souls) or 0))
+	if souls <= 0 then return end
+
+	local d = PlayerData.Get(plr)
+	d.souls = (tonumber(d.souls) or 0) + souls
+	if PlayerData.MarkDirty then PlayerData.MarkDirty(plr) end
+
+	-- don't spam hard saves for every orb; just sync HUD
+	syncHud(plr)
+end
+
 function _G.RegisterEnemyKill(_pos: Vector3?)
 	for _, plr in ipairs(Players:GetPlayers()) do
 		local r = getRun(plr)
@@ -771,10 +787,13 @@ local function endRunForPlayer(plr: Player, reason: string)
 
 	local seconds = runSeconds(plr)
 	local accountXp = math.max(0, math.floor(seconds * TIME_RATE + (r.kills or 0) * KILL_RATE))
-	local coinsGained = math.max(0, math.floor(r.runCoins or 0))
+	-- Gold coins are run-only. Convert to lobby silver at 1/3.
+	local goldCoins = math.max(0, math.floor(r.runCoins or 0))
+	local coinsGained = math.max(0, math.floor(goldCoins / 3))
 
 	local d = PlayerData.Get(plr)
 	d.xp = (tonumber(d.xp) or 0) + accountXp
+	-- PlayerData.coins is now SILVER
 	d.coins = (tonumber(d.coins) or 0) + coinsGained
 
 	if tonumber(d.level) and tonumber(d.nextXp) and PlayerData.RollNextXp then
@@ -793,7 +812,8 @@ local function endRunForPlayer(plr: Player, reason: string)
 		reason = reason,
 		time = seconds,
 		kills = r.kills or 0,
-		coinsGained = coinsGained,
+		coinsGained = coinsGained, -- silver gained
+		goldEarned = goldCoins,
 		accountXp = accountXp,
 		accountLevel = tonumber(d.level) or 1,
 	})

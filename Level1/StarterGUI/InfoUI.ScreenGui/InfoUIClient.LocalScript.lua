@@ -17,6 +17,9 @@ local killText = killFrame:WaitForChild("KillCountText")
 local coinFrame = frame:WaitForChild("Coin")
 local coinText = coinFrame:WaitForChild("CoinText")
 
+local soulsFrame = frame:WaitForChild("Souls")
+local soulsText = soulsFrame:WaitForChild("SoulText")
+
 -- Config: 15:00 countdown -> then count up
 local RUN_TARGET_SECONDS = 15 * 60
 
@@ -42,6 +45,7 @@ end
 setTimerFromElapsed(0)
 killText.Text = "0"
 coinText.Text = "0"
+soulsText.Text = "0"
 
 -- Coins + kills come from PlayerProgressEvent
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -49,19 +53,37 @@ local progressEvent = remotes:WaitForChild("PlayerProgressEvent")
 progressEvent.OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then return end
 	if payload.type ~= "progress" then return end
-	if payload.kills ~= nil then
-		killText.Text = tostring(math.floor(tonumber(payload.kills) or 0))
-	end
-	if payload.coins ~= nil then
-		coinText.Text = tostring(math.floor(tonumber(payload.coins) or 0))
-	end
+    if payload.kills ~= nil then
+        killText.Text = tostring(math.floor(tonumber(payload.kills) or 0))
+    end
+    if payload.coins ~= nil then
+        coinText.Text = tostring(math.floor(tonumber(payload.coins) or 0))
+    end
+    if payload.souls ~= nil then
+        soulsText.Text = tostring(math.floor(tonumber(payload.souls) or 0))
+    end
 end)
 
 -- Time comes from WaveStatusEvent (seconds elapsed on server; respects PauseState)
-local waveEvent = ReplicatedStorage:WaitForChild("WaveStatusEvent")
+local function getWaveStatusEvent()
+    local rem = ReplicatedStorage:FindFirstChild("Remotes")
+    if rem then
+        local ev = rem:FindFirstChild("WaveStatusEvent")
+        if ev and ev:IsA("RemoteEvent") then
+            return ev
+        end
+    end
+    local ev = ReplicatedStorage:FindFirstChild("WaveStatusEvent")
+    if ev and ev:IsA("RemoteEvent") then
+        return ev
+    end
+    return ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("WaveStatusEvent")
+end
+
+local waveEvent = getWaveStatusEvent()
 waveEvent.OnClientEvent:Connect(function(payload)
-	if typeof(payload) ~= "table" then return end
-	if payload.type == "timeUpdate" and payload.seconds ~= nil then
-		setTimerFromElapsed(payload.seconds)
-	end
+    if typeof(payload) ~= "table" then return end
+    if payload.type == "timeUpdate" and payload.seconds ~= nil then
+        setTimerFromElapsed(payload.seconds)
+    end
 end)

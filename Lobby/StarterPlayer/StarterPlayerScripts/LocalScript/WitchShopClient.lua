@@ -56,7 +56,7 @@ coinsLabel.Font = Enum.Font.Gotham
 coinsLabel.TextSize = 12
 coinsLabel.TextXAlignment = Enum.TextXAlignment.Left
 coinsLabel.TextColor3 = Color3.fromRGB(210,210,210)
-coinsLabel.Text = "Coins: 0"
+coinsLabel.Text = "Souls: 0"
 coinsLabel.Parent = panel
 
 local left = Instance.new("ScrollingFrame")
@@ -191,7 +191,7 @@ local function addRow(spell)
 	row.Text = ("  %s  [%s]  %s"):format(
 		spell.name,
 		spell.category,
-		spell.owned and "Owned" or ("Cost: "..tostring(spell.costCoins))
+		spell.owned and "Owned" or ("Cost: "..tostring(spell.costCoins).." Souls")
 	)
 	row.Parent = left
 	Instance.new("UICorner", row).CornerRadius = UDim.new(0, 12)
@@ -202,9 +202,9 @@ local function addRow(spell)
 end
 
 local function openShop(payload)
-	currentCoins = tonumber(payload.coins) or 0
+	currentCoins = tonumber(payload.souls) or 0
 	currentSpells = payload.spells or {}
-	coinsLabel.Text = ("Coins: %d"):format(currentCoins)
+	coinsLabel.Text = ("Souls: %d"):format(currentCoins)
 
 	clearList()
 	for _, spell in ipairs(currentSpells) do
@@ -275,7 +275,7 @@ WitchShopEvent.OnClientEvent:Connect(function(payload)
 		openShop(payload)
 
 	elseif payload.type == "BOUGHT" then
-		if payload.coins then coinsLabel.Text = ("Coins: %d"):format(tonumber(payload.coins) or 0) end
+		if payload.souls then coinsLabel.Text = ("Souls: %d"):format(tonumber(payload.souls) or 0) end
 		if payload.spells then
 			currentSpells = payload.spells
 			clearList()
