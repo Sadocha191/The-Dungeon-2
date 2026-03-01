@@ -44,7 +44,6 @@ local function sanitizeToolCollision(tool: Instance)
 		if inst:IsA("BasePart") then
 			inst.CollisionGroup = GROUP_PLAYERS
 			inst.CanCollide = false
-			inst.CanTouch = false
 			inst.CanQuery = false
 		end
 	end
@@ -52,7 +51,6 @@ local function sanitizeToolCollision(tool: Instance)
 		if inst:IsA("BasePart") then
 			inst.CollisionGroup = GROUP_PLAYERS
 			inst.CanCollide = false
-			inst.CanTouch = false
 			inst.CanQuery = false
 		end
 	end)
