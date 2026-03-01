@@ -1,171 +1,244 @@
--- WeaponCombat.server.lua (ServerScriptService/Script)
--- Auto-attack: 360° + zawsze najbliższy przeciwnik (później: wybór targetowania).
--- Serwer zadaje dmg i odpala VFX w miejscu trafienia.
+-- WeaponCombat.server.lua (Level1)
+-- Server-authoritative auto-attack: 360° hit nearest enemy. VFX spawns at hit position only when damage is applied.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-local PauseState = ReplicatedStorage:WaitForChild("PauseState")
-local Remotes = ReplicatedStorage:WaitForChild("Remotes")
-local WeaponSwingVFX = Remotes:WaitForChild("WeaponSwingVFX")
-
-local EnemiesFolder = workspace:WaitForChild("Enemies")
-
 local ServerScriptService = game:GetService("ServerScriptService")
-local PlayerData = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerData"))
 
-local WeaponConfigs = require(ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("WeaponConfigs"))
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local PauseState = ReplicatedStorage:WaitForChild("PauseState")
+local VFXEvent = Remotes:WaitForChild("WeaponSwingVFX")
 
--- Per-weapon profile (cooldown/range). Kąty nie są już używane (360°).
-local Profiles = {
-	Sword    = { cd = 0.55, range = 10 },
-	Scythe   = { cd = 0.80, range = 11 },
-	Halberd  = { cd = 0.75, range = 13 },
-	Claymore = { cd = 0.95, range = 11 },
-	Greataxe = { cd = 1.05, range = 11 },
+local function findModule(name: string): ModuleScript?
+	local direct = ServerScriptService:FindFirstChild(name)
+	if direct and direct:IsA("ModuleScript") then return direct end
+	local folder = ServerScriptService:FindFirstChild("ModuleScript") or ServerScriptService:FindFirstChild("ModuleScripts")
+	if folder then
+		local nested = folder:FindFirstChild(name)
+		if nested and nested:IsA("ModuleScript") then return nested end
+	end
+	return nil
+end
+
+local PlayerData = require(findModule("PlayerData") or error("[WeaponCombat] Missing PlayerData"))
+-- optional weapon configs
+local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
+local WeaponConfigs = moduleFolder and moduleFolder:FindFirstChild("WeaponConfigs") and require(moduleFolder.WeaponConfigs) or nil
+
+-- Ensure Enemies folder exists (WaveController usually creates it, but be safe)
+local ENEMIES = workspace:FindFirstChild("Enemies")
+if not ENEMIES then
+	ENEMIES = Instance.new("Folder")
+	ENEMIES.Name = "Enemies"
+	ENEMIES.Parent = workspace
+end
+
+-- simple per-weaponType cooldown defaults
+local CD_BY_TYPE = {
+	Sword = 0.55, Scythe = 0.80, Halberd = 0.75, Claymore = 0.95, Greataxe = 1.05,
+	Bow = 0.65, Wand = 0.55, Staff = 0.75, Pistol = 0.45
 }
 
-local function getActiveWeaponEntry(plr: Player)
+local RANGE_BY_TYPE = {
+	Sword = 9, Scythe = 10, Halberd = 12, Claymore = 10, Greataxe = 10,
+	Bow = 60, Wand = 45, Staff = 50, Pistol = 55
+}
+
+local function getLoadoutEntry(plr: Player)
 	local data = PlayerData.Get(plr)
 	if not data or typeof(data.Loadout) ~= "table" then return nil end
 	return data.Loadout[1]
 end
 
-local function resolveWeaponDef(entry)
+local function resolveWeaponType(entry)
 	local id = entry and (entry.id or entry.Id)
 	if typeof(id) ~= "string" then return nil end
 	if WeaponConfigs and WeaponConfigs.Get then
-		return WeaponConfigs.Get(id)
+		local def = WeaponConfigs.Get(id)
+		if def and typeof(def.weaponType) == "string" then
+			return def.weaponType
+		end
 	end
-	return nil
-end
-
-local function resolveWeaponType(entry)
-	local def = resolveWeaponDef(entry)
-	return def and def.weaponType or nil
+	-- fallback: treat melee names as sword unless known
+	return "Sword"
 end
 
 local function calcDamage(plr: Player, entry)
-	local def = resolveWeaponDef(entry)
-	local level = tonumber(entry and (entry.level or entry.Level)) or 1
-	level = math.max(1, math.floor(level))
+	local id = entry and (entry.id or entry.Id)
+	local lvl = tonumber(entry and (entry.level or entry.Level)) or 1
+	lvl = math.max(1, math.floor(lvl))
 
-	local baseAtk = 10
-	local atkPerLevel = 0.8
-	if def and def.combat then
-		baseAtk = tonumber(def.combat.baseAtk or def.baseDamage) or baseAtk
-		atkPerLevel = tonumber(def.combat.atkPerLevel) or atkPerLevel
+	local base = 10
+	local perLvl = 1.0
+	if WeaponConfigs and WeaponConfigs.Get and typeof(id) == "string" then
+		local def = WeaponConfigs.Get(id)
+		if def and def.combat then
+			base = tonumber(def.combat.baseAtk or def.baseDamage) or base
+			perLvl = tonumber(def.combat.atkPerLevel) or perLvl
+		end
 	end
-
-	return baseAtk + (level - 1) * atkPerLevel
+	return base + (lvl - 1) * perLvl
 end
 
-local function tagCreator(humanoid, plr: Player)
-	local old = humanoid:FindFirstChild("creator")
+local function ensureHealthbar(enemyModel: Model, hum: Humanoid)
+	-- create once, show after damage
+	local hrp = enemyModel:FindFirstChild("HumanoidRootPart") or enemyModel:FindFirstChild("Head")
+	if not hrp or not hrp:IsA("BasePart") then return end
+
+	local existing = enemyModel:FindFirstChild("EnemyHealthbar")
+	if existing and existing:IsA("BillboardGui") then
+		existing.Enabled = true
+		return
+	end
+
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "EnemyHealthbar"
+	gui.Adornee = hrp
+	gui.Size = UDim2.fromOffset(120, 16)
+	gui.StudsOffset = Vector3.new(0, 3.2, 0)
+	gui.AlwaysOnTop = true
+	gui.Enabled = true
+
+	local bg = Instance.new("Frame")
+	bg.Name = "BG"
+	bg.Size = UDim2.fromScale(1, 1)
+	bg.BackgroundTransparency = 0.35
+	bg.BorderSizePixel = 0
+	bg.Parent = gui
+
+	local fill = Instance.new("Frame")
+	fill.Name = "Fill"
+	fill.Size = UDim2.fromScale(1, 1)
+	fill.BackgroundTransparency = 0
+	fill.BorderSizePixel = 0
+	fill.Parent = bg
+
+	gui.Parent = enemyModel
+end
+
+local function updateHealthbar(enemyModel: Model, hum: Humanoid)
+	local gui = enemyModel:FindFirstChild("EnemyHealthbar")
+	if not gui or not gui:IsA("BillboardGui") then return end
+	local bg = gui:FindFirstChild("BG")
+	local fill = bg and bg:FindFirstChild("Fill")
+	if not fill or not fill:IsA("Frame") then return end
+
+	local maxH = math.max(1, hum.MaxHealth)
+	local pct = math.clamp(hum.Health / maxH, 0, 1)
+	fill.Size = UDim2.fromScale(pct, 1)
+
+	-- hide when dead
+	if hum.Health <= 0 then
+		gui.Enabled = false
+	end
+end
+
+local function tagCreator(hum: Humanoid, plr: Player)
+	local old = hum:FindFirstChild("creator")
 	if old then old:Destroy() end
 	local tag = Instance.new("ObjectValue")
 	tag.Name = "creator"
 	tag.Value = plr
-	tag.Parent = humanoid
-	task.delay(1.0, function()
+	tag.Parent = hum
+	task.delay(1, function()
 		if tag and tag.Parent then tag:Destroy() end
 	end)
 end
 
-local function isEnemyModel(m)
-	return m and m:IsA("Model") and m.Parent == EnemiesFolder and m:FindFirstChildOfClass("Humanoid")
-end
-
-local function getClosestTarget(origin: Vector3, maxRange: number)
-	local best, bestDist
-	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
-		if isEnemyModel(enemy) then
-			local ehrp = enemy:FindFirstChild("HumanoidRootPart")
+local function nearestEnemy(fromPos: Vector3, maxRange: number)
+	local best, bestDist = nil, maxRange
+	for _, enemy in ipairs(ENEMIES:GetChildren()) do
+		if enemy:IsA("Model") then
 			local hum = enemy:FindFirstChildOfClass("Humanoid")
-			if ehrp and hum and hum.Health > 0 then
-				local dist = (ehrp.Position - origin).Magnitude
-				if dist <= maxRange and (not bestDist or dist < bestDist) then
-					best = { model = enemy, hrp = ehrp, hum = hum, dist = dist }
-					bestDist = dist
+			local hrp = enemy:FindFirstChild("HumanoidRootPart")
+			if hum and hrp and hum.Health > 0 then
+				local d = (hrp.Position - fromPos).Magnitude
+				if d < bestDist then
+					bestDist = d
+					best = enemy
 				end
 			end
 		end
 	end
-	return best
+	return best, bestDist
 end
 
-local function doSwing(plr: Player, char: Model, entry)
-	if PauseState.Value then return end
+local loops = {}
 
-	local hrp = char:FindFirstChild("HumanoidRootPart")
-	local hum = char:FindFirstChildOfClass("Humanoid")
-	if not hrp or not hum or hum.Health <= 0 then return end
-
-	local wType = resolveWeaponType(entry)
-	if typeof(wType) ~= "string" then return end
-	local prof = Profiles[wType]
-	if not prof then
-		-- fallback: sensowny domyślny zasięg/cd
-		prof = { cd = 0.7, range = 10 }
-	end
-
-	local target = getClosestTarget(hrp.Position, prof.range)
-	if not target then return end
-
-	local dmg = calcDamage(plr, entry)
-
-	-- Server damage
-	tagCreator(target.hum, plr)
-	target.hum:TakeDamage(dmg)
-
-	-- VFX w miejscu trafienia (broń ma się pojawić tam gdzie atakuje)
-	local dir = (target.hrp.Position - hrp.Position)
-	if dir.Magnitude < 0.001 then
-		dir = hrp.CFrame.LookVector
-	else
-		dir = dir.Unit
-	end
-
-	local weaponId = entry and (entry.id or entry.Id) or ""
-	WeaponSwingVFX:FireAllClients(weaponId, wType, target.hrp.Position, dir)
-end
-
-local loops: {[Player]: {alive: boolean}} = {}
-
-local function startLoop(plr: Player, char: Model)
+local function startLoop(plr: Player)
 	if loops[plr] then loops[plr].alive = false end
 	local state = { alive = true }
 	loops[plr] = state
 
 	task.spawn(function()
-		local lastAttack = 0.0
+		local last = 0
 		while state.alive and plr.Parent do
 			task.wait(0.05)
 
-			if not char or not char.Parent then
-				char = plr.Character
+			if PauseState.Value then
+				continue
 			end
 
-			local entry = getActiveWeaponEntry(plr)
-			if not entry or not char then
+			local char = plr.Character
+			local hrp = char and char:FindFirstChild("HumanoidRootPart")
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			if not hrp or not hum or hum.Health <= 0 then
+				continue
+			end
+
+			local entry = getLoadoutEntry(plr)
+			if not entry then
 				continue
 			end
 
 			local wType = resolveWeaponType(entry)
-			local prof = wType and Profiles[wType] or { cd = 0.7, range = 10 }
+			local cd = CD_BY_TYPE[wType] or 0.7
+			local range = RANGE_BY_TYPE[wType] or 10
 
 			local now = time()
-			if (now - lastAttack) >= prof.cd then
-				lastAttack = now
-				doSwing(plr, char, entry)
+			if (now - last) < cd then
+				continue
 			end
+
+			local enemy = nearestEnemy(hrp.Position, range)
+			if not enemy then
+				continue
+			end
+
+			last = now
+
+			local eh = enemy:FindFirstChildOfClass("Humanoid")
+			local ehrp = enemy:FindFirstChild("HumanoidRootPart")
+			if not eh or not ehrp or eh.Health <= 0 then
+				continue
+			end
+
+			local dmg = calcDamage(plr, entry)
+			if dmg <= 0 then
+				continue
+			end
+
+			ensureHealthbar(enemy, eh)
+			tagCreator(eh, plr)
+
+			-- apply damage
+			eh:TakeDamage(dmg)
+			updateHealthbar(enemy, eh)
+
+			-- VFX at enemy position (client local)
+			local weaponId = entry.id or entry.Id or ""
+			VFXEvent:FireAllClients({
+				weaponId = weaponId,
+				pos = ehrp.Position,
+				lookAt = hrp.Position, -- face back to player
+			})
 		end
 	end)
 end
 
 Players.PlayerAdded:Connect(function(plr)
-	plr.CharacterAdded:Connect(function(char)
-		startLoop(plr, char)
+	plr.CharacterAdded:Connect(function()
+		startLoop(plr)
 	end)
 end)
 

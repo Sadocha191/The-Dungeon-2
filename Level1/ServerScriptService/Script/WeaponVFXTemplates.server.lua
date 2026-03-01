@@ -1,52 +1,64 @@
--- WeaponVFXTemplates.server.lua (ServerScriptService/Script)
--- Kopiuje template broni do ReplicatedStorage, żeby klient mógł je klonować jako VFX w świecie.
+-- WeaponVFXTemplates.server.lua
+-- Copies weapon tool templates from ServerStorage to ReplicatedStorage for client-side VFX cloning.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 
-local templatesFolder = ServerStorage:FindFirstChild("WeaponTemplates")
-if not templatesFolder then
-	warn("[WeaponVFXTemplates] Missing ServerStorage.WeaponTemplates")
-	return
+local templatesRoot = ServerStorage:WaitForChild("WeaponTemplates")
+local outFolder = ReplicatedStorage:FindFirstChild("WeaponVFXTemplates")
+if not outFolder then
+	outFolder = Instance.new("Folder")
+	outFolder.Name = "WeaponVFXTemplates"
+	outFolder.Parent = ReplicatedStorage
 end
 
-local assets = ReplicatedStorage:FindFirstChild("Assets")
-if not assets then
-	assets = Instance.new("Folder")
-	assets.Name = "Assets"
-	assets.Parent = ReplicatedStorage
-end
-
-local vfxFolder = assets:FindFirstChild("WeaponVFX")
-if not vfxFolder then
-	vfxFolder = Instance.new("Folder")
-	vfxFolder.Name = "WeaponVFX"
-	vfxFolder.Parent = assets
-end
-
--- Odśwież folder (żeby nie dublować)
-for _, c in ipairs(vfxFolder:GetChildren()) do
-	c:Destroy()
-end
-
-local function sanitize(inst: Instance)
-	for _, d in ipairs(inst:GetDescendants()) do
-		if d:IsA("Script") or d:IsA("LocalScript") then
+local function stripScripts(tool: Instance)
+	for _, d in ipairs(tool:GetDescendants()) do
+		if d:IsA("Script") or d:IsA("LocalScript") or d:IsA("ModuleScript") then
 			d:Destroy()
-		elseif d:IsA("BasePart") then
-			d.Anchored = true
-			d.CanCollide = false
-			d.Massless = true
 		end
 	end
 end
 
-for _, tool in ipairs(templatesFolder:GetChildren()) do
-	if tool:IsA("Tool") then
-		local clone = tool:Clone()
-		clone.Parent = vfxFolder
-		sanitize(clone)
+local function sanitizeParts(model: Instance)
+	for _, inst in ipairs(model:GetDescendants()) do
+		if inst:IsA("BasePart") then
+			inst.Anchored = true
+			inst.CanCollide = false
+			inst.CanTouch = false
+			inst.CanQuery = false
+		end
 	end
 end
 
-print(("[WeaponVFXTemplates] Copied %d weapon templates to ReplicatedStorage.Assets.WeaponVFX"):format(#vfxFolder:GetChildren()))
+-- Clone every weapon variant by name into ReplicatedStorage/WeaponVFXTemplates/<weaponName>
+-- This matches PlayerData loadout ids (usually same as template name).
+local function indexTemplates()
+	outFolder:ClearAllChildren()
+
+	for _, cat in ipairs(templatesRoot:GetChildren()) do
+		if cat:IsA("Folder") then
+			for _, weapon in ipairs(cat:GetChildren()) do
+				if weapon:IsA("Tool") then
+					local clone = weapon:Clone()
+					stripScripts(clone)
+					sanitizeParts(clone)
+					clone.Parent = outFolder
+				elseif weapon:IsA("Folder") then
+					-- some categories store weapon as Folder/Tool nested
+					for _, maybeTool in ipairs(weapon:GetChildren()) do
+						if maybeTool:IsA("Tool") then
+							local clone = maybeTool:Clone()
+							stripScripts(clone)
+							sanitizeParts(clone)
+							clone.Name = maybeTool.Name
+							clone.Parent = outFolder
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+indexTemplates()

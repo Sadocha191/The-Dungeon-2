@@ -29,5 +29,7 @@ ensureRemoteEvent("DamageIndicatorEvent")  -- server -> all clients (pos, amount
 -- Loading gate (client preload handshake)
 ensureRemoteEvent("ClientReady")          -- client -> server (loaded/preloaded)
 
--- Weapon VFX (server -> clients)
-ensureRemoteEvent("WeaponSwingVFX")  -- server -> all clients (weaponId/type, pos, dir)
+-- Weapon VFX swing (server -> client)
+ensureRemoteEvent("WeaponSwingVFX")
+-- WeaponEvent (client -> server) [legacy/manual]
+ensureRemoteEvent("WeaponEvent")

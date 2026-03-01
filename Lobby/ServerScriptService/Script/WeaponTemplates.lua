@@ -6,7 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 local WeaponCatalog = require(serverModules:WaitForChild("WeaponCatalog"))
-local WeaponConfigs = require(ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("WeaponConfigs"))
+local WeaponConfigs = require((ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5)):WaitForChild("WeaponConfigs"))
 
 local updated = 0
 for _, def in ipairs(WeaponConfigs.GetAll()) do

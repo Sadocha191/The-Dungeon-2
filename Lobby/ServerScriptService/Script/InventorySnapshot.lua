@@ -24,7 +24,7 @@ local PlayerData = requireModule("PlayerData")
 local CurrencyService = requireModule("CurrencyService")
 local PlayerStateStore = requireModule("PlayerStateStore")
 
-local WeaponConfigs = require(ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("WeaponConfigs"))
+local WeaponConfigs = require((ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5)):WaitForChild("WeaponConfigs"))
 
 local function toPct(x: number): number
 	return math.floor((tonumber(x) or 0) * 100 + 0.5)

@@ -1,110 +1,64 @@
--- WeaponVFX.client.lua (StarterPlayerScripts/LocalScript)
--- Spawns weapon model only when damage tick happens (server fires WeaponSwingVFX).
--- Position is a bit further and lower than before.
+-- WeaponVFX.client.lua (StarterPlayerScripts)
+-- Spawns a short-lived visible weapon model at the hit position, based on ReplicatedStorage/WeaponVFXTemplates.
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
 local Debris = game:GetService("Debris")
 
-local plr = Players.LocalPlayer
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
-local evt = Remotes:WaitForChild("WeaponSwingVFX")
+local VFXEvent = Remotes:WaitForChild("WeaponSwingVFX")
 
 local templates = ReplicatedStorage:WaitForChild("WeaponVFXTemplates")
 
-local function getPivot(instance: Instance): CFrame
-	if instance:IsA("Model") then
-		return instance:GetPivot()
-	elseif instance:IsA("Tool") then
-		local handle = instance:FindFirstChild("Handle")
-		if handle and handle:IsA("BasePart") then
-			return handle.CFrame
-		end
-	end
-	return CFrame.new()
+local function getTemplate(weaponId: string)
+	local t = templates:FindFirstChild(weaponId)
+	if t then return t end
+	-- fallback: first child
+	return templates:FindFirstChildWhichIsA("Tool")
 end
 
-local function setPivot(instance: Instance, cf: CFrame)
-	if instance:IsA("Model") then
-		instance:PivotTo(cf)
-	elseif instance:IsA("Tool") then
-		local handle = instance:FindFirstChild("Handle")
-		if handle and handle:IsA("BasePart") then
-			handle.CFrame = cf
-		end
+local function spawnVFX(payload)
+	local weaponId = tostring(payload.weaponId or "")
+	local pos = payload.pos
+	local lookAt = payload.lookAt
+
+	if typeof(pos) ~= "Vector3" then return end
+
+	local template = getTemplate(weaponId)
+	if not template then return end
+
+	local clone = template:Clone()
+	-- convert Tool to Model-like placement
+	local handle = clone:FindFirstChild("Handle")
+	if not handle or not handle:IsA("BasePart") then
+		clone:Destroy()
+		return
 	end
-end
 
-local function ensurePrimary(instance: Instance)
-	if instance:IsA("Model") then
-		if not instance.PrimaryPart then
-			local pp = instance:FindFirstChild("Handle", true)
-			if pp and pp:IsA("BasePart") then
-				instance.PrimaryPart = pp
-			else
-				for _, d in ipairs(instance:GetDescendants()) do
-					if d:IsA("BasePart") then
-						instance.PrimaryPart = d
-						break
-					end
-				end
-			end
-		end
+	clone.Parent = workspace
+	-- place a bit lower and offset so it doesn't clip
+	local offset = Vector3.new(0, -1.0, 0)
+	local cf
+	if typeof(lookAt) == "Vector3" then
+		cf = CFrame.lookAt(pos + offset, lookAt)
+	else
+		cf = CFrame.new(pos + offset)
 	end
-end
 
-local function spawnSwingVFX(data)
-	local weaponId = data.weaponId
-	local origin: CFrame = data.origin
-	if typeof(weaponId) ~= "string" or typeof(origin) ~= "CFrame" then return end
-
-	local src = templates:FindFirstChild(weaponId)
-	if not src then return end
-
-	local vfx = src:Clone()
-	vfx.Name = "VFX_" .. weaponId
-
-	ensurePrimary(vfx)
-
-	-- target position: a bit further and lower (forward = -Z in object space)
-	local base = origin * CFrame.new(0.6, -1.1, -4.5)
-
-	-- simple "appear + slash" animation: rotate a bit and fade out quickly
-	setPivot(vfx, base * CFrame.Angles(0, math.rad(30), math.rad(-35)))
-	vfx.Parent = workspace
-
-	-- if Tool, parent its Handle(s) to workspace visually via tool itself (Tool can be in workspace)
-	-- keep it non-interactive
-	for _, d in ipairs(vfx:GetDescendants()) do
-		if d:IsA("BasePart") then
-			d.Anchored = true
-			d.CanCollide = false
-			d.CanQuery = false
-			d.CanTouch = false
-			d.CastShadow = false
+	-- Put handle at cf, move rest relative
+	local delta = cf * handle.CFrame:Inverse()
+	for _, p in ipairs(clone:GetDescendants()) do
+		if p:IsA("BasePart") then
+			p.CFrame = delta * p.CFrame
+			p.Anchored = true
+			p.CanCollide = false
+			p.CanTouch = false
+			p.CanQuery = false
 		end
 	end
 
-	-- rotate quickly (visual slash)
-	local tInfo = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-	local goalCF = base * CFrame.Angles(0, math.rad(-40), math.rad(35))
-
-	-- We tween via a CFrameValue driving PivotTo
-	local driver = Instance.new("CFrameValue")
-	driver.Value = getPivot(vfx)
-	driver:GetPropertyChangedSignal("Value"):Connect(function()
-		if vfx and vfx.Parent then
-			setPivot(vfx, driver.Value)
-		end
-	end)
-
-	local tw = TweenService:Create(driver, tInfo, { Value = goalCF })
-	tw:Play()
-
-	-- cleanup
-	Debris:AddItem(driver, 0.3)
-	Debris:AddItem(vfx, 0.35)
+	-- lifetime
+	Debris:AddItem(clone, 0.35)
 end
 
-evt.OnClientEvent:Connect(spawnSwingVFX)
+VFXEvent.OnClientEvent:Connect(spawnVFX)

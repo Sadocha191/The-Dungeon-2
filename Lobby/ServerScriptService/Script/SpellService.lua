@@ -12,7 +12,7 @@ assert(playerDataModule, "Missing PlayerData module")
 local PlayerData = require(playerDataModule)
 
 -- Spell defs
-local moduleFolder = ReplicatedStorage:WaitForChild("ModuleScripts")
+local moduleFolder = (ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5))
 local SpellDefs = require(moduleFolder:WaitForChild("SpellDefinitions"))
 
 -- Remotes

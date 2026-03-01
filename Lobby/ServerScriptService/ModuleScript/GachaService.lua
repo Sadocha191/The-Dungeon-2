@@ -5,7 +5,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local moduleFolder = script.Parent
-local replicatedModules = ReplicatedStorage:WaitForChild("ModuleScripts")
+local replicatedModules = (ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5))
 
 local PlayerData = require(moduleFolder:WaitForChild("PlayerData"))
 local PlayerStateStore = require(moduleFolder:WaitForChild("PlayerStateStore"))

@@ -11,7 +11,7 @@ local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
 local CurrencyService = require(serverModules:WaitForChild("CurrencyService"))
 
-local WeaponConfigs = require(ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("WeaponConfigs"))
+local WeaponConfigs = require((ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5)):WaitForChild("WeaponConfigs"))
 
 local CRAFT_COST = 500
 

@@ -12,7 +12,7 @@ local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local OpenLevelSelect = remoteEvents:WaitForChild("OpenLevelSelect")
 local RequestLevelTeleport = remoteEvents:WaitForChild("RequestLevelTeleport")
 
-local moduleFolder = ReplicatedStorage:WaitForChild("ModuleScripts")
+local moduleFolder = (ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5))
 local Levels = require(moduleFolder:WaitForChild("Levels"))
 
 local gui = Instance.new("ScreenGui")
