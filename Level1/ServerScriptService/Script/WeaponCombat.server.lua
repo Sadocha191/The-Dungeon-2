@@ -44,6 +44,11 @@ local RANGE_BY_TYPE = {
 	Bow = 60, Wand = 45, Staff = 50, Pistol = 55
 }
 
+local AOE_RADIUS_BY_TYPE = {
+	Scythe = 7,
+	Halberd = 6.5,
+}
+
 local function getLoadoutEntry(plr: Player)
 	local data = PlayerData.Get(plr)
 	if not data or typeof(data.Loadout) ~= "table" then return nil end
@@ -163,6 +168,20 @@ local function nearestEnemy(fromPos: Vector3, maxRange: number)
 	return best, bestDist
 end
 
+local function getEnemiesInRadius(fromPos: Vector3, radius: number)
+	local hits = {}
+	for _, enemy in ipairs(ENEMIES:GetChildren()) do
+		if enemy:IsA("Model") then
+			local hum = enemy:FindFirstChildOfClass("Humanoid")
+			local hrp = enemy:FindFirstChild("HumanoidRootPart")
+			if hum and hrp and hum.Health > 0 and (hrp.Position - fromPos).Magnitude <= radius then
+				table.insert(hits, enemy)
+			end
+		end
+	end
+	return hits
+end
+
 local loops = {}
 
 local function startLoop(plr: Player)
@@ -218,12 +237,21 @@ local function startLoop(plr: Player)
 				continue
 			end
 
-			ensureHealthbar(enemy, eh)
-			tagCreator(eh, plr)
+			local hitEnemies = { enemy }
+			local aoeRadius = AOE_RADIUS_BY_TYPE[wType]
+			if aoeRadius then
+				hitEnemies = getEnemiesInRadius(ehrp.Position, aoeRadius)
+			end
 
-			-- apply damage
-			eh:TakeDamage(dmg)
-			updateHealthbar(enemy, eh)
+			for _, enemyModel in ipairs(hitEnemies) do
+				local enemyHum = enemyModel:FindFirstChildOfClass("Humanoid")
+				if enemyHum and enemyHum.Health > 0 then
+					ensureHealthbar(enemyModel, enemyHum)
+					tagCreator(enemyHum, plr)
+					enemyHum:TakeDamage(dmg)
+					updateHealthbar(enemyModel, enemyHum)
+				end
+			end
 
 			-- VFX at enemy position (client local)
 			local weaponId = entry.id or entry.Id or ""

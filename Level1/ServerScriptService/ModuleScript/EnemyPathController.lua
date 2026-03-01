@@ -6,9 +6,15 @@
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local EnemyPathController = {}
 EnemyPathController.__index = EnemyPathController
+
+local function isRunPaused(): boolean
+	local pauseState = ReplicatedStorage:FindFirstChild("PauseState")
+	return pauseState ~= nil and pauseState.Value == true
+end
 
 -- ======================
 -- TUNING
@@ -284,6 +290,13 @@ end
 
 function EnemyPathController:Update(dt: number)
 	if not self.Mob or not self.Root or not self.Humanoid then return end
+
+	if isRunPaused() then
+		self.Humanoid:MoveTo(self.Root.Position)
+		self.Root.AssemblyLinearVelocity = Vector3.zero
+		self.Root.AssemblyAngularVelocity = Vector3.zero
+		return
+	end
 
 	-- If Roblox put us into Climbing/Jumping anyway (edge cases), force back to Running.
 	local st = self.Humanoid:GetState()
