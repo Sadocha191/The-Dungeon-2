@@ -49,16 +49,122 @@ local function applyCollision(model: Instance, groupName: string, noCollide: boo
 	end)
 end
 
+
+-- Map sampling helpers (random ground positions)
+local function getMapBounds()
+	-- Collect anchored collidable parts (likely map geometry)
+	local minV = Vector3.new(math.huge, math.huge, math.huge)
+	local maxV = Vector3.new(-math.huge, -math.huge, -math.huge)
+
+	for _, inst in ipairs(workspace:GetDescendants()) do
+		if inst:IsA("BasePart") then
+			-- skip dynamic / gameplay folders
+			if inst:IsDescendantOf(Players) then
+				continue
+			end
+			if inst.Parent and inst.Parent.Name == "Enemies" then
+				continue
+			end
+			if inst.Anchored and inst.CanCollide and inst.Transparency < 1 then
+				local cf = inst.CFrame
+				local sz = inst.Size
+				local corners = {
+					cf * Vector3.new(-sz.X/2, -sz.Y/2, -sz.Z/2),
+					cf * Vector3.new( sz.X/2, -sz.Y/2, -sz.Z/2),
+					cf * Vector3.new(-sz.X/2, -sz.Y/2,  sz.Z/2),
+					cf * Vector3.new( sz.X/2, -sz.Y/2,  sz.Z/2),
+					cf * Vector3.new(-sz.X/2,  sz.Y/2, -sz.Z/2),
+					cf * Vector3.new( sz.X/2,  sz.Y/2, -sz.Z/2),
+					cf * Vector3.new(-sz.X/2,  sz.Y/2,  sz.Z/2),
+					cf * Vector3.new( sz.X/2,  sz.Y/2,  sz.Z/2),
+				}
+				for _, v in ipairs(corners) do
+					minV = Vector3.new(math.min(minV.X, v.X), math.min(minV.Y, v.Y), math.min(minV.Z, v.Z))
+					maxV = Vector3.new(math.max(maxV.X, v.X), math.max(maxV.Y, v.Y), math.max(maxV.Z, v.Z))
+				end
+			end
+		end
+	end
+
+	-- fallback (if map couldn't be detected)
+	if minV.X == math.huge then
+		return Vector3.new(-256, 0, -256), Vector3.new(256, 200, 256)
+	end
+	return minV, maxV
+end
+
+local MAP_MIN, MAP_MAX = getMapBounds()
+
+local function raycastToGround(x: number, z: number)
+	local origin = Vector3.new(x, MAP_MAX.Y + 250, z)
+	local dir = Vector3.new(0, -(MAP_MAX.Y - MAP_MIN.Y + 600), 0)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Blacklist
+	params.FilterDescendantsInstances = {}
+	local res = workspace:Raycast(origin, dir, params)
+	if res then
+		return res.Position
+	end
+	return nil
+end
+
+local function getRandomGroundPosition(avoidPos: Vector3?, avoidRadius: number?)
+	avoidRadius = avoidRadius or 0
+	for _ = 1, 60 do
+		local x = math.random() * (MAP_MAX.X - MAP_MIN.X) + MAP_MIN.X
+		local z = math.random() * (MAP_MAX.Z - MAP_MIN.Z) + MAP_MIN.Z
+		local p = raycastToGround(x, z)
+		if p then
+			if avoidPos and (Vector3.new(p.X, 0, p.Z) - Vector3.new(avoidPos.X, 0, avoidPos.Z)).Magnitude < avoidRadius then
+				continue
+			end
+			return p
+		end
+	end
+	-- last resort
+	return Vector3.new((MAP_MIN.X+MAP_MAX.X)/2, MAP_MAX.Y, (MAP_MIN.Z+MAP_MAX.Z)/2)
+end
+
 -- apply to player characters (so mobs/weapons never become "obstacles")
 Players.PlayerAdded:Connect(function(plr)
 	plr.CharacterAdded:Connect(function(char)
 		applyCollision(char, GROUP_PLAYERS, false)
-		local hrp = char:FindFirstChild("HumanoidRootPart")
-		if hrp and hrp:IsA("BasePart") then
+
+		-- random player spawn (server-authoritative)
+		task.defer(function()
+			local hrp = char:FindFirstChild("HumanoidRootPart")
+			if not (hrp and hrp:IsA("BasePart")) then return end
 			hrp.CanCollide = false
-		end
+
+			-- prefer explicit spawn parts if you have them
+			local candidates = {}
+			local spawnFolder = workspace:FindFirstChild("PlayerSpawns") or workspace:FindFirstChild("Spawns") or workspace:FindFirstChild("SpawnPoints")
+			if spawnFolder then
+				for _, inst in ipairs(spawnFolder:GetDescendants()) do
+					if inst:IsA("BasePart") then
+						table.insert(candidates, inst)
+					end
+				end
+			end
+			for _, inst in ipairs(workspace:GetDescendants()) do
+				if inst:IsA("SpawnLocation") then
+					table.insert(candidates, inst)
+				end
+			end
+
+			local pos
+			if #candidates > 0 then
+				local pick = candidates[math.random(1, #candidates)]
+				pos = pick.Position
+			else
+				pos = getRandomGroundPosition()
+			end
+
+			hrp.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
+		end)
 	end)
 end)
+
 
 local ServerScriptService = game:GetService("ServerScriptService")
 
@@ -97,10 +203,38 @@ end
 -- Run target (seconds). UI counts down to 0, then counts up.
 local RUN_TARGET_SECONDS = 15 * 60
 
--- Endgame (Boss + Portal)
+-- Endgame (Portal + Boss)
 local endgameTriggered = false
 local bossMob = nil
 local portalPart = nil
+local portalActivated = false
+
+local function spawnBossNearPortal()
+	if bossMob and bossMob.Parent then return bossMob end
+
+	local bossName = "Golem" -- change if you add a dedicated boss model later
+	local mob = spawnMob(bossName, true)
+	if not mob then return nil end
+
+	mob.Name = "Boss_" .. bossName
+	local hum = mob:FindFirstChildOfClass("Humanoid")
+	if hum then
+		hum.MaxHealth = math.floor(hum.MaxHealth * 3)
+		hum.Health = hum.MaxHealth
+		mob:SetAttribute("IsBoss", true)
+		mob:SetAttribute("Damage", math.floor((tonumber(mob:GetAttribute("Damage")) or 20) * 2))
+	end
+
+	-- Move boss close to portal (spawnMob uses regular spawn; we override position)
+	local hrp = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
+	if hrp and hrp:IsA("BasePart") and portalPart then
+		local behind = portalPart.CFrame * CFrame.new(0, 0, -22)
+		mob:PivotTo(CFrame.new(behind.Position + Vector3.new(0, 2, 0)))
+	end
+
+	bossMob = mob
+	return mob
+end
 
 local function createPortal(atPos: Vector3)
 	if portalPart and portalPart.Parent then return portalPart end
@@ -124,23 +258,36 @@ local function createPortal(atPos: Vector3)
 	light.Parent = p
 
 	local prompt = Instance.new("ProximityPrompt")
-	prompt.Name = "EnterPrompt"
-	prompt.ActionText = "Enter Portal"
+	prompt.Name = "PortalPrompt"
+	prompt.ActionText = "Activate Portal"
 	prompt.ObjectText = "Portal"
-	prompt.HoldDuration = 0
+	prompt.HoldDuration = 0.25
 	prompt.MaxActivationDistance = 10
 	prompt.RequiresLineOfSight = false
 	prompt.Parent = p
 
-	local function tryComplete(plr: Player)
-		if not plr or not plr.Parent then return end
-		-- Boss must be dead (or missing) to allow portal completion.
-		local bossAlive = false
+	local function bossAliveNow()
 		if bossMob and bossMob.Parent then
 			local h = bossMob:FindFirstChildOfClass("Humanoid")
-			bossAlive = (h and h.Health > 0) and true or false
+			return (h and h.Health > 0) and true or false
 		end
-		if bossAlive then return end
+		return false
+	end
+
+	local function tryUse(plr: Player)
+		if not plr or not plr.Parent then return end
+
+		-- Step 1: activate portal
+		if not portalActivated then
+			portalActivated = true
+			prompt.ActionText = "Enter Portal"
+			prompt.HoldDuration = 0
+			spawnBossNearPortal()
+			return
+		end
+
+		-- Step 2: boss must be dead to enter
+		if bossAliveNow() then return end
 
 		-- Replace with your own next-level teleporter later.
 		if _G.EndRunForPlayer then
@@ -150,17 +297,40 @@ local function createPortal(atPos: Vector3)
 		end
 	end
 
-	prompt.Triggered:Connect(tryComplete)
+	prompt.Triggered:Connect(tryUse)
 	p.Touched:Connect(function(hit)
 		local plr = Players:GetPlayerFromCharacter(hit and hit.Parent)
 		if plr then
-			tryComplete(plr)
+			tryUse(plr)
 		end
 	end)
 
 	portalPart = p
 	return p
 end
+
+
+
+-- Spawn portal at run start (random position on the map)
+local portalSpawned = false
+RunStarted.Changed:Connect(function()
+	if RunStarted.Value and not portalSpawned then
+		portalSpawned = true
+
+		local avoid = nil
+		local plr = Players:GetPlayers()[1]
+		if plr and plr.Character then
+			local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+			if hrp and hrp:IsA("BasePart") then
+				avoid = hrp.Position
+			end
+		end
+
+		local pPos = getRandomGroundPosition(avoid, 120)
+		createPortal(pPos)
+	end
+end)
+
 
 -- Enemy templates
 local EnemiesRoot = ReplicatedStorage:WaitForChild("Enemies")
@@ -767,23 +937,11 @@ RunService.Heartbeat:Connect(function()
         })
     end
 
-    -- Endgame trigger at 15:00 (boss + portal)
+    -- Endgame trigger at 15:00 (massive horde pressure)
     if (not endgameTriggered) and t >= RUN_TARGET_SECONDS then
         endgameTriggered = true
-
-        -- Spawn a boss (reuse existing Elite template; fallback is handled by spawnMob warnings)
-        local bossName = "Golem"
-        bossMob = spawnMob(bossName, true)
-        if bossMob then
-            bossMob.Name = "Boss_" .. bossName
-            local bh = bossMob:FindFirstChildOfClass("Humanoid")
-            if bh then
-                -- buff boss more than normal elite
-                bh.MaxHealth = math.floor(bh.MaxHealth * 3)
-                bh.Health = bh.MaxHealth
-                bossMob:SetAttribute("IsBoss", true)
-                bossMob:SetAttribute("Damage", math.floor((tonumber(bossMob:GetAttribute("Damage")) or 20) * 2))
-            end
+        broadcast({ kind = "Endgame", seconds = math.floor(t) })
+    end
 
             local hrp = bossMob:FindFirstChild("HumanoidRootPart") or bossMob.PrimaryPart
             if hrp and hrp:IsA("BasePart") then

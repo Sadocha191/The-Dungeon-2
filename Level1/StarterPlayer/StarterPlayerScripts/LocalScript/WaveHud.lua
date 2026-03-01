@@ -5,7 +5,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
-local WaveStatusEvent = ReplicatedStorage:WaitForChild("WaveStatusEvent")
+local WaveStatusEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("WaveStatusEvent")
 
 local plr = game.Players.LocalPlayer
 local gui = Instance.new("ScreenGui")
