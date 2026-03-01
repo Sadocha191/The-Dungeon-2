@@ -28,3 +28,6 @@ ensureRemoteEvent("PartyXPUpdate")       -- server -> all clients (xp/level upda
 ensureRemoteEvent("DamageIndicatorEvent")  -- server -> all clients (pos, amount, crit)
 -- Loading gate (client preload handshake)
 ensureRemoteEvent("ClientReady")          -- client -> server (loaded/preloaded)
+
+-- Weapon VFX (server -> clients)
+ensureRemoteEvent("WeaponSwingVFX")  -- server -> all clients (weaponId/type, pos, dir)
