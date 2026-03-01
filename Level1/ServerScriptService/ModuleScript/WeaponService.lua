@@ -314,6 +314,7 @@ function WeaponService.EquipLoadout(player: Player)
 		local tool = cloneTemplate(payload.id)
 		if tool then
 			applyWeaponStats(tool, payload.id, payload.entry)
+			sanitizeToolCollision(tool)
 			tool.Parent = backpack
 			if not equippedTool then
 				equippedTool = tool

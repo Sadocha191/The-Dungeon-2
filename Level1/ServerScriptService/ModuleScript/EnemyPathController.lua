@@ -16,6 +16,9 @@ EnemyPathController.__index = EnemyPathController
 local MOVE_UPDATE_NEAR = 0.10   -- how often we call MoveTo when near
 local MOVE_UPDATE_FAR  = 0.25   -- how often we call MoveTo when far
 local NEAR_DIST = 40
+local SEPARATION_RADIUS = 4.5
+local SEPARATION_STRENGTH = 1.8
+local RING_OFFSET_RADIUS = 1.25
 
 -- mobs stop this close (prevents climbing/stacking).
 -- IMPORTANT: must be compatible with each mob's AttackRange.
@@ -95,6 +98,7 @@ function EnemyPathController.new(mobModel: Model)
 	if typeof(ar) ~= "number" then ar = nil end
 	local stopDist = ar and math.max(1.5, ar - STOP_PADDING) or DEFAULT_STOP_DIST
 	self._stopDist = stopDist
+	self._ringSign = (math.random() < 0.5) and -1 or 1
 
 	return self
 end
@@ -146,6 +150,37 @@ end
 local function setRaycastIgnore(self)
 	local enemiesFolder = getEnemiesFolder()
 	self._rayParams.FilterDescendantsInstances = { self.Mob, enemiesFolder }
+end
+
+local function computeSeparation(self, desiredPos: Vector3)
+	local enemiesFolder = getEnemiesFolder()
+	if not enemiesFolder then
+		return Vector3.zero
+	end
+
+	local rootPos = self.Root and self.Root.Position
+	if not rootPos then
+		return Vector3.zero
+	end
+
+	local push = Vector3.zero
+	for _, other in ipairs(enemiesFolder:GetChildren()) do
+		if other ~= self.Mob and other:IsA("Model") then
+			local otherRoot = other:FindFirstChild("HumanoidRootPart") or other.PrimaryPart
+			if otherRoot and otherRoot:IsA("BasePart") then
+				local delta = rootPos - otherRoot.Position
+				local flat = Vector3.new(delta.X, 0, delta.Z)
+				local d = flat.Magnitude
+				if d > 0 and d < SEPARATION_RADIUS then
+					local w = ((SEPARATION_RADIUS - d) / SEPARATION_RADIUS)
+					push += flat.Unit * (w * SEPARATION_STRENGTH)
+				end
+			end
+		end
+	end
+
+	local targetDelta = desiredPos - rootPos
+	return Vector3.new(push.X, 0, push.Z) + Vector3.new(targetDelta.X, 0, targetDelta.Z)
 end
 
 local function smoothMantle(self, upPos: Vector3, forwardPos: Vector3, forwardDir: Vector3)
@@ -252,7 +287,9 @@ function EnemyPathController:Update(dt: number)
 
 	-- If Roblox put us into Climbing/Jumping anyway (edge cases), force back to Running.
 	local st = self.Humanoid:GetState()
-	if st == Enum.HumanoidStateType.Climbing or st == Enum.HumanoidStateType.Jumping then
+	if st == Enum.HumanoidStateType.Climbing
+		or st == Enum.HumanoidStateType.Jumping
+		or st == Enum.HumanoidStateType.Freefall then
 		pcall(function() self.Humanoid:ChangeState(Enum.HumanoidStateType.Running) end)
 		self.Root.AssemblyLinearVelocity = Vector3.zero
 		self.Root.AssemblyAngularVelocity = Vector3.zero
@@ -289,8 +326,17 @@ end
 local toMob = (self.Root.Position - playerPos)
 local flat = Vector3.new(toMob.X, 0, toMob.Z)
 local dir = (flat.Magnitude > 0.001) and flat.Unit or Vector3.new(0,0,1)
-local desiredPos = playerPos + dir * stopDist
+local tangent = Vector3.new(-dir.Z, 0, dir.X)
+local ringOffset = tangent * (self._ringSign * RING_OFFSET_RADIUS)
+local desiredPos = playerPos + dir * stopDist + ringOffset
 desiredPos = Vector3.new(desiredPos.X, self.Root.Position.Y, desiredPos.Z)
+
+local withSeparation = computeSeparation(self, desiredPos)
+if withSeparation.Magnitude > 0.001 then
+	local stepDir = withSeparation.Unit
+	desiredPos = self.Root.Position + (stepDir * math.min(withSeparation.Magnitude, stopDist))
+	desiredPos = Vector3.new(desiredPos.X, self.Root.Position.Y, desiredPos.Z)
+end
 
 -- if something blocks us, try mantle (slow climb). If mantling, do nothing else this tick.
 if self:TryMantleToward(desiredPos) then
