@@ -324,8 +324,9 @@ function WeaponService.EquipLoadout(player: Player)
 		local char = player.Character
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
 		if hum then
+			-- New combat system: player should NOT hold weapons in hands.
 			hum:UnequipTools()
-				end
+		end
 	end
 end
 
