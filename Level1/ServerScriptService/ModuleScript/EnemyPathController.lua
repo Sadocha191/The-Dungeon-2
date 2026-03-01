@@ -67,6 +67,15 @@ function EnemyPathController.new(mobModel: Model)
 	self.Root = mobModel:FindFirstChild("HumanoidRootPart") or mobModel.PrimaryPart
 	self.Humanoid = mobModel:FindFirstChildOfClass("Humanoid")
 
+	-- Hard-disable Roblox humanoid climbing/jumping. We only allow vertical movement via our mantle.
+	-- This prevents mobs from "climbing" onto the player (or floating weapons) as if they were obstacles.
+	if self.Humanoid then
+		pcall(function() self.Humanoid.AutoJumpEnabled = false end)
+		pcall(function() self.Humanoid:SetStateEnabled(Enum.HumanoidStateType.Climbing, false) end)
+		pcall(function() self.Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false) end)
+		pcall(function() self.Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false) end)
+	end
+
 	self.TargetPlayer = nil
 	self._nextTargetScanT = 0
 
@@ -240,6 +249,14 @@ end
 
 function EnemyPathController:Update(dt: number)
 	if not self.Mob or not self.Root or not self.Humanoid then return end
+
+	-- If Roblox put us into Climbing/Jumping anyway (edge cases), force back to Running.
+	local st = self.Humanoid:GetState()
+	if st == Enum.HumanoidStateType.Climbing or st == Enum.HumanoidStateType.Jumping then
+		pcall(function() self.Humanoid:ChangeState(Enum.HumanoidStateType.Running) end)
+		self.Root.AssemblyLinearVelocity = Vector3.zero
+		self.Root.AssemblyAngularVelocity = Vector3.zero
+	end
 
 	local plr = self.TargetPlayer
 	local hrp = plr and getLivingHRP(plr) or nil
