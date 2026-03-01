@@ -35,6 +35,29 @@ local WeaponConfigs = moduleFolder and moduleFolder:FindFirstChild("WeaponConfig
 
 local WeaponService = {}
 
+local PhysicsService = game:GetService("PhysicsService")
+local GROUP_PLAYERS = "Players"
+pcall(function() PhysicsService:RegisterCollisionGroup(GROUP_PLAYERS) end)
+
+local function sanitizeToolCollision(tool: Instance)
+	for _, inst in ipairs(tool:GetDescendants()) do
+		if inst:IsA("BasePart") then
+			inst.CollisionGroup = GROUP_PLAYERS
+			inst.CanCollide = false
+			inst.CanTouch = false
+			inst.CanQuery = false
+		end
+	end
+	tool.DescendantAdded:Connect(function(inst)
+		if inst:IsA("BasePart") then
+			inst.CollisionGroup = GROUP_PLAYERS
+			inst.CanCollide = false
+			inst.CanTouch = false
+			inst.CanQuery = false
+		end
+	end)
+end
+
 local function isWeaponTool(inst: Instance): boolean
 	return inst:IsA("Tool") and typeof(inst:GetAttribute("WeaponType")) == "string"
 end

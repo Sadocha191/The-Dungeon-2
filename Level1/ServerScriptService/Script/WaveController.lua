@@ -7,6 +7,56 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local PhysicsService = game:GetService("PhysicsService")
+
+-- Collision groups (prevent mob stacking/climbing on players and weapons)
+local GROUP_PLAYERS = "Players"
+local GROUP_MOBS = "Mobs"
+
+local function ensureCollisionGroup(name: string)
+	pcall(function() PhysicsService:RegisterCollisionGroup(name) end)
+end
+
+ensureCollisionGroup(GROUP_PLAYERS)
+ensureCollisionGroup(GROUP_MOBS)
+pcall(function()
+	PhysicsService:CollisionGroupSetCollidable(GROUP_PLAYERS, GROUP_MOBS, false)
+	PhysicsService:CollisionGroupSetCollidable(GROUP_MOBS, GROUP_MOBS, true) -- mobs can still bump each other if desired
+end)
+
+local function applyCollision(model: Instance, groupName: string, noCollide: boolean?)
+	for _, inst in ipairs(model:GetDescendants()) do
+		if inst:IsA("BasePart") then
+			inst.CollisionGroup = groupName
+			if noCollide then
+				inst.CanCollide = false
+				inst.CanTouch = false
+				inst.CanQuery = false
+			end
+		end
+	end
+	model.DescendantAdded:Connect(function(inst)
+		if inst:IsA("BasePart") then
+			inst.CollisionGroup = groupName
+			if noCollide then
+				inst.CanCollide = false
+				inst.CanTouch = false
+				inst.CanQuery = false
+			end
+		end
+	end)
+end
+
+-- apply to player characters (so mobs/weapons never become "obstacles")
+Players.PlayerAdded:Connect(function(plr)
+	plr.CharacterAdded:Connect(function(char)
+		applyCollision(char, GROUP_PLAYERS, false)
+		local hrp = char:FindFirstChild("HumanoidRootPart")
+		if hrp and hrp:IsA("BasePart") then
+			hrp.CanCollide = false
+		end
+	end)
+end)
+
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local EnemyPathController = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("EnemyPathController"))
@@ -62,11 +112,6 @@ PhysicsService:CollisionGroupSetCollidable(MOBS_GROUP, MOBS_GROUP, false)
 local PLAYERS_GROUP = "Players"
 pcall(function() PhysicsService:RegisterCollisionGroup(PLAYERS_GROUP) end)
 
--- IMPORTANT: mobs must NOT collide with players (prevents "jumping" / stacking on the player)
-pcall(function()
-    PhysicsService:CollisionGroupSetCollidable(MOBS_GROUP, PLAYERS_GROUP, false)
-end)
-
 -- Collision group for corpses (collides with world, not with players)
 local CORPSES_GROUP = "Corpses"
 pcall(function() PhysicsService:RegisterCollisionGroup(CORPSES_GROUP) end)
@@ -76,6 +121,7 @@ pcall(function() PhysicsService:RegisterCollisionGroup(CORPSES_GROUP) end)
 -- - Corpses don't collide with players
 -- - Corpses don't collide with mobs (prevents corpse piles blocking mobs)
 pcall(function()
+    PhysicsService:CollisionGroupSetCollidable(MOBS_GROUP, PLAYERS_GROUP, false)
     PhysicsService:CollisionGroupSetCollidable(CORPSES_GROUP, PLAYERS_GROUP, false)
     PhysicsService:CollisionGroupSetCollidable(CORPSES_GROUP, MOBS_GROUP, false)
     PhysicsService:CollisionGroupSetCollidable(CORPSES_GROUP, CORPSES_GROUP, false)
@@ -111,9 +157,24 @@ local function setMobGroup(model: Model)
     for _, d in ipairs(model:GetDescendants()) do
         if d:IsA("BasePart") then
             d.CollisionGroup = MOBS_GROUP
+            -- hard prevent "climbing/stacking" on player by removing physical collision for mobs
+            d.CanCollide = false
+            d.CanTouch = false
+            d.CanQuery = false
         end
     end
+
+    -- also handle parts added after spawn (accessories / hitboxes / etc.)
+    model.DescendantAdded:Connect(function(inst)
+        if inst:IsA("BasePart") then
+            inst.CollisionGroup = MOBS_GROUP
+            inst.CanCollide = false
+            inst.CanTouch = false
+            inst.CanQuery = false
+        end
+    end)
 end
+
 
 -- Roblox-friendly spawn ring around nearest alive player
 local SPAWN_RING_MIN = 60
