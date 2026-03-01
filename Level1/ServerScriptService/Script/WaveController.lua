@@ -1,7 +1,10 @@
 -- WaveController.server.lua (Level1)
 -- Reworked: time-based horde spawning (VS / Mega Bonk style)
 -- No waves. Difficulty ramps with elapsed run time.
--- Elites spawn every 10 minutes. After the 3rd elite is defeated -> Victory.
+--
+-- UPDATE (2026-03-01):
+-- - Run target is 15:00 (900s). UI counts down to 0, then counts up.
+-- - At 15:00 we trigger endgame: spawn Boss + Portal, and heavily increase horde pressure.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -89,6 +92,74 @@ local function broadcast(payload)
     for _, plr in ipairs(Players:GetPlayers()) do
         WaveStatusEvent:FireClient(plr, payload)
     end
+end
+
+-- Run target (seconds). UI counts down to 0, then counts up.
+local RUN_TARGET_SECONDS = 15 * 60
+
+-- Endgame (Boss + Portal)
+local endgameTriggered = false
+local bossMob = nil
+local portalPart = nil
+
+local function createPortal(atPos: Vector3)
+	if portalPart and portalPart.Parent then return portalPart end
+
+	local p = Instance.new("Part")
+	p.Name = "RunPortal"
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanTouch = true
+	p.CanQuery = false
+	p.Shape = Enum.PartType.Cylinder
+	p.Size = Vector3.new(2, 10, 10)
+	p.CFrame = CFrame.new(atPos + Vector3.new(0, 1.2, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	p.Material = Enum.Material.Neon
+	p.Transparency = 0.15
+	p.Parent = workspace
+
+	local light = Instance.new("PointLight")
+	light.Brightness = 3
+	light.Range = 18
+	light.Parent = p
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "EnterPrompt"
+	prompt.ActionText = "Enter Portal"
+	prompt.ObjectText = "Portal"
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 10
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = p
+
+	local function tryComplete(plr: Player)
+		if not plr or not plr.Parent then return end
+		-- Boss must be dead (or missing) to allow portal completion.
+		local bossAlive = false
+		if bossMob and bossMob.Parent then
+			local h = bossMob:FindFirstChildOfClass("Humanoid")
+			bossAlive = (h and h.Health > 0) and true or false
+		end
+		if bossAlive then return end
+
+		-- Replace with your own next-level teleporter later.
+		if _G.EndRunForPlayer then
+			pcall(function() _G.EndRunForPlayer(plr, "Victory") end)
+		elseif _G.EndRun then
+			pcall(function() _G.EndRun("Victory") end)
+		end
+	end
+
+	prompt.Triggered:Connect(tryComplete)
+	p.Touched:Connect(function(hit)
+		local plr = Players:GetPlayerFromCharacter(hit and hit.Parent)
+		if plr then
+			tryComplete(plr)
+		end
+	end)
+
+	portalPart = p
+	return p
 end
 
 -- Enemy templates
@@ -666,38 +737,9 @@ local function spawnInterval(t: number)
     return maxI - (maxI - minI) * p
 end
 
-local eliteCount = 0
-local nextEliteAt = 600 -- 10 minutes
-local eliteOrder = { "Knight", "Demon", "Ent" }
-
-local function endRunVictory()
-    broadcast({ type = "complete", reason = "Victory" })
-
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr.Parent and plr:GetAttribute("RunEnded") ~= true then
-            if _G.EndRunForPlayer then
-                pcall(function() _G.EndRunForPlayer(plr, "Victory") end)
-            elseif _G.EndRun then
-                pcall(function() _G.EndRun("Victory") end)
-            end
-        end
-    end
-end
-
-local function watchEliteDeath(mob: Model)
-    local hum = mob and mob:FindFirstChildOfClass("Humanoid")
-    if not hum then return end
-    hum.Died:Connect(function()
-        eliteCount += 1
-        broadcast({ type = "eliteProgress", elitesDefeated = eliteCount, elitesTotal = 3 })
-        if eliteCount >= 3 then
-            endRunVictory()
-        end
-    end)
-end
 
 -- Initial HUD ping
-broadcast({ type = "timeUpdate", seconds = 0, nextEliteIn = nextEliteAt, elitesDefeated = 0, elitesTotal = 3 })
+broadcast({ type = "timeUpdate", seconds = 0 })
 
 local lastHudPush = 0
 local lastSpawnAt = 0
@@ -716,39 +758,62 @@ RunService.Heartbeat:Connect(function()
     if not anyPlayersAlive() then
         return
     end
-
     -- HUD update (4x/sec max)
     if t - lastHudPush >= 0.25 then
         lastHudPush = t
-        local nextIn = math.max(0, nextEliteAt - t)
         broadcast({
             type = "timeUpdate",
             seconds = math.floor(t),
-            nextEliteIn = math.floor(nextIn),
-            elitesDefeated = eliteCount,
-            elitesTotal = 3,
         })
     end
 
-    -- Elites
-    if eliteCount < 3 and t >= nextEliteAt then
-        local eliteName = eliteOrder[eliteCount + 1] or "Knight"
-        local elite = spawnMob(eliteName, true)
-        if elite then
-            broadcast({ type = "eliteSpawn", name = eliteName, elitesDefeated = eliteCount, elitesTotal = 3 })
-            watchEliteDeath(elite)
+    -- Endgame trigger at 15:00 (boss + portal)
+    if (not endgameTriggered) and t >= RUN_TARGET_SECONDS then
+        endgameTriggered = true
+
+        -- Spawn a boss (reuse existing Elite template; fallback is handled by spawnMob warnings)
+        local bossName = "Golem"
+        bossMob = spawnMob(bossName, true)
+        if bossMob then
+            bossMob.Name = "Boss_" .. bossName
+            local bh = bossMob:FindFirstChildOfClass("Humanoid")
+            if bh then
+                -- buff boss more than normal elite
+                bh.MaxHealth = math.floor(bh.MaxHealth * 3)
+                bh.Health = bh.MaxHealth
+                bossMob:SetAttribute("IsBoss", true)
+                bossMob:SetAttribute("Damage", math.floor((tonumber(bossMob:GetAttribute("Damage")) or 20) * 2))
+            end
+
+            local hrp = bossMob:FindFirstChild("HumanoidRootPart") or bossMob.PrimaryPart
+            if hrp and hrp:IsA("BasePart") then
+                createPortal(hrp.Position + Vector3.new(0, 0, 14))
+            else
+                createPortal(Vector3.new(0, 6, 0))
+            end
+        else
+            -- No boss template: portal immediately usable
+            createPortal(Vector3.new(0, 6, 0))
         end
-        nextEliteAt += 600
+
+        broadcast({ type = "endgame", at = RUN_TARGET_SECONDS })
     end
 
     -- Normal spawns
     local interval = spawnInterval(t)
+    if endgameTriggered then
+        -- Massive pressure after 15:00
+        interval = math.max(0.10, interval * 0.45)
+    end
     if t - lastSpawnAt < interval then
         return
     end
     lastSpawnAt = t
 
     local maxAlive = desiredMaxAlive(t)
+    if endgameTriggered then
+        maxAlive = math.clamp(maxAlive + 120, 80, 320)
+    end
     if activeEnemiesCount() >= maxAlive then
         return
     end
