@@ -320,13 +320,12 @@ function WeaponService.EquipLoadout(player: Player)
 		end
 	end
 
-	if equippedTool then
-		local char = player.Character
-		local hum = char and char:FindFirstChildOfClass("Humanoid")
-		if hum then
-			-- Do NOT equip tools (weapon is "floating"). Keep in Backpack for reference only.
-			hum:UnequipTools()
-		end
+	-- Do NOT equip any tool to the character. Weapons are visualized/handled by our VFX + server auto-attack.
+	-- Keep tools in Backpack only (not visible) so legacy tool scripts cannot animate a floating weapon in front of the player.
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		hum:UnequipTools()
 	end
 end
 
