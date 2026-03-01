@@ -320,12 +320,11 @@ function WeaponService.EquipLoadout(player: Player)
 		end
 	end
 
-	if equippedTool then
-		local char = player.Character
-		local hum = char and char:FindFirstChildOfClass("Humanoid")
-		if hum then
-			hum:EquipTool(equippedTool)
-		end
+	-- We no longer equip tools into the player's hand (weapons are handled as flying visuals / server combat).
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		hum:UnequipTools()
 	end
 end
 
