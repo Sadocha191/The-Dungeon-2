@@ -1,10 +1,7 @@
 -- WaveController.server.lua (Level1)
 -- Reworked: time-based horde spawning (VS / Mega Bonk style)
 -- No waves. Difficulty ramps with elapsed run time.
---
--- UPDATE (2026-03-01):
--- - Run target is 15:00 (900s). UI counts down to 0, then counts up.
--- - At 15:00 we trigger endgame: spawn Boss + Portal, and heavily increase horde pressure.
+-- Elites spawn every 10 minutes. After the 3rd elite is defeated -> Victory.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -49,122 +46,16 @@ local function applyCollision(model: Instance, groupName: string, noCollide: boo
 	end)
 end
 
-
--- Map sampling helpers (random ground positions)
-local function getMapBounds()
-	-- Collect anchored collidable parts (likely map geometry)
-	local minV = Vector3.new(math.huge, math.huge, math.huge)
-	local maxV = Vector3.new(-math.huge, -math.huge, -math.huge)
-
-	for _, inst in ipairs(workspace:GetDescendants()) do
-		if inst:IsA("BasePart") then
-			-- skip dynamic / gameplay folders
-			if inst:IsDescendantOf(Players) then
-				continue
-			end
-			if inst.Parent and inst.Parent.Name == "Enemies" then
-				continue
-			end
-			if inst.Anchored and inst.CanCollide and inst.Transparency < 1 then
-				local cf = inst.CFrame
-				local sz = inst.Size
-				local corners = {
-					cf * Vector3.new(-sz.X/2, -sz.Y/2, -sz.Z/2),
-					cf * Vector3.new( sz.X/2, -sz.Y/2, -sz.Z/2),
-					cf * Vector3.new(-sz.X/2, -sz.Y/2,  sz.Z/2),
-					cf * Vector3.new( sz.X/2, -sz.Y/2,  sz.Z/2),
-					cf * Vector3.new(-sz.X/2,  sz.Y/2, -sz.Z/2),
-					cf * Vector3.new( sz.X/2,  sz.Y/2, -sz.Z/2),
-					cf * Vector3.new(-sz.X/2,  sz.Y/2,  sz.Z/2),
-					cf * Vector3.new( sz.X/2,  sz.Y/2,  sz.Z/2),
-				}
-				for _, v in ipairs(corners) do
-					minV = Vector3.new(math.min(minV.X, v.X), math.min(minV.Y, v.Y), math.min(minV.Z, v.Z))
-					maxV = Vector3.new(math.max(maxV.X, v.X), math.max(maxV.Y, v.Y), math.max(maxV.Z, v.Z))
-				end
-			end
-		end
-	end
-
-	-- fallback (if map couldn't be detected)
-	if minV.X == math.huge then
-		return Vector3.new(-256, 0, -256), Vector3.new(256, 200, 256)
-	end
-	return minV, maxV
-end
-
-local MAP_MIN, MAP_MAX = getMapBounds()
-
-local function raycastToGround(x: number, z: number)
-	local origin = Vector3.new(x, MAP_MAX.Y + 250, z)
-	local dir = Vector3.new(0, -(MAP_MAX.Y - MAP_MIN.Y + 600), 0)
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Blacklist
-	params.FilterDescendantsInstances = {}
-	local res = workspace:Raycast(origin, dir, params)
-	if res then
-		return res.Position
-	end
-	return nil
-end
-
-local function getRandomGroundPosition(avoidPos: Vector3?, avoidRadius: number?)
-	avoidRadius = avoidRadius or 0
-	for _ = 1, 60 do
-		local x = math.random() * (MAP_MAX.X - MAP_MIN.X) + MAP_MIN.X
-		local z = math.random() * (MAP_MAX.Z - MAP_MIN.Z) + MAP_MIN.Z
-		local p = raycastToGround(x, z)
-		if p then
-			if avoidPos and (Vector3.new(p.X, 0, p.Z) - Vector3.new(avoidPos.X, 0, avoidPos.Z)).Magnitude < avoidRadius then
-				continue
-			end
-			return p
-		end
-	end
-	-- last resort
-	return Vector3.new((MAP_MIN.X+MAP_MAX.X)/2, MAP_MAX.Y, (MAP_MIN.Z+MAP_MAX.Z)/2)
-end
-
 -- apply to player characters (so mobs/weapons never become "obstacles")
 Players.PlayerAdded:Connect(function(plr)
 	plr.CharacterAdded:Connect(function(char)
 		applyCollision(char, GROUP_PLAYERS, false)
-
-		-- random player spawn (server-authoritative)
-		task.defer(function()
-			local hrp = char:FindFirstChild("HumanoidRootPart")
-			if not (hrp and hrp:IsA("BasePart")) then return end
+		local hrp = char:FindFirstChild("HumanoidRootPart")
+		if hrp and hrp:IsA("BasePart") then
 			hrp.CanCollide = false
-
-			-- prefer explicit spawn parts if you have them
-			local candidates = {}
-			local spawnFolder = workspace:FindFirstChild("PlayerSpawns") or workspace:FindFirstChild("Spawns") or workspace:FindFirstChild("SpawnPoints")
-			if spawnFolder then
-				for _, inst in ipairs(spawnFolder:GetDescendants()) do
-					if inst:IsA("BasePart") then
-						table.insert(candidates, inst)
-					end
-				end
-			end
-			for _, inst in ipairs(workspace:GetDescendants()) do
-				if inst:IsA("SpawnLocation") then
-					table.insert(candidates, inst)
-				end
-			end
-
-			local pos
-			if #candidates > 0 then
-				local pick = candidates[math.random(1, #candidates)]
-				pos = pick.Position
-			else
-				pos = getRandomGroundPosition()
-			end
-
-			hrp.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
-		end)
+		end
 	end)
 end)
-
 
 local ServerScriptService = game:GetService("ServerScriptService")
 
@@ -186,151 +77,38 @@ if not PauseState then
     PauseState.Parent = ReplicatedStorage
 end
 
--- We keep the same RemoteEvent name so you don't need new remotes.
-local WaveStatusEvent = ReplicatedStorage:FindFirstChild("WaveStatusEvent")
+-- Remotes layout (your project): ReplicatedStorage/Remotes/*
+local RemotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+if not RemotesFolder then
+	RemotesFolder = Instance.new("Folder")
+	RemotesFolder.Name = "Remotes"
+	RemotesFolder.Parent = ReplicatedStorage
+end
+
+-- Primary event (preferred)
+local WaveStatusEvent = RemotesFolder:FindFirstChild("WaveStatusEvent")
 if not WaveStatusEvent then
-    WaveStatusEvent = Instance.new("RemoteEvent")
-    WaveStatusEvent.Name = "WaveStatusEvent"
-    WaveStatusEvent.Parent = ReplicatedStorage
+	WaveStatusEvent = Instance.new("RemoteEvent")
+	WaveStatusEvent.Name = "WaveStatusEvent"
+	WaveStatusEvent.Parent = RemotesFolder
+end
+
+-- Legacy compatibility: some old LocalScripts may still look in ReplicatedStorage root
+local WaveStatusEvent_Legacy = ReplicatedStorage:FindFirstChild("WaveStatusEvent")
+if not WaveStatusEvent_Legacy then
+	WaveStatusEvent_Legacy = Instance.new("RemoteEvent")
+	WaveStatusEvent_Legacy.Name = "WaveStatusEvent"
+	WaveStatusEvent_Legacy.Parent = ReplicatedStorage
 end
 
 local function broadcast(payload)
-    for _, plr in ipairs(Players:GetPlayers()) do
-        WaveStatusEvent:FireClient(plr, payload)
-    end
+	for _, plr in ipairs(Players:GetPlayers()) do
+		WaveStatusEvent:FireClient(plr, payload)
+		if WaveStatusEvent_Legacy ~= WaveStatusEvent then
+			WaveStatusEvent_Legacy:FireClient(plr, payload)
+		end
+	end
 end
-
--- Run target (seconds). UI counts down to 0, then counts up.
-local RUN_TARGET_SECONDS = 15 * 60
-
--- Endgame (Portal + Boss)
-local endgameTriggered = false
-local bossMob = nil
-local portalPart = nil
-local portalActivated = false
-
-local function spawnBossNearPortal()
-	if bossMob and bossMob.Parent then return bossMob end
-
-	local bossName = "Golem" -- change if you add a dedicated boss model later
-	local mob = spawnMob(bossName, true)
-	if not mob then return nil end
-
-	mob.Name = "Boss_" .. bossName
-	local hum = mob:FindFirstChildOfClass("Humanoid")
-	if hum then
-		hum.MaxHealth = math.floor(hum.MaxHealth * 3)
-		hum.Health = hum.MaxHealth
-		mob:SetAttribute("IsBoss", true)
-		mob:SetAttribute("Damage", math.floor((tonumber(mob:GetAttribute("Damage")) or 20) * 2))
-	end
-
-	-- Move boss close to portal (spawnMob uses regular spawn; we override position)
-	local hrp = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
-	if hrp and hrp:IsA("BasePart") and portalPart then
-		local behind = portalPart.CFrame * CFrame.new(0, 0, -22)
-		mob:PivotTo(CFrame.new(behind.Position + Vector3.new(0, 2, 0)))
-	end
-
-	bossMob = mob
-	return mob
-end
-
-local function createPortal(atPos: Vector3)
-	if portalPart and portalPart.Parent then return portalPart end
-
-	local p = Instance.new("Part")
-	p.Name = "RunPortal"
-	p.Anchored = true
-	p.CanCollide = false
-	p.CanTouch = true
-	p.CanQuery = false
-	p.Shape = Enum.PartType.Cylinder
-	p.Size = Vector3.new(2, 10, 10)
-	p.CFrame = CFrame.new(atPos + Vector3.new(0, 1.2, 0)) * CFrame.Angles(0, 0, math.rad(90))
-	p.Material = Enum.Material.Neon
-	p.Transparency = 0.15
-	p.Parent = workspace
-
-	local light = Instance.new("PointLight")
-	light.Brightness = 3
-	light.Range = 18
-	light.Parent = p
-
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.Name = "PortalPrompt"
-	prompt.ActionText = "Activate Portal"
-	prompt.ObjectText = "Portal"
-	prompt.HoldDuration = 0.25
-	prompt.MaxActivationDistance = 10
-	prompt.RequiresLineOfSight = false
-	prompt.Parent = p
-
-	local function bossAliveNow()
-		if bossMob and bossMob.Parent then
-			local h = bossMob:FindFirstChildOfClass("Humanoid")
-			return (h and h.Health > 0) and true or false
-		end
-		return false
-	end
-
-	local function tryUse(plr: Player)
-		if not plr or not plr.Parent then return end
-
-		-- Step 1: activate portal
-		if not portalActivated then
-			portalActivated = true
-			prompt.ActionText = "Enter Portal"
-			prompt.HoldDuration = 0
-			spawnBossNearPortal()
-			return
-		end
-
-		-- Step 2: boss must be dead to enter
-		if bossAliveNow() then return end
-
-		-- Replace with your own next-level teleporter later.
-		if _G.EndRunForPlayer then
-			pcall(function() _G.EndRunForPlayer(plr, "Victory") end)
-		elseif _G.EndRun then
-			pcall(function() _G.EndRun("Victory") end)
-		end
-	end
-
-	prompt.Triggered:Connect(tryUse)
-	p.Touched:Connect(function(hit)
-		local plr = Players:GetPlayerFromCharacter(hit and hit.Parent)
-		if plr then
-			tryUse(plr)
-		end
-	end)
-
-	portalPart = p
-	return p
-end
-
-
-
--- Spawn portal at run start (random position on the map)
-local portalSpawned = false
-RunStarted.Changed:Connect(function()
-	if RunStarted.Value and not portalSpawned then
-		portalSpawned = true
-
-		local avoid = nil
-		local plr = Players:GetPlayers()[1]
-		if plr and plr.Character then
-			local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
-			if hrp and hrp:IsA("BasePart") then
-				avoid = hrp.Position
-			end
-		end
-
-		local pPos = getRandomGroundPosition(avoid, 120)
-		createPortal(pPos)
-	end
-end)
-
 
 -- Enemy templates
 local EnemiesRoot = ReplicatedStorage:WaitForChild("Enemies")
@@ -892,11 +670,53 @@ _G.GetRunSeconds = function()
     return math.floor(elapsed())
 end
 
+
+-- Counters for InfoUI (must be defined before wrappers below)
+local runKills = 0
+local runCoins = 0
+-- Track kills + coins for InfoUI.
+-- Coins are counted when the player actually picks them up (AwardPlayer).
+if not _G.__InfoUI_Wrapped then
+	_G.__InfoUI_Wrapped = true
+
+	-- Kills: WaveController already calls _G.RegisterEnemyKill on enemy death.
+	local prevKill = _G.RegisterEnemyKill
+	_G.RegisterEnemyKill = function(pos)
+		runKills += 1
+		if prevKill then pcall(function() prevKill(pos) end) end
+	end
+
+	-- Coins: wrap AwardPlayer *when it exists* (ProgressService defines it).
+	task.spawn(function()
+		local waited = 0
+		while type(_G.AwardPlayer) ~= "function" and waited < 10 do
+			waited += 0.1
+			task.wait(0.1)
+		end
+		if type(_G.AwardPlayer) ~= "function" then return end
+
+		local prevAward = _G.AwardPlayer
+		_G.AwardPlayer = function(plr: Player, xp: number, coins: number)
+			xp = math.max(0, math.floor(tonumber(xp) or 0))
+			coins = math.max(0, math.floor(tonumber(coins) or 0))
+			if coins > 0 then runCoins += coins end
+			return prevAward(plr, xp, coins)
+		end
+	end)
+end
+
+local RUN_TIME_LIMIT = 15 * 60 -- 15:00 (portal/boss threshold)
+
 local function desiredMaxAlive(t: number)
     -- Starts low for fast leveling, grows steadily.
     local base = 25
     local add = math.floor(t / 60) * 5
-    return math.clamp(base + add, 25, 140)
+	local v = math.clamp(base + add, 25, 140)
+	-- After 15 minutes: big pressure increase
+	if t >= RUN_TIME_LIMIT then
+		v = math.clamp(v + 80 + math.floor((t - RUN_TIME_LIMIT) / 15) * 6, 120, 260)
+	end
+	return v
 end
 
 local function spawnInterval(t: number)
@@ -904,12 +724,240 @@ local function spawnInterval(t: number)
     local minI = 0.28
     local maxI = 0.60
     local p = math.clamp(t / 1800, 0, 1)
-    return maxI - (maxI - minI) * p
+	local i = maxI - (maxI - minI) * p
+	if t >= RUN_TIME_LIMIT then
+		-- After 15 minutes: noticeably faster
+		i = math.max(0.10, i * 0.45)
+	end
+	return i
 end
 
+local eliteCount = 0
+local nextEliteAt = 600 -- 10 minutes
+local eliteOrder = { "Knight", "Demon", "Ent" }
+
+-- === Portal + Boss end condition ===
+local portalModel: Model? = nil
+local portalActivated = false
+local bossModel: Model? = nil
+local bossDefeated = false
+
+-- Stats for InfoUI
+local function fmtTimePayload(tSeconds: number)
+	local left = math.max(0, RUN_TIME_LIMIT - tSeconds)
+	local over = math.max(0, tSeconds - RUN_TIME_LIMIT)
+	return left, over
+end
+
+local function endRun(reason: string)
+	reason = tostring(reason or "Victory")
+	broadcast({ type = "complete", reason = reason })
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr.Parent and plr:GetAttribute("RunEnded") ~= true then
+			if _G.EndRunForPlayer then
+				pcall(function() _G.EndRunForPlayer(plr, reason) end)
+			elseif _G.EndRun then
+				pcall(function() _G.EndRun(reason) end)
+			end
+		end
+	end
+end
+
+local function watchEliteDeath(mob: Model)
+    local hum = mob and mob:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    hum.Died:Connect(function()
+        eliteCount += 1
+        broadcast({ type = "eliteProgress", elitesDefeated = eliteCount, elitesTotal = 3 })
+			-- Elites are now "pressure" progression only. Ending the run happens via Portal + Boss.
+    end)
+end
+
+local function getWorldBoundsXZ()
+	-- Find bounds from collidable map parts (good enough for random portal/spawn positioning)
+	local minX, minZ = math.huge, math.huge
+	local maxX, maxZ = -math.huge, -math.huge
+	local count = 0
+
+	local function consider(inst: Instance)
+		if inst:IsA("BasePart") and inst.CanCollide and inst.Size.Magnitude > 6 then
+			local p = inst.Position
+			minX = math.min(minX, p.X)
+			maxX = math.max(maxX, p.X)
+			minZ = math.min(minZ, p.Z)
+			maxZ = math.max(maxZ, p.Z)
+			count += 1
+		end
+	end
+
+	local map = workspace:FindFirstChild("Map")
+	if map then
+		for _, d in ipairs(map:GetDescendants()) do consider(d) end
+	else
+		for _, d in ipairs(workspace:GetDescendants()) do
+			if count > 900 then break end
+			consider(d)
+		end
+	end
+
+	if count < 10 or minX == math.huge then
+		return Vector2.new(-200, -200), Vector2.new(200, 200)
+	end
+
+	-- Add padding so we don't spawn on the extreme edge
+	local pad = 18
+	return Vector2.new(minX + pad, minZ + pad), Vector2.new(maxX - pad, maxZ - pad)
+end
+
+local portalRayParams = RaycastParams.new()
+portalRayParams.FilterType = Enum.RaycastFilterType.Blacklist
+portalRayParams.IgnoreWater = false
+
+local function randomGroundPoint()
+	local pMin, pMax = getWorldBoundsXZ()
+	local ignore = { ENEMIES_FOLDER, workspace:FindFirstChild("Drops") }
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr.Character then table.insert(ignore, plr.Character) end
+	end
+	portalRayParams.FilterDescendantsInstances = ignore
+
+	for _ = 1, 40 do
+		local x = pMin.X + math.random() * (pMax.X - pMin.X)
+		local z = pMin.Y + math.random() * (pMax.Y - pMin.Y)
+		local origin = Vector3.new(x, 400, z)
+		local res = workspace:Raycast(origin, Vector3.new(0, -900, 0), portalRayParams)
+		if res then
+			return res.Position + Vector3.new(0, 2.2, 0)
+		end
+	end
+
+	return Vector3.new(0, 5, 0)
+end
+
+local function ensurePortal()
+	if portalModel and portalModel.Parent then return end
+
+	local m = Instance.new("Model")
+	m.Name = "RunPortal"
+
+	local base = Instance.new("Part")
+	base.Name = "Portal"
+	base.Anchored = true
+	base.CanCollide = false
+	base.CanQuery = false
+	base.Material = Enum.Material.Neon
+	base.Size = Vector3.new(10, 10, 1)
+	base.CFrame = CFrame.new(randomGroundPoint()) * CFrame.Angles(0, math.rad(math.random(0, 359)), 0)
+	base.Parent = m
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "PortalPrompt"
+	prompt.ActionText = "Activate Portal"
+	prompt.ObjectText = "Portal"
+	prompt.HoldDuration = 1
+	prompt.MaxActivationDistance = 10
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = base
+
+	local function setPromptState()
+		if not portalActivated then
+			prompt.ActionText = "Activate Portal"
+			prompt.Enabled = true
+		elseif not bossDefeated then
+			prompt.ActionText = "Defeat the Boss"
+			prompt.Enabled = false
+		else
+			prompt.ActionText = "Enter Portal"
+			prompt.Enabled = true
+		end
+	end
+
+	local function spawnBossNearPortal()
+		if bossModel and bossModel.Parent then return end
+		bossDefeated = false
+		local bossName = "Golem" -- change if you have a dedicated boss model
+		local tpl = EliteFolder:FindFirstChild(bossName) or NormalFolder:FindFirstChild(bossName)
+		if not tpl or not tpl:IsA("Model") then
+			warn("[Portal] Missing boss template:", bossName)
+			return
+		end
+
+		local mob = tpl:Clone()
+		mob.Name = "Boss_" .. bossName
+		mob.Parent = ENEMIES_FOLDER
+
+		pcall(function()
+			mob:PivotTo(base.CFrame * CFrame.new(0, 0, -18))
+		end)
+		setMobGroup(mob)
+		wireDropsAndKills(mob, { xp = 120, coins = 60 }, true)
+		bindMobAI(mob, { hp = 1200, speed = 10, range = 7, cd = 1.4, dmg = 24 }, true)
+
+		bossModel = mob
+		broadcast({ type = "portalBossSpawn" })
+
+		local hum = mob:FindFirstChildOfClass("Humanoid")
+		if hum then
+			hum.Died:Connect(function()
+				bossDefeated = true
+				broadcast({ type = "portalBossDefeated" })
+				setPromptState()
+			end)
+		end
+	end
+
+	prompt.Triggered:Connect(function(plr)
+		if not RunStarted.Value then return end
+		if plr:GetAttribute("RunEnded") == true then return end
+
+		if not portalActivated then
+			portalActivated = true
+			broadcast({ type = "portalActivated" })
+			spawnBossNearPortal()
+			setPromptState()
+			return
+		end
+
+		if bossDefeated then
+			endRun("Victory")
+		end
+	end)
+
+	setPromptState()
+	m.PrimaryPart = base
+	m.Parent = workspace
+	portalModel = m
+end
+
+-- Keep portal present from the start of the run
+RunStarted.Changed:Connect(function(v)
+	if v == true then
+		ensurePortal()
+	end
+end)
+
+if RunStarted.Value == true then
+	ensurePortal()
+end
 
 -- Initial HUD ping
-broadcast({ type = "timeUpdate", seconds = 0 })
+do
+	local left, over = fmtTimePayload(0)
+	broadcast({
+		type = "timeUpdate",
+		seconds = 0,
+		secondsLeft = left,
+		overtime = over,
+		nextEliteIn = nextEliteAt,
+		elitesDefeated = 0,
+		elitesTotal = 3,
+		kills = 0,
+		coins = 0,
+		portalActivated = portalActivated,
+		bossDefeated = bossDefeated,
+	})
+end
 
 local lastHudPush = 0
 local lastSpawnAt = 0
@@ -928,50 +976,46 @@ RunService.Heartbeat:Connect(function()
     if not anyPlayersAlive() then
         return
     end
+
     -- HUD update (4x/sec max)
     if t - lastHudPush >= 0.25 then
         lastHudPush = t
+        local nextIn = math.max(0, nextEliteAt - t)
+		local left, over = fmtTimePayload(t)
         broadcast({
             type = "timeUpdate",
             seconds = math.floor(t),
+			secondsLeft = math.floor(left),
+			overtime = math.floor(over),
+            nextEliteIn = math.floor(nextIn),
+            elitesDefeated = eliteCount,
+            elitesTotal = 3,
+			kills = runKills,
+			coins = runCoins,
+			portalActivated = portalActivated,
+			bossDefeated = bossDefeated,
         })
     end
 
-    -- Endgame trigger at 15:00 (massive horde pressure)
-    if (not endgameTriggered) and t >= RUN_TARGET_SECONDS then
-        endgameTriggered = true
-        broadcast({ kind = "Endgame", seconds = math.floor(t) })
-    end
-
-            local hrp = bossMob:FindFirstChild("HumanoidRootPart") or bossMob.PrimaryPart
-            if hrp and hrp:IsA("BasePart") then
-                createPortal(hrp.Position + Vector3.new(0, 0, 14))
-            else
-                createPortal(Vector3.new(0, 6, 0))
-            end
-        else
-            -- No boss template: portal immediately usable
-            createPortal(Vector3.new(0, 6, 0))
+    -- Elites
+    if eliteCount < 3 and t >= nextEliteAt then
+        local eliteName = eliteOrder[eliteCount + 1] or "Knight"
+        local elite = spawnMob(eliteName, true)
+        if elite then
+            broadcast({ type = "eliteSpawn", name = eliteName, elitesDefeated = eliteCount, elitesTotal = 3 })
+            watchEliteDeath(elite)
         end
-
-        broadcast({ type = "endgame", at = RUN_TARGET_SECONDS })
+        nextEliteAt += 600
     end
 
     -- Normal spawns
     local interval = spawnInterval(t)
-    if endgameTriggered then
-        -- Massive pressure after 15:00
-        interval = math.max(0.10, interval * 0.45)
-    end
     if t - lastSpawnAt < interval then
         return
     end
     lastSpawnAt = t
 
     local maxAlive = desiredMaxAlive(t)
-    if endgameTriggered then
-        maxAlive = math.clamp(maxAlive + 120, 80, 320)
-    end
     if activeEnemiesCount() >= maxAlive then
         return
     end

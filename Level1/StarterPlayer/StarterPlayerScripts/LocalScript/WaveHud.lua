@@ -5,7 +5,22 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
-local WaveStatusEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("WaveStatusEvent")
+-- Support both layouts:
+-- 1) ReplicatedStorage/Remotes/WaveStatusEvent (preferred)
+-- 2) ReplicatedStorage/WaveStatusEvent (legacy)
+local function getWaveStatusEvent()
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	if remotes then
+		local ev = remotes:FindFirstChild("WaveStatusEvent")
+		if ev and ev:IsA("RemoteEvent") then return ev end
+	end
+	local ev = ReplicatedStorage:FindFirstChild("WaveStatusEvent")
+	if ev and ev:IsA("RemoteEvent") then return ev end
+	-- last resort: don't infinite-yield on the wrong path
+	return ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("WaveStatusEvent")
+end
+
+local WaveStatusEvent = getWaveStatusEvent()
 
 local plr = game.Players.LocalPlayer
 local gui = Instance.new("ScreenGui")
