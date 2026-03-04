@@ -1,6 +1,6 @@
 -- PortalToDungeon.server.lua (Lobby)
--- Fix: TeleportData wysyła poprawny loadout broni + listę kupionych spelli (UnlockedSpells)
--- Wymagane do losowania spelli po level-up w Level1.
+-- Teleports selected players from lobby to a dungeon level.
+-- TeleportData contains per-player loadout so each player keeps own weapon.
 
 local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,14 +8,18 @@ local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
-local replicatedModules = (ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5))
+local replicatedModules = (
+	ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
+)
 
 local ProfilesManager = require(serverModules:WaitForChild("ProfilesManager"))
 local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
 local PlayerData = require(serverModules:WaitForChild("PlayerData"))
 local Levels = require(replicatedModules:WaitForChild("Levels"))
 
--- Remotes
 local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
 if not remoteEvents then
 	remoteEvents = Instance.new("Folder")
@@ -25,7 +29,9 @@ end
 
 local function ensureRemote(name: string): RemoteEvent
 	local ev = remoteEvents:FindFirstChild(name)
-	if ev and ev:IsA("RemoteEvent") then return ev end
+	if ev and ev:IsA("RemoteEvent") then
+		return ev
+	end
 	ev = Instance.new("RemoteEvent")
 	ev.Name = name
 	ev.Parent = remoteEvents
@@ -34,15 +40,16 @@ end
 
 local OpenLevelSelect = ensureRemote("OpenLevelSelect")
 local RequestLevelTeleport = ensureRemote("RequestLevelTeleport")
-local TeleportStatus = ensureRemote("TeleportStatus") -- optional client overlay
+local TeleportStatus = ensureRemote("TeleportStatus")
 
--- Portal part
 local function resolvePortalPart(): BasePart?
 	local ws = workspace
 	local portalModel = ws:FindFirstChild("Portal") or ws:FindFirstChild("PortalModel")
 	if portalModel and portalModel:IsA("Model") then
 		local part = portalModel:FindFirstChild("PortalTeleport")
-		if part and part:IsA("BasePart") then return part end
+		if part and part:IsA("BasePart") then
+			return part
+		end
 	end
 	for _, d in ipairs(ws:GetDescendants()) do
 		if d:IsA("BasePart") and d.Name == "PortalTeleport" then
@@ -54,7 +61,9 @@ local function resolvePortalPart(): BasePart?
 		local clone = stored:Clone()
 		clone.Parent = ws
 		local part = clone:FindFirstChild("PortalTeleport")
-		if part and part:IsA("BasePart") then return part end
+		if part and part:IsA("BasePart") then
+			return part
+		end
 	end
 	return nil
 end
@@ -76,27 +85,37 @@ if not prompt then
 end
 prompt.ActionText = "Select level"
 
-local lastOpen, lastTp = {}, {}
-local OPEN_COOLDOWN, TP_COOLDOWN = 0.6, 2.0
+local lastOpen: {[number]: number} = {}
+local lastTp: {[number]: number} = {}
+local OPEN_COOLDOWN = 0.6
+local TP_COOLDOWN = 2.0
 
 local function distanceOk(player: Player): boolean
 	local char = player.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	if not hrp then return false end
+	if not hrp then
+		return false
+	end
 	return (hrp.Position - portalPart.Position).Magnitude <= 14
 end
 
 local function tutorialComplete(player: Player): boolean
 	local attr = player:GetAttribute("TutorialComplete")
-	if attr ~= nil then return attr == true end
-	local ok, state = pcall(function() return PlayerStateStore.GetTutorialState(player) end)
+	if attr ~= nil then
+		return attr == true
+	end
+	local ok, state = pcall(function()
+		return PlayerStateStore.GetTutorialState(player)
+	end)
 	return ok and state and state.Complete == true or false
 end
 
 local function canOpen(player: Player): boolean
 	local now = os.clock()
 	local last = lastOpen[player.UserId] or 0
-	if (now - last) < OPEN_COOLDOWN then return false end
+	if (now - last) < OPEN_COOLDOWN then
+		return false
+	end
 	lastOpen[player.UserId] = now
 	return true
 end
@@ -104,7 +123,9 @@ end
 local function canTeleport(player: Player): boolean
 	local now = os.clock()
 	local last = lastTp[player.UserId] or 0
-	if (now - last) < TP_COOLDOWN then return false end
+	if (now - last) < TP_COOLDOWN then
+		return false
+	end
 	lastTp[player.UserId] = now
 	return true
 end
@@ -112,10 +133,14 @@ end
 local function getProfileSafe(player: Player)
 	if ProfilesManager.GetActiveProfile then
 		local p = ProfilesManager.GetActiveProfile(player)
-		if p then return p end
+		if p then
+			return p
+		end
 	end
 	if ProfilesManager.LoadIfAny then
-		pcall(function() ProfilesManager.LoadIfAny(player) end)
+		pcall(function()
+			ProfilesManager.LoadIfAny(player)
+		end)
 		if ProfilesManager.GetActiveProfile then
 			return ProfilesManager.GetActiveProfile(player)
 		end
@@ -140,24 +165,97 @@ local function buildUnlockedSpells(player: Player): {string}
 	return out
 end
 
--- TeleportData is based on the leader's profile/loadout; run-mode is included for Level1 logic.
+local function cloneNumberMap(src: any): {[string]: number}?
+	if typeof(src) ~= "table" then
+		return nil
+	end
+	local out: {[string]: number} = {}
+	for k, v in pairs(src) do
+		if typeof(k) == "string" and typeof(v) == "number" then
+			out[k] = v
+		end
+	end
+	return (next(out) ~= nil) and out or nil
+end
+
+local function sanitizeWeaponEntry(rawEntry: any, fallbackWeaponName: string?): {[string]: any}?
+	if typeof(rawEntry) ~= "table" then
+		return nil
+	end
+
+	local id = rawEntry.id or rawEntry.weaponId or rawEntry.weaponName or fallbackWeaponName
+	if typeof(id) ~= "string" or id == "" then
+		return nil
+	end
+
+	local clean: {[string]: any} = {
+		id = id,
+		weaponId = id,
+		level = math.max(1, math.floor(tonumber(rawEntry.level or rawEntry.Level) or 1)),
+	}
+
+	local instanceId = rawEntry.instanceId or rawEntry.InstanceId
+	if typeof(instanceId) == "string" and instanceId ~= "" then
+		clean.instanceId = instanceId
+	end
+
+	local rarity = rawEntry.rarity or rawEntry.Rarity
+	if typeof(rarity) == "string" and rarity ~= "" then
+		clean.rarity = rarity
+	end
+
+	local prefix = rawEntry.prefix or rawEntry.Prefix
+	if typeof(prefix) == "string" and prefix ~= "" then
+		clean.prefix = prefix
+	end
+
+	local rollStats = cloneNumberMap(rawEntry.rollStats or rawEntry.RollStats)
+	if rollStats then
+		clean.rollStats = rollStats
+	end
+
+	local stats = cloneNumberMap(rawEntry.stats or rawEntry.Stats)
+	if stats then
+		clean.stats = stats
+	end
+
+	return clean
+end
+
+local function resolveWeaponSelection(player: Player, state: any): (string?, {[string]: any}?)
+	local weaponName = state and state.StarterWeaponName or nil
+	local weaponEntry = nil
+
+	if PlayerStateStore.GetEquippedWeaponInstance then
+		weaponEntry = PlayerStateStore.GetEquippedWeaponInstance(player)
+	elseif state and typeof(state.EquippedWeaponInstanceId) == "string" and PlayerStateStore.GetWeaponInstance then
+		local inst = PlayerStateStore.GetWeaponInstance(player, state.EquippedWeaponInstanceId)
+		if typeof(inst) == "table" then
+			weaponEntry = inst
+		end
+	end
+
+	weaponEntry = sanitizeWeaponEntry(weaponEntry, weaponName)
+	if weaponEntry and typeof(weaponEntry.id) == "string" and weaponEntry.id ~= "" then
+		weaponName = weaponEntry.id
+	end
+
+	if (typeof(weaponName) ~= "string" or weaponName == "")
+		and state
+		and typeof(state.WeaponInstances) == "table"
+		and typeof(state.WeaponInstances[1]) == "table"
+		and typeof(state.WeaponInstances[1].weaponId) == "string"
+	then
+		weaponName = state.WeaponInstances[1].weaponId
+	end
+
+	return weaponName, weaponEntry
+end
+
 local function buildTeleportDataForLeader(leader: Player, runMode: string, partyId: string?, leaderUserId: number?)
 	local st = PlayerStateStore.Get(leader) or PlayerStateStore.Load(leader)
 	local profile = getProfileSafe(leader)
-
-	local weaponEntry = nil
-	local weaponName = st and st.StarterWeaponName or nil
-
-	if PlayerStateStore.GetEquippedWeaponInstance then
-		weaponEntry = PlayerStateStore.GetEquippedWeaponInstance(leader)
-	elseif st and typeof(st.EquippedWeaponInstanceId) == "string" and PlayerStateStore.GetWeaponInstance then
-		local inst = PlayerStateStore.GetWeaponInstance(leader, st.EquippedWeaponInstanceId)
-		if typeof(inst) == "table" then weaponEntry = inst end
-	end
-
-	if typeof(weaponEntry) == "table" and typeof(weaponEntry.weaponId) == "string" then
-		weaponName = weaponEntry.weaponId
-	end
+	local weaponName, weaponEntry = resolveWeaponSelection(leader, st)
 
 	return {
 		Profile = profile,
@@ -172,39 +270,29 @@ local function buildTeleportDataForLeader(leader: Player, runMode: string, party
 end
 
 local function tryTeleport(players: {Player}, placeId: number, tpData: any)
-	if #players == 0 then return end
-	local leader = players[1]
-	if not canTeleport(leader) then return end
+	if #players == 0 then
+		return
+	end
 
-	-- Per-player loadout map (so każdy w party ma swoją broń)
-	local weaponByUserId = {}
+	local requester = players[1]
+	if not canTeleport(requester) then
+		return
+	end
+
+	local weaponByUserId: {[string]: any} = {}
 	for _, p in ipairs(players) do
-		local stp = PlayerStateStore.Get(p) or PlayerStateStore.Load(p)
-		local weaponEntryP = nil
-		local weaponNameP = stp and stp.StarterWeaponName or nil
-
-		if PlayerStateStore.GetEquippedWeaponInstance then
-			weaponEntryP = PlayerStateStore.GetEquippedWeaponInstance(p)
-		elseif stp and typeof(stp.EquippedWeaponInstanceId) == "string" and PlayerStateStore.GetWeaponInstance then
-			local inst = PlayerStateStore.GetWeaponInstance(p, stp.EquippedWeaponInstanceId)
-			if typeof(inst) == "table" then weaponEntryP = inst end
-		end
-
-		if typeof(weaponEntryP) == "table" and typeof(weaponEntryP.weaponId) == "string" then
-			weaponNameP = weaponEntryP.weaponId
-		end
-
+		local st = PlayerStateStore.Get(p) or PlayerStateStore.Load(p)
+		local weaponName, weaponEntry = resolveWeaponSelection(p, st)
 		weaponByUserId[tostring(p.UserId)] = {
-			StarterWeaponName = weaponNameP,
-			StarterWeaponEntry = weaponEntryP,
+			StarterWeaponName = weaponName,
+			StarterWeaponEntry = weaponEntry,
 		}
 	end
 	tpData.WeaponByUserId = weaponByUserId
 
 	local options = Instance.new("TeleportOptions")
 	options:SetTeleportData(tpData)
-	-- Always use a reserved server so Single really means "only me",
-	-- and party runs don't mix with randoms.
+
 	local okReserve, code = pcall(function()
 		return TeleportService:ReserveServer(placeId)
 	end)
@@ -228,20 +316,34 @@ local function tryTeleport(players: {Player}, placeId: number, tpData: any)
 end
 
 prompt.Triggered:Connect(function(player: Player)
-	if not player or not player.Parent then return end
-	if not distanceOk(player) then return end
-	if not canOpen(player) then return end
-	if not tutorialComplete(player) then return end
+	if not player or not player.Parent then
+		return
+	end
+	if not distanceOk(player) then
+		return
+	end
+	if not canOpen(player) then
+		return
+	end
+	if not tutorialComplete(player) then
+		return
+	end
 	OpenLevelSelect:FireClient(player)
 end)
 
--- levelKey: string
--- mode: "Single" | "Multi" (optional; defaults to Single)
 RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: any, mode: any)
-	if not player or not player.Parent then return end
-	if typeof(levelKey) ~= "string" then return end
-	if not tutorialComplete(player) then return end
-	if not distanceOk(player) then return end
+	if not player or not player.Parent then
+		return
+	end
+	if typeof(levelKey) ~= "string" then
+		return
+	end
+	if not tutorialComplete(player) then
+		return
+	end
+	if not distanceOk(player) then
+		return
+	end
 
 	local runMode = (typeof(mode) == "string" and (mode == "Multi" or mode == "Single")) and mode or "Single"
 
@@ -251,7 +353,6 @@ RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: an
 		return
 	end
 
-	-- Party support (optional): PartyService module can exist even if client UI isn't yet in place.
 	local partyId, leaderUserId = nil, nil
 	local group = { player }
 	if runMode == "Multi" then
@@ -285,3 +386,4 @@ RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: an
 end)
 
 print("[PortalToDungeon] Ready (spells+loadout)")
+

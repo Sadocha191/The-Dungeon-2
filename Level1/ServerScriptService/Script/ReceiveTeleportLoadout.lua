@@ -1,11 +1,11 @@
 -- ReceiveTeleportLoadout.server.lua (Level1)
--- Fix:
--- - Aplikuje broń z TeleportData (Tool equip dopiero po CharacterAdded)
--- - Ustawia UnlockedSpellsCSV z TeleportData.UnlockedSpells (kupione u wiedźmy)
+-- Applies weapon/run metadata from TeleportData.
+-- Works for single and multi, including per-player weapon map.
 
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
 local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions"))
 
@@ -27,26 +27,56 @@ local PlayerData = require(findModule("PlayerData") or error("Missing PlayerData
 local WeaponService = require(findModule("WeaponService") or error("Missing WeaponService"))
 
 local function safeCSV(list: any): string
-	if typeof(list) ~= "table" then return "" end
+	if typeof(list) ~= "table" then
+		return ""
+	end
 	local out = {}
 	for _, id in ipairs(list) do
-		if typeof(id) == "string" and id ~= "" then table.insert(out, id) end
+		if typeof(id) == "string" and id ~= "" then
+			table.insert(out, id)
+		end
 	end
 	return table.concat(out, ",")
 end
 
+local function normalizeWeaponEntry(weaponEntry: any, weaponName: string?): {[string]: any}?
+	if typeof(weaponEntry) ~= "table" then
+		return nil
+	end
+
+	local id = weaponEntry.id or weaponEntry.weaponId or weaponEntry.weaponName or weaponName
+	if typeof(id) ~= "string" or id == "" then
+		return nil
+	end
+
+	local out: {[string]: any} = {}
+	for k, v in pairs(weaponEntry) do
+		if typeof(k) == "string" then
+			local vt = typeof(v)
+			if vt == "string" or vt == "number" or vt == "boolean" or vt == "table" then
+				out[k] = v
+			end
+		end
+	end
+	out.id = id
+	if typeof(out.weaponId) ~= "string" or out.weaponId == "" then
+		out.weaponId = id
+	end
+	return out
+end
+
 local function applyWeapon(plr: Player, weaponName: string?, weaponEntry: any)
 	local data = PlayerData.Get(plr)
+	local normalizedEntry = normalizeWeaponEntry(weaponEntry, weaponName)
 
-	if typeof(weaponEntry) == "table" then
-		local id = weaponEntry.id or weaponEntry.weaponId or weaponEntry.weaponName or weaponName
-		if typeof(id) == "string" and id ~= "" then
-			weaponEntry.id = id
-			plr:SetAttribute("StarterWeaponName", id)
-			data.Loadout = { weaponEntry }
-			if PlayerData.MarkDirty then PlayerData.MarkDirty(plr) end
-			return
+	if normalizedEntry then
+		local id = normalizedEntry.id
+		plr:SetAttribute("StarterWeaponName", id)
+		data.Loadout = { normalizedEntry }
+		if PlayerData.MarkDirty then
+			PlayerData.MarkDirty(plr)
 		end
+		return
 	end
 
 	if typeof(weaponName) ~= "string" or weaponName == "" then
@@ -57,47 +87,86 @@ local function applyWeapon(plr: Player, weaponName: string?, weaponEntry: any)
 		WeaponService.SyncLoadoutFromStarter(plr)
 	else
 		data.Loadout = { { id = weaponName } }
-		if PlayerData.MarkDirty then PlayerData.MarkDirty(plr) end
+		if PlayerData.MarkDirty then
+			PlayerData.MarkDirty(plr)
+		end
 	end
 end
 
-Players.PlayerAdded:Connect(function(plr: Player)
-	local joinData = plr:GetJoinData()
-	local tdata = joinData and joinData.TeleportData
+local function getTeleportData(plr: Player): any
+	for _ = 1, 20 do
+		local joinData = plr:GetJoinData()
+		local tdata = joinData and joinData.TeleportData
+		if typeof(tdata) == "table" then
+			return tdata
+		end
+		task.wait(0.05)
+	end
+	return nil
+end
 
-	local weaponName, weaponEntry, unlocked = nil, nil, nil
-	local runMode, partyId, partyLeader = nil, nil, nil
-	if typeof(tdata) == "table" then
-		weaponName = tdata.StarterWeaponName
-		weaponEntry = tdata.StarterWeaponEntry
-		unlocked = tdata.UnlockedSpells
-		runMode = tdata.RunModee
-		partyId = tdata.PartyId
-		partyLeader = tdata.PartyLeaderUserId
-	-- Jeśli teleport wysłał mapę broni per-player (party), to bierzemy broń dla tego userId.
-	if typeof(tdata) == "table" and typeof(tdata.WeaponByUserId) == "table" then
-		local me = tdata.WeaponByUserId[tostring(plr.UserId)]
-		if typeof(me) == "table" then
-			if me.StarterWeaponName ~= nil then weaponName = me.StarterWeaponName end
-			if me.StarterWeaponEntry ~= nil then weaponEntry = me.StarterWeaponEntry end
+local function findPerPlayerPayload(tdata: any, userId: number): any
+	if typeof(tdata) ~= "table" or typeof(tdata.WeaponByUserId) ~= "table" then
+		return nil
+	end
+
+	local map = tdata.WeaponByUserId
+	local key = tostring(userId)
+	local byString = map[key]
+	if typeof(byString) == "table" then
+		return byString
+	end
+
+	local byNumber = map[userId]
+	if typeof(byNumber) == "table" then
+		return byNumber
+	end
+
+	for k, v in pairs(map) do
+		if tonumber(k) == userId and typeof(v) == "table" then
+			return v
 		end
 	end
 
+	return nil
+end
+
+local function resolveTeleportWeapon(tdata: any, userId: number): (string?, any)
+	if typeof(tdata) ~= "table" then
+		return nil, nil
 	end
 
-	do
+	local weaponName = tdata.StarterWeaponName
+	local weaponEntry = tdata.StarterWeaponEntry
+
+	local me = findPerPlayerPayload(tdata, userId)
+	if typeof(me) == "table" then
+		local candidateName = me.StarterWeaponName or me.weaponName or me.weaponId or me.id
+		if typeof(candidateName) == "string" and candidateName ~= "" then
+			weaponName = candidateName
+		end
+		local candidateEntry = me.StarterWeaponEntry or me.weaponEntry or me.entry
+		if candidateEntry ~= nil then
+			weaponEntry = candidateEntry
+		end
+	end
+
+	return weaponName, weaponEntry
+end
+
+local function applyUnlockedSpells(plr: Player, unlocked: any)
 	local merged = {}
 	local seen = {}
-	-- base starters always available in run
+
 	if SpellDefs and SpellDefs.BASE_STARTER then
 		for _, id in ipairs(SpellDefs.BASE_STARTER) do
-			if not seen[id] then
+			if typeof(id) == "string" and id ~= "" and not seen[id] then
 				seen[id] = true
 				table.insert(merged, id)
 			end
 		end
 	end
-	-- unlocked from lobby (witch purchases)
+
 	if typeof(unlocked) == "table" then
 		for _, id in ipairs(unlocked) do
 			if typeof(id) == "string" and id ~= "" and not seen[id] then
@@ -106,16 +175,40 @@ Players.PlayerAdded:Connect(function(plr: Player)
 			end
 		end
 	end
+
 	plr:SetAttribute("UnlockedSpellsCSV", safeCSV(merged))
 end
 
-	-- run mode attrs for other systems (pause/death logic)
+local processed: {[Player]: boolean} = {}
+
+local function processPlayer(plr: Player)
+	if processed[plr] then
+		return
+	end
+	processed[plr] = true
+
+	local tdata = getTeleportData(plr)
+	local weaponName, weaponEntry, unlocked = nil, nil, nil
+	local runMode, partyId, partyLeader = nil, nil, nil
+
+	if typeof(tdata) == "table" then
+		weaponName, weaponEntry = resolveTeleportWeapon(tdata, plr.UserId)
+		unlocked = tdata.UnlockedSpells
+		runMode = tdata.RunMode
+		partyId = tdata.PartyId
+		partyLeader = tdata.PartyLeaderUserId
+	else
+		warn("[ReceiveTeleportLoadout] Missing TeleportData for", plr.Name, "- fallback loadout")
+	end
+
+	applyUnlockedSpells(plr, unlocked)
+
 	if runMode == "Multi" or runMode == "Single" then
 		plr:SetAttribute("RunMode", runMode)
 	else
 		plr:SetAttribute("RunMode", "Single")
 	end
-	if typeof(partyId) == "string" then
+	if typeof(partyId) == "string" and partyId ~= "" then
 		plr:SetAttribute("PartyId", partyId)
 	end
 	if typeof(partyLeader) == "number" then
@@ -126,13 +219,14 @@ end
 
 	local function equipNow()
 		if WeaponService.EquipLoadout then
-			pcall(function() WeaponService.EquipLoadout(plr) end)
+			pcall(function()
+				WeaponService.EquipLoadout(plr)
+			end)
 		end
 	end
 
 	plr.CharacterAdded:Connect(function(char)
 		task.wait(0.15)
-		-- base movement + hp for run (also used by level stat gains)
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
 		if hum then
 			plr:SetAttribute("BaseWalkSpeed", BASE_WALKSPEED)
@@ -148,14 +242,26 @@ end
 	end)
 
 	task.defer(function()
-		if plr.Character then equipNow() end
+		if plr.Character then
+			equipNow()
+		end
 	end)
-end)
+end
+
+Players.PlayerAdded:Connect(processPlayer)
+
+for _, plr in ipairs(Players:GetPlayers()) do
+	task.defer(processPlayer, plr)
+end
 
 Players.PlayerRemoving:Connect(function(plr: Player)
+	processed[plr] = nil
 	if PlayerData.Save then
-		pcall(function() PlayerData.Save(plr) end)
+		pcall(function()
+			PlayerData.Save(plr)
+		end)
 	end
 end)
 
 print("[ReceiveTeleportLoadout] Ready (spells)")
+
