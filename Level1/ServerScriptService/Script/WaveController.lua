@@ -1010,8 +1010,6 @@ RunService.Heartbeat:Connect(function()
         eliteIndex += 1
         nextEliteAt = eliteTimes[eliteIndex] or math.huge
     end
-        nextEliteAt += 600
-    end
 
     -- Normal spawns
     local interval = spawnInterval(t)
