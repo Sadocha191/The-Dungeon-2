@@ -71,9 +71,18 @@ Players.PlayerAdded:Connect(function(plr: Player)
 		weaponName = tdata.StarterWeaponName
 		weaponEntry = tdata.StarterWeaponEntry
 		unlocked = tdata.UnlockedSpells
-		runMode = tdata.RunMode
+		runMode = tdata.RunModee
 		partyId = tdata.PartyId
 		partyLeader = tdata.PartyLeaderUserId
+	-- Jeśli teleport wysłał mapę broni per-player (party), to bierzemy broń dla tego userId.
+	if typeof(tdata) == "table" and typeof(tdata.WeaponByUserId) == "table" then
+		local me = tdata.WeaponByUserId[tostring(plr.UserId)]
+		if typeof(me) == "table" then
+			if me.StarterWeaponName ~= nil then weaponName = me.StarterWeaponName end
+			if me.StarterWeaponEntry ~= nil then weaponEntry = me.StarterWeaponEntry end
+		end
+	end
+
 	end
 
 	do

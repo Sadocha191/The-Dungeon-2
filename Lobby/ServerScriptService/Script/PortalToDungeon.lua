@@ -176,6 +176,31 @@ local function tryTeleport(players: {Player}, placeId: number, tpData: any)
 	local leader = players[1]
 	if not canTeleport(leader) then return end
 
+	-- Per-player loadout map (so każdy w party ma swoją broń)
+	local weaponByUserId = {}
+	for _, p in ipairs(players) do
+		local stp = PlayerStateStore.Get(p) or PlayerStateStore.Load(p)
+		local weaponEntryP = nil
+		local weaponNameP = stp and stp.StarterWeaponName or nil
+
+		if PlayerStateStore.GetEquippedWeaponInstance then
+			weaponEntryP = PlayerStateStore.GetEquippedWeaponInstance(p)
+		elseif stp and typeof(stp.EquippedWeaponInstanceId) == "string" and PlayerStateStore.GetWeaponInstance then
+			local inst = PlayerStateStore.GetWeaponInstance(p, stp.EquippedWeaponInstanceId)
+			if typeof(inst) == "table" then weaponEntryP = inst end
+		end
+
+		if typeof(weaponEntryP) == "table" and typeof(weaponEntryP.weaponId) == "string" then
+			weaponNameP = weaponEntryP.weaponId
+		end
+
+		weaponByUserId[tostring(p.UserId)] = {
+			StarterWeaponName = weaponNameP,
+			StarterWeaponEntry = weaponEntryP,
+		}
+	end
+	tpData.WeaponByUserId = weaponByUserId
+
 	local options = Instance.new("TeleportOptions")
 	options:SetTeleportData(tpData)
 	-- Always use a reserved server so Single really means "only me",
