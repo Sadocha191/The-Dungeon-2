@@ -1,5 +1,5 @@
 -- WeaponCombat.server.lua (Level1)
--- Server-authoritative auto-attack: 360° hit nearest enemy. VFX spawns at hit position only when damage is applied.
+-- Server-authoritative auto-attack: nearest enemy hit with optional AoE by weapon type.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -21,11 +21,9 @@ local function findModule(name: string): ModuleScript?
 end
 
 local PlayerData = require(findModule("PlayerData") or error("[WeaponCombat] Missing PlayerData"))
--- optional weapon configs
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
 local WeaponConfigs = moduleFolder and moduleFolder:FindFirstChild("WeaponConfigs") and require(moduleFolder.WeaponConfigs) or nil
 
--- Ensure Enemies folder exists (WaveController usually creates it, but be safe)
 local ENEMIES = workspace:FindFirstChild("Enemies")
 if not ENEMIES then
 	ENEMIES = Instance.new("Folder")
@@ -33,7 +31,6 @@ if not ENEMIES then
 	ENEMIES.Parent = workspace
 end
 
--- simple per-weaponType cooldown defaults
 local CD_BY_TYPE = {
 	Sword = 0.55, Scythe = 0.80, Halberd = 0.75, Claymore = 0.95, Greataxe = 1.05,
 	Bow = 0.65, Wand = 0.55, Staff = 0.75, Pistol = 0.45
@@ -55,38 +52,91 @@ local function getLoadoutEntry(plr: Player)
 	return data.Loadout[1]
 end
 
-local function resolveWeaponType(entry)
+local function getWeaponDef(entry)
 	local id = entry and (entry.id or entry.Id)
-	if typeof(id) ~= "string" then return nil end
-	if WeaponConfigs and WeaponConfigs.Get then
-		local def = WeaponConfigs.Get(id)
-		if def and typeof(def.weaponType) == "string" then
-			return def.weaponType
-		end
+	if WeaponConfigs and WeaponConfigs.Get and typeof(id) == "string" then
+		return WeaponConfigs.Get(id)
 	end
-	-- fallback: treat melee names as sword unless known
+	return nil
+end
+
+local function resolveWeaponType(entry)
+	local def = getWeaponDef(entry)
+	if def and typeof(def.weaponType) == "string" then
+		return def.weaponType
+	end
 	return "Sword"
 end
 
-local function calcDamage(plr: Player, entry)
-	local id = entry and (entry.id or entry.Id)
-	local lvl = tonumber(entry and (entry.level or entry.Level)) or 1
-	lvl = math.max(1, math.floor(lvl))
+local function getAttrNum(plr: Player, name: string, fallback: number): number
+	local v = plr:GetAttribute(name)
+	if typeof(v) ~= "number" then
+		return fallback
+	end
+	return v
+end
+
+local function isEliteEnemy(enemyModel: Model): boolean
+	if enemyModel:GetAttribute("IsElite") == true then
+		return true
+	end
+	return string.sub(enemyModel.Name, 1, 5) == "Boss_"
+end
+
+local function calcAttackStats(plr: Player, entry)
+	local level = tonumber(entry and (entry.level or entry.Level)) or 1
+	level = math.max(1, math.floor(level))
+
+	local def = getWeaponDef(entry)
+	local combat = def and def.combat or nil
 
 	local base = 10
-	local perLvl = 1.0
-	if WeaponConfigs and WeaponConfigs.Get and typeof(id) == "string" then
-		local def = WeaponConfigs.Get(id)
-		if def and def.combat then
-			base = tonumber(def.combat.baseAtk or def.baseDamage) or base
-			perLvl = tonumber(def.combat.atkPerLevel) or perLvl
-		end
+	local perLvl = 1
+	if combat then
+		base = tonumber(combat.baseAtk or def.baseDamage) or base
+		perLvl = tonumber(combat.atkPerLevel) or perLvl
 	end
-	return base + (lvl - 1) * perLvl
+
+	local pdata = PlayerData.Get(plr) or {}
+	local damageMult = getAttrNum(plr, "ShrineDamageMult", 1)
+	local runAtkMult = getAttrNum(plr, "RunAtkMult", 1)
+	local attackSpeedBonus = getAttrNum(plr, "ShrineAttackSpeedBonus", 0)
+	local critDamageBonus = getAttrNum(plr, "ShrineCritDamageBonus", 0)
+	local lifestealBonus = getAttrNum(plr, "ShrineLifestealPct", 0)
+	local eliteBonus = getAttrNum(plr, "ShrineEliteDamageBonus", 0)
+	local knockbackMult = math.max(0, getAttrNum(plr, "ShrineKnockbackMult", 1))
+
+	local baseDamage = (base + ((level - 1) * perLvl)) * runAtkMult * damageMult
+
+	local critChance = (tonumber(pdata.baseCritRate) or 0.05) + (tonumber(pdata.critChance) or 0)
+	local critMult = (tonumber(pdata.baseCritDmg) or 1.5) + (tonumber(pdata.critMult) or 0)
+	local lifesteal = (tonumber(pdata.baseLifesteal) or 0) + (tonumber(pdata.lifesteal) or 0)
+
+	if combat then
+		critChance += tonumber(combat.bonusCritRate) or 0
+		critMult += tonumber(combat.bonusCritDmg) or 0
+		lifesteal += tonumber(combat.bonusLifesteal) or 0
+	end
+
+	critChance = math.clamp(critChance, 0, 0.95)
+	critMult = math.max(1.1, critMult + critDamageBonus)
+	lifesteal = math.clamp(lifesteal + lifestealBonus, 0, 0.9)
+
+	local attackSpeedMult = math.max(0.1, (tonumber(pdata.attackSpeed) or 1) * (1 + attackSpeedBonus))
+	local eliteMult = 1 + math.max(0, eliteBonus)
+
+	return {
+		baseDamage = baseDamage,
+		critChance = critChance,
+		critMult = critMult,
+		lifesteal = lifesteal,
+		attackSpeedMult = attackSpeedMult,
+		eliteMult = eliteMult,
+		knockbackPower = 8 * knockbackMult,
+	}
 end
 
 local function ensureHealthbar(enemyModel: Model, hum: Humanoid)
-	-- create once, show after damage
 	local hrp = enemyModel:FindFirstChild("HumanoidRootPart") or enemyModel:FindFirstChild("Head")
 	if not hrp or not hrp:IsA("BasePart") then return end
 
@@ -132,7 +182,6 @@ local function updateHealthbar(enemyModel: Model, hum: Humanoid)
 	local pct = math.clamp(hum.Health / maxH, 0, 1)
 	fill.Size = UDim2.fromScale(pct, 1)
 
-	-- hide when dead
 	if hum.Health <= 0 then
 		gui.Enabled = false
 	end
@@ -211,7 +260,9 @@ local function startLoop(plr: Player)
 			end
 
 			local wType = resolveWeaponType(entry)
-			local cd = CD_BY_TYPE[wType] or 0.7
+			local stats = calcAttackStats(plr, entry)
+			local baseCd = CD_BY_TYPE[wType] or 0.7
+			local cd = baseCd / stats.attackSpeedMult
 			local range = RANGE_BY_TYPE[wType] or 10
 
 			local now = time()
@@ -232,8 +283,7 @@ local function startLoop(plr: Player)
 				continue
 			end
 
-			local dmg = calcDamage(plr, entry)
-			if dmg <= 0 then
+			if stats.baseDamage <= 0 then
 				continue
 			end
 
@@ -243,22 +293,48 @@ local function startLoop(plr: Player)
 				hitEnemies = getEnemiesInRadius(ehrp.Position, aoeRadius)
 			end
 
+			local totalHeal = 0
 			for _, enemyModel in ipairs(hitEnemies) do
 				local enemyHum = enemyModel:FindFirstChildOfClass("Humanoid")
+				local enemyHrp = enemyModel:FindFirstChild("HumanoidRootPart")
 				if enemyHum and enemyHum.Health > 0 then
+					local isCrit = math.random() < stats.critChance
+					local dealt = stats.baseDamage
+					if isCrit then
+						dealt *= stats.critMult
+					end
+					if isEliteEnemy(enemyModel) then
+						dealt *= stats.eliteMult
+					end
+					dealt = math.max(1, math.floor(dealt + 0.5))
+
 					ensureHealthbar(enemyModel, enemyHum)
 					tagCreator(enemyHum, plr)
-					enemyHum:TakeDamage(dmg)
+					enemyHum:TakeDamage(dealt)
 					updateHealthbar(enemyModel, enemyHum)
+
+					if enemyHrp and stats.knockbackPower > 0 then
+						local dir = enemyHrp.Position - hrp.Position
+						if dir.Magnitude > 0.1 then
+							enemyHrp.AssemblyLinearVelocity += dir.Unit * stats.knockbackPower
+						end
+					end
+
+					if stats.lifesteal > 0 then
+						totalHeal += dealt * stats.lifesteal
+					end
 				end
 			end
 
-			-- VFX at enemy position (client local)
+			if totalHeal > 0 then
+				hum.Health = math.min(hum.MaxHealth, hum.Health + totalHeal)
+			end
+
 			local weaponId = entry.id or entry.Id or ""
 			VFXEvent:FireAllClients({
 				weaponId = weaponId,
 				pos = ehrp.Position,
-				lookAt = hrp.Position, -- face back to player
+				lookAt = hrp.Position,
 			})
 		end
 	end)

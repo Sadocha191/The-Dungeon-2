@@ -1,4 +1,4 @@
--- DropService.server.lua (ServerScriptService) - większe orby, bez fizyki, wolne przyciąganie z bliska
+-- DropService.server.lua (ServerScriptService) - larger orbs, no physics, close-range magnet
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -12,19 +12,27 @@ end
 
 local active = {} -- [part] = {type="xp"/"coins"/"souls", amount=number}
 
-local ATTRACT_RADIUS = 8 -- przyciąganie dopiero z bliska
+local ATTRACT_RADIUS = 8
 local PICKUP_DIST = 2.5
-local ATTRACT_SPEED_MULT = 1.15 -- trochę szybciej od aktualnej prędkości gracza
-local ATTRACT_SPEED_BONUS = 4 -- zapas na przyszłe boosty prędkości
-local ATTRACT_SPEED_MIN = 22 -- minimalna prędkość przyciągania (studs/s)
+local ATTRACT_SPEED_MULT = 1.15
+local ATTRACT_SPEED_BONUS = 4
+local ATTRACT_SPEED_MIN = 22
 
-local ORB_SIZE = Vector3.new(1, 1, 1) -- większe orby
+local ORB_SIZE = Vector3.new(1, 1, 1)
 local ORB_HALF_HEIGHT = ORB_SIZE.Y * 0.5
 local ORB_SPAWN_HEIGHT = 2.5
 
 local GROUND_RAY_PARAMS = RaycastParams.new()
 GROUND_RAY_PARAMS.FilterType = Enum.RaycastFilterType.Blacklist
 GROUND_RAY_PARAMS.IgnoreWater = false
+
+local function getPickupRangeMult(plr)
+	local bonus = plr and plr:GetAttribute("ShrinePickupRangeBonus")
+	if typeof(bonus) ~= "number" then
+		return 1
+	end
+	return math.max(0.1, 1 + bonus)
+end
 
 local function getGroundedPosition(pos: Vector3)
 	local ignore = {dropsFolder}
@@ -82,12 +90,12 @@ local function makeOrb(kind: "xp" | "coins" | "souls", amount: number, pos: Vect
 	elseif kind == "coins" then
 		p.Color = Color3.fromRGB(255, 180, 60)
 	else
-		p.Color = Color3.fromRGB(168, 85, 247) -- purple
+		p.Color = Color3.fromRGB(168, 85, 247)
 	end
 	p.Size = ORB_SIZE
 	p.CanCollide = false
 	p.CanQuery = false
-	p.Anchored = true -- bez fizyki
+	p.Anchored = true
 	p.CFrame = CFrame.new(getGroundedPosition(pos))
 	p.Parent = dropsFolder
 	p.AssemblyLinearVelocity = Vector3.new((math.random() - 0.5) * 6, math.random(5, 8), (math.random() - 0.5) * 6)
@@ -115,7 +123,7 @@ RunService.Heartbeat:Connect(function(dt)
 
 		local plr, dist = nearestAlivePlayer(orb.Position)
 		if not plr then
-			continue -- orby nie znikają
+			continue
 		end
 
 		local char = plr.Character
@@ -123,7 +131,11 @@ RunService.Heartbeat:Connect(function(dt)
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
 		if not hrp then continue end
 
-		if dist <= PICKUP_DIST then
+		local pickupMult = getPickupRangeMult(plr)
+		local pickupDist = PICKUP_DIST * pickupMult
+		local attractRadius = ATTRACT_RADIUS * pickupMult
+
+		if dist <= pickupDist then
 			if meta.type == "xp" then
 				if _G.AwardPlayer then _G.AwardPlayer(plr, meta.amount, 0) end
 			elseif meta.type == "coins" then
@@ -136,7 +148,7 @@ RunService.Heartbeat:Connect(function(dt)
 			continue
 		end
 
-		if dist <= ATTRACT_RADIUS then
+		if dist <= attractRadius then
 			local target = hrp.Position + Vector3.new(0, 1.6, 0)
 			local toTarget = target - orb.Position
 			local toTargetDist = toTarget.Magnitude

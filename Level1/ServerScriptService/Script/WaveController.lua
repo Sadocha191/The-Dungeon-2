@@ -548,7 +548,12 @@ local function startSimpleAI(mob: Model)
                     lastAttack = time()
                     local targetHum = targetHRP.Parent and targetHRP.Parent:FindFirstChildOfClass("Humanoid")
                     if targetHum and targetHum.Health > 0 and not PauseState.Value then
-                        targetHum:TakeDamage(damage)
+                        local targetPlr = Players:GetPlayerFromCharacter(targetHum.Parent)
+                        if targetPlr and _G.ApplyDamageToPlayer then
+                            _G.ApplyDamageToPlayer(targetPlr, damage)
+                        else
+                            targetHum:TakeDamage(damage)
+                        end
                     end
                 end
             end

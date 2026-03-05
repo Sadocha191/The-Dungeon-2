@@ -222,7 +222,40 @@ local function getSpellLevel(plr: Player, id: string): number
 end
 
 local function getAtkMult(plr: Player): number
-	return tonumber(plr:GetAttribute("RunAtkMult")) or 1
+	local runAtkMult = tonumber(plr:GetAttribute("RunAtkMult")) or 1
+	local shrineDamageMult = tonumber(plr:GetAttribute("ShrineDamageMult")) or 1
+	local spellDamageMult = tonumber(plr:GetAttribute("SpellDamageMult")) or 1
+	return runAtkMult * shrineDamageMult * spellDamageMult
+end
+
+local function getDurationMult(plr: Player?): number
+	if not plr then return 1 end
+	return math.max(0.1, 1 + (tonumber(plr:GetAttribute("ShrineDurationBonus")) or 0))
+end
+
+local function getEliteDamageMult(plr: Player?): number
+	if not plr then return 1 end
+	return math.max(0.1, 1 + (tonumber(plr:GetAttribute("ShrineEliteDamageBonus")) or 0))
+end
+
+local function getKnockbackMult(plr: Player?): number
+	if not plr then return 1 end
+	return math.max(0, tonumber(plr:GetAttribute("ShrineKnockbackMult")) or 1)
+end
+
+local function getProjectileBonus(plr: Player?): number
+	if not plr then return 0 end
+	return math.max(0, math.floor(tonumber(plr:GetAttribute("ShrineProjectileBonus")) or 0))
+end
+
+local function getLifestealBonus(plr: Player?): number
+	if not plr then return 0 end
+	return math.max(0, tonumber(plr:GetAttribute("ShrineLifestealPct")) or 0)
+end
+
+local function getCritDamageBonus(plr: Player?): number
+	if not plr then return 0 end
+	return math.max(0, tonumber(plr:GetAttribute("ShrineCritDamageBonus")) or 0)
 end
 
 local function projHitDamage(plr: Player, enemy: Model, dmg: number, opts)
@@ -231,7 +264,6 @@ local function projHitDamage(plr: Player, enemy: Model, dmg: number, opts)
 	local hum = enemy and enemy:FindFirstChildOfClass("Humanoid")
 	if not hum then return end
 
-	-- Soul Link (spell-only): splash dmg from anchor
 	if enemy:GetAttribute("SoulLinkAnchor") then
 		local linkPct = tonumber(plr:GetAttribute("SoulLinkPct")) or 0
 		local linkRadius = tonumber(plr:GetAttribute("SoulLinkRadius")) or 0
@@ -246,9 +278,34 @@ local function projHitDamage(plr: Player, enemy: Model, dmg: number, opts)
 			end
 		end
 	end
+
 	local dealt = math.floor(tonumber(dmg) or 0)
 	if dealt > 0 then
+		if enemy:GetAttribute("IsElite") == true or string.sub(enemy.Name, 1, 5) == "Boss_" then
+			dealt = dealt * getEliteDamageMult(plr)
+		end
+
+		local vulnUntil = tonumber(enemy:GetAttribute("VulnerableUntil")) or 0
+		local vulnPct = tonumber(enemy:GetAttribute("VulnerablePct")) or 0
+		if vulnUntil > spellClock() and vulnPct > 0 then
+			dealt = dealt * (1 + vulnPct)
+		end
+
+		if opts.crit == true then
+			dealt = dealt * (1 + getCritDamageBonus(plr))
+		end
+
+		dealt = math.max(1, math.floor(dealt + 0.5))
 		safeDamage(hum, dealt)
+
+		local lifesteal = getLifestealBonus(plr)
+		if lifesteal > 0 then
+			local ownerHum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
+			if ownerHum and ownerHum.Health > 0 then
+				ownerHum.Health = math.min(ownerHum.MaxHealth, ownerHum.Health + dealt * lifesteal)
+			end
+		end
+
 		if opts.showFloating ~= false then
 			local hrp = enemy:FindFirstChild("HumanoidRootPart")
 			if hrp then
@@ -257,23 +314,24 @@ local function projHitDamage(plr: Player, enemy: Model, dmg: number, opts)
 		end
 	end
 
+	local durationMult = getDurationMult(plr)
 	if opts.slowPct then
-		applySlow(enemy, opts.slowPct, opts.slowDuration or 1)
+		applySlow(enemy, opts.slowPct, (opts.slowDuration or 1) * durationMult)
 	end
 	if opts.freezeChance and (math.random() < opts.freezeChance) then
-		applyFreeze(enemy, opts.freezeDuration or 0.8)
+		applyFreeze(enemy, (opts.freezeDuration or 0.8) * durationMult)
 	end
 	if opts.burnDps and opts.burnDuration then
-		local endT = spellClock() + opts.burnDuration
+		local endT = spellClock() + (opts.burnDuration * durationMult)
 		task.spawn(function()
 			while spellClock() < endT and hum.Health > 0 do
-				safeDamage(hum, opts.burnDps * 0.5) -- tick 0.5s
+				safeDamage(hum, opts.burnDps * 0.5)
 				task.wait(0.5)
 			end
 		end)
 	end
 	if opts.poisonDps and opts.poisonDuration then
-		local endT = spellClock() + opts.poisonDuration
+		local endT = spellClock() + (opts.poisonDuration * durationMult)
 		task.spawn(function()
 			while spellClock() < endT and hum.Health > 0 do
 				safeDamage(hum, opts.poisonDps * 0.5)
@@ -282,7 +340,6 @@ local function projHitDamage(plr: Player, enemy: Model, dmg: number, opts)
 		end)
 	end
 end
-
 local function fireProjectile(plr: Player, origin: Vector3, dir: Vector3, speed: number, range: number, dmg: number, pierce: number, opts)
 	local s = getState(plr)
 	local cloneLv = getSpellLevel(plr, "PhantomClone")
@@ -291,37 +348,42 @@ local function fireProjectile(plr: Player, origin: Vector3, dir: Vector3, speed:
 		copyPct = ({0.35,0.45,0.45,0.60,0.35,0.90})[math.clamp(cloneLv,1,6)] or 0.35
 	end
 
-	local function spawnOne(mult: number)
+	local extraProjectiles = getProjectileBonus(plr)
+	local totalProjectiles = 1 + extraProjectiles
+	local spreadStep = math.rad(4)
+
+	local function spawnOne(mult: number, castDir: Vector3)
 		local p = ensurePart("Proj", Vector3.new(0.6,0.6,0.6))
 		p.CFrame = CFrame.new(origin)
 		p.Transparency = 0.3
 		local traveled = 0
+		local localPierce = pierce
 		local hit = {}
 		local conn
 		conn = RunService.Heartbeat:Connect(function(dt)
 			if not p.Parent then conn:Disconnect() return end
 			local step = speed * dt
 			traveled += step
-			p.CFrame = p.CFrame + (dir * step)
+			p.CFrame = p.CFrame + (castDir * step)
 			if traveled >= range then
 				conn:Disconnect()
 				p:Destroy()
 				return
 			end
-			-- cheap hit test: nearest enemy within 2 studs of projectile
-			local nearest, d = getNearestEnemy(p.Position, 3)
+
+			local nearest = getNearestEnemy(p.Position, 3)
 			if nearest and nearest:FindFirstChild("HumanoidRootPart") then
 				local hrp = nearest.HumanoidRootPart
 				if (hrp.Position - p.Position).Magnitude <= 2.5 then
 					if not hit[nearest] then
 						hit[nearest] = true
 						projHitDamage(plr, nearest, dmg * mult, opts)
-						if pierce <= 0 then
+						if localPierce <= 0 then
 							conn:Disconnect()
 							p:Destroy()
 							return
 						else
-							pierce -= 1
+							localPierce -= 1
 						end
 					end
 				end
@@ -330,12 +392,26 @@ local function fireProjectile(plr: Player, origin: Vector3, dir: Vector3, speed:
 		Debris:AddItem(p, 5)
 	end
 
-	spawnOne(1)
+	local function spawnVolley(mult: number)
+		if totalProjectiles <= 1 then
+			spawnOne(mult, dir)
+			return
+		end
+
+		for i = 1, totalProjectiles do
+			local centered = i - ((totalProjectiles + 1) / 2)
+			local angle = centered * spreadStep
+			local castDir = (CFrame.fromAxisAngle(Vector3.new(0,1,0), angle) * dir).Unit
+			spawnOne(mult, castDir)
+		end
+	end
+
+	spawnVolley(1)
 
 	if cloneLv > 0 and copyPct > 0 then
 		task.delay(s.cloneDelay, function()
 			if plr.Parent then
-				spawnOne(copyPct)
+				spawnVolley(copyPct)
 			end
 		end)
 	end
@@ -420,12 +496,13 @@ local function tickOrbit(plr: Player, dt: number, id: string, count: number, rad
 	end
 end
 
-local function spawnZone(pos: Vector3, radius: number, duration: number)
-	local p = ensurePart("Zone", Vector3.new(radius*2, 0.4, radius*2))
+local function spawnZone(pos: Vector3, radius: number, duration: number, ownerPlr: Player?)
+	duration = (tonumber(duration) or 0) * getDurationMult(ownerPlr)
+	local p = ensurePart("Zone", Vector3.new(radius * 2, 0.4, radius * 2))
 	p.Position = pos + Vector3.new(0, 0.2, 0)
 	p.Transparency = 0.6
 	p.Shape = Enum.PartType.Cylinder
-	p.Orientation = Vector3.new(0,0,90)
+	p.Orientation = Vector3.new(0, 0, 90)
 	Debris:AddItem(p, duration)
 	return p
 end
@@ -458,7 +535,7 @@ local function stepPlayer(plr: Player, dt: number)
 		local burnDur = 2.0
 		tickOrbit(plr, dt, "FireOrb", count, radius, 2.6, hitCd, dmg, function(enemy)
 			if burn then
-				applySlow(enemy, 0.05, 0.5)
+				applySlow(enemy, 0.05, 0.5 * getDurationMult(plr))
 				local hum = enemy:FindFirstChildOfClass("Humanoid")
 				if hum then
 					local endT = spellClock() + burnDur
@@ -488,7 +565,7 @@ local function stepPlayer(plr: Player, dt: number)
 			if knock and enemy:FindFirstChild("HumanoidRootPart") then
 				local epos = enemy.HumanoidRootPart.Position
 				local dir = (epos - pos).Unit
-				enemy.HumanoidRootPart.AssemblyLinearVelocity += dir * 12
+				enemy.HumanoidRootPart.AssemblyLinearVelocity += dir * 12 * getKnockbackMult(plr)
 			end
 		end)
 	else
@@ -506,7 +583,7 @@ local function stepPlayer(plr: Player, dt: number)
 		local poisonDps = 3 + (lv * 2)
 		local poisonDur = 2.5
 		tickOrbit(plr, dt, "ToxicBlades", count, radius, speed, hitCd, dmg, function(enemy)
-			applySlow(enemy, 0.10, 0.6)
+			applySlow(enemy, 0.10, 0.6 * getDurationMult(plr))
 			local hum = enemy:FindFirstChildOfClass("Humanoid")
 			if hum then
 				local endT = spellClock() + poisonDur
@@ -604,10 +681,10 @@ local function stepPlayer(plr: Player, dt: number)
 		if spellClock() >= nextT then
 			s.cds.PoisonCloud = spellClock() + interval
 			local radius = 7 * (lv >= 2 and 1.15 or 1.0)
-			local dur = (2.5 + (lv>=3 and 1 or 0))
+			local dur = (2.5 + (lv>=3 and 1 or 0)) * getDurationMult(plr)
 			local tick = (lv>=4 and 0.4 or 0.5)
 			local dps = 8 + lv*3
-			local cloud = spawnZone(pos - hrp.CFrame.LookVector*3, radius, dur)
+			local cloud = spawnZone(pos - hrp.CFrame.LookVector*3, radius, dur, plr)
 			local endT = spellClock() + dur
 			task.spawn(function()
 				while spellClock() < endT and cloud.Parent do
@@ -627,10 +704,10 @@ local function stepPlayer(plr: Player, dt: number)
 		s.timers.FlameTrail = (s.timers.FlameTrail or 0) + dt
 		if s.timers.FlameTrail >= every then
 			s.timers.FlameTrail = 0
-			local dur = (lv>=3 and 3.0) or 2.0
+			local dur = ((lv>=3 and 3.0) or 2.0) * getDurationMult(plr)
 			local tick = (lv>=4 and 0.4) or 0.5
 			local size = 5 * (lv>=2 and 1.10 or 1.0)
-			local zone = spawnZone(pos, size/2, dur)
+			local zone = spawnZone(pos, size/2, dur, plr)
 			local dps = 10 + lv*4
 			local endT = spellClock() + dur
 			task.spawn(function()
@@ -664,7 +741,7 @@ local function stepPlayer(plr: Player, dt: number)
 					hit[cur] = true
 					projHitDamage(plr, cur, dmg, { })
 					if stun > 0 then
-						applyFreeze(cur, stun)
+						applyFreeze(cur, stun * getDurationMult(plr))
 				 end
 					-- next
 					local best=nil
@@ -716,10 +793,10 @@ local function stepPlayer(plr: Player, dt: number)
 					dir = dir.Unit
 					local vel = e.HumanoidRootPart.AssemblyLinearVelocity
 					if pull > 0 then
-						e.HumanoidRootPart.AssemblyLinearVelocity = vel - dir*force
-						applySlow(e, 0.25, pull)
+						e.HumanoidRootPart.AssemblyLinearVelocity = vel - dir * force * getKnockbackMult(plr)
+						applySlow(e, 0.25, pull * getDurationMult(plr))
 					else
-						e.HumanoidRootPart.AssemblyLinearVelocity = vel + dir*force
+						e.HumanoidRootPart.AssemblyLinearVelocity = vel + dir * force * getKnockbackMult(plr)
 					end
 					projHitDamage(plr, e, dmg, {})
 				end
@@ -808,8 +885,8 @@ local function stepPlayer(plr: Player, dt: number)
 				local hrpE = e:FindFirstChild("HumanoidRootPart")
 				if hrpE and (hrpE.Position - pos).Magnitude <= range then
 					local dir = (pos - hrpE.Position).Unit
-					hrpE.AssemblyLinearVelocity += dir * force
-					if stun>0 then applyFreeze(e, stun) end
+					hrpE.AssemblyLinearVelocity += dir * force * getKnockbackMult(plr)
+					if stun>0 then applyFreeze(e, stun * getDurationMult(plr)) end
 					pulled += 1
 				end
 			end
@@ -824,7 +901,7 @@ local function stepPlayer(plr: Player, dt: number)
 		if spellClock() >= nextT then
 			s.cds.IceWall = spellClock() + cd
 			local count = (lv>=3 and 2) or 1
-			local dur = (lv>=6 and 6) or (lv>=4 and 4) or 3
+			local dur = ((lv>=6 and 6) or (lv>=4 and 4) or 3) * getDurationMult(plr)
 			local size = Vector3.new(10, 8, 1.2)
 			for i=1,count do
 				local ang = math.random()*math.pi*2
@@ -847,7 +924,7 @@ local function stepPlayer(plr: Player, dt: number)
 		if spellClock() >= nextT then
 			s.cds.ThunderTotem = spellClock() + cd
 			local totems = (lv>=6 and 2) or 1
-			local dur = 10 + (lv>=3 and 2 or 0)
+			local dur = (10 + (lv>=3 and 2 or 0)) * getDurationMult(plr)
 			local range = 45
 			local fireRate = 0.9 * (lv>=2 and 0.9 or 1.0)
 			local baseDmg = 20 + lv*8
@@ -893,7 +970,7 @@ local function stepPlayer(plr: Player, dt: number)
 		local dmg = 18 + lv*6
 		local hitCd = 1.0 * (lv>=2 and 0.9 or 1.0)
 		tickOrbit(plr, dt, "SpiritWolves", count, 9, 1.6, hitCd, dmg, function(enemy)
-			applySlow(enemy, 0.15, 0.8)
+			applySlow(enemy, 0.15, 0.8 * getDurationMult(plr))
 		end)
 	else
 		syncOrbitVFX(plr, "SpiritWolves", false)
@@ -994,7 +1071,7 @@ local function stepPlayer(plr: Player, dt: number)
 			s.cds.DarkRift = spellClock() + interval
 			local count = (lv>=6 and 2) or 1
 			local radius = 10 * (lv>=2 and 1.15 or 1.0)
-			local dur = 4 + (lv>=3 and 1 or 0)
+			local dur = (4 + (lv>=3 and 1 or 0)) * getDurationMult(plr)
 			local tick = (lv>=5 and 0.35) or 0.5
 			local pull = 70 * (lv>=4 and 1.2 or 1.0)
 			local dmg = 16 + lv*6
@@ -1002,14 +1079,14 @@ local function stepPlayer(plr: Player, dt: number)
 				local ang = math.random()*math.pi*2
 				local r = 8 + math.random()*8
 				local rpos = pos + Vector3.new(math.cos(ang)*r,0,math.sin(ang)*r)
-				local zone = spawnZone(rpos, radius, dur)
+				local zone = spawnZone(rpos, radius, dur, plr)
 				local endT = spellClock() + dur
 				task.spawn(function()
 					while spellClock() < endT and zone.Parent do
 						for _, e in ipairs(getEnemiesInRadius(zone.Position, radius)) do
 							if e:FindFirstChild("HumanoidRootPart") then
 								local dir = (zone.Position - e.HumanoidRootPart.Position).Unit
-								e.HumanoidRootPart.AssemblyLinearVelocity += dir * pull * tick
+								e.HumanoidRootPart.AssemblyLinearVelocity += dir * pull * tick * getKnockbackMult(plr)
 								projHitDamage(plr, e, dmg, {})
 							end
 						end
@@ -1038,7 +1115,7 @@ local function stepPlayer(plr: Player, dt: number)
 					pulseAt(plr, p, aoe, dmg, {})
 					if lv>=5 then
 						-- fire pool 2s
-						local pool = spawnZone(p, aoe*0.7, 2)
+						local pool = spawnZone(p, aoe*0.7, 2, plr)
 						local endT = spellClock()+2
 						task.spawn(function()
 							while spellClock()<endT and pool.Parent do
@@ -1061,7 +1138,7 @@ local function stepPlayer(plr: Player, dt: number)
 		local nextT = s.cds.SolarBeam or 0
 		if spellClock() >= nextT then
 			s.cds.SolarBeam = spellClock() + interval
-			local dur = (lv>=6 and 2.2) or (lv>=3 and 1.6) or 1.2
+			local dur = ((lv>=6 and 2.2) or (lv>=3 and 1.6) or 1.2) * getDurationMult(plr)
 			local range = (lv>=6 and 90) or 70
 			local tick = 0.2
 			local dmg = (22 + lv*9)
@@ -1116,7 +1193,7 @@ local function stepPlayer(plr: Player, dt: number)
 									projHitDamage(plr, e, dmg*0.12, {})
 									if pull > 0 then
 										local dir = (pos - e.HumanoidRootPart.Position).Unit
-										e.HumanoidRootPart.AssemblyLinearVelocity += dir * pull
+										e.HumanoidRootPart.AssemblyLinearVelocity += dir * pull * getKnockbackMult(plr)
 									end
 								end
 							end
@@ -1178,14 +1255,14 @@ local function stepPlayer(plr: Player, dt: number)
 		if spellClock() >= nextT then
 			s.cds.TimeFracture = spellClock() + interval
 			local radius = 14 * (lv>=2 and 1.15 or 1.0)
-			local dur = (lv>=6 and 5) or (lv>=4 and 4) or 3
+			local dur = ((lv>=6 and 5) or (lv>=4 and 4) or 3) * getDurationMult(plr)
 			local slowPct = (lv>=6 and 0.55) or (lv>=3 and 0.40) or 0.30
 			local vuln = (lv>=5 and 0.20) or 0
 			local endT = spellClock() + dur
 			task.spawn(function()
 				while spellClock()<endT do
 					for _, e in ipairs(getEnemiesInRadius(pos, radius)) do
-						applySlow(e, slowPct, 0.35)
+						applySlow(e, slowPct, 0.35 * getDurationMult(plr))
 						if vuln > 0 then
 							e:SetAttribute("VulnerableUntil", spellClock()+0.4)
 							e:SetAttribute("VulnerablePct", vuln)
@@ -1204,7 +1281,7 @@ local function stepPlayer(plr: Player, dt: number)
 		local nextT = s.cds.SoulLink or 0
 		if spellClock() >= nextT then
 			s.cds.SoulLink = spellClock() + interval
-			local dur = 4 + (lv>=4 and 1.5 or 0)
+			local dur = (4 + (lv>=4 and 1.5 or 0)) * getDurationMult(plr)
 			local linkPct = (lv>=6 and 0.50) or (lv>=3 and 0.35) or 0.25
 			local radius = 14 * (lv>=2 and 1.15 or 1.0)
 			local anchor = getNearestEnemy(pos, 70)
@@ -1243,7 +1320,7 @@ local function stepPlayer(plr: Player, dt: number)
 						pulseAt(plr, p, aoe, dmg, {})
 						if stun>0 then
 							for _, e in ipairs(getEnemiesInRadius(p, aoe)) do
-								applyFreeze(e, stun)
+								applyFreeze(e, stun * getDurationMult(plr))
 							end
 						end
 					end)

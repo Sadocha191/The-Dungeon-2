@@ -1,5 +1,5 @@
 -- ShrineService.server.lua (Level1)
--- Spawns random charge shrines on map. Staying in range for 5s grants a reward.
+-- Spawns random charge shrines on map. Staying in range for 5s grants a random stat bonus.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13,13 +13,7 @@ local MIN_SHRINE_GAP = 26
 local SHRINE_RAYCAST_TRIES = 45
 local SHRINE_HEIGHT = 2.2
 
-local XP_REWARD_MIN = 45
-local XP_REWARD_MAX = 90
-local COIN_REWARD_MIN = 12
-local COIN_REWARD_MAX = 28
-local SOUL_REWARD_CHANCE = 0.35
-local SOUL_REWARD_MIN = 1
-local SOUL_REWARD_MAX = 3
+local SHIELD_REGEN_PER_SEC = 12
 
 local RunStarted = ReplicatedStorage:FindFirstChild("RunStarted")
 if not RunStarted then
@@ -61,10 +55,118 @@ end
 local shrines = {}
 local spawnedForRun = false
 
-local function broadcast(payload)
-	if not WaveStatusEvent then
+local SHRINE_DEFAULTS = {
+	ShrineDamageMult = 1,
+	ShrineCritDamageBonus = 0,
+	ShrineAttackSpeedBonus = 0,
+	ShrinePickupRangeBonus = 0,
+	ShrineLuckBonus = 0,
+	ShrineProjectileBonus = 0,
+	ShrineHpRegenFlat = 0,
+	ShrineKnockbackMult = 1,
+	ShrineDifficultyPct = 0,
+	ShrineLifestealPct = 0,
+	ShrinePowerupMult = 1,
+	ShrineEliteDamageBonus = 0,
+	ShrineDurationBonus = 0,
+	ShrineJumpHeightBonus = 0,
+	ShrineShieldMax = 0,
+	ShrineShieldCurrent = 0,
+	ShrineBuffCount = 0,
+	ShrineMoveSpeedAdded = 0,
+}
+
+local BUFFS = {
+	{ rarity = "Common", id = "damage_12", label = "Gain 12% Damage", value = 0.12 },
+	{ rarity = "Common", id = "shield_5", label = "Gain +5 Shield", value = 5 },
+	{ rarity = "Common", id = "pickup_20", label = "Gain 20% Pickup Range", value = 0.20 },
+	{ rarity = "Common", id = "damage_10", label = "Gain 10% Damage", value = 0.10 },
+	{ rarity = "Common", id = "crit_dmg_10", label = "Gain 10% Crit Damage", value = 0.10 },
+	{ rarity = "Common", id = "luck_5", label = "Gain 5% Luck", value = 0.05 },
+	{ rarity = "Common", id = "projectile_1", label = "Gain +1 Projectile Count", value = 1 },
+	{ rarity = "Common", id = "hp_regen_20", label = "Gain +20 HP Regen", value = 20 },
+	{ rarity = "Common", id = "knockback_10", label = "Gain 10% Knockback", value = 0.10 },
+	{ rarity = "Uncommon", id = "knockback_12", label = "Gain 12% Knockback", value = 0.12 },
+	{ rarity = "Uncommon", id = "atkspd_72", label = "Gain 7.2% Attack Speed", value = 0.072 },
+	{ rarity = "Rare", id = "atkspd_84", label = "Gain 8.4% Attack Speed", value = 0.084 },
+	{ rarity = "Common", id = "difficulty_8", label = "Gain 8% Difficulty", value = 0.08 },
+	{ rarity = "Common", id = "lifesteal_6", label = "Gain 6% Lifesteal", value = 0.06 },
+	{ rarity = "Common", id = "powerup_10", label = "Gain 10% Powerup Multiplier", value = 0.10 },
+	{ rarity = "Common", id = "elite_dmg_10", label = "Gain 10% Damage to Elites", value = 0.10 },
+	{ rarity = "Common", id = "duration_8", label = "Gain 8% Duration", value = 0.08 },
+	{ rarity = "Common", id = "jump_10", label = "Gain 10% Jump Height", value = 0.10 },
+	{ rarity = "Common", id = "move_8", label = "Gain 8% Movement Speed", value = 0.08 },
+}
+
+local BUFFS_BY_RARITY = {
+	Common = {},
+	Uncommon = {},
+	Rare = {},
+}
+for _, buff in ipairs(BUFFS) do
+	table.insert(BUFFS_BY_RARITY[buff.rarity], buff)
+end
+
+local function getNumAttr(plr, name, fallback)
+	local v = plr:GetAttribute(name)
+	if typeof(v) ~= "number" then
+		return fallback
+	end
+	return v
+end
+
+local function setNumAttr(plr, name, value)
+	plr:SetAttribute(name, tonumber(value) or 0)
+end
+
+local function ensurePlayerDefaults(plr)
+	for attr, defaultValue in pairs(SHRINE_DEFAULTS) do
+		if typeof(plr:GetAttribute(attr)) ~= "number" then
+			setNumAttr(plr, attr, defaultValue)
+		end
+	end
+end
+
+local applyMovementBonus
+
+local function resetPlayerBuffs(plr)
+	local moveAdded = getNumAttr(plr, "ShrineMoveSpeedAdded", 0)
+	if moveAdded ~= 0 then
+		setNumAttr(plr, "RunBonusSpeed", math.max(0, getNumAttr(plr, "RunBonusSpeed", 0) - moveAdded))
+	end
+
+	for attr, defaultValue in pairs(SHRINE_DEFAULTS) do
+		setNumAttr(plr, attr, defaultValue)
+	end
+
+	applyMovementBonus(plr)
+end
+
+local function applyJumpBonus(plr)
+	local char = plr.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not hum then
 		return
 	end
+
+	local baseJumpPower = getNumAttr(plr, "BaseJumpPower", 50)
+	local jumpBonus = getNumAttr(plr, "ShrineJumpHeightBonus", 0)
+	hum.JumpPower = baseJumpPower * (1 + jumpBonus)
+end
+
+applyMovementBonus = function(plr)
+	local char = plr.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not hum then
+		return
+	end
+
+	local baseSpeed = getNumAttr(plr, "BaseWalkSpeed", 18)
+	local runBonusSpeed = getNumAttr(plr, "RunBonusSpeed", 0)
+	hum.WalkSpeed = baseSpeed + runBonusSpeed
+end
+
+local function broadcast(payload)
 	for _, plr in ipairs(Players:GetPlayers()) do
 		WaveStatusEvent:FireClient(plr, payload)
 	end
@@ -218,6 +320,7 @@ local function buildShrine(pos, idx)
 	billboard.Size = UDim2.fromOffset(240, 62)
 	billboard.StudsOffset = Vector3.new(0, 2.9, 0)
 	billboard.AlwaysOnTop = true
+	billboard.Enabled = false
 	billboard.Parent = core
 
 	local text = Instance.new("TextLabel")
@@ -227,7 +330,7 @@ local function buildShrine(pos, idx)
 	text.TextStrokeTransparency = 0.25
 	text.Font = Enum.Font.GothamBold
 	text.TextScaled = true
-	text.Text = "Kapliczka\nStoj blisko 5s"
+	text.Text = "0%"
 	text.Parent = billboard
 
 	model.PrimaryPart = core
@@ -236,6 +339,7 @@ local function buildShrine(pos, idx)
 	return {
 		model = model,
 		core = core,
+		billboard = billboard,
 		label = text,
 		progress = {},
 		completed = false,
@@ -255,33 +359,113 @@ local function getAlivePlayers()
 	return list
 end
 
-local function randomReward()
-	local xp = math.random(XP_REWARD_MIN, XP_REWARD_MAX)
-	local coins = math.random(COIN_REWARD_MIN, COIN_REWARD_MAX)
-	local souls = 0
-	if math.random() <= SOUL_REWARD_CHANCE then
-		souls = math.random(SOUL_REWARD_MIN, SOUL_REWARD_MAX)
+local function pickRarity(plr)
+	local luck = math.max(0, getNumAttr(plr, "ShrineLuckBonus", 0))
+	local commonW = math.max(10, 80 * (1 - luck * 0.9))
+	local uncommonW = 16 * (1 + luck * 1.8)
+	local rareW = 4 * (1 + luck * 2.4)
+
+	local total = commonW + uncommonW + rareW
+	local roll = math.random() * total
+	if roll <= commonW then
+		return "Common"
 	end
-	return xp, coins, souls
+	if roll <= commonW + uncommonW then
+		return "Uncommon"
+	end
+	return "Rare"
+end
+
+local function pickRandomBuff(plr)
+	local rarity = pickRarity(plr)
+	local bucket = BUFFS_BY_RARITY[rarity]
+	if not bucket or #bucket == 0 then
+		bucket = BUFFS_BY_RARITY.Common
+		rarity = "Common"
+	end
+	return bucket[math.random(1, #bucket)], rarity
+end
+
+local function applyBuff(plr, buff)
+	ensurePlayerDefaults(plr)
+
+	local powerMult = math.max(1, getNumAttr(plr, "ShrinePowerupMult", 1))
+	local scaled = buff.value
+	if buff.id ~= "powerup_10" then
+		scaled = scaled * powerMult
+	end
+
+	if buff.id == "damage_12" or buff.id == "damage_10" then
+		setNumAttr(plr, "ShrineDamageMult", getNumAttr(plr, "ShrineDamageMult", 1) * (1 + scaled))
+
+	elseif buff.id == "shield_5" then
+		local addShield = math.max(1, math.floor(scaled + 0.5))
+		setNumAttr(plr, "ShrineShieldMax", getNumAttr(plr, "ShrineShieldMax", 0) + addShield)
+		setNumAttr(plr, "ShrineShieldCurrent", getNumAttr(plr, "ShrineShieldCurrent", 0) + addShield)
+
+	elseif buff.id == "pickup_20" then
+		setNumAttr(plr, "ShrinePickupRangeBonus", getNumAttr(plr, "ShrinePickupRangeBonus", 0) + scaled)
+
+	elseif buff.id == "crit_dmg_10" then
+		setNumAttr(plr, "ShrineCritDamageBonus", getNumAttr(plr, "ShrineCritDamageBonus", 0) + scaled)
+
+	elseif buff.id == "luck_5" then
+		setNumAttr(plr, "ShrineLuckBonus", getNumAttr(plr, "ShrineLuckBonus", 0) + scaled)
+
+	elseif buff.id == "projectile_1" then
+		local addProj = math.max(1, math.floor(scaled + 0.5))
+		setNumAttr(plr, "ShrineProjectileBonus", getNumAttr(plr, "ShrineProjectileBonus", 0) + addProj)
+
+	elseif buff.id == "hp_regen_20" then
+		setNumAttr(plr, "ShrineHpRegenFlat", getNumAttr(plr, "ShrineHpRegenFlat", 0) + scaled)
+
+	elseif buff.id == "knockback_10" or buff.id == "knockback_12" then
+		setNumAttr(plr, "ShrineKnockbackMult", getNumAttr(plr, "ShrineKnockbackMult", 1) * (1 + scaled))
+
+	elseif buff.id == "atkspd_72" or buff.id == "atkspd_84" then
+		setNumAttr(plr, "ShrineAttackSpeedBonus", getNumAttr(plr, "ShrineAttackSpeedBonus", 0) + scaled)
+
+	elseif buff.id == "difficulty_8" then
+		setNumAttr(plr, "ShrineDifficultyPct", getNumAttr(plr, "ShrineDifficultyPct", 0) + scaled)
+
+	elseif buff.id == "lifesteal_6" then
+		setNumAttr(plr, "ShrineLifestealPct", getNumAttr(plr, "ShrineLifestealPct", 0) + scaled)
+
+	elseif buff.id == "powerup_10" then
+		setNumAttr(plr, "ShrinePowerupMult", getNumAttr(plr, "ShrinePowerupMult", 1) * (1 + scaled))
+
+	elseif buff.id == "elite_dmg_10" then
+		setNumAttr(plr, "ShrineEliteDamageBonus", getNumAttr(plr, "ShrineEliteDamageBonus", 0) + scaled)
+
+	elseif buff.id == "duration_8" then
+		setNumAttr(plr, "ShrineDurationBonus", getNumAttr(plr, "ShrineDurationBonus", 0) + scaled)
+
+	elseif buff.id == "jump_10" then
+		setNumAttr(plr, "ShrineJumpHeightBonus", getNumAttr(plr, "ShrineJumpHeightBonus", 0) + scaled)
+		applyJumpBonus(plr)
+
+	elseif buff.id == "move_8" then
+		local baseSpeed = getNumAttr(plr, "BaseWalkSpeed", 18)
+		local addSpeed = baseSpeed * scaled
+		setNumAttr(plr, "RunBonusSpeed", getNumAttr(plr, "RunBonusSpeed", 0) + addSpeed)
+		setNumAttr(plr, "ShrineMoveSpeedAdded", getNumAttr(plr, "ShrineMoveSpeedAdded", 0) + addSpeed)
+		applyMovementBonus(plr)
+	end
+
+	setNumAttr(plr, "ShrineBuffCount", getNumAttr(plr, "ShrineBuffCount", 0) + 1)
 end
 
 local function completeShrine(shrine, plr)
 	shrine.completed = true
 
-	local xp, coins, souls = randomReward()
-	if _G.AwardPlayer then
-		pcall(function()
-			_G.AwardPlayer(plr, xp, coins)
-		end)
-	end
-	if souls > 0 and _G.AwardSouls then
-		pcall(function()
-			_G.AwardSouls(plr, souls)
-		end)
-	end
+	local buff, rarity = pickRandomBuff(plr)
+	applyBuff(plr, buff)
 
 	if shrine.label then
-		shrine.label.Text = ("Aktywowana!\n+%d XP +%d C"):format(xp, coins)
+		shrine.label.Text = "100%"
+	end
+	if shrine.billboard then
+		shrine.billboard.Enabled = false
 	end
 
 	local zone = shrine.model:FindFirstChild("ChargeZone")
@@ -297,9 +481,8 @@ local function completeShrine(shrine, plr)
 	broadcast({
 		type = "shrineComplete",
 		playerName = plr.DisplayName ~= "" and plr.DisplayName or plr.Name,
-		xp = xp,
-		coins = coins,
-		souls = souls,
+		bonusName = buff.label,
+		rarity = rarity,
 	})
 
 	task.delay(1.6, function()
@@ -314,6 +497,11 @@ local function spawnShrinesForRun()
 		return
 	end
 	spawnedForRun = true
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		resetPlayerBuffs(plr)
+		applyJumpBonus(plr)
+	end
 
 	clearShrines()
 
@@ -334,12 +522,62 @@ local function spawnShrinesForRun()
 	})
 end
 
+_G.ApplyDamageToPlayer = function(plr, amount)
+	if not plr or not plr.Parent then
+		return 0
+	end
+	local char = plr.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not hum or hum.Health <= 0 then
+		return 0
+	end
+
+	ensurePlayerDefaults(plr)
+
+	local incoming = math.max(0, tonumber(amount) or 0)
+	incoming = incoming * (1 + getNumAttr(plr, "ShrineDifficultyPct", 0))
+
+	local shield = math.max(0, getNumAttr(plr, "ShrineShieldCurrent", 0))
+	if shield > 0 and incoming > 0 then
+		local absorbed = math.min(shield, incoming)
+		incoming -= absorbed
+		setNumAttr(plr, "ShrineShieldCurrent", shield - absorbed)
+	end
+
+	if incoming > 0 then
+		hum:TakeDamage(incoming)
+	end
+	return incoming
+end
+
+Players.PlayerAdded:Connect(function(plr)
+	ensurePlayerDefaults(plr)
+	plr.CharacterAdded:Connect(function()
+		task.wait(0.1)
+		ensurePlayerDefaults(plr)
+		applyJumpBonus(plr)
+	end)
+end)
+
+for _, plr in ipairs(Players:GetPlayers()) do
+	ensurePlayerDefaults(plr)
+	plr.CharacterAdded:Connect(function()
+		task.wait(0.1)
+		ensurePlayerDefaults(plr)
+		applyJumpBonus(plr)
+	end)
+end
+
 RunStarted.Changed:Connect(function(v)
 	if v == true then
 		spawnShrinesForRun()
 	else
 		spawnedForRun = false
 		clearShrines()
+		for _, plr in ipairs(Players:GetPlayers()) do
+			resetPlayerBuffs(plr)
+			applyJumpBonus(plr)
+		end
 	end
 end)
 
@@ -348,6 +586,32 @@ if RunStarted.Value == true then
 end
 
 RunService.Heartbeat:Connect(function(dt)
+	if RunStarted.Value and not PauseState.Value then
+		for _, plr in ipairs(Players:GetPlayers()) do
+			local char = plr.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			if hum and hum.Health > 0 then
+				local maxShield = math.max(0, getNumAttr(plr, "ShrineShieldMax", 0))
+				local shield = math.max(0, getNumAttr(plr, "ShrineShieldCurrent", 0))
+				if maxShield > 0 then
+					if shield < maxShield then
+						shield = math.min(maxShield, shield + SHIELD_REGEN_PER_SEC * dt)
+						setNumAttr(plr, "ShrineShieldCurrent", shield)
+					end
+				elseif shield ~= 0 then
+					setNumAttr(plr, "ShrineShieldCurrent", 0)
+				end
+
+				local hpRegen = math.max(0, getNumAttr(plr, "ShrineHpRegenFlat", 0))
+				if hpRegen > 0 and hum.Health < hum.MaxHealth then
+					hum.Health = math.min(hum.MaxHealth, hum.Health + hpRegen * dt)
+				end
+
+				applyJumpBonus(plr)
+			end
+		end
+	end
+
 	if not RunStarted.Value then
 		return
 	end
@@ -411,9 +675,10 @@ RunService.Heartbeat:Connect(function(dt)
 		if shrine.label then
 			if anyoneCharging and topProgress > 0 then
 				local pct = math.floor((topProgress / CHARGE_SECONDS) * 100 + 0.5)
-				shrine.label.Text = ("Kapliczka\nLadowanie %d%%"):format(math.clamp(pct, 0, 100))
+				shrine.label.Text = ("%d%%"):format(math.clamp(pct, 0, 100))
+				if shrine.billboard then shrine.billboard.Enabled = true end
 			else
-				shrine.label.Text = "Kapliczka\nStoj blisko 5s"
+				if shrine.billboard then shrine.billboard.Enabled = false end
 			end
 		end
 	end

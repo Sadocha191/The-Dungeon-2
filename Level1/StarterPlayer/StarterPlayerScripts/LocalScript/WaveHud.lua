@@ -163,10 +163,10 @@ WaveStatusEvent.OnClientEvent:Connect(function(p)
 
 	elseif p.type == "shrineComplete" then
 		local playerName = tostring(p.playerName or "Player")
-		local xp = math.max(0, math.floor(tonumber(p.xp) or 0))
-		local coins = math.max(0, math.floor(tonumber(p.coins) or 0))
+		local bonusName = tostring(p.bonusName or "Bonus")
+		local rarity = tostring(p.rarity or "Common")
 		center.Visible = true
-		center.Text = ("SHRINE: %s +%d XP +%d C"):format(playerName, xp, coins)
+		center.Text = ("SHRINE [%s]: %s (%s)"):format(rarity, bonusName, playerName)
 		task.delay(3, function() center.Visible = false end)
 
 	elseif p.type == "complete" then
