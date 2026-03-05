@@ -239,56 +239,89 @@ local function getClosestLivingHRP(fromPos: Vector3): BasePart?
     return best
 end
 
-local function raycastGround(pos: Vector3)
-    -- If you have Workspace.Terrain.Spawnable, we only allow spawns on those parts.
-    -- Otherwise fallback to a blacklist-based raycast.
-    if not workspace:GetAttribute("_SpawnableResolved") then
-        workspace:SetAttribute("_SpawnableResolved", true)
-        local terrainFolder = workspace:FindFirstChild("Terrain")
-        workspace:SetAttribute("_HasSpawnable", terrainFolder and terrainFolder:FindFirstChild("Spawnable") ~= nil)
+local function getTerrainAndSpawnable()
+    local terrain = workspace:FindFirstChildOfClass("Terrain")
+    local spawnable = nil
+    if terrain then
+        spawnable = terrain:FindFirstChild("Spawnable")
+    end
+    if not spawnable then
+        spawnable = workspace:FindFirstChild("Spawnable")
+    end
+    return terrain, spawnable
+end
+
+local function resolveMapPart(spawnable): BasePart?
+    local mapInst = spawnable and spawnable:FindFirstChild("Map")
+    if mapInst and mapInst:IsA("BasePart") then
+        return mapInst
+    end
+    if mapInst then
+        local nested = mapInst:FindFirstChildWhichIsA("BasePart", true)
+        if nested then
+            return nested
+        end
     end
 
+    local workspaceMap = workspace:FindFirstChild("Map", true)
+    if workspaceMap and workspaceMap:IsA("BasePart") then
+        return workspaceMap
+    end
+    if workspaceMap then
+        return workspaceMap:FindFirstChildWhichIsA("BasePart", true)
+    end
+    return nil
+end
+
+local function raycastGround(pos: Vector3)
     local params = RaycastParams.new()
     params.IgnoreWater = true
 
-    local terrainFolder = workspace:FindFirstChild("Terrain")
-    local spawnable = terrainFolder and terrainFolder:FindFirstChild("Spawnable")
+    local terrain, spawnable = getTerrainAndSpawnable()
 
-    if spawnable then
-        params.FilterType = Enum.RaycastFilterType.Include
-        params.FilterDescendantsInstances = { spawnable }
-    else
-        params.FilterType = Enum.RaycastFilterType.Blacklist
-        local blacklist = { ENEMIES_FOLDER }
-        for _, plr in ipairs(Players:GetPlayers()) do
-            if plr.Character then
-                table.insert(blacklist, plr.Character)
-            end
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    local blacklist = { ENEMIES_FOLDER }
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Character then
+            table.insert(blacklist, plr.Character)
         end
-        params.FilterDescendantsInstances = blacklist
     end
+    params.FilterDescendantsInstances = blacklist
 
     local origin = Vector3.new(pos.X, SPAWN_RAY_START_Y, pos.Z)
-    return workspace:Raycast(origin, Vector3.new(0, -GROUND_RAY_DIST, 0), params)
+    local hit = workspace:Raycast(origin, Vector3.new(0, -GROUND_RAY_DIST, 0), params)
+    if not hit then
+        return nil
+    end
+
+    if spawnable then
+        local inst = hit.Instance
+        local isSpawnablePart = inst and inst:IsDescendantOf(spawnable)
+        local isTerrainVoxel = terrain and inst == terrain
+        if not isSpawnablePart and not isTerrainVoxel then
+            return nil
+        end
+    end
+
+    return hit
 end
 
-local function slopeDeg(normal: Vector3)
+local function slopeDeg(normal: Vector3): number
     local up = Vector3.new(0, 1, 0)
     local dot = math.clamp(normal:Dot(up), -1, 1)
     return math.deg(math.acos(dot))
 end
 
--- Spawn bounds: use Workspace.Terrain.Spawnable.Map as the playable floor bounds.
+-- Spawn bounds: prefer Map from Spawnable, fallback to any Map part in workspace.
 -- This prevents "spawn only in a quarter" when ring samples outside the arena.
 local _boundsCache = nil
 local _boundsCacheT = 0
 local BOUNDS_REFRESH_SEC = 2
 
 local function computeSpawnBounds()
-    local terrainFolder = workspace:FindFirstChild("Terrain")
-    local spawnable = terrainFolder and terrainFolder:FindFirstChild("Spawnable")
-    local mapPart = spawnable and spawnable:FindFirstChild("Map")
-    if mapPart and mapPart:IsA("BasePart") then
+    local _, spawnable = getTerrainAndSpawnable()
+    local mapPart = resolveMapPart(spawnable)
+    if mapPart then
         local halfX, halfZ = mapPart.Size.X * 0.5, mapPart.Size.Z * 0.5
         return {
             minX = mapPart.Position.X - halfX,
