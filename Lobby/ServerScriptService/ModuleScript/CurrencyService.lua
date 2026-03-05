@@ -20,6 +20,10 @@ local function utcWeekKey(t: number?): number
 	return (dt.year * 100) + week
 end
 
+local function getData(player: Player)
+	return PlayerData.Get(player)
+end
+
 local function addMissionCounter(player: Player, key: string, amount: number)
 	if amount == 0 then return end
 	local data = getData(player)
@@ -44,10 +48,6 @@ local function addMissionCounter(player: Player, key: string, amount: number)
 	m.CountersDaily[key] = (tonumber(m.CountersDaily[key]) or 0) + amount
 	m.CountersWeekly[key] = (tonumber(m.CountersWeekly[key]) or 0) + amount
 	PlayerData.MarkDirty(player)
-end
-
-local function getData(player: Player)
-	return PlayerData.Get(player)
 end
 
 local function clamp0(n)

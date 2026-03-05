@@ -154,6 +154,21 @@ WaveStatusEvent.OnClientEvent:Connect(function(p)
 		center.Text = ("ELITE DEFEATED (%d/%d)"):format(defeated, total)
 		task.delay(3, function() center.Visible = false end)
 
+	elseif p.type == "shrinesSpawned" then
+		local count = math.max(0, math.floor(tonumber(p.count) or 0))
+		local seconds = math.max(1, math.floor(tonumber(p.chargeSeconds) or 5))
+		center.Visible = true
+		center.Text = ("SHRINES: %d (STAY %ds)"):format(count, seconds)
+		task.delay(3, function() center.Visible = false end)
+
+	elseif p.type == "shrineComplete" then
+		local playerName = tostring(p.playerName or "Player")
+		local xp = math.max(0, math.floor(tonumber(p.xp) or 0))
+		local coins = math.max(0, math.floor(tonumber(p.coins) or 0))
+		center.Visible = true
+		center.Text = ("SHRINE: %s +%d XP +%d C"):format(playerName, xp, coins)
+		task.delay(3, function() center.Visible = false end)
+
 	elseif p.type == "complete" then
 		local defeated, total = sanitizeEliteProgress(p.elitesDefeated, p.elitesTotal)
 		center.Visible = true
