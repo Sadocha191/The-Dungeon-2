@@ -1,0 +1,566 @@
+-- ChestService.server.lua (Level1)
+-- Spawns random coin chests. Players can open them for coins or for free via Key chance.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local MIN_CHESTS = 3
+local MAX_CHESTS = 5
+local MIN_CHEST_GAP = 30
+local CHEST_RAYCAST_TRIES = 45
+local CHEST_HEIGHT = 1.8
+
+local BASE_CHEST_COST = 55
+local CHEST_COST_STEP = 25
+local MIN_CHEST_COST = 25
+
+local KEY_STACK_CHANCE = 0.10 -- each key adds +10% to x before applying x/(1+x)
+
+local RunStarted = ReplicatedStorage:FindFirstChild("RunStarted")
+if not RunStarted then
+	RunStarted = Instance.new("BoolValue")
+	RunStarted.Name = "RunStarted"
+	RunStarted.Value = false
+	RunStarted.Parent = ReplicatedStorage
+end
+
+local PauseState = ReplicatedStorage:FindFirstChild("PauseState")
+if not PauseState then
+	PauseState = Instance.new("BoolValue")
+	PauseState.Name = "PauseState"
+	PauseState.Value = false
+	PauseState.Parent = ReplicatedStorage
+end
+
+local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
+if not Remotes then
+	Remotes = Instance.new("Folder")
+	Remotes.Name = "Remotes"
+	Remotes.Parent = ReplicatedStorage
+end
+
+local WaveStatusEvent = Remotes:FindFirstChild("WaveStatusEvent")
+if not WaveStatusEvent then
+	WaveStatusEvent = Instance.new("RemoteEvent")
+	WaveStatusEvent.Name = "WaveStatusEvent"
+	WaveStatusEvent.Parent = Remotes
+end
+
+local chestsFolder = workspace:FindFirstChild("Chests")
+if not chestsFolder then
+	chestsFolder = Instance.new("Folder")
+	chestsFolder.Name = "Chests"
+	chestsFolder.Parent = workspace
+end
+
+local chests = {}
+local spawnedForRun = false
+
+local NUM_DEFAULTS = {
+	ShrineDamageMult = 1,
+	ShrineCritDamageBonus = 0,
+	ShrineAttackSpeedBonus = 0,
+	ShrinePickupRangeBonus = 0,
+	ShrineLuckBonus = 0,
+	ShrineProjectileBonus = 0,
+	ShrineHpRegenFlat = 0,
+	ShrineKnockbackMult = 1,
+	ShrineDifficultyPct = 0,
+	ShrineLifestealPct = 0,
+	ShrinePowerupMult = 1,
+	ShrineEliteDamageBonus = 0,
+	ShrineDurationBonus = 0,
+	ShrineJumpHeightBonus = 0,
+	ShrineShieldMax = 0,
+	ShrineShieldCurrent = 0,
+	ShrineMoveSpeedAdded = 0,
+	ChestOpenedCount = 0,
+	ChestKeyStacks = 0,
+	ChestFreeChanceFlat = 0,
+	ChestCostMult = 1,
+}
+
+local REWARDS = {
+	{ rarity = "Common", id = "damage_10", label = "Gym Sauce (+10% Damage)", value = 0.10 },
+	{ rarity = "Common", id = "shield_5", label = "Shield Tome (+5 Shield)", value = 5 },
+	{ rarity = "Common", id = "pickup_20", label = "Attraction (+20% Pickup Range)", value = 0.20 },
+	{ rarity = "Common", id = "crit_dmg_10", label = "Crit Tonic (+10% Crit Damage)", value = 0.10 },
+	{ rarity = "Common", id = "move_15", label = "Turbo Socks (+15% Movement Speed)", value = 0.15 },
+	{ rarity = "Common", id = "regen_35", label = "Medkit (+35 HP Regen)", value = 35 },
+	{ rarity = "Common", id = "key_1", label = "Key (+1 stack)", value = 1 },
+	{ rarity = "Uncommon", id = "projectile_1", label = "Backpack (+1 Projectile)", value = 1 },
+	{ rarity = "Uncommon", id = "atkspd_8", label = "Battery (+8% Attack Speed)", value = 0.08 },
+	{ rarity = "Uncommon", id = "elite_15", label = "Boss Buster (+15% Elite Damage)", value = 0.15 },
+	{ rarity = "Rare", id = "lifesteal_10", label = "Demonic Blade (+10% Lifesteal)", value = 0.10 },
+	{ rarity = "Rare", id = "luck_8", label = "Clover (+8% Luck)", value = 0.08 },
+	{ rarity = "Rare", id = "powerup_15", label = "Anvil (+15% Powerup Mult)", value = 0.15 },
+	{ rarity = "Legendary", id = "damage_25", label = "Big Bonk (+25% Damage)", value = 0.25 },
+}
+
+local REWARDS_BY_RARITY = {
+	Common = {},
+	Uncommon = {},
+	Rare = {},
+	Legendary = {},
+}
+for _, reward in ipairs(REWARDS) do
+	table.insert(REWARDS_BY_RARITY[reward.rarity], reward)
+end
+
+local function getNumAttr(plr, name, fallback)
+	local v = plr:GetAttribute(name)
+	if typeof(v) ~= "number" then
+		return fallback
+	end
+	return v
+end
+
+local function setNumAttr(plr, name, value)
+	plr:SetAttribute(name, tonumber(value) or 0)
+end
+
+local function ensureDefaults(plr)
+	for attr, defaultValue in pairs(NUM_DEFAULTS) do
+		if typeof(plr:GetAttribute(attr)) ~= "number" then
+			setNumAttr(plr, attr, defaultValue)
+		end
+	end
+end
+
+local function applyMovement(plr)
+	local char = plr.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not hum then
+		return
+	end
+	local baseSpeed = getNumAttr(plr, "BaseWalkSpeed", 18)
+	local runBonusSpeed = getNumAttr(plr, "RunBonusSpeed", 0)
+	hum.WalkSpeed = baseSpeed + runBonusSpeed
+end
+
+local function broadcast(payload)
+	for _, plr in ipairs(Players:GetPlayers()) do
+		WaveStatusEvent:FireClient(plr, payload)
+	end
+end
+
+local function clearChests()
+	for _, chest in ipairs(chests) do
+		if chest.model and chest.model.Parent then
+			chest.model:Destroy()
+		end
+	end
+	table.clear(chests)
+end
+
+local function getWorldBoundsXZ()
+	local minX, minZ = math.huge, math.huge
+	local maxX, maxZ = -math.huge, -math.huge
+	local count = 0
+
+	local function consider(inst)
+		if not inst:IsA("BasePart") then return end
+		if not inst.CanCollide then return end
+		if inst.Size.Magnitude <= 6 then return end
+
+		local p = inst.Position
+		minX = math.min(minX, p.X)
+		maxX = math.max(maxX, p.X)
+		minZ = math.min(minZ, p.Z)
+		maxZ = math.max(maxZ, p.Z)
+		count += 1
+	end
+
+	local map = workspace:FindFirstChild("Map")
+	if map then
+		for _, d in ipairs(map:GetDescendants()) do
+			consider(d)
+		end
+	else
+		for _, d in ipairs(workspace:GetDescendants()) do
+			if count > 1000 then break end
+			consider(d)
+		end
+	end
+
+	if count < 10 or minX == math.huge then
+		return Vector2.new(-180, -180), Vector2.new(180, 180)
+	end
+
+	local pad = 20
+	return Vector2.new(minX + pad, minZ + pad), Vector2.new(maxX - pad, maxZ - pad)
+end
+
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+rayParams.IgnoreWater = false
+
+local function buildRaycastBlacklist()
+	local list = {
+		chestsFolder,
+		workspace:FindFirstChild("Enemies"),
+		workspace:FindFirstChild("Drops"),
+		workspace:FindFirstChild("Shrines"),
+	}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr.Character then
+			table.insert(list, plr.Character)
+		end
+	end
+	return list
+end
+
+local function farEnoughFromOthers(pos, used)
+	for _, other in ipairs(used) do
+		if (other - pos).Magnitude < MIN_CHEST_GAP then
+			return false
+		end
+	end
+	return true
+end
+
+local function randomGroundPoint(existing)
+	local pMin, pMax = getWorldBoundsXZ()
+	rayParams.FilterDescendantsInstances = buildRaycastBlacklist()
+
+	for _ = 1, CHEST_RAYCAST_TRIES do
+		local x = pMin.X + math.random() * (pMax.X - pMin.X)
+		local z = pMin.Y + math.random() * (pMax.Y - pMin.Y)
+		local origin = Vector3.new(x, 420, z)
+		local result = workspace:Raycast(origin, Vector3.new(0, -900, 0), rayParams)
+		if result then
+			local pos = result.Position + Vector3.new(0, CHEST_HEIGHT, 0)
+			if farEnoughFromOthers(pos, existing) then
+				return pos
+			end
+		end
+	end
+	return nil
+end
+
+local function newPart(parent, name, size, color, material)
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Size = size
+	p.Color = color
+	p.Material = material
+	p.Anchored = true
+	p.Parent = parent
+	return p
+end
+
+local function computeFreeChance(plr)
+	local keyStacks = math.max(0, getNumAttr(plr, "ChestKeyStacks", 0))
+	local flat = math.max(0, getNumAttr(plr, "ChestFreeChanceFlat", 0))
+	local x = keyStacks * KEY_STACK_CHANCE + flat
+	if x <= 0 then
+		return 0
+	end
+	return math.clamp(x / (1 + x), 0, 0.95)
+end
+
+local function getChestCost(plr)
+	local opened = math.max(0, math.floor(getNumAttr(plr, "ChestOpenedCount", 0)))
+	local mult = math.max(0.2, getNumAttr(plr, "ChestCostMult", 1))
+	local raw = (BASE_CHEST_COST + opened * CHEST_COST_STEP) * mult
+	return math.max(MIN_CHEST_COST, math.floor(raw + 0.5))
+end
+
+local function pickRewardRarity(plr)
+	local luck = math.max(0, getNumAttr(plr, "ShrineLuckBonus", 0))
+	local commonW = math.max(8, 75 * (1 - luck * 0.8))
+	local uncommonW = 20 * (1 + luck * 1.4)
+	local rareW = 4 * (1 + luck * 1.8)
+	local legendaryW = 1 * (1 + luck * 2.0)
+
+	local total = commonW + uncommonW + rareW + legendaryW
+	local roll = math.random() * total
+	if roll <= commonW then
+		return "Common"
+	end
+	if roll <= commonW + uncommonW then
+		return "Uncommon"
+	end
+	if roll <= commonW + uncommonW + rareW then
+		return "Rare"
+	end
+	return "Legendary"
+end
+
+local function pickReward(plr)
+	local rarity = pickRewardRarity(plr)
+	local bucket = REWARDS_BY_RARITY[rarity]
+	if not bucket or #bucket == 0 then
+		bucket = REWARDS_BY_RARITY.Common
+		rarity = "Common"
+	end
+	return bucket[math.random(1, #bucket)], rarity
+end
+
+local function applyReward(plr, reward)
+	ensureDefaults(plr)
+
+	local powerMult = math.max(1, getNumAttr(plr, "ShrinePowerupMult", 1))
+	local scaled = reward.value
+	if reward.id ~= "powerup_15" and reward.id ~= "key_1" then
+		scaled = scaled * powerMult
+	end
+
+	if reward.id == "damage_10" or reward.id == "damage_25" then
+		setNumAttr(plr, "ShrineDamageMult", getNumAttr(plr, "ShrineDamageMult", 1) * (1 + scaled))
+
+	elseif reward.id == "shield_5" then
+		local addShield = math.max(1, math.floor(scaled + 0.5))
+		setNumAttr(plr, "ShrineShieldMax", getNumAttr(plr, "ShrineShieldMax", 0) + addShield)
+		setNumAttr(plr, "ShrineShieldCurrent", getNumAttr(plr, "ShrineShieldCurrent", 0) + addShield)
+
+	elseif reward.id == "pickup_20" then
+		setNumAttr(plr, "ShrinePickupRangeBonus", getNumAttr(plr, "ShrinePickupRangeBonus", 0) + scaled)
+
+	elseif reward.id == "crit_dmg_10" then
+		setNumAttr(plr, "ShrineCritDamageBonus", getNumAttr(plr, "ShrineCritDamageBonus", 0) + scaled)
+
+	elseif reward.id == "move_15" then
+		local baseSpeed = getNumAttr(plr, "BaseWalkSpeed", 18)
+		local addSpeed = baseSpeed * scaled
+		setNumAttr(plr, "RunBonusSpeed", getNumAttr(plr, "RunBonusSpeed", 0) + addSpeed)
+		setNumAttr(plr, "ShrineMoveSpeedAdded", getNumAttr(plr, "ShrineMoveSpeedAdded", 0) + addSpeed)
+		applyMovement(plr)
+
+	elseif reward.id == "regen_35" then
+		setNumAttr(plr, "ShrineHpRegenFlat", getNumAttr(plr, "ShrineHpRegenFlat", 0) + scaled)
+
+	elseif reward.id == "key_1" then
+		setNumAttr(plr, "ChestKeyStacks", getNumAttr(plr, "ChestKeyStacks", 0) + 1)
+
+	elseif reward.id == "projectile_1" then
+		setNumAttr(plr, "ShrineProjectileBonus", getNumAttr(plr, "ShrineProjectileBonus", 0) + 1)
+
+	elseif reward.id == "atkspd_8" then
+		setNumAttr(plr, "ShrineAttackSpeedBonus", getNumAttr(plr, "ShrineAttackSpeedBonus", 0) + scaled)
+
+	elseif reward.id == "elite_15" then
+		setNumAttr(plr, "ShrineEliteDamageBonus", getNumAttr(plr, "ShrineEliteDamageBonus", 0) + scaled)
+
+	elseif reward.id == "lifesteal_10" then
+		setNumAttr(plr, "ShrineLifestealPct", getNumAttr(plr, "ShrineLifestealPct", 0) + scaled)
+
+	elseif reward.id == "luck_8" then
+		setNumAttr(plr, "ShrineLuckBonus", getNumAttr(plr, "ShrineLuckBonus", 0) + scaled)
+
+	elseif reward.id == "powerup_15" then
+		setNumAttr(plr, "ShrinePowerupMult", getNumAttr(plr, "ShrinePowerupMult", 1) * (1 + scaled))
+	end
+end
+
+local function createChestModel(pos, idx)
+	local model = Instance.new("Model")
+	model.Name = ("Chest_%d"):format(idx)
+
+	local base = newPart(model, "Base", Vector3.new(5.2, 1.2, 4.2), Color3.fromRGB(86, 56, 35), Enum.Material.WoodPlanks)
+	base.CFrame = CFrame.new(pos - Vector3.new(0, 1.4, 0))
+	base.CanCollide = true
+
+	local body = newPart(model, "Body", Vector3.new(4.4, 2, 3.4), Color3.fromRGB(121, 80, 44), Enum.Material.Wood)
+	body.CFrame = CFrame.new(pos)
+	body.CanCollide = true
+
+	local band = newPart(model, "Band", Vector3.new(4.5, 0.4, 3.6), Color3.fromRGB(213, 168, 69), Enum.Material.Metal)
+	band.CFrame = CFrame.new(pos + Vector3.new(0, 0.75, 0))
+	band.CanCollide = false
+
+	local lid = newPart(model, "Lid", Vector3.new(4.6, 0.9, 3.6), Color3.fromRGB(103, 67, 38), Enum.Material.Wood)
+	lid.CFrame = CFrame.new(pos + Vector3.new(0, 1.5, -0.2))
+	lid.CanCollide = true
+
+	local core = newPart(model, "Core", Vector3.new(1.2, 1.2, 1.2), Color3.fromRGB(255, 209, 83), Enum.Material.Neon)
+	core.Shape = Enum.PartType.Ball
+	core.CFrame = CFrame.new(pos + Vector3.new(0, 1.3, 0.8))
+	core.CanCollide = false
+	core.CanTouch = false
+	core.CanQuery = false
+
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromRGB(255, 210, 89)
+	light.Brightness = 1.8
+	light.Range = 14
+	light.Parent = core
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "OpenPrompt"
+	prompt.ActionText = "Open Chest"
+	prompt.ObjectText = "Chest"
+	prompt.HoldDuration = 0.45
+	prompt.MaxActivationDistance = 12
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = core
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "Billboard"
+	billboard.Size = UDim2.fromOffset(180, 42)
+	billboard.StudsOffset = Vector3.new(0, 2.6, 0)
+	billboard.AlwaysOnTop = true
+	billboard.Parent = core
+
+	local text = Instance.new("TextLabel")
+	text.Size = UDim2.fromScale(1, 1)
+	text.BackgroundTransparency = 1
+	text.TextColor3 = Color3.fromRGB(255, 236, 186)
+	text.TextStrokeTransparency = 0.3
+	text.Font = Enum.Font.GothamBold
+	text.TextScaled = true
+	text.Text = "CHEST"
+	text.Parent = billboard
+
+	model.PrimaryPart = core
+	model.Parent = chestsFolder
+
+	return {
+		model = model,
+		core = core,
+		lid = lid,
+		prompt = prompt,
+		opened = false,
+	}
+end
+
+local function isAlive(plr)
+	local char = plr.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	return hum and hum.Health > 0 and plr:GetAttribute("RunEnded") ~= true
+end
+
+local function handleOpen(chest, plr)
+	if not chest or chest.opened then
+		return
+	end
+	if not RunStarted.Value or PauseState.Value then
+		return
+	end
+	if not plr or not plr.Parent or not isAlive(plr) then
+		return
+	end
+
+	ensureDefaults(plr)
+
+	local cost = getChestCost(plr)
+	local freeChance = computeFreeChance(plr)
+	local openedForFree = (math.random() < freeChance)
+
+	if not openedForFree then
+		local canSpend = false
+		if type(_G.TrySpendRunCoins) == "function" then
+			local ok = _G.TrySpendRunCoins(plr, cost)
+			canSpend = (ok == true)
+		end
+		if not canSpend then
+			WaveStatusEvent:FireClient(plr, {
+				type = "chestFail",
+				cost = cost,
+				required = cost,
+				freeChancePct = math.floor(freeChance * 100 + 0.5),
+			})
+			return
+		end
+	end
+
+	chest.opened = true
+	if chest.prompt then
+		chest.prompt.Enabled = false
+	end
+
+	if chest.lid and chest.lid:IsA("BasePart") then
+		chest.lid.CFrame = chest.lid.CFrame * CFrame.new(0, 0.5, -0.8) * CFrame.Angles(math.rad(-28), 0, 0)
+	end
+	if chest.core and chest.core:IsA("BasePart") then
+		chest.core.Color = Color3.fromRGB(93, 255, 137)
+	end
+
+	local reward, rarity = pickReward(plr)
+	applyReward(plr, reward)
+	setNumAttr(plr, "ChestOpenedCount", getNumAttr(plr, "ChestOpenedCount", 0) + 1)
+
+	broadcast({
+		type = "chestOpened",
+		playerName = plr.DisplayName ~= "" and plr.DisplayName or plr.Name,
+		rewardName = reward.label,
+		rarity = rarity,
+		free = openedForFree,
+		cost = cost,
+	})
+
+	task.delay(1.8, function()
+		if chest.model and chest.model.Parent then
+			chest.model:Destroy()
+		end
+	end)
+end
+
+local function spawnChestsForRun()
+	if spawnedForRun then
+		return
+	end
+	spawnedForRun = true
+
+	clearChests()
+	for _, plr in ipairs(Players:GetPlayers()) do
+		ensureDefaults(plr)
+		setNumAttr(plr, "ChestOpenedCount", 0)
+		setNumAttr(plr, "ChestKeyStacks", 0)
+	end
+
+	local used = {}
+	local count = math.random(MIN_CHESTS, MAX_CHESTS)
+	for i = 1, count do
+		local pos = randomGroundPoint(used)
+		if pos then
+			table.insert(used, pos)
+			local chest = createChestModel(pos, i)
+			chest.prompt.Triggered:Connect(function(plr)
+				handleOpen(chest, plr)
+			end)
+			table.insert(chests, chest)
+		end
+	end
+
+	broadcast({
+		type = "chestsSpawned",
+		count = #chests,
+		baseCost = BASE_CHEST_COST,
+	})
+end
+
+Players.PlayerAdded:Connect(function(plr)
+	ensureDefaults(plr)
+	plr.CharacterAdded:Connect(function()
+		task.wait(0.1)
+		ensureDefaults(plr)
+	end)
+end)
+
+for _, plr in ipairs(Players:GetPlayers()) do
+	ensureDefaults(plr)
+	plr.CharacterAdded:Connect(function()
+		task.wait(0.1)
+		ensureDefaults(plr)
+	end)
+end
+
+RunStarted.Changed:Connect(function(v)
+	if v == true then
+		spawnChestsForRun()
+	else
+		spawnedForRun = false
+		clearChests()
+		for _, plr in ipairs(Players:GetPlayers()) do
+			setNumAttr(plr, "ChestOpenedCount", 0)
+			setNumAttr(plr, "ChestKeyStacks", 0)
+		end
+	end
+end)
+
+if RunStarted.Value == true then
+	spawnChestsForRun()
+end
+
+print("[ChestService] Ready")

@@ -740,6 +740,29 @@ function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	end
 end
 
+
+function _G.GetRunCoins(plr: Player): number
+	if not plr or not plr.Parent then return 0 end
+	local r = getRun(plr)
+	return math.max(0, math.floor(tonumber(r.runSilver) or 0))
+end
+
+function _G.TrySpendRunCoins(plr: Player, coins: number): boolean
+	if not plr or not plr.Parent then return false end
+	coins = math.max(0, math.floor(tonumber(coins) or 0))
+	if coins <= 0 then return true end
+
+	local r = getRun(plr)
+	if r.ended then return false end
+	if r.runSilver < coins then
+		syncHud(plr)
+		return false
+	end
+
+	r.runSilver -= coins
+	syncHud(plr)
+	return true
+end
 -- Public API for soul orbs (DropService calls _G.AwardSouls)
 function _G.AwardSouls(plr: Player, souls: number)
 	if not plr or not plr.Parent then return end
@@ -944,3 +967,4 @@ Players.PlayerRemoving:Connect(function(plr: Player)
 end)
 
 print("[ProgressService] Ready (v15)")
+

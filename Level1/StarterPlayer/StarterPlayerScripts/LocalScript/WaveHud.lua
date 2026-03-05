@@ -169,6 +169,28 @@ WaveStatusEvent.OnClientEvent:Connect(function(p)
 		center.Text = ("SHRINE [%s]: %s (%s)"):format(rarity, bonusName, playerName)
 		task.delay(3, function() center.Visible = false end)
 
+	elseif p.type == "chestsSpawned" then
+		local count = math.max(0, math.floor(tonumber(p.count) or 0))
+		center.Visible = true
+		center.Text = ("CHESTS SPAWNED: %d"):format(count)
+		task.delay(3, function() center.Visible = false end)
+
+	elseif p.type == "chestOpened" then
+		local playerName = tostring(p.playerName or "Player")
+		local rewardName = tostring(p.rewardName or "Reward")
+		local rarity = tostring(p.rarity or "Common")
+		local openedForFree = (p.free == true)
+		local suffix = openedForFree and "FREE" or ("-%d COINS"):format(math.max(0, math.floor(tonumber(p.cost) or 0)))
+		center.Visible = true
+		center.Text = ("CHEST [%s]: %s (%s, %s)"):format(rarity, rewardName, playerName, suffix)
+		task.delay(3, function() center.Visible = false end)
+
+	elseif p.type == "chestFail" then
+		local cost = math.max(0, math.floor(tonumber(p.cost) or 0))
+		center.Visible = true
+		center.Text = ("CHEST: NEED %d COINS"):format(cost)
+		task.delay(2, function() center.Visible = false end)
+
 	elseif p.type == "complete" then
 		local defeated, total = sanitizeEliteProgress(p.elitesDefeated, p.elitesTotal)
 		center.Visible = true
@@ -178,3 +200,4 @@ WaveStatusEvent.OnClientEvent:Connect(function(p)
 		setBar(total > 0 and (defeated / total) or 1)
 	end
 end)
+
