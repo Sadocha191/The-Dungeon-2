@@ -31,7 +31,8 @@ local function send(plr: Player)
 		level = d.level,
 		xp = d.xp,
 		nextXp = d.nextXp,
-		coins = d.coins,
+		silver = d.silver,
+		coins = d.silver,
 	})
 end
 

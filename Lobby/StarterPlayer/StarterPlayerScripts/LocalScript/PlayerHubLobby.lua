@@ -174,7 +174,7 @@ PlayerProgressEvent.OnClientEvent:Connect(function(payload)
 	level = tonumber(payload.level) or level
 	xp = tonumber(payload.xp) or xp
 	nextXp = tonumber(payload.nextXp) or nextXp
-	coins = tonumber(payload.coins) or coins
+	coins = tonumber(payload.silver) or tonumber(payload.coins) or coins
 	render()
 end)
 
