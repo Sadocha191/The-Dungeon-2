@@ -11,6 +11,8 @@ local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions
 
 local BASE_WALKSPEED = 18
 local BASE_MAX_HP = 120
+local TELEPORT_DATA_RETRIES = 120
+local TELEPORT_DATA_RETRY_DELAY = 0.05
 
 local function findModule(name: string): ModuleScript?
 	local roots = { ServerScriptService, ReplicatedStorage }
@@ -65,6 +67,29 @@ local function normalizeWeaponEntry(weaponEntry: any, weaponName: string?): {[st
 	return out
 end
 
+local function getStoredWeaponFromProfile(data: any): (string?, any)
+	if typeof(data) ~= "table" then
+		return nil, nil
+	end
+
+	local loadout = data.Loadout
+	if typeof(loadout) ~= "table" then
+		return nil, nil
+	end
+
+	local first = loadout[1]
+	if typeof(first) == "table" then
+		local id = first.id or first.weaponId or first.weaponName
+		if typeof(id) == "string" and id ~= "" then
+			return id, first
+		end
+	elseif typeof(first) == "string" and first ~= "" then
+		return first, { id = first }
+	end
+
+	return nil, nil
+end
+
 local function applyWeapon(plr: Player, weaponName: string?, weaponEntry: any)
 	local data = PlayerData.Get(plr)
 	local normalizedEntry = normalizeWeaponEntry(weaponEntry, weaponName)
@@ -80,8 +105,15 @@ local function applyWeapon(plr: Player, weaponName: string?, weaponEntry: any)
 	end
 
 	if typeof(weaponName) ~= "string" or weaponName == "" then
+		local storedName = nil
+		storedName, _ = getStoredWeaponFromProfile(data)
+		if typeof(storedName) == "string" and storedName ~= "" then
+			plr:SetAttribute("StarterWeaponName", storedName)
+			return
+		end
 		weaponName = "Knight's Oath"
 	end
+
 	plr:SetAttribute("StarterWeaponName", weaponName)
 	if WeaponService.SyncLoadoutFromStarter then
 		WeaponService.SyncLoadoutFromStarter(plr)
@@ -94,41 +126,58 @@ local function applyWeapon(plr: Player, weaponName: string?, weaponEntry: any)
 end
 
 local function getTeleportData(plr: Player): any
-	for _ = 1, 20 do
+	for _ = 1, TELEPORT_DATA_RETRIES do
 		local joinData = plr:GetJoinData()
 		local tdata = joinData and joinData.TeleportData
 		if typeof(tdata) == "table" then
 			return tdata
 		end
-		task.wait(0.05)
+		task.wait(TELEPORT_DATA_RETRY_DELAY)
+	end
+	return nil
+end
+
+local function getPerPlayerWeaponMap(tdata: any): any
+	if typeof(tdata) ~= "table" then
+		return nil
+	end
+	if typeof(tdata.WeaponByUserId) == "table" then
+		return tdata.WeaponByUserId
+	end
+	if typeof(tdata.WeaponsByUserId) == "table" then
+		return tdata.WeaponsByUserId
+	end
+	if typeof(tdata.LoadoutByUserId) == "table" then
+		return tdata.LoadoutByUserId
+	end
+	if typeof(tdata.WeaponNameByUserId) == "table" then
+		return tdata.WeaponNameByUserId
+	end
+	return nil
+end
+
+local function mapValueByUserId(map: any, userId: number): any
+	if typeof(map) ~= "table" then
+		return nil
+	end
+	local key = tostring(userId)
+	if map[key] ~= nil then
+		return map[key]
+	end
+	if map[userId] ~= nil then
+		return map[userId]
+	end
+	for k, v in pairs(map) do
+		if tonumber(k) == userId then
+			return v
+		end
 	end
 	return nil
 end
 
 local function findPerPlayerPayload(tdata: any, userId: number): any
-	if typeof(tdata) ~= "table" or typeof(tdata.WeaponByUserId) ~= "table" then
-		return nil
-	end
-
-	local map = tdata.WeaponByUserId
-	local key = tostring(userId)
-	local byString = map[key]
-	if typeof(byString) == "table" then
-		return byString
-	end
-
-	local byNumber = map[userId]
-	if typeof(byNumber) == "table" then
-		return byNumber
-	end
-
-	for k, v in pairs(map) do
-		if tonumber(k) == userId and typeof(v) == "table" then
-			return v
-		end
-	end
-
-	return nil
+	local map = getPerPlayerWeaponMap(tdata)
+	return mapValueByUserId(map, userId)
 end
 
 local function resolveTeleportWeapon(tdata: any, userId: number): (string?, any)
@@ -140,14 +189,18 @@ local function resolveTeleportWeapon(tdata: any, userId: number): (string?, any)
 	local weaponEntry = tdata.StarterWeaponEntry
 
 	local me = findPerPlayerPayload(tdata, userId)
-	if typeof(me) == "table" then
-		local candidateName = me.StarterWeaponName or me.weaponName or me.weaponId or me.id
+	if typeof(me) == "string" and me ~= "" then
+		weaponName = me
+	elseif typeof(me) == "table" then
+		local candidateName = me.StarterWeaponName or me.weaponName or me.weaponId or me.id or me.StarterWeapon
 		if typeof(candidateName) == "string" and candidateName ~= "" then
 			weaponName = candidateName
 		end
-		local candidateEntry = me.StarterWeaponEntry or me.weaponEntry or me.entry
+		local candidateEntry = me.StarterWeaponEntry or me.weaponEntry or me.entry or me.LoadoutEntry
 		if candidateEntry ~= nil then
 			weaponEntry = candidateEntry
+		elseif me.id or me.weaponId or me.weaponName then
+			weaponEntry = me
 		end
 	end
 
@@ -198,7 +251,7 @@ local function processPlayer(plr: Player)
 		partyId = tdata.PartyId
 		partyLeader = tdata.PartyLeaderUserId
 	else
-		warn("[ReceiveTeleportLoadout] Missing TeleportData for", plr.Name, "- fallback loadout")
+		print("[ReceiveTeleportLoadout] Missing TeleportData for", plr.Name, "- using saved/default loadout")
 	end
 
 	applyUnlockedSpells(plr, unlocked)
@@ -264,4 +317,3 @@ Players.PlayerRemoving:Connect(function(plr: Player)
 end)
 
 print("[ReceiveTeleportLoadout] Ready (spells)")
-

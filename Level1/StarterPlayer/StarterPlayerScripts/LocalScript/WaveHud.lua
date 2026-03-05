@@ -1,6 +1,6 @@
 -- WaveHud.client.lua (StarterPlayerScripts)
 -- Reworked: time-based horde HUD
--- Shows: elapsed time, next elite timer, elite progress (0/3), and short center alerts.
+-- Shows: elapsed time, next elite timer, elite progress, and short center alerts.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -72,7 +72,7 @@ elites.Font = Enum.Font.Gotham
 elites.TextSize = 12
 elites.TextXAlignment = Enum.TextXAlignment.Left
 elites.TextColor3 = Color3.fromRGB(210,210,210)
-elites.Text = "Elites: 0/3"
+elites.Text = "Elites: 0/2"
 elites.Parent = panel
 
 local barBack = Instance.new("Frame")
@@ -91,10 +91,10 @@ fill.Parent = barBack
 Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 999)
 
 local function setBar(p)
-    p = math.clamp(p, 0, 1)
-    TweenService:Create(fill, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        Size = UDim2.new(p, 0, 1, 0)
-    }):Play()
+	p = math.clamp(p, 0, 1)
+	TweenService:Create(fill, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = UDim2.new(p, 0, 1, 0)
+	}):Play()
 end
 
 local center = Instance.new("TextLabel")
@@ -111,38 +111,55 @@ center.Visible = false
 center.Parent = gui
 Instance.new("UICorner", center).CornerRadius = UDim.new(0, 14)
 
+local function sanitizeEliteProgress(defeatedRaw, totalRaw)
+	local total = math.floor(tonumber(totalRaw) or 0)
+	if total <= 0 then total = 2 end
+	total = math.min(total, 99)
+
+	local defeated = math.floor(tonumber(defeatedRaw) or 0)
+	defeated = math.clamp(defeated, 0, total)
+
+	return defeated, total
+end
+
 local function fmtTime(sec)
-    sec = math.max(0, math.floor(sec or 0))
-    local m = math.floor(sec / 60)
-    local s = sec % 60
-    return string.format("%02d:%02d", m, s)
+	if typeof(sec) ~= "number" or sec ~= sec or sec == math.huge or sec == -math.huge then
+		return "--:--"
+	end
+	sec = math.max(0, math.floor(sec))
+	local m = math.floor(sec / 60)
+	local s = sec % 60
+	return string.format("%02d:%02d", m, s)
 end
 
 WaveStatusEvent.OnClientEvent:Connect(function(p)
-    if typeof(p) ~= "table" then return end
+	if typeof(p) ~= "table" then return end
 
-    if p.type == "timeUpdate" then
-        title.Text = ("Time: %s"):format(fmtTime(p.seconds))
-        sub.Text = ("Next Elite: %s"):format(fmtTime(p.nextEliteIn))
-        elites.Text = ("Elites: %d/%d"):format(tonumber(p.elitesDefeated) or 0, tonumber(p.elitesTotal) or 3)
-        setBar((tonumber(p.elitesDefeated) or 0) / math.max(1, tonumber(p.elitesTotal) or 3))
+	if p.type == "timeUpdate" then
+		local defeated, total = sanitizeEliteProgress(p.elitesDefeated, p.elitesTotal)
+		title.Text = ("Time: %s"):format(fmtTime(p.seconds))
+		sub.Text = ("Next Elite: %s"):format(fmtTime(p.nextEliteIn))
+		elites.Text = ("Elites: %d/%d"):format(defeated, total)
+		setBar(defeated / math.max(1, total))
 
-    elseif p.type == "eliteSpawn" then
-        local name = tostring(p.name or "Elite")
-        center.Visible = true
-        center.Text = ("ELITE SPAWNED: %s"):format(name)
-        task.delay(3, function() center.Visible = false end)
+	elseif p.type == "eliteSpawn" then
+		local name = tostring(p.name or "Elite")
+		center.Visible = true
+		center.Text = ("ELITE SPAWNED: %s"):format(name)
+		task.delay(3, function() center.Visible = false end)
 
-    elseif p.type == "eliteDefeated" then
-        center.Visible = true
-        center.Text = ("ELITE DEFEATED (%d/%d)"):format(tonumber(p.elitesDefeated) or 0, tonumber(p.elitesTotal) or 3)
-        task.delay(3, function() center.Visible = false end)
+	elseif p.type == "eliteDefeated" or p.type == "eliteProgress" then
+		local defeated, total = sanitizeEliteProgress(p.elitesDefeated, p.elitesTotal)
+		center.Visible = true
+		center.Text = ("ELITE DEFEATED (%d/%d)"):format(defeated, total)
+		task.delay(3, function() center.Visible = false end)
 
-    elseif p.type == "complete" then
-        center.Visible = true
-        center.Text = "LEVEL COMPLETE"
-        task.delay(5, function() center.Visible = false end)
-        elites.Text = "Elites: 3/3"
-        setBar(1)
-    end
+	elseif p.type == "complete" then
+		local defeated, total = sanitizeEliteProgress(p.elitesDefeated, p.elitesTotal)
+		center.Visible = true
+		center.Text = "LEVEL COMPLETE"
+		task.delay(5, function() center.Visible = false end)
+		elites.Text = ("Elites: %d/%d"):format(defeated, total)
+		setBar(total > 0 and (defeated / total) or 1)
+	end
 end)

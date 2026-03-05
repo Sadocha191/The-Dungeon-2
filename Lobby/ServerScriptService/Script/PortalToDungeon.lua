@@ -15,7 +15,6 @@ local replicatedModules = (
 	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
 )
 
-local ProfilesManager = require(serverModules:WaitForChild("ProfilesManager"))
 local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
 local PlayerData = require(serverModules:WaitForChild("PlayerData"))
 local Levels = require(replicatedModules:WaitForChild("Levels"))
@@ -130,27 +129,6 @@ local function canTeleport(player: Player): boolean
 	return true
 end
 
-local function getProfileSafe(player: Player)
-	if ProfilesManager.GetActiveProfile then
-		local p = ProfilesManager.GetActiveProfile(player)
-		if p then
-			return p
-		end
-	end
-	if ProfilesManager.LoadIfAny then
-		pcall(function()
-			ProfilesManager.LoadIfAny(player)
-		end)
-		if ProfilesManager.GetActiveProfile then
-			return ProfilesManager.GetActiveProfile(player)
-		end
-	end
-	if ProfilesManager.GetProfile then
-		return ProfilesManager.GetProfile(player)
-	end
-	return nil
-end
-
 local function buildUnlockedSpells(player: Player): {string}
 	local out = {}
 	local d = PlayerData.Get(player)
@@ -252,16 +230,40 @@ local function resolveWeaponSelection(player: Player, state: any): (string?, {[s
 	return weaponName, weaponEntry
 end
 
+local function compactWeaponEntry(entry: any): {[string]: any}?
+	if typeof(entry) ~= "table" then
+		return nil
+	end
+	local id = entry.id or entry.weaponId or entry.weaponName
+	if typeof(id) ~= "string" or id == "" then
+		return nil
+	end
+	local out: {[string]: any} = {
+		id = id,
+		weaponId = id,
+		level = math.max(1, math.floor(tonumber(entry.level) or 1)),
+	}
+	if typeof(entry.rarity) == "string" and entry.rarity ~= "" then
+		out.rarity = entry.rarity
+	end
+	if typeof(entry.prefix) == "string" and entry.prefix ~= "" then
+		out.prefix = entry.prefix
+	end
+	if typeof(entry.rollStats) == "table" then
+		local roll = cloneNumberMap(entry.rollStats)
+		if roll then
+			out.rollStats = roll
+		end
+	end
+	return out
+end
 local function buildTeleportDataForLeader(leader: Player, runMode: string, partyId: string?, leaderUserId: number?)
 	local st = PlayerStateStore.Get(leader) or PlayerStateStore.Load(leader)
-	local profile = getProfileSafe(leader)
 	local weaponName, weaponEntry = resolveWeaponSelection(leader, st)
 
 	return {
-		Profile = profile,
 		StarterWeaponName = weaponName,
-		StarterWeaponEntry = weaponEntry,
-		EquippedWeaponInstanceId = st and st.EquippedWeaponInstanceId or nil,
+		StarterWeaponEntry = compactWeaponEntry(weaponEntry),
 		UnlockedSpells = buildUnlockedSpells(leader),
 		RunMode = runMode,
 		PartyId = partyId,
@@ -280,15 +282,21 @@ local function tryTeleport(players: {Player}, placeId: number, tpData: any)
 	end
 
 	local weaponByUserId: {[string]: any} = {}
+	local weaponNameByUserId: {[string]: string} = {}
 	for _, p in ipairs(players) do
 		local st = PlayerStateStore.Get(p) or PlayerStateStore.Load(p)
 		local weaponName, weaponEntry = resolveWeaponSelection(p, st)
-		weaponByUserId[tostring(p.UserId)] = {
+		local uidKey = tostring(p.UserId)
+		weaponByUserId[uidKey] = {
 			StarterWeaponName = weaponName,
-			StarterWeaponEntry = weaponEntry,
+			StarterWeaponEntry = compactWeaponEntry(weaponEntry),
 		}
+		if typeof(weaponName) == "string" and weaponName ~= "" then
+			weaponNameByUserId[uidKey] = weaponName
+		end
 	end
 	tpData.WeaponByUserId = weaponByUserId
+	tpData.WeaponNameByUserId = weaponNameByUserId
 
 	local options = Instance.new("TeleportOptions")
 	options:SetTeleportData(tpData)
@@ -314,7 +322,6 @@ local function tryTeleport(players: {Player}, placeId: number, tpData: any)
 		end
 	end
 end
-
 prompt.Triggered:Connect(function(player: Player)
 	if not player or not player.Parent then
 		return
@@ -386,4 +393,3 @@ RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: an
 end)
 
 print("[PortalToDungeon] Ready (spells+loadout)")
-

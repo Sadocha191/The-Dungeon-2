@@ -1,7 +1,7 @@
 -- WaveController.server.lua (Level1)
 -- Reworked: time-based horde spawning (VS / Mega Bonk style)
 -- No waves. Difficulty ramps with elapsed run time.
--- Elites spawn every 10 minutes. After the 3rd elite is defeated -> Victory.
+-- Elites spawn at configured run times (default: 5:00 and 10:00).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -733,12 +733,39 @@ local function spawnInterval(t: number)
 	return i
 end
 
+local function buildEliteOrder(): {string}
+	-- Prefer named elites if they exist, fallback to any elite model in ReplicatedStorage.
+	local preferred = { "Ent", "Golem", "Knight", "Demon" }
+	local result = {}
+	local used = {}
+
+	for _, name in ipairs(preferred) do
+		local obj = EliteFolder:FindFirstChild(name)
+		if obj and obj:IsA("Model") then
+			table.insert(result, name)
+			used[name] = true
+		end
+	end
+
+	if #result == 0 then
+		for _, obj in ipairs(EliteFolder:GetChildren()) do
+			if obj:IsA("Model") and not used[obj.Name] then
+				table.insert(result, obj.Name)
+				used[obj.Name] = true
+			end
+		end
+	end
+
+	table.sort(result)
+	return result
+end
+
 local eliteCount = 0
 local eliteTimes = { 300, 600 } -- 5 min, 10 min
-local eliteTotal = #eliteTimes
+local eliteOrder = buildEliteOrder()
+local eliteTotal = math.min(#eliteTimes, #eliteOrder)
 local eliteIndex = 1 -- next elite to spawn
 local nextEliteAt = eliteTimes[eliteIndex] or math.huge
-local eliteOrder = { "Knight", "Demon" }
 -- === Portal + Boss end condition ===
 local portalModel: Model? = nil
 local portalActivated = false
@@ -754,7 +781,12 @@ end
 
 local function endRun(reason: string)
 	reason = tostring(reason or "Victory")
-	broadcast({ type = "complete", reason = reason })
+	broadcast({
+		type = "complete",
+		reason = reason,
+		elitesDefeated = eliteCount,
+		elitesTotal = eliteTotal,
+	})
 
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr.Parent and plr:GetAttribute("RunEnded") ~= true then
@@ -773,6 +805,7 @@ local function watchEliteDeath(mob: Model)
     hum.Died:Connect(function()
         eliteCount += 1
         broadcast({ type = "eliteProgress", elitesDefeated = eliteCount, elitesTotal = eliteTotal })
+        broadcast({ type = "eliteDefeated", elitesDefeated = eliteCount, elitesTotal = eliteTotal })
 			-- Elites are now "pressure" progression only. Ending the run happens via Portal + Boss.
     end)
 end
@@ -893,16 +926,30 @@ local function ensurePortal()
 		pcall(function()
 			mob:PivotTo(base.CFrame * CFrame.new(0, 0, -18))
 		end)
+		cleanupTemplateScripts(mob)
 		setMobGroup(mob)
 		wireDropsAndKills(mob, { xp = 120, coins = 60 }, true)
-		bindMobAI(mob, { hp = 1200, speed = 10, range = 7, cd = 1.4, dmg = 24 }, true)
+
+		local hum = mob:FindFirstChildOfClass("Humanoid")
+		if hum then
+			hum.MaxHealth = 1200
+			hum.Health = hum.MaxHealth
+			hum.WalkSpeed = 10
+		end
+		mob:SetAttribute("MobType", bossName)
+		mob:SetAttribute("Damage", 24)
+		mob:SetAttribute("AttackRange", 7)
+		mob:SetAttribute("AttackCooldown", 1.4)
+		mob:SetAttribute("IsElite", true)
+		mob:SetAttribute("IsRanged", false)
+		startSimpleAI(mob)
 
 		bossModel = mob
 		broadcast({ type = "portalBossSpawn" })
 
-		local hum = mob:FindFirstChildOfClass("Humanoid")
-		if hum then
-			hum.Died:Connect(function()
+		local bossHum = mob:FindFirstChildOfClass("Humanoid")
+		if bossHum then
+			bossHum.Died:Connect(function()
 				bossDefeated = true
 				broadcast({ type = "portalBossDefeated" })
 				setPromptState()
@@ -952,7 +999,7 @@ do
 		seconds = 0,
 		secondsLeft = left,
 		overtime = over,
-		nextEliteIn = nextEliteAt,
+		nextEliteIn = (eliteIndex <= eliteTotal) and nextEliteAt or nil,
 		elitesDefeated = 0,
 		elitesTotal = eliteTotal,
 		kills = 0,
@@ -983,14 +1030,17 @@ RunService.Heartbeat:Connect(function()
     -- HUD update (4x/sec max)
     if t - lastHudPush >= 0.25 then
         lastHudPush = t
-        local nextIn = math.max(0, nextEliteAt - t)
+		local nextIn = nil
+		if eliteIndex <= eliteTotal and nextEliteAt < math.huge then
+			nextIn = math.max(0, nextEliteAt - t)
+		end
 		local left, over = fmtTimePayload(t)
         broadcast({
             type = "timeUpdate",
             seconds = math.floor(t),
 			secondsLeft = math.floor(left),
 			overtime = math.floor(over),
-            nextEliteIn = math.floor(nextIn),
+            nextEliteIn = nextIn and math.floor(nextIn) or nil,
             elitesDefeated = eliteCount,
             elitesTotal = eliteTotal,
 			kills = runKills,
@@ -1001,14 +1051,17 @@ RunService.Heartbeat:Connect(function()
     end
     -- Elites (only at 5:00 and 10:00)
     if eliteIndex <= eliteTotal and t >= nextEliteAt then
-        local eliteName = eliteOrder[eliteIndex] or "Knight"
+        local eliteName = eliteOrder[eliteIndex]
         local elite = spawnMob(eliteName, true)
         if elite then
             broadcast({ type = "eliteSpawn", name = eliteName, elitesDefeated = eliteCount, elitesTotal = eliteTotal })
             watchEliteDeath(elite)
+			eliteIndex += 1
+			nextEliteAt = eliteTimes[eliteIndex] or math.huge
+		else
+			-- Spawn could fail due temporary position/template issues; retry shortly.
+			nextEliteAt = t + 1
         end
-        eliteIndex += 1
-        nextEliteAt = eliteTimes[eliteIndex] or math.huge
     end
 
     -- Normal spawns
