@@ -111,11 +111,12 @@ function PlayerData.Get(plr)
 		end
 		
 		-- MIGRATE_COINS_TO_SILVER
-		if data.silver == nil and data.silver ~= nil then
-			data.silver = tonumber(data.silver) or 0
+		if data.silver == nil and data.coins ~= nil then
+			data.silver = tonumber(data.coins) or 0
 		end
-		data.silver = nil
-if typeof(saved.upgrades) == "table" then
+		data.coins = nil
+
+		if typeof(saved.upgrades) == "table" then
 			data.upgrades = data.upgrades or { dmg = 0, speed = 0, jump = 0 }
 			data.upgrades.dmg = clampInt(saved.upgrades.dmg)
 			data.upgrades.speed = clampInt(saved.upgrades.speed)
@@ -131,11 +132,12 @@ if typeof(saved.upgrades) == "table" then
 			end
 			
 			-- MIGRATE_LEGACY_COINS_TO_SILVER
-			if data.silver == nil and data.silver ~= nil then
-				data.silver = tonumber(data.silver) or 0
+			if data.silver == nil and data.coins ~= nil then
+				data.silver = tonumber(data.coins) or 0
 			end
-			data.silver = nil
-if typeof(legacySaved.upgrades) == "table" then
+			data.coins = nil
+
+			if typeof(legacySaved.upgrades) == "table" then
 				data.upgrades = data.upgrades or { dmg = 0, speed = 0, jump = 0 }
 				data.upgrades.dmg = clampInt(legacySaved.upgrades.dmg)
 				data.upgrades.speed = clampInt(legacySaved.upgrades.speed)

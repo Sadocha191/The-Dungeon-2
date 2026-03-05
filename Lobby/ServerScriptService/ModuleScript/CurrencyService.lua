@@ -131,7 +131,7 @@ function CurrencyService.AddCurrency(player: Player, currency: string, amount: n
 	if amount == 0 then return true end
 	local data = getData(player); ensure(data)
 
-	if currency == "Coins" then
+	if currency == "Coins" or currency == "Silver" then
 		data.silver += amount
 	elseif currency == "WeaponPoints" then
 		data.weaponPoints += amount
@@ -150,7 +150,7 @@ function CurrencyService.RemoveCurrency(player: Player, currency: string, amount
 	if amount == 0 then return true end
 	local data = getData(player); ensure(data)
 
-	if currency == "Coins" then
+	if currency == "Coins" or currency == "Silver" then
 		if data.silver < amount then return false end
 		data.silver -= amount
 	elseif currency == "WeaponPoints" then

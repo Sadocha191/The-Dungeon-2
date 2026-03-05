@@ -204,7 +204,7 @@ local lastForgedByUser: {[number]: string} = {} -- instanceId
 
 local function buildSnapshot(player: Player)
 	local balances = CurrencyService.GetBalances(player)
-	local coins = balances.Silver or 0
+	local silver = balances.Silver or 0
 
 	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
 	local equippedInst = PlayerStateStore.GetEquippedWeaponInstance(player)
@@ -263,7 +263,8 @@ local function buildSnapshot(player: Player)
 	end
 
 	return {
-		coins = coins,
+		silver = silver,
+		coins = silver,
 		craftCost = CRAFT_COST,
 		equippedInstanceId = equippedId,
 		instances = instancesOut,
