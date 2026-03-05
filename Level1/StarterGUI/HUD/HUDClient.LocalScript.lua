@@ -32,3 +32,8 @@ progressEvent.OnClientEvent:Connect(function(payload)
 	if payload.type ~= "progress" then return end
 	setXP(payload.level, payload.xp, payload.nextXp)
 end)
+
+-- Pull initial snapshot (first server push can happen before this UI binds).
+task.defer(function()
+	progressEvent:FireServer({ type = "requestSync" })
+end)

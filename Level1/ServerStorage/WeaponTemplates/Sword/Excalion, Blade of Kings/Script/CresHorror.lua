@@ -4,7 +4,8 @@ local Tool = script.Parent
 
 local Handle = Tool:WaitForChild("Handle")
 
-local SoundBank = script:WaitForChild("SoundBank"):GetChildren()
+local soundFolder = script:FindFirstChild("SoundBank")
+local SoundBank = (soundFolder and soundFolder:GetChildren()) or {}
 
 local Seed = Random.new()
 
@@ -14,7 +15,7 @@ local Clone, Destroy = script.Clone, script.Destroy
 
 repeat
 	wait(Seed:NextNumber(10,15))
-	if FindFirstChildOfClass(Tool.Parent,"Humanoid") then
+	if #SoundBank > 0 and FindFirstChildOfClass(Tool.Parent,"Humanoid") then
 		local Sound = Clone(SoundBank[Seed:NextInteger(1,#SoundBank)])
 		Sound.Parent = Handle
 		Sound:Play();Sound.Ended:Wait()

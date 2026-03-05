@@ -64,6 +64,15 @@ progressEvent.OnClientEvent:Connect(function(payload)
     end
 end)
 
+
+-- Pull initial snapshot (first server push can happen before this UI binds).
+local function requestProgressSync()
+	progressEvent:FireServer({ type = "requestSync" })
+end
+
+task.defer(requestProgressSync)
+task.delay(1, requestProgressSync)
+
 -- Time comes from WaveStatusEvent (seconds elapsed on server; respects PauseState)
 local function getWaveStatusEvent()
     local rem = ReplicatedStorage:FindFirstChild("Remotes")

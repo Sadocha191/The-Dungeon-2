@@ -294,6 +294,26 @@ local function syncHud(plr: Player)
 	})
 end
 
+
+PlayerProgressEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
+	if not plr or not plr.Parent then
+		return
+	end
+
+	if payload == nil then
+		syncHud(plr)
+		return
+	end
+
+	if typeof(payload) ~= "table" then
+		return
+	end
+
+	local t = tostring(payload.type or "")
+	if t == "requestSync" or t == "request" or t == "sync" then
+		syncHud(plr)
+	end
+end)
 local function parseUnlocked(plr: Player): {string}
 	local csv = plr:GetAttribute("UnlockedSpellsCSV")
 	if typeof(csv) ~= "string" or csv == "" then return {} end
