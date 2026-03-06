@@ -474,6 +474,53 @@ local function cleanupTemplateScripts(mob: Model)
     end
 end
 
+local function ensureMobHumanoid(mob: Model): Humanoid?
+    local hum = mob:FindFirstChildOfClass("Humanoid")
+    if not hum then
+        hum = Instance.new("Humanoid")
+        hum.Name = "Humanoid"
+        hum.Parent = mob
+    end
+
+    local isR15 = mob:FindFirstChild("UpperTorso") ~= nil or mob:FindFirstChild("LowerTorso") ~= nil
+    hum.RigType = isR15 and Enum.HumanoidRigType.R15 or Enum.HumanoidRigType.R6
+
+    hum.AutoRotate = true
+    hum.BreakJointsOnDeath = false
+    hum.RequiresNeck = false
+    hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+    hum.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+    hum.UseJumpPower = true
+    hum.JumpPower = 0
+
+    -- Fallback for rigs converted from AnimationController-only: keep feet above ground.
+    local root = mob:FindFirstChild("HumanoidRootPart")
+    if root and root:IsA("BasePart") then
+        local lowestY = math.huge
+        for _, d in ipairs(mob:GetDescendants()) do
+            if d:IsA("BasePart") then
+                lowestY = math.min(lowestY, d.Position.Y - (d.Size.Y * 0.5))
+            end
+        end
+
+        if lowestY < math.huge then
+            local rootBottomY = root.Position.Y - (root.Size.Y * 0.5)
+            local computedHipHeight = math.max(0, rootBottomY - lowestY + 0.05)
+            if computedHipHeight > 0 then
+                hum.HipHeight = computedHipHeight
+            elseif hum.HipHeight <= 0 then
+                hum.HipHeight = isR15 and 2 or 0
+            end
+        elseif hum.HipHeight <= 0 then
+            hum.HipHeight = isR15 and 2 or 0
+        end
+    elseif hum.HipHeight <= 0 then
+        hum.HipHeight = isR15 and 2 or 0
+    end
+
+    return hum
+end
+
 local function startSimpleAI(mob: Model)
     local hum = mob:FindFirstChildOfClass("Humanoid")
     local hrp = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
@@ -492,6 +539,28 @@ local function startSimpleAI(mob: Model)
     local attackRange = tonumber(mob:GetAttribute("AttackRange")) or 4
     local attackCD = tonumber(mob:GetAttribute("AttackCooldown")) or 1.5
     local damage = tonumber(mob:GetAttribute("Damage")) or 8
+    local attackPulseDuration = tonumber(mob:GetAttribute("AttackAnimDuration"))
+        or math.min(0.6, math.max(0.2, attackCD * 0.45))
+    local attackPulseToken = 0
+
+    mob:SetAttribute("IsAttacking", false)
+    mob:SetAttribute("IsDead", false)
+
+    local function pulseAttackState()
+        attackPulseToken += 1
+        local pulseToken = attackPulseToken
+        mob:SetAttribute("IsAttacking", true)
+
+        task.delay(attackPulseDuration, function()
+            if not mob.Parent then
+                return
+            end
+            if attackPulseToken ~= pulseToken then
+                return
+            end
+            mob:SetAttribute("IsAttacking", false)
+        end)
+    end
 
     local function stopMovementNow()
         hum:Move(Vector3.zero)
@@ -529,6 +598,7 @@ local function startSimpleAI(mob: Model)
     task.spawn(function()
         while mob.Parent and hum.Health > 0 do
             if not anyPlayersAlive() then
+                mob:SetAttribute("IsAttacking", false)
                 task.wait(0.2)
                 continue
             end
@@ -537,6 +607,7 @@ local function startSimpleAI(mob: Model)
 
             if PauseState.Value then
                 stopMovementNow()
+                mob:SetAttribute("IsAttacking", false)
                 task.wait(0.03)
                 continue
             end
@@ -546,6 +617,7 @@ local function startSimpleAI(mob: Model)
                 local dist = (targetHRP.Position - hrp.Position).Magnitude
                 if dist <= attackRange and time() - lastAttack >= attackCD then
                     lastAttack = time()
+                    pulseAttackState()
                     local targetHum = targetHRP.Parent and targetHRP.Parent:FindFirstChildOfClass("Humanoid")
                     if targetHum and targetHum.Health > 0 and not PauseState.Value then
                         local targetPlr = Players:GetPlayerFromCharacter(targetHum.Parent)
@@ -560,6 +632,8 @@ local function startSimpleAI(mob: Model)
 
             task.wait(0.08)
         end
+
+        mob:SetAttribute("IsAttacking", false)
     end)
 
     controller:Run()
@@ -571,6 +645,9 @@ local function wireDropsAndKills(mob: Model, cfg, isElite: boolean)
     if not hum or not hrp then return end
 
     hum.Died:Connect(function()
+        mob:SetAttribute("IsDead", true)
+        mob:SetAttribute("IsAttacking", false)
+
         local pos = hrp.Position
         if _G.RegisterEnemyKill then
             pcall(function() _G.RegisterEnemyKill(pos) end)
@@ -643,9 +720,9 @@ local function spawnMob(mobName: string, isElite: boolean)
     cleanupTemplateScripts(mob)
     setMobGroup(mob)
 
-    local hum = mob:FindFirstChildOfClass("Humanoid")
+    local hum = ensureMobHumanoid(mob)
     if not hum then
-        warn("[Horde] Template has no Humanoid:", mobName)
+        warn("[Horde] Failed to create/find Humanoid:", mobName)
         mob:Destroy()
         return
     end
@@ -669,6 +746,8 @@ local function spawnMob(mobName: string, isElite: boolean)
     mob:SetAttribute("AttackCooldown", cfg.cd)
     mob:SetAttribute("IsElite", isElite)
     mob:SetAttribute("IsRanged", cfg.isRanged == true)
+    mob:SetAttribute("IsDead", false)
+    mob:SetAttribute("IsAttacking", false)
 
     wireDropsAndKills(mob, cfg, isElite)
     startSimpleAI(mob)
@@ -841,6 +920,9 @@ local function watchEliteDeath(mob: Model)
     local hum = mob and mob:FindFirstChildOfClass("Humanoid")
     if not hum then return end
     hum.Died:Connect(function()
+        mob:SetAttribute("IsDead", true)
+        mob:SetAttribute("IsAttacking", false)
+
         eliteCount += 1
         broadcast({ type = "eliteProgress", elitesDefeated = eliteCount, elitesTotal = eliteTotal })
         broadcast({ type = "eliteDefeated", elitesDefeated = eliteCount, elitesTotal = eliteTotal })
@@ -968,12 +1050,18 @@ local function ensurePortal()
 		setMobGroup(mob)
 		wireDropsAndKills(mob, { xp = 120, coins = 60 }, true)
 
-		local hum = mob:FindFirstChildOfClass("Humanoid")
-		if hum then
-			hum.MaxHealth = 1200
-			hum.Health = hum.MaxHealth
-			hum.WalkSpeed = 10
-		end
+        local hum = ensureMobHumanoid(mob)
+        if not hum then
+            warn("[Portal] Boss template has no Humanoid and fallback creation failed:", bossName)
+            if mob and mob.Parent then
+                mob:Destroy()
+            end
+            return
+        end
+
+        hum.MaxHealth = 1200
+        hum.Health = hum.MaxHealth
+        hum.WalkSpeed = 10
 		mob:SetAttribute("MobType", bossName)
 		mob:SetAttribute("Damage", 24)
 		mob:SetAttribute("AttackRange", 7)
