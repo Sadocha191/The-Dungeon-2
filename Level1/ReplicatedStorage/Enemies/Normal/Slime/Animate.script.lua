@@ -3,18 +3,36 @@ if not model or not model:IsA("Model") then
     return
 end
 
-local animationController = model:FindFirstChildOfClass("AnimationController")
-if not animationController then
-    animationController = model:WaitForChild("AnimationController", 5)
-end
-if not animationController then
-    return
+local function resolveAnimator()
+    -- Current AI stack still depends on Humanoid for movement/combat.
+    -- If Humanoid exists, drive animations from its Animator to avoid controller conflicts.
+    local humanoid = model:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        local humAnimator = humanoid:FindFirstChildOfClass("Animator")
+        if not humAnimator then
+            humAnimator = Instance.new("Animator")
+            humAnimator.Parent = humanoid
+        end
+        return humAnimator
+    end
+
+    local animationController = model:FindFirstChildOfClass("AnimationController")
+    if not animationController then
+        animationController = model:WaitForChild("AnimationController", 5)
+    end
+    if not animationController then
+        return nil
+    end
+
+    local controllerAnimator = animationController:FindFirstChildOfClass("Animator")
+    if not controllerAnimator then
+        controllerAnimator = animationController:WaitForChild("Animator", 5)
+    end
+
+    return controllerAnimator
 end
 
-local animator = animationController:FindFirstChildOfClass("Animator")
-if not animator then
-    animator = animationController:WaitForChild("Animator", 5)
-end
+local animator = resolveAnimator()
 if not animator then
     return
 end
@@ -107,6 +125,14 @@ local function normalizeAnimationId(raw)
 end
 
 local function animationFromValueNode(node, stateName)
+    if node:IsA("ObjectValue") then
+        local value = node.Value
+        if value and value:IsA("Animation") then
+            return value
+        end
+        return nil
+    end
+
     if not (node:IsA("StringValue") or node:IsA("NumberValue") or node:IsA("IntValue")) then
         return nil
     end

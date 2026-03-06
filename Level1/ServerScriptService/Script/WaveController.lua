@@ -493,6 +493,12 @@ local function ensureMobHumanoid(mob: Model): Humanoid?
     hum.UseJumpPower = true
     hum.JumpPower = 0
 
+    local humAnimator = hum:FindFirstChildOfClass("Animator")
+    if not humAnimator then
+        humAnimator = Instance.new("Animator")
+        humAnimator.Parent = hum
+    end
+
     -- Fallback for rigs converted from AnimationController-only: keep feet above ground.
     local root = mob:FindFirstChild("HumanoidRootPart")
     if root and root:IsA("BasePart") then
@@ -714,18 +720,18 @@ local function spawnMob(mobName: string, isElite: boolean)
 
     local mob = template:Clone()
     mob.Name = mobName
-    mob.Parent = ENEMIES_FOLDER
-    mob:PivotTo(cf)
-
-    cleanupTemplateScripts(mob)
-    setMobGroup(mob)
-
     local hum = ensureMobHumanoid(mob)
     if not hum then
         warn("[Horde] Failed to create/find Humanoid:", mobName)
         mob:Destroy()
         return
     end
+
+    mob.Parent = ENEMIES_FOLDER
+    mob:PivotTo(cf)
+
+    cleanupTemplateScripts(mob)
+    setMobGroup(mob)
 
     local hpMult, dmgMult = timeScaleMult(_G.GetRunSeconds and _G.GetRunSeconds() or 0)
     local hp = math.floor(cfg.hp * hpMult)
@@ -1041,15 +1047,6 @@ local function ensurePortal()
 
 		local mob = tpl:Clone()
 		mob.Name = "Boss_" .. bossName
-		mob.Parent = ENEMIES_FOLDER
-
-		pcall(function()
-			mob:PivotTo(base.CFrame * CFrame.new(0, 0, -18))
-		end)
-		cleanupTemplateScripts(mob)
-		setMobGroup(mob)
-		wireDropsAndKills(mob, { xp = 120, coins = 60 }, true)
-
         local hum = ensureMobHumanoid(mob)
         if not hum then
             warn("[Portal] Boss template has no Humanoid and fallback creation failed:", bossName)
@@ -1058,6 +1055,15 @@ local function ensurePortal()
             end
             return
         end
+
+		mob.Parent = ENEMIES_FOLDER
+
+		pcall(function()
+			mob:PivotTo(base.CFrame * CFrame.new(0, 0, -18))
+		end)
+		cleanupTemplateScripts(mob)
+		setMobGroup(mob)
+		wireDropsAndKills(mob, { xp = 120, coins = 60 }, true)
 
         hum.MaxHealth = 1200
         hum.Health = hum.MaxHealth
