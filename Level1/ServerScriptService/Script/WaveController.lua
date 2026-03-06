@@ -474,6 +474,23 @@ local function cleanupTemplateScripts(mob: Model)
     end
 end
 
+local function primeMobAnimateScripts(mob: Model)
+    local found = 0
+    for _, d in ipairs(mob:GetDescendants()) do
+        if d:IsA("Script") and string.lower(d.Name) == "animate" then
+            found += 1
+            d.Disabled = false
+            pcall(function()
+                d.RunContext = Enum.RunContext.Server
+            end)
+        end
+    end
+
+    if found == 0 then
+        warn("[Horde] Missing server Script 'Animate' in mob:", mob:GetFullName())
+    end
+end
+
 local function ensureMobHumanoid(mob: Model): Humanoid?
     local hum = mob:FindFirstChildOfClass("Humanoid")
     if not hum then
@@ -731,6 +748,7 @@ local function spawnMob(mobName: string, isElite: boolean)
     mob:PivotTo(cf)
 
     cleanupTemplateScripts(mob)
+    primeMobAnimateScripts(mob)
     setMobGroup(mob)
 
     local hpMult, dmgMult = timeScaleMult(_G.GetRunSeconds and _G.GetRunSeconds() or 0)
@@ -1062,6 +1080,7 @@ local function ensurePortal()
 			mob:PivotTo(base.CFrame * CFrame.new(0, 0, -18))
 		end)
 		cleanupTemplateScripts(mob)
+		primeMobAnimateScripts(mob)
 		setMobGroup(mob)
 		wireDropsAndKills(mob, { xp = 120, coins = 60 }, true)
 

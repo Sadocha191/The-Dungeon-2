@@ -3,40 +3,6 @@ if not model or not model:IsA("Model") then
     return
 end
 
-local function resolveAnimator()
-    -- Current AI stack still depends on Humanoid for movement/combat.
-    -- If Humanoid exists, drive animations from its Animator to avoid controller conflicts.
-    local humanoid = model:FindFirstChildOfClass("Humanoid")
-    if humanoid then
-        local humAnimator = humanoid:FindFirstChildOfClass("Animator")
-        if not humAnimator then
-            humAnimator = Instance.new("Animator")
-            humAnimator.Parent = humanoid
-        end
-        return humAnimator
-    end
-
-    local animationController = model:FindFirstChildOfClass("AnimationController")
-    if not animationController then
-        animationController = model:WaitForChild("AnimationController", 5)
-    end
-    if not animationController then
-        return nil
-    end
-
-    local controllerAnimator = animationController:FindFirstChildOfClass("Animator")
-    if not controllerAnimator then
-        controllerAnimator = animationController:WaitForChild("Animator", 5)
-    end
-
-    return controllerAnimator
-end
-
-local animator = resolveAnimator()
-if not animator then
-    return
-end
-
 local STATE_ORDER = { "idle", "run", "attack", "death" }
 local STATE_SEARCH_NAMES = {
     idle = { "idle" },
@@ -220,37 +186,154 @@ local function resolveWeight(animation)
     return 1
 end
 
-local function loadTracksForState(stateName)
-    local entries = {}
-    local seenAnimations = {}
-    local names = STATE_SEARCH_NAMES[stateName] or { stateName }
+local function getAnimatorCandidates()
+    local candidates = {}
+    local seen = {}
 
-    for _, searchName in ipairs(names) do
-        local found = gatherAnimationsForName(stateName, searchName)
-        for _, animation in ipairs(found) do
-            if not seenAnimations[animation] then
-                seenAnimations[animation] = true
-                local ok, track = pcall(function()
-                    return animator:LoadAnimation(animation)
-                end)
-
-                if ok and track then
-                    track.Looped = LOOPED_BY_STATE[stateName] == true
-                    track.Priority = PRIORITY_BY_STATE[stateName] or Enum.AnimationPriority.Core
-                    table.insert(entries, {
-                        track = track,
-                        weight = resolveWeight(animation),
-                    })
-                end
-            end
+    local animationController = model:FindFirstChildOfClass("AnimationController")
+    if animationController then
+        local controllerAnimator = animationController:FindFirstChildOfClass("Animator")
+        if controllerAnimator and not seen[controllerAnimator] then
+            seen[controllerAnimator] = true
+            table.insert(candidates, {
+                animator = controllerAnimator,
+                source = "controller",
+            })
         end
     end
 
-    stateTracks[stateName] = entries
+    local humanoid = model:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        local humAnimator = humanoid:FindFirstChildOfClass("Animator")
+        if not humAnimator then
+            humAnimator = Instance.new("Animator")
+            humAnimator.Parent = humanoid
+        end
+
+        if humAnimator and not seen[humAnimator] then
+            seen[humAnimator] = true
+            table.insert(candidates, {
+                animator = humAnimator,
+                source = "humanoid",
+            })
+        end
+    end
+
+    return candidates
 end
 
-for _, stateName in ipairs(STATE_ORDER) do
-    loadTracksForState(stateName)
+local function buildTracksForAnimator(animator)
+    local tracksByState = {}
+    local totalLoaded = 0
+
+    for _, stateName in ipairs(STATE_ORDER) do
+        local entries = {}
+        local seenAnimations = {}
+        local names = STATE_SEARCH_NAMES[stateName] or { stateName }
+
+        for _, searchName in ipairs(names) do
+            local found = gatherAnimationsForName(stateName, searchName)
+            for _, animation in ipairs(found) do
+                if not seenAnimations[animation] then
+                    seenAnimations[animation] = true
+                    local ok, track = pcall(function()
+                        return animator:LoadAnimation(animation)
+                    end)
+
+                    if ok and track then
+                        track.Looped = LOOPED_BY_STATE[stateName] == true
+                        track.Priority = PRIORITY_BY_STATE[stateName] or Enum.AnimationPriority.Core
+                        table.insert(entries, {
+                            track = track,
+                            weight = resolveWeight(animation),
+                        })
+                        totalLoaded += 1
+                    end
+                end
+            end
+        end
+
+        tracksByState[stateName] = entries
+    end
+
+    return tracksByState, totalLoaded
+end
+
+local function destroyTracks(tracksByState)
+    for _, entries in pairs(tracksByState) do
+        for _, entry in ipairs(entries) do
+            local track = entry.track
+            if track then
+                pcall(function()
+                    track:Stop(0)
+                end)
+                pcall(function()
+                    track:Destroy()
+                end)
+            end
+        end
+    end
+end
+
+local function initializeTracks()
+    local candidates = getAnimatorCandidates()
+    if #candidates == 0 then
+        return false
+    end
+
+    local bestTracks = nil
+    local bestSource = nil
+    local bestScore = -math.huge
+
+    local staged = {}
+
+    for _, candidate in ipairs(candidates) do
+        local tracksByState, totalLoaded = buildTracksForAnimator(candidate.animator)
+        local sourceBonus = (candidate.source == "controller") and 0.1 or 0
+        local score = totalLoaded + sourceBonus
+
+        table.insert(staged, {
+            source = candidate.source,
+            tracks = tracksByState,
+            totalLoaded = totalLoaded,
+            score = score,
+        })
+
+        if score > bestScore then
+            bestScore = score
+            bestTracks = tracksByState
+            bestSource = candidate.source
+        end
+    end
+
+    for _, item in ipairs(staged) do
+        if item.tracks ~= bestTracks then
+            destroyTracks(item.tracks)
+        end
+    end
+
+    if not bestTracks then
+        return false
+    end
+
+    stateTracks = bestTracks
+
+    local total = 0
+    for _, entries in pairs(stateTracks) do
+        total += #entries
+    end
+
+    if total == 0 then
+        warn(string.format("[NPCAnimate] No tracks loaded for %s", model:GetFullName()))
+        return false
+    end
+
+    model:SetAttribute("NPCAnimateSource", bestSource)
+    return true
+end
+
+if not initializeTracks() then
+    return
 end
 
 local function getRootPart()
@@ -492,8 +575,4 @@ while model.Parent do
     task.wait(UPDATE_INTERVAL)
 end
 
-for _, entries in pairs(stateTracks) do
-    for _, entry in ipairs(entries) do
-        stopTrack(entry.track, 0)
-    end
-end
+destroyTracks(stateTracks)
