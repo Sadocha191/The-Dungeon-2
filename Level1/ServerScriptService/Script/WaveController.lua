@@ -59,7 +59,12 @@ end)
 
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local EnemyPathController = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("EnemyPathController"))
+local NpcService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("NpcService"))
+
+local MissionProgress = nil
+pcall(function()
+	MissionProgress = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("MissionProgress"))
+end)
 
 -- Shared pause flag (used by upgrade UI in single)
 local PauseState = ReplicatedStorage:FindFirstChild("PauseState")
@@ -390,7 +395,7 @@ local function pickSpawnCFrame(): CFrame?
     return CFrame.new(anchor + Vector3.new(0, 2.5, 0))
 end
 
--- Enemy config (studs, Roblox Humanoid speeds)
+-- Enemy config (custom movement/combat stats)
 local ENEMY_CONFIGS = {
     Slime =      { hp = 30,  speed = 9,  range = 3,  cd = 1.8, dmg = 6,  xp = 5,  coins = 1 },
     Zombie =     { hp = 110, speed = 8,  range = 4,  cd = 2.2, dmg = 10, xp = 10, coins = 2 },
@@ -447,275 +452,104 @@ local function pickWeighted(pool)
 end
 
 local function activeEnemiesCount()
-    local n = 0
-    for _, ch in ipairs(ENEMIES_FOLDER:GetChildren()) do
-        if ch:IsA("Model") then
-            local h = ch:FindFirstChildOfClass("Humanoid")
-            if h and h.Health > 0 then
-                n += 1
-            end
-        end
-    end
-    return n
-end
-
-local function waitIfPaused()
-    while PauseState.Value do
-        task.wait(0.05)
-    end
+    return NpcService.GetActiveCount()
 end
 
 local function cleanupTemplateScripts(mob: Model)
-    -- Prevent the template "Respawn" scripts from duplicating mobs in a horde run.
+    local animationsFolder = mob:FindFirstChild("Animations")
     for _, d in ipairs(mob:GetDescendants()) do
-        if d:IsA("Script") and string.lower(d.Name) == "respawn" then
+        if d:IsA("Script") or d:IsA("LocalScript") then
+            if string.lower(d.Name) == "animate" then
+                if not animationsFolder then
+                    animationsFolder = Instance.new("Folder")
+                    animationsFolder.Name = "Animations"
+                    animationsFolder.Parent = mob
+                end
+                for _, child in ipairs(d:GetChildren()) do
+                    child.Parent = animationsFolder
+                end
+            end
             d:Destroy()
         end
     end
 end
 
-local function primeMobAnimateScripts(mob: Model)
-    local found = 0
-    for _, d in ipairs(mob:GetDescendants()) do
-        if d:IsA("Script") and string.lower(d.Name) == "animate" then
-            found += 1
-            d.Disabled = false
-            pcall(function()
-                d.RunContext = Enum.RunContext.Server
-            end)
-        end
-    end
-
-    if found == 0 then
-        warn("[Horde] Missing server Script 'Animate' in mob:", mob:GetFullName())
-    end
-end
-
-local function ensureMobHumanoid(mob: Model): Humanoid?
-    local hum = mob:FindFirstChildOfClass("Humanoid")
-    if not hum then
-        hum = Instance.new("Humanoid")
-        hum.Name = "Humanoid"
-        hum.Parent = mob
-    end
-
-    local isR15 = mob:FindFirstChild("UpperTorso") ~= nil or mob:FindFirstChild("LowerTorso") ~= nil
-    hum.RigType = isR15 and Enum.HumanoidRigType.R15 or Enum.HumanoidRigType.R6
-
-    hum.AutoRotate = true
-    hum.BreakJointsOnDeath = false
-    hum.RequiresNeck = false
-    hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
-    hum.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
-    hum.UseJumpPower = true
-    hum.JumpPower = 0
-
-    local humAnimator = hum:FindFirstChildOfClass("Animator")
-    if not humAnimator then
-        humAnimator = Instance.new("Animator")
-        humAnimator.Parent = hum
-    end
-
-    -- Fallback for rigs converted from AnimationController-only: keep feet above ground.
-    local root = mob:FindFirstChild("HumanoidRootPart")
-    if root and root:IsA("BasePart") then
-        local lowestY = math.huge
-        for _, d in ipairs(mob:GetDescendants()) do
-            if d:IsA("BasePart") then
-                lowestY = math.min(lowestY, d.Position.Y - (d.Size.Y * 0.5))
-            end
-        end
-
-        if lowestY < math.huge then
-            local rootBottomY = root.Position.Y - (root.Size.Y * 0.5)
-            local computedHipHeight = math.max(0, rootBottomY - lowestY + 0.05)
-            if computedHipHeight > 0 then
-                hum.HipHeight = computedHipHeight
-            elseif hum.HipHeight <= 0 then
-                hum.HipHeight = isR15 and 2 or 0
-            end
-        elseif hum.HipHeight <= 0 then
-            hum.HipHeight = isR15 and 2 or 0
-        end
-    elseif hum.HipHeight <= 0 then
-        hum.HipHeight = isR15 and 2 or 0
-    end
-
-    return hum
-end
-
-local function startSimpleAI(mob: Model)
-    local hum = mob:FindFirstChildOfClass("Humanoid")
-    local hrp = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
-    if not hum or not hrp then return end
-
-    -- Ensure server owns NPC physics (prevents jitter/freeze under client ownership)
+local function applyCorpseCollision(mob: Model)
     for _, d in ipairs(mob:GetDescendants()) do
         if d:IsA("BasePart") then
-            pcall(function() d:SetNetworkOwner(nil) end)
+            d.CollisionGroup = CORPSES_GROUP
+            d.CanCollide = false
+            d.CanTouch = false
+            d.CanQuery = false
         end
     end
-
-    hum.AutoRotate = true
-    hum:ChangeState(Enum.HumanoidStateType.Running)
-
-    local attackRange = tonumber(mob:GetAttribute("AttackRange")) or 4
-    local attackCD = tonumber(mob:GetAttribute("AttackCooldown")) or 1.5
-    local damage = tonumber(mob:GetAttribute("Damage")) or 8
-    local attackPulseDuration = tonumber(mob:GetAttribute("AttackAnimDuration"))
-        or math.min(0.6, math.max(0.2, attackCD * 0.45))
-    local attackPulseToken = 0
-
-    mob:SetAttribute("IsAttacking", false)
-    mob:SetAttribute("IsDead", false)
-
-    local function pulseAttackState()
-        attackPulseToken += 1
-        local pulseToken = attackPulseToken
-        mob:SetAttribute("IsAttacking", true)
-
-        task.delay(attackPulseDuration, function()
-            if not mob.Parent then
-                return
-            end
-            if attackPulseToken ~= pulseToken then
-                return
-            end
-            mob:SetAttribute("IsAttacking", false)
-        end)
-    end
-
-    local function stopMovementNow()
-        hum:Move(Vector3.zero)
-        hum:MoveTo(hrp.Position)
-    end
-
-    local controller = EnemyPathController.new(mob, {
-        GetTarget = getClosestLivingHRP,
-        IsPaused = function()
-            return PauseState.Value
-        end,
-        StopMove = stopMovementNow,
-        RepathDistance = 10,
-        RepathCooldown = 1.2,
-        NoLOSRepathDelay = 0.45,
-        StuckCheckWindow = 0.55,
-        FullUpdateRadius = 90,
-        FarNoPathRadius = 120,
-        PathParams = {
-            AgentRadius = 2.5,
-            AgentHeight = 5,
-            AgentCanJump = true,
-            AgentCanClimb = false,
-            AgentJumpHeight = 7,
-            AgentMaxSlope = 35,
-            WaypointSpacing = 10,
-        },
-    })
-    if not controller then
-        return
-    end
-
-    local lastAttack = 0
-
-    task.spawn(function()
-        while mob.Parent and hum.Health > 0 do
-            if not anyPlayersAlive() then
-                mob:SetAttribute("IsAttacking", false)
-                task.wait(0.2)
-                continue
-            end
-
-            waitIfPaused()
-
-            if PauseState.Value then
-                stopMovementNow()
-                mob:SetAttribute("IsAttacking", false)
-                task.wait(0.03)
-                continue
-            end
-
-            local targetHRP = getClosestLivingHRP(hrp.Position)
-            if targetHRP then
-                local dist = (targetHRP.Position - hrp.Position).Magnitude
-                if dist <= attackRange and time() - lastAttack >= attackCD then
-                    lastAttack = time()
-                    pulseAttackState()
-                    local targetHum = targetHRP.Parent and targetHRP.Parent:FindFirstChildOfClass("Humanoid")
-                    if targetHum and targetHum.Health > 0 and not PauseState.Value then
-                        local targetPlr = Players:GetPlayerFromCharacter(targetHum.Parent)
-                        if targetPlr and _G.ApplyDamageToPlayer then
-                            _G.ApplyDamageToPlayer(targetPlr, damage)
-                        else
-                            targetHum:TakeDamage(damage)
-                        end
-                    end
-                end
-            end
-
-            task.wait(0.08)
-        end
-
-        mob:SetAttribute("IsAttacking", false)
-    end)
-
-    controller:Run()
 end
 
-local function wireDropsAndKills(mob: Model, cfg, isElite: boolean)
-    local hum = mob:FindFirstChildOfClass("Humanoid")
-    local hrp = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
-    if not hum or not hrp then return end
+local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, _ctx)
+    local pos = NpcService.GetPosition(mob) or mob:GetPivot().Position
 
-    hum.Died:Connect(function()
-        mob:SetAttribute("IsDead", true)
-        mob:SetAttribute("IsAttacking", false)
+    if _G.RegisterEnemyKill then
+        pcall(function() _G.RegisterEnemyKill(pos) end)
+    end
 
-        local pos = hrp.Position
-        if _G.RegisterEnemyKill then
-            pcall(function() _G.RegisterEnemyKill(pos) end)
-        end
-
-        -- Mission progress hooks
-        local ServerScriptService = game:GetService("ServerScriptService")
-        local mp = nil
-        pcall(function()
-            mp = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("MissionProgress"))
-        end)
-        if mp and mp.OnKill then
-            for _, plr in ipairs(Players:GetPlayers()) do
-                if plr:GetAttribute("RunEnded") ~= true then
-                    pcall(function() mp.OnKill(plr, mob) end)
-                end
+    if MissionProgress and MissionProgress.OnKill then
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr:GetAttribute("RunEnded") ~= true then
+                pcall(function() MissionProgress.OnKill(plr, mob) end)
             end
         end
-        local xpDrop = cfg.xp or 5
-        local coinDrop = cfg.coins or 1
-        local soulsDrop = 0
-        if isElite then
-            xpDrop = math.floor(xpDrop * 10)
-            coinDrop = math.floor(coinDrop * 8)
-            soulsDrop = math.random(5, 10)
-        end
-        if _G.SpawnDropsAt then
-            pcall(function() _G.SpawnDropsAt(pos, xpDrop, coinDrop, soulsDrop) end)
-        end
+    end
 
-        
-        -- Make the corpse non-walkable for players, but keep it resting on the ground.
-        for _, d in ipairs(mob:GetDescendants()) do
-            if d:IsA("BasePart") then
-                d.CollisionGroup = CORPSES_GROUP
-                d.CanTouch = false
-                d.CanQuery = false
-                d.CanCollide = true
+    local xpDrop = rewardCfg.xp or 5
+    local coinDrop = rewardCfg.coins or 1
+    local soulsDrop = 0
+    if isElite then
+        xpDrop = math.floor(xpDrop * 10)
+        coinDrop = math.floor(coinDrop * 8)
+        soulsDrop = math.random(5, 10)
+    end
+    if _G.SpawnDropsAt then
+        pcall(function() _G.SpawnDropsAt(pos, xpDrop, coinDrop, soulsDrop) end)
+    end
+
+    applyCorpseCollision(mob)
+end
+
+local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, isElite: boolean, extraOnDeath)
+    mob:SetAttribute("MobType", mobType)
+    mob:SetAttribute("Damage", stats.dmg)
+    mob:SetAttribute("AttackRange", stats.range)
+    mob:SetAttribute("AttackCooldown", stats.cd)
+    mob:SetAttribute("IsElite", isElite)
+    mob:SetAttribute("IsRanged", stats.isRanged == true)
+    mob:SetAttribute("IsDead", false)
+    mob:SetAttribute("IsAttacking", false)
+
+    local registeredId = NpcService.Register(mob, {
+        mobType = mobType,
+        maxHealth = stats.hp,
+        speed = stats.speed,
+        attackRange = stats.range,
+        attackCooldown = stats.cd,
+        damage = stats.dmg,
+        isElite = isElite,
+        isRanged = stats.isRanged == true,
+        despawnDelay = 3,
+        attackWindup = math.min(0.6, math.max(0.2, stats.cd * 0.45)),
+        onDeath = function(_npc, ctx)
+            handleMobDeath(mob, rewardCfg, isElite, ctx)
+            if extraOnDeath then
+                extraOnDeath(mob, ctx)
             end
-        end
+        end,
+    })
 
-task.delay(3, function()
-            if mob and mob.Parent then mob:Destroy() end
-        end)
-    end)
+    if not registeredId then
+        mob:Destroy()
+        return nil
+    end
+
+    return mob
 end
 
 local function spawnMob(mobName: string, isElite: boolean)
@@ -737,19 +571,10 @@ local function spawnMob(mobName: string, isElite: boolean)
 
     local mob = template:Clone()
     mob.Name = mobName
-    local hum = ensureMobHumanoid(mob)
-    if not hum then
-        warn("[Horde] Failed to create/find Humanoid:", mobName)
-        mob:Destroy()
-        return
-    end
-
+    cleanupTemplateScripts(mob)
+    setMobGroup(mob)
     mob.Parent = ENEMIES_FOLDER
     mob:PivotTo(cf)
-
-    cleanupTemplateScripts(mob)
-    primeMobAnimateScripts(mob)
-    setMobGroup(mob)
 
     local hpMult, dmgMult = timeScaleMult(_G.GetRunSeconds and _G.GetRunSeconds() or 0)
     local hp = math.floor(cfg.hp * hpMult)
@@ -760,25 +585,15 @@ local function spawnMob(mobName: string, isElite: boolean)
         dmg = math.floor(dmg * 2)
     end
 
-    hum.MaxHealth = math.max(1, hp)
-    hum.Health = hum.MaxHealth
-    hum.WalkSpeed = cfg.speed
-
-    mob:SetAttribute("MobType", mobName)
-    mob:SetAttribute("Damage", dmg)
-    mob:SetAttribute("AttackRange", cfg.range)
-    mob:SetAttribute("AttackCooldown", cfg.cd)
-    mob:SetAttribute("IsElite", isElite)
-    mob:SetAttribute("IsRanged", cfg.isRanged == true)
-    mob:SetAttribute("IsDead", false)
-    mob:SetAttribute("IsAttacking", false)
-
-    wireDropsAndKills(mob, cfg, isElite)
-    startSimpleAI(mob)
-
-    return mob
+    return registerMobModel(mob, mobName, {
+        hp = hp,
+        speed = cfg.speed,
+        range = cfg.range,
+        cd = cfg.cd,
+        dmg = dmg,
+        isRanged = cfg.isRanged == true,
+    }, cfg, isElite, nil)
 end
-
 -- Run clock (server-side)
 local runStart = 0 -- set when RunStarted becomes true
 local pausedAccum = 0
@@ -941,19 +756,12 @@ local function endRun(reason: string)
 end
 
 local function watchEliteDeath(mob: Model)
-    local hum = mob and mob:FindFirstChildOfClass("Humanoid")
-    if not hum then return end
-    hum.Died:Connect(function()
-        mob:SetAttribute("IsDead", true)
-        mob:SetAttribute("IsAttacking", false)
-
+    NpcService.BindDeath(mob, function()
         eliteCount += 1
         broadcast({ type = "eliteProgress", elitesDefeated = eliteCount, elitesTotal = eliteTotal })
         broadcast({ type = "eliteDefeated", elitesDefeated = eliteCount, elitesTotal = eliteTotal })
-			-- Elites are now "pressure" progression only. Ending the run happens via Portal + Boss.
     end)
 end
-
 local function getWorldBoundsXZ()
 	-- Find bounds from collidable map parts (good enough for random portal/spawn positioning)
 	local minX, minZ = math.huge, math.huge
@@ -1054,61 +862,45 @@ local function ensurePortal()
 	end
 
 	local function spawnBossNearPortal()
-		if bossModel and bossModel.Parent then return end
-		bossDefeated = false
-		local bossName = "Golem" -- change if you have a dedicated boss model
-		local tpl = EliteFolder:FindFirstChild(bossName) or NormalFolder:FindFirstChild(bossName)
-		if not tpl or not tpl:IsA("Model") then
-			warn("[Portal] Missing boss template:", bossName)
-			return
-		end
-
-		local mob = tpl:Clone()
-		mob.Name = "Boss_" .. bossName
-        local hum = ensureMobHumanoid(mob)
-        if not hum then
-            warn("[Portal] Boss template has no Humanoid and fallback creation failed:", bossName)
-            if mob and mob.Parent then
-                mob:Destroy()
-            end
-            return
-        end
-
-		mob.Parent = ENEMIES_FOLDER
-
-		pcall(function()
-			mob:PivotTo(base.CFrame * CFrame.new(0, 0, -18))
-		end)
-		cleanupTemplateScripts(mob)
-		primeMobAnimateScripts(mob)
-		setMobGroup(mob)
-		wireDropsAndKills(mob, { xp = 120, coins = 60 }, true)
-
-        hum.MaxHealth = 1200
-        hum.Health = hum.MaxHealth
-        hum.WalkSpeed = 10
-		mob:SetAttribute("MobType", bossName)
-		mob:SetAttribute("Damage", 24)
-		mob:SetAttribute("AttackRange", 7)
-		mob:SetAttribute("AttackCooldown", 1.4)
-		mob:SetAttribute("IsElite", true)
-		mob:SetAttribute("IsRanged", false)
-		startSimpleAI(mob)
-
-		bossModel = mob
-		broadcast({ type = "portalBossSpawn" })
-
-		local bossHum = mob:FindFirstChildOfClass("Humanoid")
-		if bossHum then
-			bossHum.Died:Connect(function()
-				bossDefeated = true
-				broadcast({ type = "portalBossDefeated" })
-				setPromptState()
-			end)
-		end
+	if bossModel and bossModel.Parent then return end
+	bossDefeated = false
+	local bossName = "Golem" -- change if you have a dedicated boss model
+	local tpl = EliteFolder:FindFirstChild(bossName) or NormalFolder:FindFirstChild(bossName)
+	if not tpl or not tpl:IsA("Model") then
+		warn("[Portal] Missing boss template:", bossName)
+		return
 	end
 
-	prompt.Triggered:Connect(function(plr)
+	local mob = tpl:Clone()
+	mob.Name = "Boss_" .. bossName
+	cleanupTemplateScripts(mob)
+	setMobGroup(mob)
+	mob.Parent = ENEMIES_FOLDER
+
+	pcall(function()
+		mob:PivotTo(base.CFrame * CFrame.new(0, 0, -18))
+	end)
+
+	local registered = registerMobModel(mob, bossName, {
+		hp = 1200,
+		speed = 10,
+		range = 7,
+		cd = 1.4,
+		dmg = 24,
+		isRanged = false,
+	}, { xp = 120, coins = 60 }, true, function()
+		bossDefeated = true
+		broadcast({ type = "portalBossDefeated" })
+		setPromptState()
+	end)
+	if not registered then
+		return
+	end
+
+	bossModel = registered
+	broadcast({ type = "portalBossSpawn" })
+end
+prompt.Triggered:Connect(function(plr)
 		if not RunStarted.Value then return end
 		if plr:GetAttribute("RunEnded") == true then return end
 
@@ -1233,3 +1025,7 @@ RunService.Heartbeat:Connect(function()
 end)
 
 print("[HordeController] Ready (time-based)")
+
+
+
+

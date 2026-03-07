@@ -21,24 +21,18 @@ local function findModule(name: string): ModuleScript?
 end
 
 local PlayerData = require(findModule("PlayerData") or error("[WeaponCombat] Missing PlayerData"))
+local NpcService = require(findModule("NpcService") or error("[WeaponCombat] Missing NpcService"))
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
 local WeaponConfigs = moduleFolder and moduleFolder:FindFirstChild("WeaponConfigs") and require(moduleFolder.WeaponConfigs) or nil
 
-local ENEMIES = workspace:FindFirstChild("Enemies")
-if not ENEMIES then
-	ENEMIES = Instance.new("Folder")
-	ENEMIES.Name = "Enemies"
-	ENEMIES.Parent = workspace
-end
-
 local CD_BY_TYPE = {
 	Sword = 0.55, Scythe = 0.80, Halberd = 0.75, Claymore = 0.95, Greataxe = 1.05,
-	Bow = 0.65, Wand = 0.55, Staff = 0.75, Pistol = 0.45
+	Bow = 0.65, Wand = 0.55, Staff = 0.75, Pistol = 0.45,
 }
 
 local RANGE_BY_TYPE = {
 	Sword = 9, Scythe = 10, Halberd = 12, Claymore = 10, Greataxe = 10,
-	Bow = 60, Wand = 45, Staff = 50, Pistol = 55
+	Bow = 60, Wand = 45, Staff = 50, Pistol = 55,
 }
 
 local AOE_RADIUS_BY_TYPE = {
@@ -136,99 +130,12 @@ local function calcAttackStats(plr: Player, entry)
 	}
 end
 
-local function ensureHealthbar(enemyModel: Model, hum: Humanoid)
-	local hrp = enemyModel:FindFirstChild("HumanoidRootPart") or enemyModel:FindFirstChild("Head")
-	if not hrp or not hrp:IsA("BasePart") then return end
-
-	local existing = enemyModel:FindFirstChild("EnemyHealthbar")
-	if existing and existing:IsA("BillboardGui") then
-		existing.Enabled = true
-		return
-	end
-
-	local gui = Instance.new("BillboardGui")
-	gui.Name = "EnemyHealthbar"
-	gui.Adornee = hrp
-	gui.Size = UDim2.fromOffset(120, 16)
-	gui.StudsOffset = Vector3.new(0, 3.2, 0)
-	gui.AlwaysOnTop = true
-	gui.Enabled = true
-
-	local bg = Instance.new("Frame")
-	bg.Name = "BG"
-	bg.Size = UDim2.fromScale(1, 1)
-	bg.BackgroundTransparency = 0.35
-	bg.BorderSizePixel = 0
-	bg.Parent = gui
-
-	local fill = Instance.new("Frame")
-	fill.Name = "Fill"
-	fill.Size = UDim2.fromScale(1, 1)
-	fill.BackgroundTransparency = 0
-	fill.BorderSizePixel = 0
-	fill.Parent = bg
-
-	gui.Parent = enemyModel
-end
-
-local function updateHealthbar(enemyModel: Model, hum: Humanoid)
-	local gui = enemyModel:FindFirstChild("EnemyHealthbar")
-	if not gui or not gui:IsA("BillboardGui") then return end
-	local bg = gui:FindFirstChild("BG")
-	local fill = bg and bg:FindFirstChild("Fill")
-	if not fill or not fill:IsA("Frame") then return end
-
-	local maxH = math.max(1, hum.MaxHealth)
-	local pct = math.clamp(hum.Health / maxH, 0, 1)
-	fill.Size = UDim2.fromScale(pct, 1)
-
-	if hum.Health <= 0 then
-		gui.Enabled = false
-	end
-end
-
-local function tagCreator(hum: Humanoid, plr: Player)
-	local old = hum:FindFirstChild("creator")
-	if old then old:Destroy() end
-	local tag = Instance.new("ObjectValue")
-	tag.Name = "creator"
-	tag.Value = plr
-	tag.Parent = hum
-	task.delay(1, function()
-		if tag and tag.Parent then tag:Destroy() end
-	end)
-end
-
 local function nearestEnemy(fromPos: Vector3, maxRange: number)
-	local best, bestDist = nil, maxRange
-	for _, enemy in ipairs(ENEMIES:GetChildren()) do
-		if enemy:IsA("Model") then
-			local hum = enemy:FindFirstChildOfClass("Humanoid")
-			local hrp = enemy:FindFirstChild("HumanoidRootPart")
-			if hum and hrp and hum.Health > 0 then
-				local d = (hrp.Position - fromPos).Magnitude
-				if d < bestDist then
-					bestDist = d
-					best = enemy
-				end
-			end
-		end
-	end
-	return best, bestDist
+	return NpcService.GetNearestEnemy(fromPos, maxRange)
 end
 
 local function getEnemiesInRadius(fromPos: Vector3, radius: number)
-	local hits = {}
-	for _, enemy in ipairs(ENEMIES:GetChildren()) do
-		if enemy:IsA("Model") then
-			local hum = enemy:FindFirstChildOfClass("Humanoid")
-			local hrp = enemy:FindFirstChild("HumanoidRootPart")
-			if hum and hrp and hum.Health > 0 and (hrp.Position - fromPos).Magnitude <= radius then
-				table.insert(hits, enemy)
-			end
-		end
-	end
-	return hits
+	return NpcService.GetEnemiesInRadius(fromPos, radius)
 end
 
 local loops = {}
@@ -271,17 +178,16 @@ local function startLoop(plr: Player)
 			end
 
 			local enemy = nearestEnemy(hrp.Position, range)
-			if not enemy then
+			if not enemy or not NpcService.IsAlive(enemy) then
+				continue
+			end
+
+			local enemyPos = NpcService.GetPosition(enemy)
+			if not enemyPos then
 				continue
 			end
 
 			last = now
-
-			local eh = enemy:FindFirstChildOfClass("Humanoid")
-			local ehrp = enemy:FindFirstChild("HumanoidRootPart")
-			if not eh or not ehrp or eh.Health <= 0 then
-				continue
-			end
 
 			if stats.baseDamage <= 0 then
 				continue
@@ -290,14 +196,13 @@ local function startLoop(plr: Player)
 			local hitEnemies = { enemy }
 			local aoeRadius = AOE_RADIUS_BY_TYPE[wType]
 			if aoeRadius then
-				hitEnemies = getEnemiesInRadius(ehrp.Position, aoeRadius)
+				hitEnemies = getEnemiesInRadius(enemyPos, aoeRadius)
 			end
 
 			local totalHeal = 0
 			for _, enemyModel in ipairs(hitEnemies) do
-				local enemyHum = enemyModel:FindFirstChildOfClass("Humanoid")
-				local enemyHrp = enemyModel:FindFirstChild("HumanoidRootPart")
-				if enemyHum and enemyHum.Health > 0 then
+				if NpcService.IsAlive(enemyModel) then
+					local enemyHitPos = NpcService.GetPosition(enemyModel)
 					local isCrit = math.random() < stats.critChance
 					local dealt = stats.baseDamage
 					if isCrit then
@@ -308,20 +213,21 @@ local function startLoop(plr: Player)
 					end
 					dealt = math.max(1, math.floor(dealt + 0.5))
 
-					ensureHealthbar(enemyModel, enemyHum)
-					tagCreator(enemyHum, plr)
-					enemyHum:TakeDamage(dealt)
-					updateHealthbar(enemyModel, enemyHum)
-
-					if enemyHrp and stats.knockbackPower > 0 then
-						local dir = enemyHrp.Position - hrp.Position
-						if dir.Magnitude > 0.1 then
-							enemyHrp.AssemblyLinearVelocity += dir.Unit * stats.knockbackPower
+					local applied = NpcService.ApplyDamage(enemyModel, dealt, {
+						player = plr,
+						crit = isCrit,
+					})
+					if applied > 0 then
+						if enemyHitPos and stats.knockbackPower > 0 then
+							local dir = enemyHitPos - hrp.Position
+							if dir.Magnitude > 0.1 then
+								NpcService.AddImpulse(enemyModel, dir.Unit * stats.knockbackPower)
+							end
 						end
-					end
 
-					if stats.lifesteal > 0 then
-						totalHeal += dealt * stats.lifesteal
+						if stats.lifesteal > 0 then
+							totalHeal += applied * stats.lifesteal
+						end
 					end
 				end
 			end
@@ -333,7 +239,7 @@ local function startLoop(plr: Player)
 			local weaponId = entry.id or entry.Id or ""
 			VFXEvent:FireAllClients({
 				weaponId = weaponId,
-				pos = ehrp.Position,
+				pos = enemyPos,
 				lookAt = hrp.Position,
 			})
 		end
@@ -352,3 +258,13 @@ Players.PlayerRemoving:Connect(function(plr)
 		loops[plr] = nil
 	end
 end)
+
+for _, plr in ipairs(Players:GetPlayers()) do
+	plr.CharacterAdded:Connect(function()
+		startLoop(plr)
+	end)
+	if plr.Character then
+		startLoop(plr)
+	end
+end
+

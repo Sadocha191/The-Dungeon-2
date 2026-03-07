@@ -33,3 +33,5 @@ ensureRemoteEvent("ClientReady")          -- client -> server (loaded/preloaded)
 ensureRemoteEvent("WeaponSwingVFX")
 -- WeaponEvent (client -> server) [legacy/manual]
 ensureRemoteEvent("WeaponEvent")
+-- NPC presentation batches (server -> client)
+ensureRemoteEvent("NpcBatchEvent")

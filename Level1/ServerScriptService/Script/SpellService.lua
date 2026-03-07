@@ -6,28 +6,20 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Remotes = ReplicatedStorage:WaitForChild("Remotes")
-local DamageIndicatorEvent = Remotes:WaitForChild("DamageIndicatorEvent")
-local SpellVFXEvent = Remotes:FindFirstChild("SpellVFXEvent")
+local ServerScriptService = game:GetService("ServerScriptService")
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
-
 local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes") or ReplicatedStorage:WaitForChild("Remotes", 5)
-local DamageIndicatorEvent = remotesFolder and remotesFolder:FindFirstChild("DamageIndicatorEvent")
-if remotesFolder and not DamageIndicatorEvent then
-	DamageIndicatorEvent = Instance.new("RemoteEvent")
-	DamageIndicatorEvent.Name = "DamageIndicatorEvent"
-	DamageIndicatorEvent.Parent = remotesFolder
+if not remotesFolder then
+	error("[SpellService] Missing ReplicatedStorage.Remotes")
 end
 
--- Ensure SpellVFXEvent exists (server -> client VFX sync)
-local SpellVFXEvent = remotesFolder and remotesFolder:FindFirstChild("SpellVFXEvent")
-if remotesFolder and not SpellVFXEvent then
+local SpellVFXEvent = remotesFolder:FindFirstChild("SpellVFXEvent")
+if not SpellVFXEvent then
 	SpellVFXEvent = Instance.new("RemoteEvent")
 	SpellVFXEvent.Name = "SpellVFXEvent"
 	SpellVFXEvent.Parent = remotesFolder
 end
-
 local PauseState = ReplicatedStorage:FindFirstChild("PauseState")
 if not PauseState then
 	PauseState = Instance.new("BoolValue")
@@ -61,9 +53,22 @@ end
 local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
 local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions"))
 
-local function getEnemiesRoot()
-	return workspace:FindFirstChild("Enemies") or workspace:FindFirstChild("Mobs")
+local function findServerModule(name: string): ModuleScript?
+	local direct = ServerScriptService:FindFirstChild(name)
+	if direct and direct:IsA("ModuleScript") then
+		return direct
+	end
+	local folder = ServerScriptService:FindFirstChild("ModuleScript") or ServerScriptService:FindFirstChild("ModuleScripts")
+	if folder then
+		local nested = folder:FindFirstChild(name)
+		if nested and nested:IsA("ModuleScript") then
+			return nested
+		end
+	end
+	return nil
 end
+
+local NpcService = require(findServerModule("NpcService") or error("[SpellService] Missing NpcService"))
 
 local vfxRoot = workspace:FindFirstChild("SpellVFX")
 if not vfxRoot then
@@ -73,118 +78,81 @@ if not vfxRoot then
 end
 
 -- ===== Utils =====
-local function safeDamage(hum: Humanoid, dmg: number)
-	if isPaused() then return end
-	if not hum or hum.Health <= 0 then return end
+local function getEnemyRoot(model: Model): BasePart?
+	return NpcService.GetRoot(model)
+end
+
+local function enemyAlive(model: Model): boolean
+	return NpcService.IsAlive(model)
+end
+
+local function safeDamage(enemyModel: Model, dmg: number, meta)
+	if isPaused() then return 0 end
 	dmg = math.floor(tonumber(dmg) or 0)
-	if dmg <= 0 then return end
-	pcall(function() hum:TakeDamage(dmg) end)
+	if dmg <= 0 then return 0 end
+	return NpcService.ApplyDamage(enemyModel, dmg, meta)
 end
 
 local function getEnemyModels()
-	local out = {}
-	local enemiesRoot = getEnemiesRoot()
-	if not enemiesRoot then return out end
-	for _, d in ipairs(enemiesRoot:GetDescendants()) do
-		if d:IsA("Model") then
-			local hum = d:FindFirstChildOfClass("Humanoid")
-			local hrp = d:FindFirstChild("HumanoidRootPart")
-			if hum and hrp and hum.Health > 0 then
-				table.insert(out, d)
-			end
-		end
-	end
-	return out
+	return NpcService.GetLivingModels()
 end
 
 local function getNearestEnemy(pos: Vector3, range: number)
-	local best, bestD = nil, range or 9999
-	for _, m in ipairs(getEnemyModels()) do
-		local hrp = m:FindFirstChild("HumanoidRootPart")
-		if hrp then
-			local d = (hrp.Position - pos).Magnitude
-			if d < bestD then
-				bestD = d
-				best = m
-			end
-		end
-	end
-	return best, bestD
+	return NpcService.GetNearestEnemy(pos, range or 9999)
 end
 
 local function getEnemiesInRadius(pos: Vector3, radius: number)
-	local list = {}
-	radius = radius or 10
-	local r2 = radius * radius
-	for _, m in ipairs(getEnemyModels()) do
-		local hrp = m:FindFirstChild("HumanoidRootPart")
-		if hrp then
-			local d2 = (hrp.Position - pos).Magnitude
-			if d2 <= radius then
-				table.insert(list, m)
-			end
-		end
-	end
-	return list
+	return NpcService.GetEnemiesInRadius(pos, radius or 10)
 end
 
 local function applySlow(model: Model, slowPct: number, duration: number)
-	local hum = model and model:FindFirstChildOfClass("Humanoid")
-	if not hum then return end
-	slowPct = math.clamp(tonumber(slowPct) or 0, 0, 0.95)
-	duration = math.max(0.05, tonumber(duration) or 0.5)
-
-	local now = spellClock()
-	local curEnd = hum:GetAttribute("SlowEnd") or 0
-	local curPct = hum:GetAttribute("SlowPct") or 0
-	local newEnd = math.max(curEnd, now + duration)
-	local newPct = math.max(curPct, slowPct)
-
-	hum:SetAttribute("SlowEnd", newEnd)
-	hum:SetAttribute("SlowPct", newPct)
+	NpcService.ApplySlow(model, slowPct, duration)
 end
 
 local function applyFreeze(model: Model, duration: number)
-	local hum = model and model:FindFirstChildOfClass("Humanoid")
-	if not hum then return end
-	duration = math.max(0.1, tonumber(duration) or 0.5)
-	local now = spellClock()
-	local curEnd = hum:GetAttribute("FreezeEnd") or 0
-	hum:SetAttribute("FreezeEnd", math.max(curEnd, now + duration))
+	NpcService.ApplyFreeze(model, duration)
 end
 
--- Status maintenance: slow/freeze
-RunService.Heartbeat:Connect(function()
-	local now = spellClock()
-	for _, m in ipairs(getEnemyModels()) do
-		local hum = m:FindFirstChildOfClass("Humanoid")
-		if hum and hum.Health > 0 then
-			local base = hum:GetAttribute("BaseWalkSpeed")
-			if not base then
-				base = hum.WalkSpeed
-				hum:SetAttribute("BaseWalkSpeed", base)
-			end
+local function addImpulse(model: Model, impulse: Vector3)
+	NpcService.AddImpulse(model, impulse)
+end
 
-			local freezeEnd = hum:GetAttribute("FreezeEnd") or 0
-			if freezeEnd > now then
-				hum.WalkSpeed = 0
-			else
-				local slowEnd = hum:GetAttribute("SlowEnd") or 0
-				local slowPct = hum:GetAttribute("SlowPct") or 0
-				if slowEnd > now and slowPct > 0 then
-					hum.WalkSpeed = math.max(2, base * (1 - slowPct))
-				else
-					hum.WalkSpeed = base
-					if slowEnd ~= 0 then
-						hum:SetAttribute("SlowEnd", 0)
-						hum:SetAttribute("SlowPct", 0)
-					end
-				end
-			end
-		end
+local function getEnemyPosition(model: Model): Vector3?
+	local pos = NpcService.GetPosition(model)
+	if pos then
+		return pos
 	end
-end)
+	local root = getEnemyRoot(model)
+	return root and root.Position or nil
+end
 
+local function getEnemyDirection(fromPos: Vector3, model: Model): Vector3?
+	local enemyPos = getEnemyPosition(model)
+	if not enemyPos then
+		return nil
+	end
+
+	local delta = enemyPos - fromPos
+	if delta.Magnitude <= 1e-4 then
+		return nil
+	end
+
+	return delta.Unit
+end
+
+local function sortEnemiesByDistance(fromPos: Vector3, enemies: {Model})
+	table.sort(enemies, function(a, b)
+		local aPos = getEnemyPosition(a)
+		local bPos = getEnemyPosition(b)
+		if not aPos then
+			return false
+		end
+		if not bPos then
+			return true
+		end
+		return (aPos - fromPos).Magnitude < (bPos - fromPos).Magnitude
+	end)
+end
 -- ===== Per-player state =====
 local state = {} :: {[number]: any}
 
@@ -259,21 +227,18 @@ local function getCritDamageBonus(plr: Player?): number
 end
 
 local function projHitDamage(plr: Player, enemy: Model, dmg: number, opts)
-	if isPaused() then return end
+	if isPaused() or not enemy or not enemyAlive(enemy) then return end
 	opts = opts or {}
-	local hum = enemy and enemy:FindFirstChildOfClass("Humanoid")
-	if not hum then return end
+	local enemyRoot = getEnemyRoot(enemy)
+	if not enemyRoot then return end
 
 	if enemy:GetAttribute("SoulLinkAnchor") then
 		local linkPct = tonumber(plr:GetAttribute("SoulLinkPct")) or 0
 		local linkRadius = tonumber(plr:GetAttribute("SoulLinkRadius")) or 0
 		if linkPct > 0 and linkRadius > 0 then
-			for _, other in ipairs(getEnemiesInRadius(enemy.HumanoidRootPart.Position, linkRadius)) do
-				if other ~= enemy then
-					local oh = other:FindFirstChildOfClass("Humanoid")
-					if oh then
-						safeDamage(oh, dmg * linkPct)
-					end
+			for _, other in ipairs(getEnemiesInRadius(enemyRoot.Position, linkRadius)) do
+				if other ~= enemy and enemyAlive(other) then
+					safeDamage(other, dmg * linkPct, { player = plr, showFloating = false })
 				end
 			end
 		end
@@ -296,20 +261,17 @@ local function projHitDamage(plr: Player, enemy: Model, dmg: number, opts)
 		end
 
 		dealt = math.max(1, math.floor(dealt + 0.5))
-		safeDamage(hum, dealt)
+		local applied = safeDamage(enemy, dealt, {
+			player = plr,
+			crit = opts.crit == true,
+			showFloating = opts.showFloating,
+		})
 
 		local lifesteal = getLifestealBonus(plr)
-		if lifesteal > 0 then
+		if lifesteal > 0 and applied > 0 then
 			local ownerHum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
 			if ownerHum and ownerHum.Health > 0 then
-				ownerHum.Health = math.min(ownerHum.MaxHealth, ownerHum.Health + dealt * lifesteal)
-			end
-		end
-
-		if opts.showFloating ~= false then
-			local hrp = enemy:FindFirstChild("HumanoidRootPart")
-			if hrp then
-				DamageIndicatorEvent:FireAllClients({ pos = hrp.Position, amount = dealt, crit = opts.crit == true })
+				ownerHum.Health = math.min(ownerHum.MaxHealth, ownerHum.Health + applied * lifesteal)
 			end
 		end
 	end
@@ -324,8 +286,8 @@ local function projHitDamage(plr: Player, enemy: Model, dmg: number, opts)
 	if opts.burnDps and opts.burnDuration then
 		local endT = spellClock() + (opts.burnDuration * durationMult)
 		task.spawn(function()
-			while spellClock() < endT and hum.Health > 0 do
-				safeDamage(hum, opts.burnDps * 0.5)
+			while spellClock() < endT and enemyAlive(enemy) do
+				safeDamage(enemy, opts.burnDps * 0.5, { player = plr, showFloating = false })
 				task.wait(0.5)
 			end
 		end)
@@ -333,13 +295,14 @@ local function projHitDamage(plr: Player, enemy: Model, dmg: number, opts)
 	if opts.poisonDps and opts.poisonDuration then
 		local endT = spellClock() + (opts.poisonDuration * durationMult)
 		task.spawn(function()
-			while spellClock() < endT and hum.Health > 0 do
-				safeDamage(hum, opts.poisonDps * 0.5)
+			while spellClock() < endT and enemyAlive(enemy) do
+				safeDamage(enemy, opts.poisonDps * 0.5, { player = plr, showFloating = false })
 				task.wait(0.5)
 			end
 		end)
 	end
 end
+
 local function fireProjectile(plr: Player, origin: Vector3, dir: Vector3, speed: number, range: number, dmg: number, pierce: number, opts)
 	local s = getState(plr)
 	local cloneLv = getSpellLevel(plr, "PhantomClone")
@@ -372,19 +335,17 @@ local function fireProjectile(plr: Player, origin: Vector3, dir: Vector3, speed:
 			end
 
 			local nearest = getNearestEnemy(p.Position, 3)
-			if nearest and nearest:FindFirstChild("HumanoidRootPart") then
-				local hrp = nearest.HumanoidRootPart
-				if (hrp.Position - p.Position).Magnitude <= 2.5 then
-					if not hit[nearest] then
-						hit[nearest] = true
-						projHitDamage(plr, nearest, dmg * mult, opts)
-						if localPierce <= 0 then
-							conn:Disconnect()
-							p:Destroy()
-							return
-						else
-							localPierce -= 1
-						end
+			local nearestRoot = nearest and getEnemyRoot(nearest)
+			if nearestRoot and (nearestRoot.Position - p.Position).Magnitude <= 2.5 then
+				if not hit[nearest] then
+					hit[nearest] = true
+					projHitDamage(plr, nearest, dmg * mult, opts)
+					if localPierce <= 0 then
+						conn:Disconnect()
+						p:Destroy()
+						return
+					else
+						localPierce -= 1
 					end
 				end
 			end
@@ -458,7 +419,6 @@ local function tickOrbit(plr: Player, dt: number, id: string, count: number, rad
 		s.orbit[id] = bucket
 	end
 
-	-- client-side orbit visuals (no server parts)
 	syncOrbitVFX(plr, id, count > 0, {
 		count = count,
 		radius = radius,
@@ -477,25 +437,19 @@ local function tickOrbit(plr: Player, dt: number, id: string, count: number, rad
 	local t0 = bucket.t
 	for i = 1, count do
 		local ang = t0 + (i / math.max(1, count)) * math.pi * 2
-		-- IMPORTANT: Y is constant (not multiplied by radius) so orbits don't float too high
 		local pos = hrp.Position + Vector3.new(math.cos(ang) * radius, 1.5, math.sin(ang) * radius)
 
-		local nearest, d = getNearestEnemy(pos, 3)
-		if nearest then
-			local hum = nearest:FindFirstChildOfClass("Humanoid")
-			if hum then
-				local key = nearest
-				local last = bucket.lastHit[key] or 0
-				if spellClock() - last >= hitCd then
-					bucket.lastHit[key] = spellClock()
-					safeDamage(hum, baseDmg * getAtkMult(plr))
-					if onHit then onHit(nearest) end
-				end
+		local nearest = getNearestEnemy(pos, 3)
+		if nearest and enemyAlive(nearest) then
+			local key = nearest
+			local last = bucket.lastHit[key] or 0
+			if spellClock() - last >= hitCd then
+				bucket.lastHit[key] = spellClock()
+				safeDamage(nearest, baseDmg * getAtkMult(plr), { player = plr })
+				if onHit then onHit(nearest) end
 			end
 		end
 	end
-end
-
 local function spawnZone(pos: Vector3, radius: number, duration: number, ownerPlr: Player?)
 	duration = (tonumber(duration) or 0) * getDurationMult(ownerPlr)
 	local p = ensurePart("Zone", Vector3.new(radius * 2, 0.4, radius * 2))
@@ -536,16 +490,13 @@ local function stepPlayer(plr: Player, dt: number)
 		tickOrbit(plr, dt, "FireOrb", count, radius, 2.6, hitCd, dmg, function(enemy)
 			if burn then
 				applySlow(enemy, 0.05, 0.5 * getDurationMult(plr))
-				local hum = enemy:FindFirstChildOfClass("Humanoid")
-				if hum then
-					local endT = spellClock() + burnDur
-					task.spawn(function()
-						while spellClock() < endT and hum.Health > 0 do
-							safeDamage(hum, burnDps)
-							task.wait(0.5)
-						end
-					end)
-				end
+				local endT = spellClock() + burnDur
+				task.spawn(function()
+					while spellClock() < endT and enemyAlive(enemy) do
+						safeDamage(enemy, burnDps, { player = plr, showFloating = false })
+						task.wait(0.5)
+					end
+				end)
 			end
 		end)
 	else
@@ -562,11 +513,12 @@ local function stepPlayer(plr: Player, dt: number)
 		local hitCd = 0.35
 		local knock = (lv >= 5)
 		tickOrbit(plr, dt, "WindBlades", count, radius, speed, hitCd, dmg, function(enemy)
-			if knock and enemy:FindFirstChild("HumanoidRootPart") then
-				local epos = enemy.HumanoidRootPart.Position
+			local epos = getEnemyPosition(enemy)
+			if knock and epos then
 				local dir = (epos - pos).Unit
-				enemy.HumanoidRootPart.AssemblyLinearVelocity += dir * 12 * getKnockbackMult(plr)
+				addImpulse(enemy, dir * 12 * getKnockbackMult(plr))
 			end
+		end)
 		end)
 	else
 		syncOrbitVFX(plr, "WindBlades", false)
@@ -582,19 +534,16 @@ local function stepPlayer(plr: Player, dt: number)
 		local hitCd = 0.35
 		local poisonDps = 3 + (lv * 2)
 		local poisonDur = 2.5
-		tickOrbit(plr, dt, "ToxicBlades", count, radius, speed, hitCd, dmg, function(enemy)
-			applySlow(enemy, 0.10, 0.6 * getDurationMult(plr))
-			local hum = enemy:FindFirstChildOfClass("Humanoid")
-			if hum then
+			tickOrbit(plr, dt, "ToxicBlades", count, radius, speed, hitCd, dmg, function(enemy)
+				applySlow(enemy, 0.10, 0.6 * getDurationMult(plr))
 				local endT = spellClock() + poisonDur
 				task.spawn(function()
-					while spellClock() < endT and hum.Health > 0 do
-						safeDamage(hum, poisonDps)
+					while spellClock() < endT and enemyAlive(enemy) do
+						safeDamage(enemy, poisonDps, { player = plr, showFloating = false })
 						task.wait(0.5)
 					end
 				end)
-			end
-		end)
+			end)
 	else
 		syncOrbitVFX(plr, "ToxicBlades", false)
 	end
@@ -608,8 +557,8 @@ local function stepPlayer(plr: Player, dt: number)
 		if spellClock() >= nextT then
 			s.cds.ShadowDagger = spellClock() + cd
 			local target = getNearestEnemy(pos, 40)
-			if target and target:FindFirstChild("HumanoidRootPart") then
-				local dir = (target.HumanoidRootPart.Position - pos).Unit
+			local dir = target and getEnemyDirection(pos, target)
+			if dir then
 				local knives = (lv >= 3 and 2) or 1
 				for k=1,knives do
 					task.delay((k-1)*0.1, function()
@@ -635,8 +584,8 @@ local function stepPlayer(plr: Player, dt: number)
 		if spellClock() >= nextT then
 			s.cds.BoneSpear = spellClock() + cd
 			local target = getNearestEnemy(pos, 60)
-			if target and target:FindFirstChild("HumanoidRootPart") then
-				local dir0 = (target.HumanoidRootPart.Position - pos).Unit
+			local dir0 = target and getEnemyDirection(pos, target)
+			if dir0 then
 				local spears = (lv >= 6 and 3) or (lv >= 3 and 2) or 1
 				local pierce = (lv >= 6 and 5) or (lv >= 4 and 3) or (lv >= 1 and 2) or 1
 				for i=1,spears do
@@ -729,7 +678,7 @@ local function stepPlayer(plr: Player, dt: number)
 		if spellClock() >= nextT then
 			s.cds.LightningChain = spellClock() + cd
 			local start = getNearestEnemy(pos, 55)
-			if start and start:FindFirstChild("HumanoidRootPart") then
+			if getEnemyRoot(start) then
 				local jumps = (lv >= 6 and 6) or (lv >= 3 and 4) or 3
 				local jumpR = 12 * (lv>=4 and 1.2 or 1.0)
 				local dmg = 20 + lv*6
@@ -746,10 +695,14 @@ local function stepPlayer(plr: Player, dt: number)
 					-- next
 					local best=nil
 					local bestD=jumpR
-					local cpos = cur.HumanoidRootPart.Position
+					local cpos = getEnemyPosition(cur)
+					if not cpos then
+						break
+					end
 					for _, e in ipairs(getEnemyModels()) do
-						if not hit[e] and e:FindFirstChild("HumanoidRootPart") then
-							local d = (e.HumanoidRootPart.Position - cpos).Magnitude
+						local epos = (not hit[e]) and getEnemyPosition(e) or nil
+						if epos then
+							local d = (epos - cpos).Magnitude
 							if d < bestD then bestD=d best=e end
 						end
 					end
@@ -787,16 +740,16 @@ local function stepPlayer(plr: Player, dt: number)
 			local dmg = 22 + lv*6
 			local pull = (lv>=5) and ((lv>=6 and 0.6) or 0.3) or 0
 			for _, e in ipairs(getEnemiesInRadius(pos, radius)) do
-				if e:FindFirstChild("HumanoidRootPart") then
-					local dir = (e.HumanoidRootPart.Position - pos)
+				local enemyRoot = getEnemyRoot(e)
+				if enemyRoot then
+					local dir = (enemyRoot.Position - pos)
 					if dir.Magnitude < 0.1 then dir = Vector3.new(1,0,0) end
 					dir = dir.Unit
-					local vel = e.HumanoidRootPart.AssemblyLinearVelocity
 					if pull > 0 then
-						e.HumanoidRootPart.AssemblyLinearVelocity = vel - dir * force * getKnockbackMult(plr)
+						addImpulse(e, -dir * force * getKnockbackMult(plr))
 						applySlow(e, 0.25, pull * getDurationMult(plr))
 					else
-						e.HumanoidRootPart.AssemblyLinearVelocity = vel + dir * force * getKnockbackMult(plr)
+						addImpulse(e, dir * force * getKnockbackMult(plr))
 					end
 					projHitDamage(plr, e, dmg, {})
 				end
@@ -817,17 +770,16 @@ local function stepPlayer(plr: Player, dt: number)
 			local dmg = 16 + lv*6
 			local impactR = (lv>=5 and 4) or 0
 			local enemies = getEnemyModels()
-			table.sort(enemies, function(a,b)
-				return (a.HumanoidRootPart.Position - pos).Magnitude < (b.HumanoidRootPart.Position - pos).Magnitude
-			end)
+			sortEnemiesByDistance(pos, enemies)
 			for i=1,count do
 				local t = enemies[i]
-				if t and t:FindFirstChild("HumanoidRootPart") then
-					local dir = (t.HumanoidRootPart.Position - pos).Unit
+				local targetPos = t and getEnemyPosition(t)
+				local dir = t and getEnemyDirection(pos, t)
+				if dir and targetPos then
 					fireProjectile(plr, pos + Vector3.new(0,2,0), dir, speed, range, dmg, 0, { })
 					if impactR > 0 then
 						task.delay(0.15 + i*0.05, function()
-							pulseAt(plr, t.HumanoidRootPart.Position, impactR, dmg*0.6, {})
+							pulseAt(plr, targetPos, impactR, dmg*0.6, {})
 						end)
 					end
 				end
@@ -843,8 +795,8 @@ local function stepPlayer(plr: Player, dt: number)
 		if spellClock() >= nextT then
 			s.cds.CrystalBarrage = spellClock() + cd
 			local target = getNearestEnemy(pos, 55)
-			if target and target:FindFirstChild("HumanoidRootPart") then
-				local dir0 = (target.HumanoidRootPart.Position - pos).Unit
+			local dir0 = target and getEnemyDirection(pos, target)
+			if dir0 then
 				local shards = (lv>=6 and 10) or (lv>=3 and 7) or 5
 				local cone = math.rad(28)
 				local dmg = 10 + lv*4
@@ -876,16 +828,14 @@ local function stepPlayer(plr: Player, dt: number)
 			local force = 60 * (lv>=4 and 1.2 or 1.0)
 			local stun = (lv>=5 and 0.3) or 0
 			local enemies = getEnemyModels()
-			table.sort(enemies, function(a,b)
-				return (a.HumanoidRootPart.Position - pos).Magnitude < (b.HumanoidRootPart.Position - pos).Magnitude
-			end)
+			sortEnemiesByDistance(pos, enemies)
 			local pulled = 0
 			for _, e in ipairs(enemies) do
 				if pulled >= hooks then break end
-				local hrpE = e:FindFirstChild("HumanoidRootPart")
-				if hrpE and (hrpE.Position - pos).Magnitude <= range then
-					local dir = (pos - hrpE.Position).Unit
-					hrpE.AssemblyLinearVelocity += dir * force * getKnockbackMult(plr)
+				local enemyPos = getEnemyPosition(e)
+				if enemyPos and (enemyPos - pos).Magnitude <= range then
+					local dir = (pos - enemyPos).Unit
+					addImpulse(e, dir * force * getKnockbackMult(plr))
 					if stun>0 then applyFreeze(e, stun * getDurationMult(plr)) end
 					pulled += 1
 				end
@@ -937,16 +887,18 @@ local function stepPlayer(plr: Player, dt: number)
 				task.spawn(function()
 					while spellClock() < endT and t.Parent do
 						local target = getNearestEnemy(t.Position, range)
-						if target and target:FindFirstChild("HumanoidRootPart") then
+						local targetPos = target and getEnemyPosition(target)
+						if targetPos then
 							projHitDamage(plr, target, baseDmg*getAtkMult(plr), {})
 							if chainJumps > 0 then
 								-- one extra jump
 								local next = nil
 								local bestD = 12
-								local cpos = target.HumanoidRootPart.Position
+								local cpos = targetPos
 								for _, e in ipairs(getEnemyModels()) do
-									if e ~= target and e:FindFirstChild("HumanoidRootPart") then
-										local d = (e.HumanoidRootPart.Position - cpos).Magnitude
+									local epos = e ~= target and getEnemyPosition(e) or nil
+									if epos then
+										local d = (epos - cpos).Magnitude
 										if d < bestD then bestD = d next = e end
 									end
 								end
@@ -997,14 +949,15 @@ local function stepPlayer(plr: Player, dt: number)
 					local t0 = spellClock()
 					while spellClock() - t0 < life and skull.Parent do
 						local t = target
-						if not t or not t:FindFirstChild("HumanoidRootPart") or t:FindFirstChildOfClass("Humanoid").Health <= 0 then
+						if not t or not getEnemyRoot(t) or not enemyAlive(t) then
 							t = getNearestEnemy(skull.Position, 70)
 							target = t
 						end
-						if t and t:FindFirstChild("HumanoidRootPart") then
-							local dir = (t.HumanoidRootPart.Position - skull.Position).Unit
+						local targetPos = t and getEnemyPosition(t)
+						if targetPos then
+							local dir = (targetPos - skull.Position).Unit
 							skull.Position = skull.Position + dir * speed * RunService.Heartbeat:Wait()
-							if (t.HumanoidRootPart.Position - skull.Position).Magnitude <= 3 then
+							if (targetPos - skull.Position).Magnitude <= 3 then
 								pulseAt(plr, skull.Position, aoe, dmg, {})
 								skull:Destroy()
 								return
@@ -1084,10 +1037,11 @@ local function stepPlayer(plr: Player, dt: number)
 				task.spawn(function()
 					while spellClock() < endT and zone.Parent do
 						for _, e in ipairs(getEnemiesInRadius(zone.Position, radius)) do
-							if e:FindFirstChild("HumanoidRootPart") then
-								local dir = (zone.Position - e.HumanoidRootPart.Position).Unit
-								e.HumanoidRootPart.AssemblyLinearVelocity += dir * pull * tick * getKnockbackMult(plr)
-								projHitDamage(plr, e, dmg, {})
+						local enemyPos = getEnemyPosition(e)
+						if enemyPos then
+							local dir = (zone.Position - enemyPos).Unit
+							addImpulse(e, dir * pull * tick * getKnockbackMult(plr))
+							projHitDamage(plr, e, dmg, {})
 							end
 						end
 						task.wait(tick)
@@ -1144,19 +1098,19 @@ local function stepPlayer(plr: Player, dt: number)
 			local dmg = (22 + lv*9)
 			local burn = (lv>=5)
 			local target = getNearestEnemy(pos, 70)
-			if target and target:FindFirstChild("HumanoidRootPart") then
-				local dir = (target.HumanoidRootPart.Position - pos).Unit
+			local dir = target and getEnemyDirection(pos, target)
+			if dir then
 				local t0 = spellClock()
 				while spellClock()-t0 < dur do
 					-- damage all enemies close to beam line (cheap)
 					for _, e in ipairs(getEnemyModels()) do
-						local hrpE = e:FindFirstChild("HumanoidRootPart")
-						if hrpE then
-							local rel = hrpE.Position - pos
+						local enemyPos = getEnemyPosition(e)
+						if enemyPos then
+							local rel = enemyPos - pos
 							local proj = rel:Dot(dir)
 							if proj > 0 and proj < range then
 								local closest = (pos + dir*proj)
-								local dist = (hrpE.Position - closest).Magnitude
+								local dist = (enemyPos - closest).Magnitude
 								local width = (lv>=4 and 4) or 3
 								if dist <= width then
 									projHitDamage(plr, e, dmg*tick, {burnDps = burn and 6 or nil, burnDuration = burn and 2 or nil})
@@ -1187,13 +1141,14 @@ local function stepPlayer(plr: Player, dt: number)
 					while r <= endR do
 						-- hit enemies near ring
 						for _, e in ipairs(getEnemiesInRadius(pos, r+3)) do
-							if e:FindFirstChild("HumanoidRootPart") then
-								local d = (e.HumanoidRootPart.Position - pos).Magnitude
+							local enemyPos = getEnemyPosition(e)
+							if enemyPos then
+								local d = (enemyPos - pos).Magnitude
 								if math.abs(d - r) <= 2.2 then
 									projHitDamage(plr, e, dmg*0.12, {})
 									if pull > 0 then
-										local dir = (pos - e.HumanoidRootPart.Position).Unit
-										e.HumanoidRootPart.AssemblyLinearVelocity += dir * pull * getKnockbackMult(plr)
+										local dir = (pos - enemyPos).Unit
+										addImpulse(e, dir * pull * getKnockbackMult(plr))
 									end
 								end
 							end
@@ -1285,7 +1240,7 @@ local function stepPlayer(plr: Player, dt: number)
 			local linkPct = (lv>=6 and 0.50) or (lv>=3 and 0.35) or 0.25
 			local radius = 14 * (lv>=2 and 1.15 or 1.0)
 			local anchor = getNearestEnemy(pos, 70)
-			if anchor and anchor:FindFirstChild("HumanoidRootPart") then
+			if getEnemyRoot(anchor) then
 				anchor:SetAttribute("SoulLinkAnchor", true)
 				plr:SetAttribute("SoulLinkPct", linkPct)
 				plr:SetAttribute("SoulLinkRadius", radius)
@@ -1340,13 +1295,14 @@ local function stepPlayer(plr: Player, dt: number)
 		if spellClock() >= nextT then
 			s.cds.EmberSpirits = spellClock() + interval
 			local target = getNearestEnemy(pos, 50)
-			if target and target:FindFirstChild("HumanoidRootPart") then
-				local dir = (target.HumanoidRootPart.Position - pos).Unit
+			local targetPos = target and getEnemyPosition(target)
+			local dir = target and getEnemyDirection(pos, target)
+			if dir and targetPos then
 				local dmg = 24 + lv*8
 				local aoe = 7 * (lv>=2 and 1.10 or 1.0)
 				fireProjectile(plr, pos + Vector3.new(0,2,0), dir, 85, 55, dmg, 0, {})
 				task.delay(0.2, function()
-					pulseAt(plr, target.HumanoidRootPart.Position, aoe, dmg*0.7, {})
+					pulseAt(plr, targetPos, aoe, dmg*0.7, {})
 				end)
 			end
 		end
@@ -1372,3 +1328,9 @@ Players.PlayerRemoving:Connect(function(plr: Player)
 end)
 
 print("[SpellService] Ready (horde spells)")
+
+
+
+
+
+
