@@ -7,9 +7,13 @@ local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local batchEvent = remotes:WaitForChild("NpcBatchEvent")
 local syncRequestEvent = remotes:WaitForChild("NpcSyncRequest")
 
-local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
-	or ReplicatedStorage:WaitForChild("ModuleScript")
+local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
+if not moduleFolder then
+	moduleFolder = ReplicatedStorage:WaitForChild("ModuleScripts")
+end
+
 local NpcShared = require(moduleFolder:WaitForChild("NpcShared"))
+local LoadingOverlay = require(moduleFolder:WaitForChild("ClientLoadingOverlay"))
 
 local ATTR = NpcShared.Attributes
 local LOOPED_BY_STATE = {
@@ -35,6 +39,8 @@ local SEARCH_NAMES = {
 
 local presentations = {}
 local pendingTrackBuilds = {}
+local currentSyncRequestId = 0
+local syncOverlayToken = nil
 
 local function flatDir(v: Vector3?): Vector3
 	if typeof(v) ~= "Vector3" then
@@ -357,6 +363,49 @@ local function ensureEntry(id: string)
 	return entry
 end
 
+local finishSyncGate
+
+local function beginSyncGate()
+	currentSyncRequestId += 1
+	local requestId = currentSyncRequestId
+	if syncOverlayToken then
+		LoadingOverlay.Update(syncOverlayToken, {
+			title = "Synchronizing...",
+			message = "Waiting for full enemy sync from server",
+			progress = nil,
+		})
+	else
+		syncOverlayToken = LoadingOverlay.Acquire({
+			title = "Synchronizing...",
+			message = "Waiting for full enemy sync from server",
+			progress = nil,
+		})
+	end
+
+	task.delay(12, function()
+		if requestId == currentSyncRequestId and syncOverlayToken then
+			warn("[NpcPresentation] Full NPC sync timed out; releasing loading overlay")
+			finishSyncGate(requestId)
+		end
+	end)
+
+	syncRequestEvent:FireServer(requestId)
+	return requestId
+end
+
+finishSyncGate = function(requestId: number?)
+	if requestId and requestId ~= currentSyncRequestId then
+		return
+	end
+
+	if not syncOverlayToken then
+		return
+	end
+
+	LoadingOverlay.Release(syncOverlayToken)
+	syncOverlayToken = nil
+end
+
 batchEvent.OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then
 		return
@@ -422,6 +471,10 @@ batchEvent.OnClientEvent:Connect(function(payload)
 			end
 		end
 	end
+
+	if fullSnapshot then
+		finishSyncGate(tonumber(payload.requestId))
+	end
 end)
 
 RunService.RenderStepped:Connect(function(dt)
@@ -483,7 +536,7 @@ RunService.RenderStepped:Connect(function(dt)
 end)
 
 local function requestFullSync()
-	syncRequestEvent:FireServer()
+	beginSyncGate()
 end
 
 requestFullSync()

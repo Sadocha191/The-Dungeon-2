@@ -583,7 +583,7 @@ local function collectBatchItems(includeTombstones: boolean?)
 	return items
 end
 
-local function sendBatchToPlayer(player: Player, fullSnapshot: boolean?)
+local function sendBatchToPlayer(player: Player, fullSnapshot: boolean?, requestId: number?)
 	if not player or player.Parent ~= Players then
 		return
 	end
@@ -592,6 +592,7 @@ local function sendBatchToPlayer(player: Player, fullSnapshot: boolean?)
 	batchEvent:FireClient(player, {
 		serverTime = workspace:GetServerTimeNow(),
 		full = fullSnapshot == true,
+		requestId = requestId,
 		items = items,
 	})
 end
@@ -861,8 +862,8 @@ function NpcService.Despawn(target: any)
 	destroyNpcNow(npc, true)
 end
 
-syncRequestEvent.OnServerEvent:Connect(function(player: Player)
-	sendBatchToPlayer(player, true)
+syncRequestEvent.OnServerEvent:Connect(function(player: Player, requestId: number?)
+	sendBatchToPlayer(player, true, tonumber(requestId))
 end)
 
 local batchAccumulator = 0
