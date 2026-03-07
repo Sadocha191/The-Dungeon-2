@@ -30,6 +30,7 @@ local function ensureRemoteEvent(name: string): RemoteEvent
 end
 
 local batchEvent = ensureRemoteEvent(NpcShared.RemoteName)
+local syncRequestEvent = ensureRemoteEvent(NpcShared.SyncRequestRemoteName)
 local damageIndicatorEvent = ensureRemoteEvent("DamageIndicatorEvent")
 
 local pauseState = ReplicatedStorage:FindFirstChild("PauseState")
@@ -351,9 +352,23 @@ local function unregisterNpc(npc: NpcRecord, despawned: boolean?)
 	queueTombstone(npc, despawned == true)
 end
 
+local function destroyNpcNow(npc: NpcRecord, despawned: boolean)
+	unregisterNpc(npc, despawned)
+	if npc.model.Parent then
+		npc.model:Destroy()
+	end
+end
+
 local function killNpc(npc: NpcRecord, context: {[string]: any}?)
 	if npc.dead then
 		return
+	end
+
+	local deathContext = {}
+	if context then
+		for key, value in pairs(context) do
+			deathContext[key] = value
+		end
 	end
 
 	npc.dead = true
@@ -363,19 +378,15 @@ local function killNpc(npc: NpcRecord, context: {[string]: any}?)
 	npc.attackUntil = 0
 	setState(npc, STATE.Dead)
 	writeHealthAttributes(npc)
+	deathContext.position = npc.position
+	deathContext.model = npc.model
+	deathContext.npcId = npc.id
 
 	for _, callback in ipairs(npc.deathCallbacks) do
-		task.spawn(function()
-			callback(npc, context or {})
-		end)
+		pcall(callback, npc, deathContext)
 	end
 
-	task.delay(npc.despawnDelay, function()
-		if npc.model.Parent then
-			unregisterNpc(npc, true)
-			npc.model:Destroy()
-		end
-	end)
+	destroyNpcNow(npc, true)
 end
 
 local function applyPlayerDamage(player: Player, amount: number)
@@ -559,14 +570,34 @@ local function buildSnapshot(npc: NpcRecord)
 	}
 end
 
-local function broadcastBatch()
+local function collectBatchItems(includeTombstones: boolean?)
 	local items = {}
 	for _, npc in pairs(npcById) do
 		table.insert(items, buildSnapshot(npc))
 	end
-	for _, tombstone in ipairs(tombstones) do
-		table.insert(items, tombstone)
+	if includeTombstones == true then
+		for _, tombstone in ipairs(tombstones) do
+			table.insert(items, tombstone)
+		end
 	end
+	return items
+end
+
+local function sendBatchToPlayer(player: Player, fullSnapshot: boolean?)
+	if not player or player.Parent ~= Players then
+		return
+	end
+
+	local items = collectBatchItems(false)
+	batchEvent:FireClient(player, {
+		serverTime = workspace:GetServerTimeNow(),
+		full = fullSnapshot == true,
+		items = items,
+	})
+end
+
+local function broadcastBatch()
+	local items = collectBatchItems(true)
 	table.clear(tombstones)
 
 	if #items == 0 then
@@ -827,11 +858,12 @@ function NpcService.Despawn(target: any)
 		setState(npc, STATE.Despawned)
 	end
 
-	if npc.model.Parent then
-		unregisterNpc(npc, true)
-		npc.model:Destroy()
-	end
+	destroyNpcNow(npc, true)
 end
+
+syncRequestEvent.OnServerEvent:Connect(function(player: Player)
+	sendBatchToPlayer(player, true)
+end)
 
 local batchAccumulator = 0
 

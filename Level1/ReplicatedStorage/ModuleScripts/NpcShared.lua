@@ -1,6 +1,7 @@
 local NpcShared = {}
 
 NpcShared.RemoteName = "NpcBatchEvent"
+NpcShared.SyncRequestRemoteName = "NpcSyncRequest"
 NpcShared.BatchRate = 0.1
 
 NpcShared.States = table.freeze({

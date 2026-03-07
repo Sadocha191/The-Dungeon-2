@@ -1,8 +1,11 @@
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local localPlayer = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local batchEvent = remotes:WaitForChild("NpcBatchEvent")
+local syncRequestEvent = remotes:WaitForChild("NpcSyncRequest")
 
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
 	or ReplicatedStorage:WaitForChild("ModuleScript")
@@ -31,6 +34,7 @@ local SEARCH_NAMES = {
 }
 
 local presentations = {}
+local pendingTrackBuilds = {}
 
 local function flatDir(v: Vector3?): Vector3
 	if typeof(v) ~= "Vector3" then
@@ -134,6 +138,7 @@ local function buildTracks(entry)
 	if entry.animBuilt then
 		return
 	end
+	entry.animQueued = false
 	entry.animBuilt = true
 	entry.animTracks = {}
 
@@ -165,6 +170,15 @@ local function buildTracks(entry)
 	end
 end
 
+local function queueTrackBuild(entry)
+	if entry.animBuilt or entry.animQueued or not entry.model then
+		return
+	end
+
+	entry.animQueued = true
+	pendingTrackBuilds[#pendingTrackBuilds + 1] = entry
+end
+
 local function chooseTrack(entry, stateName: string)
 	local variants = entry.animTracks and entry.animTracks[stateName]
 	if not variants or #variants == 0 then
@@ -194,7 +208,11 @@ local function chooseTrack(entry, stateName: string)
 end
 
 local function playAnimation(entry)
-	buildTracks(entry)
+	if not entry.animBuilt then
+		queueTrackBuild(entry)
+		return
+	end
+
 	local animState = NpcShared.AnimationStateByNpcState[entry.state] or "idle"
 	if animState == "death" and entry.currentAnimState == "death" then
 		return
@@ -333,6 +351,7 @@ local function ensureEntry(id: string)
 		lastSeen = os.clock(),
 		rootToPivot = nil,
 		boundRoot = nil,
+		animQueued = false,
 	}
 	presentations[id] = entry
 	return entry
@@ -348,24 +367,30 @@ batchEvent.OnClientEvent:Connect(function(payload)
 		return
 	end
 
+	local fullSnapshot = payload.full == true
+	local seen = fullSnapshot and {} or nil
 	local now = os.clock()
 	for _, item in ipairs(items) do
 		if typeof(item) == "table" and item.id ~= nil then
 			local id = tostring(item.id)
 			local entry = ensureEntry(id)
+			if seen then
+				seen[id] = true
+			end
 			if typeof(item.model) == "Instance" and item.model:IsA("Model") then
 				entry.model = item.model
 				refreshRigBinding(entry)
+				queueTrackBuild(entry)
 			end
 			if typeof(item.pos) == "Vector3" then
 				entry.targetPos = item.pos
-				if not entry.renderPos then
+				if fullSnapshot or not entry.renderPos then
 					entry.renderPos = item.pos
 				end
 			end
 			if typeof(item.dir) == "Vector3" then
 				entry.targetDir = flatDir(item.dir)
-				if not entry.renderDir then
+				if fullSnapshot or not entry.renderDir then
 					entry.renderDir = entry.targetDir
 				end
 			end
@@ -387,17 +412,41 @@ batchEvent.OnClientEvent:Connect(function(payload)
 			if entry.model and not entry.model:GetAttribute(ATTR.Id) then
 				entry.model:SetAttribute(ATTR.Id, id)
 			end
-			updateHealthbar(entry)
-			playAnimation(entry)
+		end
+	end
+
+	if seen then
+		for id in pairs(presentations) do
+			if not seen[id] then
+				cleanupEntry(id)
+			end
 		end
 	end
 end)
 
 RunService.RenderStepped:Connect(function(dt)
 	local now = os.clock()
+
+	local buildsLeft = 3
+	while buildsLeft > 0 and #pendingTrackBuilds > 0 do
+		local index = #pendingTrackBuilds
+		local entry = pendingTrackBuilds[index]
+		pendingTrackBuilds[index] = nil
+		if entry and presentations[entry.id] == entry and entry.model and entry.model.Parent then
+			buildTracks(entry)
+		elseif entry then
+			entry.animQueued = false
+		end
+		buildsLeft -= 1
+	end
+
 	for id, entry in pairs(presentations) do
 		local model = entry.model
-		if (entry.despawned and (not model or not model.Parent)) or (now - entry.lastSeen) > 2 then
+		if model and not model.Parent then
+			cleanupEntry(id)
+			continue
+		end
+		if (entry.despawned and not model) or (now - entry.lastSeen) > 2 then
 			cleanupEntry(id)
 			continue
 		end
@@ -431,6 +480,15 @@ RunService.RenderStepped:Connect(function(dt)
 		updateHealthbar(entry)
 		playAnimation(entry)
 	end
+end)
+
+local function requestFullSync()
+	syncRequestEvent:FireServer()
+end
+
+requestFullSync()
+localPlayer.CharacterAdded:Connect(function()
+	requestFullSync()
 end)
 
 

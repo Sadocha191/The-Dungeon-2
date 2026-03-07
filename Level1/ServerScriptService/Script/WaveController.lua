@@ -474,19 +474,8 @@ local function cleanupTemplateScripts(mob: Model)
     end
 end
 
-local function applyCorpseCollision(mob: Model)
-    for _, d in ipairs(mob:GetDescendants()) do
-        if d:IsA("BasePart") then
-            d.CollisionGroup = CORPSES_GROUP
-            d.CanCollide = false
-            d.CanTouch = false
-            d.CanQuery = false
-        end
-    end
-end
-
 local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, _ctx)
-    local pos = NpcService.GetPosition(mob) or mob:GetPivot().Position
+    local pos = (_ctx and _ctx.position) or NpcService.GetPosition(mob) or mob:GetPivot().Position
 
     if _G.RegisterEnemyKill then
         pcall(function() _G.RegisterEnemyKill(pos) end)
@@ -511,8 +500,6 @@ local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, _ctx)
     if _G.SpawnDropsAt then
         pcall(function() _G.SpawnDropsAt(pos, xpDrop, coinDrop, soulsDrop) end)
     end
-
-    applyCorpseCollision(mob)
 end
 
 local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, isElite: boolean, extraOnDeath)
