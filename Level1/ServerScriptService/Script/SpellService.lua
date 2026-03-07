@@ -450,6 +450,8 @@ local function tickOrbit(plr: Player, dt: number, id: string, count: number, rad
 			end
 		end
 	end
+end
+
 local function spawnZone(pos: Vector3, radius: number, duration: number, ownerPlr: Player?)
 	duration = (tonumber(duration) or 0) * getDurationMult(ownerPlr)
 	local p = ensurePart("Zone", Vector3.new(radius * 2, 0.4, radius * 2))
