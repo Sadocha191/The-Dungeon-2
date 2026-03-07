@@ -519,7 +519,6 @@ local function stepPlayer(plr: Player, dt: number)
 				addImpulse(enemy, dir * 12 * getKnockbackMult(plr))
 			end
 		end)
-		end)
 	else
 		syncOrbitVFX(plr, "WindBlades", false)
 	end

@@ -55,6 +55,35 @@ local function resolveRoot(model: Model): BasePart?
 	return model:FindFirstChildWhichIsA("BasePart", true)
 end
 
+local function computeRootToPivot(model: Model, root: BasePart): CFrame?
+	local ok, pivot = pcall(function()
+		return model:GetPivot()
+	end)
+	if not ok then
+		return nil
+	end
+	return root.CFrame:ToObjectSpace(pivot)
+end
+
+local function refreshRigBinding(entry)
+	local model = entry.model
+	if not model then
+		return nil
+	end
+
+	local root = resolveRoot(model)
+	if not root then
+		return nil
+	end
+
+	if entry.boundRoot ~= root or not entry.rootToPivot then
+		entry.boundRoot = root
+		entry.rootToPivot = computeRootToPivot(model, root)
+	end
+
+	return root
+end
+
 local function ensureAnimator(model: Model): Animator?
 	local controller = model:FindFirstChildOfClass("AnimationController")
 	if not controller then
@@ -302,6 +331,8 @@ local function ensureEntry(id: string)
 		dead = false,
 		despawned = false,
 		lastSeen = os.clock(),
+		rootToPivot = nil,
+		boundRoot = nil,
 	}
 	presentations[id] = entry
 	return entry
@@ -324,6 +355,7 @@ batchEvent.OnClientEvent:Connect(function(payload)
 			local entry = ensureEntry(id)
 			if typeof(item.model) == "Instance" and item.model:IsA("Model") then
 				entry.model = item.model
+				refreshRigBinding(entry)
 			end
 			if typeof(item.pos) == "Vector3" then
 				entry.targetPos = item.pos
@@ -389,7 +421,13 @@ RunService.RenderStepped:Connect(function(dt)
 		entry.renderDir = entry.renderDir and entry.renderDir:Lerp(goalDir, math.clamp(dt * 14, 0, 1)) or goalDir
 		entry.renderDir = flatDir(entry.renderDir)
 
-		model:PivotTo(CFrame.lookAt(entry.renderPos, entry.renderPos + entry.renderDir))
+		refreshRigBinding(entry)
+		local rootFrame = CFrame.lookAt(entry.renderPos, entry.renderPos + entry.renderDir)
+		if entry.rootToPivot then
+			model:PivotTo(rootFrame * entry.rootToPivot)
+		else
+			model:PivotTo(rootFrame)
+		end
 		updateHealthbar(entry)
 		playAnimation(entry)
 	end

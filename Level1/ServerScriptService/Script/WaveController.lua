@@ -376,7 +376,7 @@ local function pickSpawnCFrame(): CFrame?
 
         local hit = raycastGround(Vector3.new(x, 0, z))
         if hit and hit.Position and slopeDeg(hit.Normal) <= MAX_GROUND_SLOPE_DEG then
-            return CFrame.new(hit.Position + Vector3.new(0, 2.5, 0))
+            return CFrame.new(hit.Position + Vector3.new(0, 0.05, 0))
         end
     end
 
@@ -387,12 +387,12 @@ local function pickSpawnCFrame(): CFrame?
             local z = (bounds.minZ + BOUNDS_MARGIN) + math.random() * ((bounds.maxZ - BOUNDS_MARGIN) - (bounds.minZ + BOUNDS_MARGIN))
             local hit = raycastGround(Vector3.new(x, 0, z))
             if hit and hit.Position and slopeDeg(hit.Normal) <= MAX_GROUND_SLOPE_DEG then
-                return CFrame.new(hit.Position + Vector3.new(0, 2.5, 0))
+                return CFrame.new(hit.Position + Vector3.new(0, 0.05, 0))
             end
         end
     end
 
-    return CFrame.new(anchor + Vector3.new(0, 2.5, 0))
+    return CFrame.new(anchor + Vector3.new(0, 0.05, 0))
 end
 
 -- Enemy config (custom movement/combat stats)
@@ -1025,6 +1025,7 @@ RunService.Heartbeat:Connect(function()
 end)
 
 print("[HordeController] Ready (time-based)")
+
 
 
 

@@ -200,6 +200,24 @@ local function sampleGroundY(model: Model, pos: Vector3): number?
 	return nil
 end
 
+local function computeGroundOffset(model: Model, root: BasePart): number
+	local lowestY = math.huge
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			local partBottom = descendant.Position.Y - (descendant.Size.Y * 0.5)
+			if partBottom < lowestY then
+				lowestY = partBottom
+			end
+		end
+	end
+
+	if lowestY == math.huge then
+		return math.max(0, root.Size.Y * 0.5)
+	end
+
+	return math.max(0, root.Position.Y - lowestY)
+end
+
 local function clampMagnitude(v: Vector3, maxMagnitude: number): Vector3
 	local magnitude = v.Magnitude
 	if magnitude <= maxMagnitude or magnitude <= 1e-6 then
@@ -736,11 +754,7 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 	local mobType = tostring((config and config.mobType) or model.Name)
 	local maxHealth = math.max(1, math.floor(tonumber(config and config.maxHealth) or 1))
 	local speed = math.max(0, tonumber(config and config.speed) or 0)
-	local groundY = sampleGroundY(model, root.Position)
-	local groundOffset = 0
-	if groundY ~= nil then
-		groundOffset = math.max(0, root.Position.Y - groundY)
-	end
+	local groundOffset = computeGroundOffset(model, root)
 
 	local npc: NpcRecord = {
 		id = npcId,
