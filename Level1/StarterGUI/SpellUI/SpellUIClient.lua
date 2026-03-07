@@ -21,9 +21,9 @@ local SLOT_COUNT = 12
 
 local EMPTY_SLOT_TEXT = ""
 local EMPTY_LEVEL_TEXT = ""
-local READY_STROKE_COLOR = Color3.fromRGB(255, 214, 102)
-local COOLING_STROKE_COLOR = Color3.fromRGB(95, 110, 135)
 local EMPTY_STROKE_COLOR = Color3.fromRGB(60, 60, 60)
+local MIN_BAR_COOLDOWN = 0.65
+local MIN_FULL_COOLDOWN = 1.25
 
 local RARITY_ORDER = {
 	Common = 1,
@@ -162,7 +162,7 @@ local COOLDOWN_RESOLVERS = {
 local slots = table.create(SLOT_COUNT)
 local levelLabels = table.create(SLOT_COUNT)
 local slotTextLabels = table.create(SLOT_COUNT)
-local cooldownOverlays = table.create(SLOT_COUNT)
+local cooldownWidgets = table.create(SLOT_COUNT)
 local slotStrokes = table.create(SLOT_COUNT)
 local displayedSpellIds = table.create(SLOT_COUNT)
 
@@ -227,40 +227,90 @@ local function ensureStroke(slot)
 	return stroke
 end
 
-local function ensureCooldownOverlay(slot, stroke)
+local function ensureCooldownWidget(slot)
 	if slot:IsA("GuiObject") then
 		slot.ClipsDescendants = true
 	end
 
 	local overlay = slot:FindFirstChild("CooldownOverlay")
 	if overlay and overlay:IsA("Frame") then
-		return overlay
+		local text = overlay:FindFirstChild("CooldownText")
+		local barBg = overlay:FindFirstChild("CooldownBarBg")
+		local barFill = barBg and barBg:FindFirstChild("CooldownBarFill")
+		local gradient = overlay:FindFirstChildOfClass("UIGradient")
+		return {
+			root = overlay,
+			text = text,
+			barBg = barBg,
+			barFill = barFill,
+			gradient = gradient,
+		}
 	end
 
 	overlay = Instance.new("Frame")
 	overlay.Name = "CooldownOverlay"
-	overlay.AnchorPoint = Vector2.new(0, 1)
-	overlay.Position = UDim2.fromScale(0, 1)
-	overlay.Size = UDim2.fromScale(1, 0)
+	overlay.Position = UDim2.fromScale(0, 0)
+	overlay.Size = UDim2.fromScale(1, 1)
 	overlay.BorderSizePixel = 0
-	overlay.BackgroundColor3 = Color3.fromRGB(10, 10, 14)
-	overlay.BackgroundTransparency = 0.35
+	overlay.BackgroundColor3 = Color3.fromRGB(8, 10, 16)
+	overlay.BackgroundTransparency = 0.25
 	overlay.ZIndex = (slot:IsA("GuiObject") and slot.ZIndex + 1) or 1
+	overlay.Visible = false
 	overlay.Parent = slot
 
 	local shine = Instance.new("UIGradient")
 	shine.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(135, 170, 255)),
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(18, 26, 40)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(48, 72, 110)),
 	})
 	shine.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.85),
-		NumberSequenceKeypoint.new(1, 0.55),
+		NumberSequenceKeypoint.new(0, 0.1),
+		NumberSequenceKeypoint.new(1, 0.45),
 	})
 	shine.Rotation = 90
 	shine.Parent = overlay
 
-	return overlay
+	local text = Instance.new("TextLabel")
+	text.Name = "CooldownText"
+	text.AnchorPoint = Vector2.new(0.5, 0.5)
+	text.Position = UDim2.fromScale(0.5, 0.48)
+	text.Size = UDim2.fromScale(0.9, 0.55)
+	text.BackgroundTransparency = 1
+	text.Font = Enum.Font.GothamBlack
+	text.Text = ""
+	text.TextColor3 = Color3.fromRGB(255, 245, 220)
+	text.TextScaled = true
+	text.TextStrokeTransparency = 0.15
+	text.Visible = false
+	text.ZIndex = overlay.ZIndex + 2
+	text.Parent = overlay
+
+	local barBg = Instance.new("Frame")
+	barBg.Name = "CooldownBarBg"
+	barBg.AnchorPoint = Vector2.new(0.5, 1)
+	barBg.Position = UDim2.fromScale(0.5, 1)
+	barBg.Size = UDim2.fromScale(1, 0.18)
+	barBg.BorderSizePixel = 0
+	barBg.BackgroundColor3 = Color3.fromRGB(18, 22, 30)
+	barBg.BackgroundTransparency = 0.1
+	barBg.ZIndex = overlay.ZIndex + 1
+	barBg.Parent = overlay
+
+	local barFill = Instance.new("Frame")
+	barFill.Name = "CooldownBarFill"
+	barFill.Size = UDim2.fromScale(1, 1)
+	barFill.BorderSizePixel = 0
+	barFill.BackgroundColor3 = Color3.fromRGB(255, 214, 102)
+	barFill.ZIndex = barBg.ZIndex + 1
+	barFill.Parent = barBg
+
+	return {
+		root = overlay,
+		text = text,
+		barBg = barBg,
+		barFill = barFill,
+		gradient = shine,
+	}
 end
 
 local function getSpellInitials(spellId)
@@ -318,7 +368,7 @@ local function setSlotEmpty(index)
 	local slot = slots[index]
 	local textLabel = slotTextLabels[index]
 	local levelLabel = levelLabels[index]
-	local overlay = cooldownOverlays[index]
+	local widget = cooldownWidgets[index]
 	local stroke = slotStrokes[index]
 
 	displayedSpellIds[index] = nil
@@ -335,9 +385,16 @@ local function setSlotEmpty(index)
 		levelLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
 	end
 
-	if overlay then
-		overlay.Visible = false
-		overlay.Size = UDim2.fromScale(1, 0)
+	if widget and widget.root then
+		widget.root.Visible = false
+		widget.root.BackgroundTransparency = 1
+		if widget.text then
+			widget.text.Visible = false
+			widget.text.Text = ""
+		end
+		if widget.barFill then
+			widget.barFill.Size = UDim2.fromScale(0, 1)
+		end
 	end
 
 	if slot and slot:IsA("GuiObject") then
@@ -382,6 +439,13 @@ local function setSlotSpell(index, spellId, level)
 	if stroke then
 		stroke.Transparency = 0.1
 	end
+end
+
+local function formatCooldownTime(remaining)
+	if remaining >= 10 then
+		return tostring(math.ceil(remaining))
+	end
+	return string.format("%.1f", remaining)
 end
 
 local function removeOwnedSpell(spellId)
@@ -473,16 +537,32 @@ end
 local function refreshCooldownVisuals(now)
 	for index = 1, SLOT_COUNT do
 		local spellId = displayedSpellIds[index]
-		local overlay = cooldownOverlays[index]
+		local widget = cooldownWidgets[index]
 		local stroke = slotStrokes[index]
+		local textLabel = slotTextLabels[index]
+		local levelLabel = levelLabels[index]
 
-		if not spellId or not overlay then
+		if not spellId or not widget or not widget.root then
 			continue
 		end
 
 		local record = cooldownState[spellId]
 		if not record or not record.duration or record.duration <= 0 then
-			overlay.Visible = false
+			widget.root.Visible = false
+			widget.root.BackgroundTransparency = 1
+			if widget.text then
+				widget.text.Visible = false
+				widget.text.Text = ""
+			end
+			if widget.barFill then
+				widget.barFill.Size = UDim2.fromScale(0, 1)
+			end
+			if textLabel then
+				textLabel.TextTransparency = 0
+			end
+			if levelLabel then
+				levelLabel.TextTransparency = 0
+			end
 			if stroke then
 				local def = getSpellDef(spellId)
 				local rarity = (def and def.rarity) or "Common"
@@ -498,18 +578,61 @@ local function refreshCooldownVisuals(now)
 		end
 
 		local progress = math.clamp(elapsed / record.duration, 0, 1)
-		local remainingFill = 1 - progress
+		local remaining = math.max(0, record.duration - elapsed)
+		local def = getSpellDef(spellId)
+		local rarity = (def and def.rarity) or "Common"
+		local accentColor = RARITY_COLORS[rarity] or RARITY_COLORS.Common
 
-		overlay.Visible = remainingFill > 0.02
-		overlay.Size = UDim2.fromScale(1, remainingFill)
-		overlay.BackgroundTransparency = 0.2 + (progress * 0.45)
+		if record.duration < MIN_BAR_COOLDOWN then
+			widget.root.Visible = false
+			widget.root.BackgroundTransparency = 1
+			if widget.text then
+				widget.text.Visible = false
+			end
+			if widget.barFill then
+				widget.barFill.Size = UDim2.fromScale(0, 1)
+			end
+			if textLabel then
+				textLabel.TextTransparency = 0
+			end
+			if levelLabel then
+				levelLabel.TextTransparency = 0
+			end
+		else
+			local fullMode = record.duration >= MIN_FULL_COOLDOWN
+			widget.root.Visible = true
+			widget.root.BackgroundTransparency = fullMode and 0.28 or 1
+
+			if widget.gradient then
+				widget.gradient.Enabled = fullMode
+			end
+
+			if widget.text then
+				widget.text.Visible = fullMode
+				widget.text.Text = fullMode and formatCooldownTime(remaining) or ""
+			end
+
+			if widget.barBg then
+				widget.barBg.Visible = true
+				widget.barBg.BackgroundTransparency = fullMode and 0.15 or 0.05
+			end
+
+			if widget.barFill then
+				widget.barFill.BackgroundColor3 = accentColor
+				widget.barFill.Size = UDim2.fromScale(1 - progress, 1)
+			end
+
+			if textLabel then
+				textLabel.TextTransparency = fullMode and 0.2 or 0
+			end
+			if levelLabel then
+				levelLabel.TextTransparency = fullMode and 0.2 or 0
+			end
+		end
 
 		if stroke then
-			if progress >= 0.98 then
-				stroke.Color = READY_STROKE_COLOR
-			else
-				stroke.Color = COOLING_STROKE_COLOR
-			end
+			stroke.Color = accentColor
+			stroke.Transparency = 0.1
 		end
 	end
 end
@@ -523,11 +646,15 @@ for index = 1, SLOT_COUNT do
 		textLabel.ZIndex = math.max(textLabel.ZIndex, slot.ZIndex + 2)
 	end
 
+	if levelLabel and slot:IsA("GuiObject") then
+		levelLabel.ZIndex = math.max(levelLabel.ZIndex, slot.ZIndex + 2)
+	end
+
 	slots[index] = slot
 	levelLabels[index] = levelLabel
 	slotTextLabels[index] = textLabel
 	slotStrokes[index] = ensureStroke(slot)
-	cooldownOverlays[index] = ensureCooldownOverlay(slot, slotStrokes[index])
+	cooldownWidgets[index] = ensureCooldownWidget(slot)
 end
 
 for spellId in pairs(SpellDefs.SPELLS or {}) do
