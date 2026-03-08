@@ -77,6 +77,7 @@ gui.Name = "MissionsGui"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.Enabled = false
+gui:SetAttribute("Modal", true)
 gui.Parent = playerGui
 
 local overlay = Instance.new("Frame")
@@ -441,6 +442,33 @@ end
 local function closeUI()
 	gui.Enabled = false
 end
+
+local lastScreenButtonsNonce = nil
+
+local function handleScreenButtonsRequest()
+	local nonce = gui:GetAttribute("ScreenButtonsNonce")
+	if nonce == nil or nonce == lastScreenButtonsNonce then
+		return
+	end
+
+	lastScreenButtonsNonce = nonce
+
+	local action = gui:GetAttribute("ScreenButtonsAction")
+	if action == "open" then
+		openUI()
+	elseif action == "close" then
+		closeUI()
+	elseif action == "toggle" then
+		if gui.Enabled then
+			closeUI()
+		else
+			openUI()
+		end
+	end
+end
+
+gui:GetAttributeChangedSignal("ScreenButtonsNonce"):Connect(handleScreenButtonsRequest)
+handleScreenButtonsRequest()
 
 closeBtn.MouseButton1Click:Connect(closeUI)
 

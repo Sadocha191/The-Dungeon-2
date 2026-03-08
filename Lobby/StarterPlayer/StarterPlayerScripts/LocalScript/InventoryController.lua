@@ -1226,6 +1226,48 @@ local function fireInventoryAction(actionType, payload)
 	InventoryAction:FireServer(message)
 end
 
+local function closeInventory()
+	inventoryGui.Enabled = false
+	hideContextMenu()
+	infoOverlay.Visible = false
+end
+
+local function openInventory()
+	inventoryGui.Enabled = true
+	loadSnapshot()
+end
+
+local function toggleInventory()
+	if inventoryGui.Enabled then
+		closeInventory()
+	else
+		openInventory()
+	end
+end
+
+local lastScreenButtonsNonce = nil
+
+local function handleScreenButtonsRequest()
+	local nonce = inventoryGui:GetAttribute("ScreenButtonsNonce")
+	if nonce == nil or nonce == lastScreenButtonsNonce then
+		return
+	end
+
+	lastScreenButtonsNonce = nonce
+
+	local action = inventoryGui:GetAttribute("ScreenButtonsAction")
+	if action == "open" then
+		openInventory()
+	elseif action == "close" then
+		closeInventory()
+	elseif action == "toggle" then
+		toggleInventory()
+	end
+end
+
+inventoryGui:GetAttributeChangedSignal("ScreenButtonsNonce"):Connect(handleScreenButtonsRequest)
+handleScreenButtonsRequest()
+
 equipBtn.MouseButton1Click:Connect(function()
 	local item = contextIndex and inventoryItems[contextIndex]
 	if not item then return end
@@ -1268,9 +1310,7 @@ infoBtn.MouseButton1Click:Connect(function()
 end)
 
 closeBtn.MouseButton1Click:Connect(function()
-	inventoryGui.Enabled = false
-	hideContextMenu()
-	infoOverlay.Visible = false
+	closeInventory()
 end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -1279,10 +1319,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		hideContextMenu()
 	end
 	if input.KeyCode == Enum.KeyCode.Tab then
-		inventoryGui.Enabled = not inventoryGui.Enabled
-		if inventoryGui.Enabled then
-			loadSnapshot()
-		end
+		toggleInventory()
 	end
 end)
 

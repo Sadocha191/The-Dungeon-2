@@ -24,6 +24,7 @@ local gui = Instance.new("ScreenGui")
 gui.Name = "PartyGui"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
+gui:SetAttribute("Modal", false)
 gui.Parent = plr:WaitForChild("PlayerGui")
 
 local btn = Instance.new("TextButton")
@@ -35,6 +36,7 @@ btn.Size = UDim2.new(0, 120, 0, 36)
 btn.Font = Enum.Font.GothamBold
 btn.TextSize = 18
 btn.BackgroundTransparency = 0.15
+btn.Visible = false
 btn.Parent = gui
 
 local panel = Instance.new("Frame")
@@ -150,12 +152,51 @@ local function clearChildren(frame)
 end
 
 local currentParty = { id = nil, leaderUserId = nil, members = {}, maxMembers = 5 }
+local activeInviteModal = nil
+local renderParty
+local renderOnline
+
+local function refreshModalState()
+	gui:SetAttribute("Modal", panel.Visible or (activeInviteModal ~= nil and activeInviteModal.Parent ~= nil))
+end
+
+local function fetchPartyState()
+	local party = safeCall(function()
+		return PartyQuery:InvokeServer("GetParty")
+	end)
+	if typeof(party) == "table" then
+		currentParty = party
+	else
+		currentParty = { id = nil, leaderUserId = nil, members = {}, maxMembers = 5 }
+	end
+end
+
+local function openUI()
+	panel.Visible = true
+	refreshModalState()
+	fetchPartyState()
+	renderParty()
+	renderOnline()
+end
+
+local function closeUI()
+	panel.Visible = false
+	refreshModalState()
+end
+
+local function toggleUI()
+	if panel.Visible then
+		closeUI()
+	else
+		openUI()
+	end
+end
 
 local function isLeader()
 	return currentParty.id ~= nil and currentParty.leaderUserId == plr.UserId
 end
 
-local function renderParty()
+renderParty = function()
 	clearChildren(partyList)
 
 	local y = 8
@@ -209,7 +250,7 @@ local function passesFilter(name)
 	return string.find(string.lower(name), f, 1, true) ~= nil
 end
 
-local function renderOnline()
+renderOnline = function()
 	clearChildren(onlineList)
 	local y = 6
 	for _, p in ipairs(Players:GetPlayers()) do
@@ -249,24 +290,35 @@ local function renderOnline()
 end
 
 btn.MouseButton1Click:Connect(function()
-	panel.Visible = not panel.Visible
-	if panel.Visible then
-		local party = safeCall(function()
-			return PartyQuery:InvokeServer("GetParty")
-		end)
-		if typeof(party) == "table" then
-			currentParty = party
-		else
-			currentParty = { id = nil, leaderUserId = nil, members = {}, maxMembers = 5 }
-		end
-		renderParty()
-		renderOnline()
-	end
+	toggleUI()
 end)
 
 close.MouseButton1Click:Connect(function()
-	panel.Visible = false
+	closeUI()
 end)
+
+local lastScreenButtonsNonce = nil
+
+local function handleScreenButtonsRequest()
+	local nonce = gui:GetAttribute("ScreenButtonsNonce")
+	if nonce == nil or nonce == lastScreenButtonsNonce then
+		return
+	end
+
+	lastScreenButtonsNonce = nonce
+
+	local action = gui:GetAttribute("ScreenButtonsAction")
+	if action == "open" then
+		openUI()
+	elseif action == "close" then
+		closeUI()
+	elseif action == "toggle" then
+		toggleUI()
+	end
+end
+
+gui:GetAttributeChangedSignal("ScreenButtonsNonce"):Connect(handleScreenButtonsRequest)
+handleScreenButtonsRequest()
 
 search:GetPropertyChangedSignal("Text"):Connect(function()
 	if panel.Visible then renderOnline() end
@@ -304,6 +356,8 @@ PartyInvite.OnClientEvent:Connect(function(payload)
 	modal.Position = UDim2.new(0.5, -160, 0.5, -70)
 	modal.BackgroundTransparency = 0.1
 	modal.Parent = gui
+	activeInviteModal = modal
+	refreshModalState()
 
 	local msg = Instance.new("TextLabel")
 	msg.BackgroundTransparency = 1
@@ -336,7 +390,11 @@ PartyInvite.OnClientEvent:Connect(function(payload)
 	decline.Parent = modal
 
 	local function closeModal()
+		if activeInviteModal == modal then
+			activeInviteModal = nil
+		end
 		modal:Destroy()
+		refreshModalState()
 	end
 
 	accept.MouseButton1Click:Connect(function()
