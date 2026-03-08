@@ -5,11 +5,11 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
-local MIN_SHRINES = 3
-local MAX_SHRINES = 6
+local MIN_SHRINES = 5
+local MAX_SHRINES = 8
 local CHARGE_SECONDS = 5
 local CHARGE_RADIUS = 12
-local MIN_SHRINE_GAP = 26
+local MIN_SHRINE_GAP = 22
 local SHRINE_RAYCAST_TRIES = 45
 local SHRINE_HEIGHT = 2.2
 
@@ -228,6 +228,8 @@ local function buildRaycastBlacklist()
 		shrinesFolder,
 		workspace:FindFirstChild("Enemies"),
 		workspace:FindFirstChild("Drops"),
+		workspace:FindFirstChild("Chests"),
+		workspace:FindFirstChild("Statues"),
 	}
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr.Character then

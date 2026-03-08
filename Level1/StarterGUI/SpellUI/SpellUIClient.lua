@@ -234,13 +234,11 @@ local function ensureCooldownWidget(slot)
 
 	local overlay = slot:FindFirstChild("CooldownOverlay")
 	if overlay and overlay:IsA("Frame") then
-		local text = overlay:FindFirstChild("CooldownText")
 		local barBg = overlay:FindFirstChild("CooldownBarBg")
 		local barFill = barBg and barBg:FindFirstChild("CooldownBarFill")
 		local gradient = overlay:FindFirstChildOfClass("UIGradient")
 		return {
 			root = overlay,
-			text = text,
 			barBg = barBg,
 			barFill = barFill,
 			gradient = gradient,
@@ -270,21 +268,6 @@ local function ensureCooldownWidget(slot)
 	shine.Rotation = 90
 	shine.Parent = overlay
 
-	local text = Instance.new("TextLabel")
-	text.Name = "CooldownText"
-	text.AnchorPoint = Vector2.new(0.5, 0.5)
-	text.Position = UDim2.fromScale(0.5, 0.48)
-	text.Size = UDim2.fromScale(0.9, 0.55)
-	text.BackgroundTransparency = 1
-	text.Font = Enum.Font.GothamBlack
-	text.Text = ""
-	text.TextColor3 = Color3.fromRGB(255, 245, 220)
-	text.TextScaled = true
-	text.TextStrokeTransparency = 0.15
-	text.Visible = false
-	text.ZIndex = overlay.ZIndex + 2
-	text.Parent = overlay
-
 	local barBg = Instance.new("Frame")
 	barBg.Name = "CooldownBarBg"
 	barBg.AnchorPoint = Vector2.new(0.5, 1)
@@ -306,7 +289,6 @@ local function ensureCooldownWidget(slot)
 
 	return {
 		root = overlay,
-		text = text,
 		barBg = barBg,
 		barFill = barFill,
 		gradient = shine,
@@ -388,10 +370,6 @@ local function setSlotEmpty(index)
 	if widget and widget.root then
 		widget.root.Visible = false
 		widget.root.BackgroundTransparency = 1
-		if widget.text then
-			widget.text.Visible = false
-			widget.text.Text = ""
-		end
 		if widget.barFill then
 			widget.barFill.Size = UDim2.fromScale(0, 1)
 		end
@@ -439,13 +417,6 @@ local function setSlotSpell(index, spellId, level)
 	if stroke then
 		stroke.Transparency = 0.1
 	end
-end
-
-local function formatCooldownTime(remaining)
-	if remaining >= 10 then
-		return tostring(math.ceil(remaining))
-	end
-	return string.format("%.1f", remaining)
 end
 
 local function removeOwnedSpell(spellId)
@@ -550,10 +521,6 @@ local function refreshCooldownVisuals(now)
 		if not record or not record.duration or record.duration <= 0 then
 			widget.root.Visible = false
 			widget.root.BackgroundTransparency = 1
-			if widget.text then
-				widget.text.Visible = false
-				widget.text.Text = ""
-			end
 			if widget.barFill then
 				widget.barFill.Size = UDim2.fromScale(0, 1)
 			end
@@ -578,7 +545,6 @@ local function refreshCooldownVisuals(now)
 		end
 
 		local progress = math.clamp(elapsed / record.duration, 0, 1)
-		local remaining = math.max(0, record.duration - elapsed)
 		local def = getSpellDef(spellId)
 		local rarity = (def and def.rarity) or "Common"
 		local accentColor = RARITY_COLORS[rarity] or RARITY_COLORS.Common
@@ -586,9 +552,6 @@ local function refreshCooldownVisuals(now)
 		if record.duration < MIN_BAR_COOLDOWN then
 			widget.root.Visible = false
 			widget.root.BackgroundTransparency = 1
-			if widget.text then
-				widget.text.Visible = false
-			end
 			if widget.barFill then
 				widget.barFill.Size = UDim2.fromScale(0, 1)
 			end
@@ -605,11 +568,6 @@ local function refreshCooldownVisuals(now)
 
 			if widget.gradient then
 				widget.gradient.Enabled = fullMode
-			end
-
-			if widget.text then
-				widget.text.Visible = fullMode
-				widget.text.Text = fullMode and formatCooldownTime(remaining) or ""
 			end
 
 			if widget.barBg then

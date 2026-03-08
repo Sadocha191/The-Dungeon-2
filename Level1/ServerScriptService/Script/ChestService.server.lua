@@ -4,9 +4,9 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local MIN_CHESTS = 3
-local MAX_CHESTS = 5
-local MIN_CHEST_GAP = 30
+local MIN_CHESTS = 8
+local MAX_CHESTS = 12
+local MIN_CHEST_GAP = 24
 local CHEST_RAYCAST_TRIES = 45
 local CHEST_HEIGHT = 1.8
 
@@ -55,6 +55,7 @@ end
 
 local chests = {}
 local spawnedForRun = false
+local nextChestId = 0
 
 local NUM_DEFAULTS = {
 	ShrineDamageMult = 1,
@@ -201,6 +202,7 @@ local function buildRaycastBlacklist()
 		workspace:FindFirstChild("Enemies"),
 		workspace:FindFirstChild("Drops"),
 		workspace:FindFirstChild("Shrines"),
+		workspace:FindFirstChild("Statues"),
 	}
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr.Character then
@@ -236,6 +238,18 @@ local function randomGroundPoint(existing)
 		end
 	end
 	return nil
+end
+
+local function groundPointFromXZ(pos: Vector3)
+	rayParams.FilterDescendantsInstances = buildRaycastBlacklist()
+
+	local originY = math.max(420, pos.Y + 80)
+	local origin = Vector3.new(pos.X, originY, pos.Z)
+	local result = workspace:Raycast(origin, Vector3.new(0, -1000, 0), rayParams)
+	if result then
+		return result.Position + Vector3.new(0, CHEST_HEIGHT, 0)
+	end
+	return pos
 end
 
 local function newPart(parent, name, size, color, material)
@@ -353,9 +367,11 @@ local function applyReward(plr, reward)
 	end
 end
 
-local function createChestModel(pos, idx)
+local function createChestModel(pos, idx, config)
+	config = config or {}
+
 	local model = Instance.new("Model")
-	model.Name = ("Chest_%d"):format(idx)
+	model.Name = tostring(config.name or ("Chest_%d"):format(idx))
 
 	local base = newPart(model, "Base", Vector3.new(5.2, 1.2, 4.2), Color3.fromRGB(86, 56, 35), Enum.Material.WoodPlanks)
 	base.CFrame = CFrame.new(pos - Vector3.new(0, 1.4, 0))
@@ -379,6 +395,9 @@ local function createChestModel(pos, idx)
 	core.CanCollide = false
 	core.CanTouch = false
 	core.CanQuery = false
+	if config.forceFree == true then
+		core.Color = Color3.fromRGB(109, 255, 157)
+	end
 
 	local light = Instance.new("PointLight")
 	light.Color = Color3.fromRGB(255, 210, 89)
@@ -388,29 +407,12 @@ local function createChestModel(pos, idx)
 
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "OpenPrompt"
-	prompt.ActionText = "Open Chest"
-	prompt.ObjectText = "Chest"
+	prompt.ActionText = tostring(config.actionText or "Open Chest")
+	prompt.ObjectText = ""
 	prompt.HoldDuration = 0.45
 	prompt.MaxActivationDistance = 12
 	prompt.RequiresLineOfSight = false
 	prompt.Parent = core
-
-	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "Billboard"
-	billboard.Size = UDim2.fromOffset(180, 42)
-	billboard.StudsOffset = Vector3.new(0, 2.6, 0)
-	billboard.AlwaysOnTop = true
-	billboard.Parent = core
-
-	local text = Instance.new("TextLabel")
-	text.Size = UDim2.fromScale(1, 1)
-	text.BackgroundTransparency = 1
-	text.TextColor3 = Color3.fromRGB(255, 236, 186)
-	text.TextStrokeTransparency = 0.3
-	text.Font = Enum.Font.GothamBold
-	text.TextScaled = true
-	text.Text = "CHEST"
-	text.Parent = billboard
 
 	model.PrimaryPart = core
 	model.Parent = chestsFolder
@@ -421,7 +423,24 @@ local function createChestModel(pos, idx)
 		lid = lid,
 		prompt = prompt,
 		opened = false,
+		forceFree = config.forceFree == true,
+		ownerUserId = tonumber(config.ownerUserId),
+		countsForScaling = config.countsForScaling ~= false,
 	}
+end
+
+local handleOpen
+
+local function spawnChestInstance(pos: Vector3, config)
+	nextChestId += 1
+
+	local groundedPos = groundPointFromXZ(pos)
+	local chest = createChestModel(groundedPos, nextChestId, config)
+	chest.prompt.Triggered:Connect(function(plr)
+		handleOpen(chest, plr)
+	end)
+	table.insert(chests, chest)
+	return chest
 end
 
 local function isAlive(plr)
@@ -430,7 +449,7 @@ local function isAlive(plr)
 	return hum and hum.Health > 0 and plr:GetAttribute("RunEnded") ~= true
 end
 
-local function handleOpen(chest, plr)
+handleOpen = function(chest, plr)
 	if not chest or chest.opened then
 		return
 	end
@@ -440,12 +459,15 @@ local function handleOpen(chest, plr)
 	if not plr or not plr.Parent or not isAlive(plr) then
 		return
 	end
+	if chest.ownerUserId and chest.ownerUserId ~= plr.UserId then
+		return
+	end
 
 	ensureDefaults(plr)
 
 	local cost = getChestCost(plr)
 	local freeChance = computeFreeChance(plr)
-	local openedForFree = (math.random() < freeChance)
+	local openedForFree = chest.forceFree == true or (math.random() < freeChance)
 
 	if not openedForFree then
 		local canSpend = false
@@ -478,7 +500,9 @@ local function handleOpen(chest, plr)
 
 	local reward, rarity = pickReward(plr)
 	applyReward(plr, reward)
-	setNumAttr(plr, "ChestOpenedCount", getNumAttr(plr, "ChestOpenedCount", 0) + 1)
+	if chest.countsForScaling ~= false then
+		setNumAttr(plr, "ChestOpenedCount", getNumAttr(plr, "ChestOpenedCount", 0) + 1)
+	end
 
 	broadcast({
 		type = "chestOpened",
@@ -486,7 +510,7 @@ local function handleOpen(chest, plr)
 		rewardName = reward.label,
 		rarity = rarity,
 		free = openedForFree,
-		cost = cost,
+		cost = chest.forceFree == true and 0 or cost,
 	})
 
 	task.delay(1.8, function()
@@ -515,11 +539,9 @@ local function spawnChestsForRun()
 		local pos = randomGroundPoint(used)
 		if pos then
 			table.insert(used, pos)
-			local chest = createChestModel(pos, i)
-			chest.prompt.Triggered:Connect(function(plr)
-				handleOpen(chest, plr)
-			end)
-			table.insert(chests, chest)
+			spawnChestInstance(pos, {
+				name = ("Chest_%d"):format(i),
+			})
 		end
 	end
 
@@ -527,6 +549,20 @@ local function spawnChestsForRun()
 		type = "chestsSpawned",
 		count = #chests,
 		baseCost = BASE_CHEST_COST,
+	})
+end
+
+function _G.SpawnRewardChestForPlayer(plr: Player, pos: Vector3)
+	if not plr or not plr.Parent then
+		return nil
+	end
+
+	return spawnChestInstance(pos, {
+		name = ("RewardChest_%d"):format(nextChestId + 1),
+		forceFree = true,
+		ownerUserId = plr.UserId,
+		countsForScaling = false,
+		actionText = "Claim Chest",
 	})
 end
 

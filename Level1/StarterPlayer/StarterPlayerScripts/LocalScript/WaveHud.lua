@@ -191,6 +191,42 @@ WaveStatusEvent.OnClientEvent:Connect(function(p)
 		center.Text = ("CHEST: NEED %d COINS"):format(cost)
 		task.delay(2, function() center.Visible = false end)
 
+	elseif p.type == "statuesSpawned" then
+		local count = math.max(0, math.floor(tonumber(p.count) or 0))
+		center.Visible = true
+		center.Text = ("STATUES READY: %d"):format(count)
+		task.delay(3, function() center.Visible = false end)
+
+	elseif p.type == "statueActivated" then
+		local statueType = tostring(p.statueType or "statue")
+		local playerName = tostring(p.playerName or "Player")
+		center.Visible = true
+		if statueType == "battle" then
+			local spawnCount = math.max(0, math.floor(tonumber(p.spawnCount) or 0))
+			center.Text = ("WAR STATUE: %d ENEMIES (%s)"):format(spawnCount, playerName)
+		else
+			local duration = math.max(1, math.floor(tonumber(p.duration) or 0))
+			center.Text = ("MAGNET STATUE: %ds (%s)"):format(duration, playerName)
+		end
+		task.delay(3, function() center.Visible = false end)
+
+	elseif p.type == "statueRewardReady" then
+		local playerName = tostring(p.playerName or "Player")
+		center.Visible = true
+		center.Text = ("STATUE CLEARED: REWARD CHEST (%s)"):format(playerName)
+		task.delay(3, function() center.Visible = false end)
+
+	elseif p.type == "swarmStart" then
+		local duration = math.max(1, math.floor(tonumber(p.duration) or 0))
+		center.Visible = true
+		center.Text = ("SWARM: x3 SPAWN RATE (%ds)"):format(duration)
+		task.delay(3, function() center.Visible = false end)
+
+	elseif p.type == "swarmEnd" then
+		center.Visible = true
+		center.Text = "SWARM ENDED"
+		task.delay(2, function() center.Visible = false end)
+
 	elseif p.type == "complete" then
 		local defeated, total = sanitizeEliteProgress(p.elitesDefeated, p.elitesTotal)
 		center.Visible = true

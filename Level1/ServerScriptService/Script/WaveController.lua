@@ -352,10 +352,13 @@ local function inBounds(bounds, x, z, margin)
     return x >= (bounds.minX + margin) and x <= (bounds.maxX - margin) and z >= (bounds.minZ + margin) and z <= (bounds.maxZ - margin)
 end
 
-local function pickSpawnCFrame(): CFrame?
-    local hrps = getAliveHRPs()
-    if #hrps == 0 then return nil end
-    local anchor = hrps[math.random(1, #hrps)].Position
+local function pickSpawnCFrame(anchorPos: Vector3?): CFrame?
+    local anchor = anchorPos
+    if not anchor then
+        local hrps = getAliveHRPs()
+        if #hrps == 0 then return nil end
+        anchor = hrps[math.random(1, #hrps)].Position
+    end
 
     -- We intentionally do NOT use SpawnPoints here (raycast-based spawning only).
 
@@ -539,7 +542,7 @@ local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, i
     return mob
 end
 
-local function spawnMob(mobName: string, isElite: boolean)
+local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vector3?)
     local templateFolder = isElite and EliteFolder or NormalFolder
     local template = templateFolder:FindFirstChild(mobName)
     if not template or not template:IsA("Model") then
@@ -553,7 +556,7 @@ local function spawnMob(mobName: string, isElite: boolean)
         return
     end
 
-    local cf = pickSpawnCFrame()
+    local cf = pickSpawnCFrame(spawnAnchorPos)
     if not cf then return end
 
     local mob = template:Clone()
@@ -581,12 +584,37 @@ local function spawnMob(mobName: string, isElite: boolean)
         isRanged = cfg.isRanged == true,
     }, cfg, isElite, nil)
 end
+
+local elapsed: () -> number
+
+local function spawnBurst(count: number, anchorPos: Vector3?, poolTime: number?)
+    local spawned = {}
+    local targetCount = math.max(0, math.floor(tonumber(count) or 0))
+    if targetCount <= 0 then
+        return spawned
+    end
+
+    local pool = getPool(tonumber(poolTime) or elapsed())
+    for _ = 1, targetCount do
+        local mobName = pickWeighted(pool)
+        local mob = spawnMob(mobName, false, anchorPos)
+        if mob then
+            table.insert(spawned, mob)
+        end
+    end
+
+    return spawned
+end
+
+_G.SpawnEnemyBurst = function(count: number, anchorPos: Vector3?, poolTime: number?)
+    return spawnBurst(count, anchorPos, poolTime)
+end
 -- Run clock (server-side)
 local runStart = 0 -- set when RunStarted becomes true
 local pausedAccum = 0
 local pauseStart = nil
 
-local function elapsed()
+elapsed = function()
     if not RunStarted.Value then
         return 0
     end
@@ -650,6 +678,17 @@ if not _G.__InfoUI_Wrapped then
 end
 
 local RUN_TIME_LIMIT = 15 * 60 -- 15:00 (portal/boss threshold)
+local SWARM_EVENT_TIMES = { 240, 720 } -- 4:00, 12:00
+local SWARM_DURATION = 60
+
+local swarmIndex = 1
+local nextSwarmAt = SWARM_EVENT_TIMES[swarmIndex] or math.huge
+local swarmActive = false
+local swarmActiveUntil = 0
+
+local function isSwarmActiveAt(t: number): boolean
+    return swarmActive and t < swarmActiveUntil
+end
 
 local function desiredMaxAlive(t: number)
     -- Starts low for fast leveling, grows steadily.
@@ -673,6 +712,9 @@ local function spawnInterval(t: number)
 		-- After 15 minutes: noticeably faster
 		i = math.max(0.10, i * 0.45)
 	end
+    if isSwarmActiveAt(t) then
+        i = math.max(0.08, i / 3)
+    end
 	return i
 end
 
@@ -978,11 +1020,11 @@ RunService.Heartbeat:Connect(function()
 			portalActivated = portalActivated,
 			bossDefeated = bossDefeated,
         })
-    end
+	end
     -- Elites (only at 5:00 and 10:00)
     if eliteIndex <= eliteTotal and t >= nextEliteAt then
         local eliteName = eliteOrder[eliteIndex]
-        local elite = spawnMob(eliteName, true)
+        local elite = spawnMob(eliteName, true, nil)
         if elite then
             broadcast({ type = "eliteSpawn", name = eliteName, elitesDefeated = eliteCount, elitesTotal = eliteTotal })
             watchEliteDeath(elite)
@@ -992,6 +1034,23 @@ RunService.Heartbeat:Connect(function()
 			-- Spawn could fail due temporary position/template issues; retry shortly.
 			nextEliteAt = t + 1
         end
+    end
+
+    if (not swarmActive) and swarmIndex <= #SWARM_EVENT_TIMES and t >= nextSwarmAt then
+        local startedAt = nextSwarmAt
+        swarmActive = true
+        swarmActiveUntil = t + SWARM_DURATION
+        swarmIndex += 1
+        nextSwarmAt = SWARM_EVENT_TIMES[swarmIndex] or math.huge
+        broadcast({
+            type = "swarmStart",
+            duration = SWARM_DURATION,
+            startedAt = math.floor(startedAt),
+        })
+    elseif swarmActive and t >= swarmActiveUntil then
+        swarmActive = false
+        swarmActiveUntil = 0
+        broadcast({ type = "swarmEnd" })
     end
 
     -- Normal spawns
@@ -1008,7 +1067,7 @@ RunService.Heartbeat:Connect(function()
 
     local pool = getPool(t)
     local mobName = pickWeighted(pool)
-    spawnMob(mobName, false)
+    spawnMob(mobName, false, nil)
 end)
 
 print("[HordeController] Ready (time-based)")
