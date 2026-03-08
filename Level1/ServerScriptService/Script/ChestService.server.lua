@@ -4,8 +4,8 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local MIN_CHESTS = 8
-local MAX_CHESTS = 12
+local MIN_CHESTS = 30
+local MAX_CHESTS = 30
 local MIN_CHEST_GAP = 24
 local CHEST_RAYCAST_TRIES = 45
 local CHEST_HEIGHT = 1.8

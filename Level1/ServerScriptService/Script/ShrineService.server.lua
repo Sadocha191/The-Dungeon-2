@@ -5,8 +5,8 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
-local MIN_SHRINES = 5
-local MAX_SHRINES = 8
+local MIN_SHRINES = 10
+local MAX_SHRINES = 20
 local CHARGE_SECONDS = 5
 local CHARGE_RADIUS = 12
 local MIN_SHRINE_GAP = 22
