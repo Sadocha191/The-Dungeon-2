@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -12,6 +13,8 @@ local CONTROL_GUIS = {
 }
 
 local requestCounters = {}
+local hotkeyBindings = {}
+local isPC = UserInputService.KeyboardEnabled and UserInputService.MouseEnabled
 
 local function findButtons(names)
 	local buttons = {}
@@ -97,6 +100,56 @@ local function connectButtons(buttons, callback)
 	end
 end
 
+local function setHotKeyVisibility(buttons)
+	for _, button in ipairs(buttons) do
+		for _, descendant in ipairs(button:GetDescendants()) do
+			if descendant.Name == "HotKey" and descendant:IsA("GuiObject") then
+				descendant.Visible = isPC
+			end
+		end
+	end
+end
+
+local function getButtonHotKey(button)
+	local hotKeyLabel = button:FindFirstChild("HotKey", true)
+	if not hotKeyLabel then
+		return nil
+	end
+
+	if not (hotKeyLabel:IsA("TextLabel") or hotKeyLabel:IsA("TextButton") or hotKeyLabel:IsA("TextBox")) then
+		return nil
+	end
+
+	local keyText = tostring(hotKeyLabel.Text or ""):match("[%w]")
+	if not keyText then
+		return nil
+	end
+
+	local ok, keyCode = pcall(function()
+		return Enum.KeyCode[string.upper(keyText)]
+	end)
+
+	if ok then
+		return keyCode
+	end
+
+	return nil
+end
+
+local function registerHotKey(buttons, callback)
+	if not isPC then
+		return
+	end
+
+	for _, button in ipairs(buttons) do
+		local keyCode = getButtonHotKey(button)
+		if keyCode then
+			hotkeyBindings[keyCode] = callback
+			return
+		end
+	end
+end
+
 local function applyProfileIcon()
 	local profileButton = findButtons({ "Profile" })[1]
 	if not profileButton then
@@ -121,20 +174,59 @@ local function applyProfileIcon()
 	end
 end
 
-connectButtons(findButtons({ "Events", "Missions" }), function()
+local missionsButtons = findButtons({ "Events", "Missions" })
+setHotKeyVisibility(missionsButtons)
+connectButtons(missionsButtons, function()
+	openExclusive("MissionsGui")
+end)
+registerHotKey(missionsButtons, function()
 	openExclusive("MissionsGui")
 end)
 
-connectButtons(findButtons({ "Party" }), function()
+local partyButtons = findButtons({ "Party" })
+setHotKeyVisibility(partyButtons)
+connectButtons(partyButtons, function()
+	openExclusive("PartyGui")
+end)
+registerHotKey(partyButtons, function()
 	openExclusive("PartyGui")
 end)
 
-connectButtons(findButtons({ "Inventory" }), function()
+local inventoryButtons = findButtons({ "Inventory" })
+setHotKeyVisibility(inventoryButtons)
+connectButtons(inventoryButtons, function()
+	openExclusive("InventoryGui")
+end)
+registerHotKey(inventoryButtons, function()
 	openExclusive("InventoryGui")
 end)
 
-connectButtons(findButtons({ "Profile" }), function()
+local profileButtons = findButtons({ "Profile" })
+setHotKeyVisibility(profileButtons)
+connectButtons(profileButtons, function()
 	-- Placeholder until profile UI exists.
+end)
+registerHotKey(profileButtons, function()
+	-- Placeholder until profile UI exists.
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if not isPC or gameProcessed then
+		return
+	end
+
+	if input.UserInputType ~= Enum.UserInputType.Keyboard then
+		return
+	end
+
+	if UserInputService:GetFocusedTextBox() then
+		return
+	end
+
+	local callback = hotkeyBindings[input.KeyCode]
+	if callback then
+		callback()
+	end
 end)
 
 applyProfileIcon()
