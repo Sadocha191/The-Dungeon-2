@@ -102,6 +102,32 @@ local currentToken: string? = nil
 local banishMode = false
 local choiceLockedUntil = 0 -- os.clock() time
 
+local function setButtonEnabled(btn: GuiObject, enabled: boolean)
+	if btn:IsA("GuiButton") then
+		btn.Active = enabled
+		btn.AutoButtonColor = enabled
+	end
+	if btn:IsA("ImageButton") then
+		btn.ImageTransparency = enabled and 0 or 0.45
+	end
+	if btn:IsA("TextButton") then
+		btn.TextTransparency = enabled and 0 or 0.35
+	end
+	for _, d in ipairs(btn:GetDescendants()) do
+		if d:IsA("TextLabel") or d:IsA("TextButton") then
+			d.TextTransparency = enabled and 0 or 0.35
+		elseif d:IsA("ImageLabel") or d:IsA("ImageButton") then
+			d.ImageTransparency = enabled and 0 or 0.45
+		end
+	end
+end
+
+local function updateRerollButtonState()
+	local rerollsUsed = math.max(0, math.floor(tonumber(plr:GetAttribute("RunRerollsUsed")) or 0))
+	local available = currentToken ~= nil and rerollsUsed < 1
+	setButtonEnabled(btnReroll, available)
+end
+
 -- movement lock
 local savedWalkSpeed, savedJumpPower, savedJumpHeight
 local movementLocked = false
@@ -167,6 +193,8 @@ local function hideMenu()
 	lockMovement(false)
 	currentToken = nil
 	banishMode = false
+	setBanishButtonState(false)
+	updateRerollButtonState()
 end
 
 local function showMenu()
@@ -234,6 +262,8 @@ end
 
 local function renderOffers(token: string, offers: {any})
 	currentToken = token
+	banishMode = false
+	setBanishButtonState(false)
 
 	for i = 1, 3 do
 		local slot = slots[i]
@@ -283,6 +313,7 @@ local function renderOffers(token: string, offers: {any})
 	end
 
 	showMenu()
+	updateRerollButtonState()
 end
 
 btnSkip.MouseButton1Click:Connect(function()
@@ -295,6 +326,7 @@ end)
 btnReroll.MouseButton1Click:Connect(function()
 	if os.clock() < choiceLockedUntil then return end
 	if not currentToken then return end
+	if (tonumber(plr:GetAttribute("RunRerollsUsed")) or 0) >= 1 then return end
 	SpellEvent:FireServer({ type="reroll", token=currentToken })
 end)
 
@@ -306,6 +338,7 @@ btnBanish.MouseButton1Click:Connect(function()
 end)
 
 main.Visible = false
+updateRerollButtonState()
 
 -- If the player respawns while the menu is open, keep them locked.
 plr.CharacterAdded:Connect(function()
@@ -314,6 +347,10 @@ plr.CharacterAdded:Connect(function()
 	else
 		lockMovement(false)
 	end
+end)
+
+plr:GetAttributeChangedSignal("RunRerollsUsed"):Connect(function()
+	updateRerollButtonState()
 end)
 
 SpellEvent.OnClientEvent:Connect(function(payload)

@@ -605,7 +605,11 @@ SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 
 	if t == "reroll" then
 		local r = getRun(plr)
+		if (r.rerollsUsed or 0) >= 1 then
+			return
+		end
 		r.rerollsUsed = (r.rerollsUsed or 0) + 1
+		plr:SetAttribute("RunRerollsUsed", r.rerollsUsed)
 		if MissionProgress and MissionProgress.Add then
 			pcall(function() MissionProgress.Add(plr, "REROLLS_USED", 1) end)
 		end
@@ -991,6 +995,7 @@ Players.PlayerAdded:Connect(function(plr: Player)
 	r.ended = false
 	r.banished = {}
 	r.pendingLevelUps = 0
+	plr:SetAttribute("RunRerollsUsed", 0)
 
 	-- reset spell levels for this run
 	if SpellDefs and SpellDefs.SPELLS then
