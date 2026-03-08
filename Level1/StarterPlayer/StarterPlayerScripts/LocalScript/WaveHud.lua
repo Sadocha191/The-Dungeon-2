@@ -72,7 +72,7 @@ elites.Font = Enum.Font.Gotham
 elites.TextSize = 12
 elites.TextXAlignment = Enum.TextXAlignment.Left
 elites.TextColor3 = Color3.fromRGB(210,210,210)
-elites.Text = "Elites: 0/2"
+elites.Text = "Elites: 0/3"
 elites.Parent = panel
 
 local barBack = Instance.new("Frame")
@@ -113,7 +113,7 @@ Instance.new("UICorner", center).CornerRadius = UDim.new(0, 14)
 
 local function sanitizeEliteProgress(defeatedRaw, totalRaw)
 	local total = math.floor(tonumber(totalRaw) or 0)
-	if total <= 0 then total = 2 end
+	if total <= 0 then total = 3 end
 	total = math.min(total, 99)
 
 	local defeated = math.floor(tonumber(defeatedRaw) or 0)

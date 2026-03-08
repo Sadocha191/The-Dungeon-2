@@ -59,9 +59,21 @@ coinsLabel.TextColor3 = Color3.fromRGB(210,210,210)
 coinsLabel.Text = "Souls: 0"
 coinsLabel.Parent = panel
 
+local sortBar = Instance.new("Frame")
+sortBar.Position = UDim2.fromOffset(18, 70)
+sortBar.Size = UDim2.fromOffset(360, 28)
+sortBar.BackgroundTransparency = 1
+sortBar.Parent = panel
+
+local sortLayout = Instance.new("UIListLayout")
+sortLayout.FillDirection = Enum.FillDirection.Horizontal
+sortLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+sortLayout.Padding = UDim.new(0, 6)
+sortLayout.Parent = sortBar
+
 local left = Instance.new("ScrollingFrame")
-left.Position = UDim2.fromOffset(18, 70)
-left.Size = UDim2.fromOffset(360, 330)
+left.Position = UDim2.fromOffset(18, 106)
+left.Size = UDim2.fromOffset(360, 294)
 left.BackgroundColor3 = Color3.fromRGB(20,20,24)
 left.BackgroundTransparency = 0.10
 left.BorderSizePixel = 0
@@ -135,6 +147,46 @@ Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 14)
 local selected = nil
 local currentCoins = 0
 local currentSpells = {}
+local sortButtons = {}
+local sortState = { key = "name", ascending = true }
+local addRow
+local setRight
+
+local ELEMENT_ORDER = {
+	Fire = 1,
+	Electricity = 2,
+	Air = 3,
+	Water = 4,
+	Earth = 5,
+	Void = 6,
+	Light = 7,
+	Physical = 8,
+}
+
+local RARITY_ORDER = {
+	Common = 1,
+	Uncommon = 2,
+	Rare = 3,
+	Epic = 4,
+	Legendary = 5,
+	Mythical = 6,
+	Standard = 1,
+	Amplified = 3,
+}
+
+local SORT_DEFAULT_ASC = {
+	name = true,
+	price = true,
+	element = true,
+	rarity = false,
+}
+
+local SORT_LABELS = {
+	name = "Name",
+	price = "Price",
+	element = "Element",
+	rarity = "Rarity",
+}
 
 local function refreshCanvas()
 	left.CanvasSize = UDim2.fromOffset(0, leftLay.AbsoluteContentSize.Y + 16)
@@ -148,7 +200,114 @@ local function clearList()
 	end
 end
 
-local function setRight(spell)
+local function getSpellName(spell)
+	return tostring(spell.displayName or spell.name or "Spell")
+end
+
+local function getSpellRarity(spell)
+	return tostring(spell.rarity or spell.cardQuality or spell.baseQuality or "Common")
+end
+
+local function getSpellElementRank(spell)
+	return ELEMENT_ORDER[tostring(spell.element or "Physical")] or 99
+end
+
+local function getSpellRarityRank(spell)
+	return RARITY_ORDER[getSpellRarity(spell)] or 0
+end
+
+local function updateSortButtons()
+	for key, button in pairs(sortButtons) do
+		local active = sortState.key == key
+		local dir = ""
+		if active then
+			dir = sortState.ascending and " ASC" or " DESC"
+		end
+		button.Text = (SORT_LABELS[key] or key) .. dir
+		button.BackgroundColor3 = active and Color3.fromRGB(180,120,255) or Color3.fromRGB(30,30,34)
+		button.TextColor3 = active and Color3.fromRGB(10,10,12) or Color3.fromRGB(245,245,245)
+	end
+end
+
+local function spellLess(a, b)
+	local key = sortState.key
+	local ascending = sortState.ascending
+
+	local function pick(primaryA, primaryB)
+		if primaryA == primaryB then
+			return nil
+		end
+		if ascending then
+			return primaryA < primaryB
+		end
+		return primaryA > primaryB
+	end
+
+	if key == "price" then
+		local cmp = pick(tonumber(a.costCoins) or 0, tonumber(b.costCoins) or 0)
+		if cmp ~= nil then
+			return cmp
+		end
+	elseif key == "element" then
+		local cmp = pick(getSpellElementRank(a), getSpellElementRank(b))
+		if cmp ~= nil then
+			return cmp
+		end
+	elseif key == "rarity" then
+		local cmp = pick(getSpellRarityRank(a), getSpellRarityRank(b))
+		if cmp ~= nil then
+			return cmp
+		end
+	else
+		local cmp = pick(string.lower(getSpellName(a)), string.lower(getSpellName(b)))
+		if cmp ~= nil then
+			return cmp
+		end
+	end
+
+	local aName = string.lower(getSpellName(a))
+	local bName = string.lower(getSpellName(b))
+	if aName ~= bName then
+		return aName < bName
+	end
+
+	return (tonumber(a.costCoins) or 0) < (tonumber(b.costCoins) or 0)
+end
+
+local function renderList()
+	local selectedId = selected and selected.id or nil
+	table.sort(currentSpells, spellLess)
+
+	clearList()
+	for _, spell in ipairs(currentSpells) do
+		addRow(spell)
+	end
+	refreshCanvas()
+
+	if selectedId then
+		for _, spell in ipairs(currentSpells) do
+			if spell.id == selectedId then
+				setRight(spell)
+				return
+			end
+		end
+	end
+
+	setRight(nil)
+end
+
+local function setSort(key)
+	if sortState.key == key then
+		sortState.ascending = not sortState.ascending
+	else
+		sortState.key = key
+		sortState.ascending = SORT_DEFAULT_ASC[key] ~= false
+	end
+	updateSortButtons()
+	renderList()
+end
+
+setRight = function(spell)
 	selected = spell
 	if not spell then
 		rName.Text = "Select a spell"
@@ -161,10 +320,11 @@ local function setRight(spell)
 
 	rName.Text = tostring(spell.displayName or spell.name)
 	rInfo.Text = string.format(
-		"Type: %s\nElement: %s\nAttack: %s\nBase Variant: %s\nCost: %d Souls\nStatus: %s\n\n%s",
+		"Type: %s\nElement: %s\nAttack: %s\nRarity: %s\nBase Variant: %s\nCost: %d Souls\nStatus: %s\n\n%s",
 		tostring(spell.spellType or "Spell"),
 		tostring(spell.element or "-"),
 		tostring(spell.attackType or "-"),
+		getSpellRarity(spell),
 		tostring(spell.baseQuality or "Standard"),
 		tonumber(spell.costCoins) or 0,
 		spell.owned and "Owned" or "Locked",
@@ -182,7 +342,7 @@ local function setRight(spell)
 	end
 end
 
-local function addRow(spell)
+addRow = function(spell)
 	local row = Instance.new("TextButton")
 	row.Size = UDim2.new(1, -16, 0, 46)
 	row.Position = UDim2.fromOffset(8, 0)
@@ -193,9 +353,10 @@ local function addRow(spell)
 	row.TextSize = 12
 	row.TextColor3 = Color3.fromRGB(230,230,230)
 	row.TextXAlignment = Enum.TextXAlignment.Left
-	row.Text = ("  %s  [%s]  %s"):format(
-		tostring(spell.displayName or spell.name),
+	row.Text = ("  %s  [%s | %s]  %s"):format(
+		getSpellName(spell),
 		tostring(spell.element or spell.category or "Spell"),
+		getSpellRarity(spell),
 		spell.owned and "Owned" or ("Cost: "..tostring(spell.costCoins).." Souls")
 	)
 	row.Parent = left
@@ -211,12 +372,8 @@ local function openShop(payload)
 	currentSpells = payload.spells or {}
 	coinsLabel.Text = ("Souls: %d"):format(currentCoins)
 
-	clearList()
-	for _, spell in ipairs(currentSpells) do
-		addRow(spell)
-	end
-	refreshCanvas()
-	setRight(nil)
+	updateSortButtons()
+	renderList()
 
 	gui.Enabled = true
 	PauseState.Value = true
@@ -243,6 +400,26 @@ buyBtn.MouseButton1Click:Connect(function()
 	if not selected or selected.owned then return end
 	WitchShopEvent:FireServer({ type = "BUY", id = selected.id })
 end)
+
+for _, key in ipairs({ "name", "price", "element", "rarity" }) do
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.fromOffset(85, 28)
+	button.BackgroundColor3 = Color3.fromRGB(30,30,34)
+	button.BorderSizePixel = 0
+	button.Font = Enum.Font.GothamBold
+	button.TextSize = 11
+	button.TextColor3 = Color3.fromRGB(245,245,245)
+	button.Parent = sortBar
+	Instance.new("UICorner", button).CornerRadius = UDim.new(0, 10)
+
+	button.MouseButton1Click:Connect(function()
+		setSort(key)
+	end)
+
+	sortButtons[key] = button
+end
+
+updateSortButtons()
 
 UIS.InputBegan:Connect(function(inp, gp)
 	if gp then return end
@@ -280,22 +457,13 @@ WitchShopEvent.OnClientEvent:Connect(function(payload)
 		openShop(payload)
 
 	elseif payload.type == "BOUGHT" then
-		if payload.souls then coinsLabel.Text = ("Souls: %d"):format(tonumber(payload.souls) or 0) end
+		if payload.souls then
+			currentCoins = tonumber(payload.souls) or 0
+			coinsLabel.Text = ("Souls: %d"):format(currentCoins)
+		end
 		if payload.spells then
 			currentSpells = payload.spells
-			clearList()
-			for _, spell in ipairs(currentSpells) do
-				addRow(spell)
-			end
-			refreshCanvas()
-		end
-		if selected then
-			for _, s in ipairs(currentSpells) do
-				if s.id == selected.id then
-					setRight(s)
-					break
-				end
-			end
+			renderList()
 		end
 
 	elseif payload.type == "ERROR" or payload.type == "INFO" then

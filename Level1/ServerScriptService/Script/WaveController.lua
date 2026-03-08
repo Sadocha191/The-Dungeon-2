@@ -1,7 +1,7 @@
 -- WaveController.server.lua (Level1)
 -- Reworked: time-based horde spawning (VS / Mega Bonk style)
 -- No waves. Difficulty ramps with elapsed run time.
--- Elites spawn at configured run times (default: 5:00 and 10:00).
+-- Elites spawn on a recurring timer during the run.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -413,8 +413,14 @@ local ENEMY_CONFIGS = {
     Ent =        { hp = 650, speed = 5,  range = 8,  cd = 3.0, dmg = 22, xp = 40, coins = 6 },
 }
 
+local RUN_TIME_LIMIT = 15 * 60 -- 15:00 (portal/boss threshold)
+local ENEMY_HP_MULTIPLIER = 1.5
+local ELITE_SOUL_DROP_MIN = 12
+local ELITE_SOUL_DROP_MAX = 18
+local ELITE_INTERVAL_SECONDS = 5 * 60
+
 local function timeScaleMult(elapsed: number)
-    -- Per minute: HP +5%, Damage +3%
+	-- Per minute: HP +5%, Damage +3%
     local minutes = math.floor(math.max(0, elapsed) / 60)
     local hpMult = (1.05) ^ minutes
     local dmgMult = (1.03) ^ minutes
@@ -498,7 +504,7 @@ local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, _ctx)
     if isElite then
         xpDrop = math.floor(xpDrop * 10)
         coinDrop = math.floor(coinDrop * 8)
-        soulsDrop = math.random(5, 10)
+        soulsDrop = math.random(ELITE_SOUL_DROP_MIN, ELITE_SOUL_DROP_MAX)
     end
     if _G.SpawnDropsAt then
         pcall(function() _G.SpawnDropsAt(pos, xpDrop, coinDrop, soulsDrop) end)
@@ -567,7 +573,7 @@ local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vecto
     mob:PivotTo(cf)
 
     local hpMult, dmgMult = timeScaleMult(_G.GetRunSeconds and _G.GetRunSeconds() or 0)
-    local hp = math.floor(cfg.hp * hpMult)
+    local hp = math.floor(cfg.hp * ENEMY_HP_MULTIPLIER * hpMult)
     local dmg = math.floor(cfg.dmg * dmgMult)
 
     if isElite then
@@ -677,7 +683,6 @@ if not _G.__InfoUI_Wrapped then
 	end)
 end
 
-local RUN_TIME_LIMIT = 15 * 60 -- 15:00 (portal/boss threshold)
 local SWARM_EVENT_TIMES = { 240, 720 } -- 4:00, 12:00
 local SWARM_DURATION = 60
 
@@ -746,11 +751,10 @@ local function buildEliteOrder(): {string}
 end
 
 local eliteCount = 0
-local eliteTimes = { 300, 600 } -- 5 min, 10 min
 local eliteOrder = buildEliteOrder()
-local eliteTotal = math.min(#eliteTimes, #eliteOrder)
+local eliteTotal = (#eliteOrder > 0) and math.max(1, math.floor(RUN_TIME_LIMIT / ELITE_INTERVAL_SECONDS)) or 0
 local eliteIndex = 1 -- next elite to spawn
-local nextEliteAt = eliteTimes[eliteIndex] or math.huge
+local nextEliteAt = eliteTotal > 0 and ELITE_INTERVAL_SECONDS or math.huge
 -- === Portal + Boss end condition ===
 local portalModel: Model? = nil
 local portalActivated = false
@@ -911,7 +915,7 @@ local function ensurePortal()
 	end)
 
 	local registered = registerMobModel(mob, bossName, {
-		hp = 1200,
+		hp = math.floor(1200 * ENEMY_HP_MULTIPLIER),
 		speed = 10,
 		range = 7,
 		cd = 1.4,
@@ -1021,15 +1025,15 @@ RunService.Heartbeat:Connect(function()
 			bossDefeated = bossDefeated,
         })
 	end
-    -- Elites (only at 5:00 and 10:00)
+    -- Elites (every 5 minutes during the scheduled run)
     if eliteIndex <= eliteTotal and t >= nextEliteAt then
-        local eliteName = eliteOrder[eliteIndex]
+        local eliteName = eliteOrder[((eliteIndex - 1) % #eliteOrder) + 1]
         local elite = spawnMob(eliteName, true, nil)
         if elite then
             broadcast({ type = "eliteSpawn", name = eliteName, elitesDefeated = eliteCount, elitesTotal = eliteTotal })
             watchEliteDeath(elite)
 			eliteIndex += 1
-			nextEliteAt = eliteTimes[eliteIndex] or math.huge
+			nextEliteAt = eliteIndex <= eliteTotal and (eliteIndex * ELITE_INTERVAL_SECONDS) or math.huge
 		else
 			-- Spawn could fail due temporary position/template issues; retry shortly.
 			nextEliteAt = t + 1

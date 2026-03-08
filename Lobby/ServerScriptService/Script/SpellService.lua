@@ -52,6 +52,8 @@ local function buildShopPayload(plr)
 	for _, productId in ipairs(SpellDefs.GetShopList()) do
 		local product = SpellDefs.GetProduct(productId)
 		if product then
+			local baseVariant = SpellDefs.BASE_VARIANT_QUALITIES[product.baseQuality]
+			local rarity = product.cardQuality or (baseVariant and baseVariant.cardQuality) or "Common"
 			payload[#payload + 1] = {
 				id = product.id,
 				familyId = product.familyId,
@@ -62,6 +64,8 @@ local function buildShopPayload(plr)
 				element = product.element,
 				attackType = product.attackType,
 				baseQuality = product.baseQuality,
+				cardQuality = rarity,
+				rarity = rarity,
 				costCoins = product.costSouls or product.costCoins or 0,
 				color = product.color,
 				owned = unlocked[product.id] == true,

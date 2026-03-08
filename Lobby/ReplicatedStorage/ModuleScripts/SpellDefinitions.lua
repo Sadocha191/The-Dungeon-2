@@ -1,8 +1,8 @@
 local SpellDefs = {}
 
 SpellDefs.MAX_MAGIC_RUN_SPELLS = 8
-SpellDefs.MAX_PHYSICAL_RUN_SPELLS = 2
-SpellDefs.MAX_RUN_SPELLS = 10
+SpellDefs.MAX_PHYSICAL_RUN_SPELLS = 4
+SpellDefs.MAX_RUN_SPELLS = SpellDefs.MAX_MAGIC_RUN_SPELLS + SpellDefs.MAX_PHYSICAL_RUN_SPELLS
 
 SpellDefs.RARITY_WEIGHTS = { Common = 0.52, Uncommon = 0.28, Rare = 0.14, Epic = 0.06 }
 SpellDefs.COLOR_BASE = Color3.fromRGB(120, 190, 255)
