@@ -77,7 +77,7 @@ if not PauseState then
 end
 
 -- Run state
-local run = {} -- [uid] = {startT, pausedTotal, pauseStart, runLevel, runXp, nextXp, runSilver, kills, ended, banished}
+local run = {} -- [uid] = {startT, pausedTotal, pauseStart, runLevel, runXp, nextXp, runSilver, kills, ended, banished, pendingLevelUps}
 local pending = {} -- [uid] = {token, offers}
 
 -- extra per-run stats used by missions
@@ -166,8 +166,27 @@ local function startPartyLevelUp(partyId: string)
 		if not r.pauseStart then
 			r.pauseStart = now
 		end
-		p.waitingFor[member.UserId] = true
-		openSpellMenu(member)
+		if openSpellMenu(member) then
+			p.waitingFor[member.UserId] = true
+		end
+	end
+
+	if next(p.waitingFor) == nil then
+		for _, member in ipairs(members) do
+			local r = getRun(member)
+			if r.pauseStart then
+				r.pausedTotal += (now - r.pauseStart)
+				r.pauseStart = nil
+			end
+		end
+		PauseState.Value = false
+		if p.pendingLevelUps > 0 then
+			p.pendingLevelUps -= 1
+		end
+		p.inLevelUp = false
+		if p.pendingLevelUps > 0 then
+			startPartyLevelUp(partyId)
+		end
 	end
 end
 
@@ -203,6 +222,7 @@ local function getRun(plr: Player)
 			multikill60_20Done = false,
 			ended = false,
 			banished = {}, -- [spellId]=true
+			pendingLevelUps = 0,
 		}
 		run[uid] = r
 	end
@@ -381,7 +401,15 @@ end
 local function finishUpgrade(plr: Player)
 	-- Single: normal unpause per player
 	if not isMulti(plr) then
-		pauseEnd(plr)
+		local r = getRun(plr)
+		if r.pendingLevelUps > 0 then
+			r.pendingLevelUps -= 1
+		end
+		if r.pendingLevelUps > 0 then
+			openSpellMenu(plr)
+		else
+			pauseEnd(plr)
+		end
 		return
 	end
 
@@ -504,7 +532,15 @@ end
 
 openSpellMenu = function(plr: Player)
 	local offers = rollOffers(plr)
-	if #offers == 0 then return end
+	if #offers == 0 then
+		if not isMulti(plr) then
+			local r = getRun(plr)
+			r.pendingLevelUps = 0
+			pending[plr.UserId] = nil
+			pauseEnd(plr)
+		end
+		return false
+	end
 
 	local token = ("%d:%d:%d"):format(plr.UserId, math.floor(os.clock()*1000), math.random(100000,999999))
 	pending[plr.UserId] = { token = token, offers = offers }
@@ -513,6 +549,7 @@ openSpellMenu = function(plr: Player)
 		pauseBegin(plr)
 	end
 	SpellEvent:FireClient(plr, { type = "offer", token = token, offers = offers })
+	return true
 end
 
 local function newToken(plr: Player): string
@@ -593,7 +630,7 @@ SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 		if #offers == 0 then
 			-- jeśli po banishu nie ma już nic do oferowania, po prostu zamknij
 			pending[plr.UserId] = nil
-			pauseEnd(plr)
+			finishUpgrade(plr)
 			return
 		end
 
@@ -724,19 +761,22 @@ function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	r.runXp += xp
 	r.runSilver += coins
 
-	local leveled = false
+	local leveledCount = 0
 	while r.runXp >= r.nextXp do
 		r.runXp -= r.nextXp
 		r.runLevel += 1
-			grantLevelStatGains(plr, 1)
+		grantLevelStatGains(plr, 1)
 		r.nextXp = rollNextRunXp(r.runLevel)
-		leveled = true
+		leveledCount += 1
 	end
 
 	syncHud(plr)
 
-	if leveled then
-		openSpellMenu(plr)
+	if leveledCount > 0 then
+		r.pendingLevelUps = math.max(0, tonumber(r.pendingLevelUps) or 0) + leveledCount
+		if not pending[plr.UserId] then
+			openSpellMenu(plr)
+		end
 	end
 end
 
@@ -950,6 +990,7 @@ Players.PlayerAdded:Connect(function(plr: Player)
 	r.multikill60_20Done = false
 	r.ended = false
 	r.banished = {}
+	r.pendingLevelUps = 0
 
 	-- reset spell levels for this run
 	if SpellDefs and SpellDefs.SPELLS then
