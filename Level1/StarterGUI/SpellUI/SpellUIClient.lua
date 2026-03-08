@@ -17,147 +17,10 @@ assert(moduleFolder and moduleFolder:IsA("Folder"), "[SpellUI] Missing Replicate
 local SpellDefs = require(moduleFolder:WaitForChild("SpellDefinitions"))
 local PauseState = ReplicatedStorage:FindFirstChild("PauseState") or ReplicatedStorage:WaitForChild("PauseState")
 
-local SLOT_COUNT = 12
-
-local EMPTY_SLOT_TEXT = ""
-local EMPTY_LEVEL_TEXT = ""
+local SLOT_COUNT = SpellDefs.MAX_RUN_SPELLS or 10
 local EMPTY_STROKE_COLOR = Color3.fromRGB(60, 60, 60)
-local MIN_BAR_COOLDOWN = 0.65
+local MIN_BAR_COOLDOWN = 0.60
 local MIN_FULL_COOLDOWN = 1.25
-
-local RARITY_ORDER = {
-	Common = 1,
-	Uncommon = 2,
-	Rare = 3,
-	Epic = 4,
-}
-
-local RARITY_COLORS = {
-	Common = Color3.fromRGB(220, 220, 220),
-	Uncommon = Color3.fromRGB(120, 255, 175),
-	Rare = Color3.fromRGB(120, 175, 255),
-	Epic = Color3.fromRGB(255, 165, 120),
-}
-
-local COOLDOWN_RESOLVERS = {
-	ShadowDagger = function(level)
-		if level <= 0 then return nil end
-		local cd = 0.8
-		if level >= 2 then
-			cd *= 0.9
-			cd *= 0.9 ^ (level - 1)
-		end
-		return cd
-	end,
-	BoneSpear = function(level)
-		if level <= 0 then return nil end
-		return 1.4
-	end,
-	IceShards = function(level)
-		if level <= 0 then return nil end
-		return 2.0
-	end,
-	PoisonCloud = function(level)
-		if level <= 0 then return nil end
-		return 2.5
-	end,
-	EmberSpirits = function(level)
-		if level <= 0 then return nil end
-		local cd = 1.2
-		if level >= 4 then
-			cd *= 0.9
-		end
-		return cd
-	end,
-	FlameTrail = function(level)
-		if level <= 0 then return nil end
-		return 0.35
-	end,
-	FrostNova = function(level)
-		if level <= 0 then return nil end
-		local cd = 6.0
-		if level >= 3 then
-			cd *= 0.9
-		end
-		return cd
-	end,
-	GravityPulse = function(level)
-		if level <= 0 then return nil end
-		local cd = 5.0
-		if level >= 4 then
-			cd *= 0.9
-		end
-		return cd
-	end,
-	ArcaneMissile = function(level)
-		if level <= 0 then return nil end
-		return 2.2
-	end,
-	CrystalBarrage = function(level)
-		if level <= 0 then return nil end
-		return 2.6
-	end,
-	ChainHooks = function(level)
-		if level <= 0 then return nil end
-		return 4.0
-	end,
-	IceWall = function(level)
-		if level <= 0 then return nil end
-		return 8.0
-	end,
-	ThunderTotem = function(level)
-		if level <= 0 then return nil end
-		return 10.0
-	end,
-	NecroSwarm = function(level)
-		if level <= 0 then return nil end
-		return 1.6
-	end,
-	ArcaneMine = function(level)
-		if level <= 0 then return nil end
-		return 3.5
-	end,
-	DarkRift = function(level)
-		if level <= 0 then return nil end
-		return 7.0
-	end,
-	MeteorStrike = function(level)
-		if level <= 0 then return nil end
-		local cd = 4.5
-		if level >= 4 then
-			cd *= 0.9
-		end
-		return cd
-	end,
-	SolarBeam = function(level)
-		if level <= 0 then return nil end
-		return 6.5
-	end,
-	VoidRing = function(level)
-		if level <= 0 then return nil end
-		return 5.5
-	end,
-	BloodNova = function(level)
-		if level <= 0 then return nil end
-		local cd = 7.0
-		if level >= 3 then
-			cd *= 0.9
-		end
-		return cd
-	end,
-	TimeFracture = function(level)
-		if level <= 0 then return nil end
-		return 10.0
-	end,
-	SoulLink = function(level)
-		if level <= 0 then return nil end
-		return 9.0
-	end,
-	Starfall = function(level)
-		if level <= 0 then return nil end
-		return 8.5
-	end,
-}
 
 local slots = table.create(SLOT_COUNT)
 local levelLabels = table.create(SLOT_COUNT)
@@ -165,11 +28,10 @@ local slotTextLabels = table.create(SLOT_COUNT)
 local cooldownWidgets = table.create(SLOT_COUNT)
 local slotStrokes = table.create(SLOT_COUNT)
 local displayedSpellIds = table.create(SLOT_COUNT)
-
-local allSpellIds = {}
-local ownedSpellOrder = {}
-local ownedLookup = {}
 local cooldownState = {}
+local activeSpellOrder = {}
+local allSpellIds = SpellDefs.GetSpellIds and SpellDefs.GetSpellIds() or {}
+
 local pauseAccum = 0
 local pauseStart = nil
 
@@ -181,26 +43,43 @@ local function spellClock()
 		end
 		return pauseStart - pauseAccum
 	end
-
 	if pauseStart then
 		pauseAccum += (realNow - pauseStart)
 		pauseStart = nil
 	end
-
 	return realNow - pauseAccum
 end
 
-local function getSpellLevel(spellId)
-	return tonumber(player:GetAttribute(("Spell_%s_Level"):format(spellId))) or 0
+local function getSpellState(spellId)
+	return {
+		level = tonumber(player:GetAttribute(("Spell_%s_Level"):format(spellId))) or 0,
+		upgradePower = tonumber(player:GetAttribute(("Spell_%s_UpgradePower"):format(spellId))) or 0,
+		baseMultiplier = tonumber(player:GetAttribute(("Spell_%s_BaseMultiplier"):format(spellId))) or 1,
+		basePower = tonumber(player:GetAttribute(("Spell_%s_BasePower"):format(spellId))) or 0,
+	}
 end
 
 local function getSpellDef(spellId)
 	return SpellDefs.SPELLS and SpellDefs.SPELLS[spellId] or nil
 end
 
-local function rarityRank(spellId)
+local function getSpellColor(spellId)
 	local def = getSpellDef(spellId)
-	return RARITY_ORDER[(def and def.rarity) or "Common"] or 99
+	return SpellDefs.GetSpellColor and SpellDefs.GetSpellColor(def) or Color3.fromRGB(220, 220, 220)
+end
+
+local function getSpellInitials(spellId)
+	local def = getSpellDef(spellId)
+	local source = (def and def.name) or spellId
+	local initials = {}
+	for token in string.gmatch(source, "[A-Za-z]+") do
+		initials[#initials + 1] = string.sub(string.upper(token), 1, 1)
+	end
+	if #initials == 0 then
+		local compact = string.gsub(tostring(source), "%s+", "")
+		return string.upper(string.sub(compact, 1, 2))
+	end
+	return table.concat(initials, "", 1, math.min(2, #initials))
 end
 
 local function findSlotTextLabel(slot)
@@ -216,7 +95,6 @@ local function ensureStroke(slot)
 	if stroke and stroke:IsA("UIStroke") then
 		return stroke
 	end
-
 	stroke = Instance.new("UIStroke")
 	stroke.Name = "SpellUIStroke"
 	stroke.Thickness = 2
@@ -237,36 +115,30 @@ local function ensureCooldownWidget(slot)
 		local barBg = overlay:FindFirstChild("CooldownBarBg")
 		local barFill = barBg and barBg:FindFirstChild("CooldownBarFill")
 		local gradient = overlay:FindFirstChildOfClass("UIGradient")
-		return {
-			root = overlay,
-			barBg = barBg,
-			barFill = barFill,
-			gradient = gradient,
-		}
+		return { root = overlay, barBg = barBg, barFill = barFill, gradient = gradient }
 	end
 
 	overlay = Instance.new("Frame")
 	overlay.Name = "CooldownOverlay"
-	overlay.Position = UDim2.fromScale(0, 0)
 	overlay.Size = UDim2.fromScale(1, 1)
 	overlay.BorderSizePixel = 0
 	overlay.BackgroundColor3 = Color3.fromRGB(8, 10, 16)
 	overlay.BackgroundTransparency = 0.25
-	overlay.ZIndex = (slot:IsA("GuiObject") and slot.ZIndex + 1) or 1
 	overlay.Visible = false
+	overlay.ZIndex = (slot:IsA("GuiObject") and slot.ZIndex + 1) or 1
 	overlay.Parent = slot
 
-	local shine = Instance.new("UIGradient")
-	shine.Color = ColorSequence.new({
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new({
 		ColorSequenceKeypoint.new(0, Color3.fromRGB(18, 26, 40)),
 		ColorSequenceKeypoint.new(1, Color3.fromRGB(48, 72, 110)),
 	})
-	shine.Transparency = NumberSequence.new({
+	gradient.Transparency = NumberSequence.new({
 		NumberSequenceKeypoint.new(0, 0.1),
 		NumberSequenceKeypoint.new(1, 0.45),
 	})
-	shine.Rotation = 90
-	shine.Parent = overlay
+	gradient.Rotation = 90
+	gradient.Parent = overlay
 
 	local barBg = Instance.new("Frame")
 	barBg.Name = "CooldownBarBg"
@@ -283,90 +155,29 @@ local function ensureCooldownWidget(slot)
 	barFill.Name = "CooldownBarFill"
 	barFill.Size = UDim2.fromScale(1, 1)
 	barFill.BorderSizePixel = 0
-	barFill.BackgroundColor3 = Color3.fromRGB(255, 214, 102)
 	barFill.ZIndex = barBg.ZIndex + 1
 	barFill.Parent = barBg
 
-	return {
-		root = overlay,
-		barBg = barBg,
-		barFill = barFill,
-		gradient = shine,
-	}
-end
-
-local function getSpellInitials(spellId)
-	local def = getSpellDef(spellId)
-	local source = (def and def.name) or spellId
-	local initials = {}
-
-	for token in string.gmatch(source, "[A-Za-z]+") do
-		table.insert(initials, string.sub(string.upper(token), 1, 1))
-	end
-
-	if #initials == 0 then
-		local compact = string.gsub(tostring(source), "%s+", "")
-		return string.upper(string.sub(compact, 1, 2))
-	end
-
-	if #initials == 1 then
-		local compact = string.gsub(tostring(source), "%s+", "")
-		return string.upper(string.sub(compact, 1, math.min(2, #compact)))
-	end
-
-	return table.concat(initials, "", 1, math.min(2, #initials))
-end
-
-local function genericCooldown(spellId, level)
-	if level <= 0 then
-		return nil
-	end
-
-	local def = getSpellDef(spellId)
-	local params = def and def.params
-	if type(params) ~= "table" then
-		return nil
-	end
-
-	for _, key in ipairs({ "interval", "spawnInterval", "spawnRate", "launchInterval", "spawnEvery", "fireRate" }) do
-		local value = tonumber(params[key])
-		if value and value > 0 then
-			return value
-		end
-	end
-
-	return nil
-end
-
-local function getCooldownDuration(spellId, level)
-	local resolver = COOLDOWN_RESOLVERS[spellId]
-	if resolver then
-		return resolver(level)
-	end
-	return genericCooldown(spellId, level)
+	return { root = overlay, barBg = barBg, barFill = barFill, gradient = gradient }
 end
 
 local function setSlotEmpty(index)
-	local slot = slots[index]
 	local textLabel = slotTextLabels[index]
 	local levelLabel = levelLabels[index]
 	local widget = cooldownWidgets[index]
 	local stroke = slotStrokes[index]
 
 	displayedSpellIds[index] = nil
-
 	if textLabel then
-		textLabel.Text = EMPTY_SLOT_TEXT
-		textLabel.TextTransparency = 0.4
+		textLabel.Text = ""
+		textLabel.TextTransparency = 0.45
 		textLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
 	end
-
 	if levelLabel then
-		levelLabel.Text = EMPTY_LEVEL_TEXT
+		levelLabel.Text = ""
 		levelLabel.TextTransparency = 0.45
 		levelLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
 	end
-
 	if widget and widget.root then
 		widget.root.Visible = false
 		widget.root.BackgroundTransparency = 1
@@ -374,76 +185,58 @@ local function setSlotEmpty(index)
 			widget.barFill.Size = UDim2.fromScale(0, 1)
 		end
 	end
-
-	if slot and slot:IsA("GuiObject") then
-		slot.BackgroundTransparency = 0.25
-	end
-
 	if stroke then
 		stroke.Color = EMPTY_STROKE_COLOR
 		stroke.Transparency = 0.45
 	end
 end
 
-local function setSlotSpell(index, spellId, level)
-	local slot = slots[index]
+local function setSlotSpell(index, spellId, state)
+	local def = getSpellDef(spellId)
+	local color = getSpellColor(spellId)
 	local textLabel = slotTextLabels[index]
 	local levelLabel = levelLabels[index]
 	local stroke = slotStrokes[index]
-	local def = getSpellDef(spellId)
-	local rarity = (def and def.rarity) or "Common"
-	local color = RARITY_COLORS[rarity] or RARITY_COLORS.Common
 
 	displayedSpellIds[index] = spellId
-
 	if textLabel then
 		textLabel.Text = getSpellInitials(spellId)
 		textLabel.TextTransparency = 0
 		textLabel.TextColor3 = color
 		textLabel.TextScaled = true
-		textLabel.BackgroundTransparency = 1
 	end
-
 	if levelLabel then
-		levelLabel.Text = ("Lv. %d"):format(level)
+		local prefix = def and def.spellType == "Physical" and "P" or "M"
+		levelLabel.Text = string.format("%s Lv.%d", prefix, state.level)
 		levelLabel.TextTransparency = 0
 		levelLabel.TextColor3 = color
 	end
-
-	if slot and slot:IsA("GuiObject") then
-		slot.BackgroundTransparency = 0.1
-	end
-
 	if stroke then
+		stroke.Color = color
 		stroke.Transparency = 0.1
 	end
 end
 
-local function removeOwnedSpell(spellId)
-	if not ownedLookup[spellId] then
-		return
-	end
-
-	ownedLookup[spellId] = nil
-	for index, ownedId in ipairs(ownedSpellOrder) do
-		if ownedId == spellId then
-			table.remove(ownedSpellOrder, index)
-			break
+local function rebuildActiveSpellOrder()
+	local active = {}
+	for _, spellId in ipairs(allSpellIds) do
+		if getSpellState(spellId).level > 0 then
+			active[#active + 1] = spellId
 		end
 	end
+	activeSpellOrder = SpellDefs.SortSpellIds and SpellDefs.SortSpellIds(active) or active
 end
 
-local function addOwnedSpell(spellId)
-	if ownedLookup[spellId] then
+local function refreshCooldownRecord(spellId, forceRestart)
+	local state = getSpellState(spellId)
+	if state.level <= 0 then
+		cooldownState[spellId] = nil
 		return
 	end
 
-	ownedLookup[spellId] = true
-	table.insert(ownedSpellOrder, spellId)
-end
-
-local function updateCooldownRecord(spellId, level, forceRestart)
-	local duration = getCooldownDuration(spellId, level)
+	local def = getSpellDef(spellId)
+	local runtime = def and SpellDefs.ComputeRuntimeStats and SpellDefs.ComputeRuntimeStats(def, state) or nil
+	local duration = runtime and runtime.cooldown or nil
 	if not duration or duration <= 0 then
 		cooldownState[spellId] = nil
 		return
@@ -452,10 +245,7 @@ local function updateCooldownRecord(spellId, level, forceRestart)
 	local record = cooldownState[spellId]
 	local now = spellClock()
 	if not record then
-		record = {
-			startClock = now,
-			duration = duration,
-		}
+		record = { startClock = now, duration = duration }
 		cooldownState[spellId] = record
 		return
 	end
@@ -466,42 +256,21 @@ local function updateCooldownRecord(spellId, level, forceRestart)
 	end
 end
 
-local function rebuildOwnedSpellOrder()
-	table.clear(ownedSpellOrder)
-	table.clear(ownedLookup)
-
-	for _, spellId in ipairs(allSpellIds) do
-		if getSpellLevel(spellId) > 0 then
-			addOwnedSpell(spellId)
-		end
-	end
-end
-
 local function refreshSlots()
 	for index = 1, SLOT_COUNT do
-		local spellId = ownedSpellOrder[index]
+		local spellId = activeSpellOrder[index]
 		if spellId then
-			setSlotSpell(index, spellId, getSpellLevel(spellId))
+			setSlotSpell(index, spellId, getSpellState(spellId))
 		else
 			setSlotEmpty(index)
 		end
 	end
 end
 
-local function onSpellLevelChanged(spellId)
-	local level = getSpellLevel(spellId)
-
-	if level > 0 then
-		local isNewSpell = not ownedLookup[spellId]
-		if isNewSpell then
-			addOwnedSpell(spellId)
-		end
-		updateCooldownRecord(spellId, level, isNewSpell)
-	else
-		removeOwnedSpell(spellId)
-		cooldownState[spellId] = nil
-	end
-
+local function onSpellChanged(spellId)
+	local state = getSpellState(spellId)
+	refreshCooldownRecord(spellId, state.level > 0)
+	rebuildActiveSpellOrder()
 	refreshSlots()
 end
 
@@ -518,22 +287,15 @@ local function refreshCooldownVisuals(now)
 		end
 
 		local record = cooldownState[spellId]
+		local accentColor = getSpellColor(spellId)
 		if not record or not record.duration or record.duration <= 0 then
 			widget.root.Visible = false
 			widget.root.BackgroundTransparency = 1
 			if widget.barFill then
 				widget.barFill.Size = UDim2.fromScale(0, 1)
 			end
-			if textLabel then
-				textLabel.TextTransparency = 0
-			end
-			if levelLabel then
-				levelLabel.TextTransparency = 0
-			end
 			if stroke then
-				local def = getSpellDef(spellId)
-				local rarity = (def and def.rarity) or "Common"
-				stroke.Color = RARITY_COLORS[rarity] or RARITY_COLORS.Common
+				stroke.Color = accentColor
 			end
 			continue
 		end
@@ -545,41 +307,27 @@ local function refreshCooldownVisuals(now)
 		end
 
 		local progress = math.clamp(elapsed / record.duration, 0, 1)
-		local def = getSpellDef(spellId)
-		local rarity = (def and def.rarity) or "Common"
-		local accentColor = RARITY_COLORS[rarity] or RARITY_COLORS.Common
-
 		if record.duration < MIN_BAR_COOLDOWN then
 			widget.root.Visible = false
 			widget.root.BackgroundTransparency = 1
 			if widget.barFill then
 				widget.barFill.Size = UDim2.fromScale(0, 1)
 			end
-			if textLabel then
-				textLabel.TextTransparency = 0
-			end
-			if levelLabel then
-				levelLabel.TextTransparency = 0
-			end
 		else
 			local fullMode = record.duration >= MIN_FULL_COOLDOWN
 			widget.root.Visible = true
 			widget.root.BackgroundTransparency = fullMode and 0.28 or 1
-
 			if widget.gradient then
 				widget.gradient.Enabled = fullMode
 			end
-
 			if widget.barBg then
 				widget.barBg.Visible = true
 				widget.barBg.BackgroundTransparency = fullMode and 0.15 or 0.05
 			end
-
 			if widget.barFill then
 				widget.barFill.BackgroundColor3 = accentColor
 				widget.barFill.Size = UDim2.fromScale(1 - progress, 1)
 			end
-
 			if textLabel then
 				textLabel.TextTransparency = fullMode and 0.2 or 0
 			end
@@ -599,15 +347,6 @@ for index = 1, SLOT_COUNT do
 	local slot = frame:WaitForChild(("Slot%d"):format(index))
 	local levelLabel = frame:WaitForChild(("Lvl%d"):format(index))
 	local textLabel = findSlotTextLabel(slot)
-
-	if textLabel and slot:IsA("GuiObject") then
-		textLabel.ZIndex = math.max(textLabel.ZIndex, slot.ZIndex + 2)
-	end
-
-	if levelLabel and slot:IsA("GuiObject") then
-		levelLabel.ZIndex = math.max(levelLabel.ZIndex, slot.ZIndex + 2)
-	end
-
 	slots[index] = slot
 	levelLabels[index] = levelLabel
 	slotTextLabels[index] = textLabel
@@ -615,44 +354,16 @@ for index = 1, SLOT_COUNT do
 	cooldownWidgets[index] = ensureCooldownWidget(slot)
 end
 
-for spellId in pairs(SpellDefs.SPELLS or {}) do
-	table.insert(allSpellIds, spellId)
-end
-
-table.sort(allSpellIds, function(a, b)
-	local defA = getSpellDef(a)
-	local defB = getSpellDef(b)
-
-	local baseA = defA and defA.base == true
-	local baseB = defB and defB.base == true
-	if baseA ~= baseB then
-		return baseA
-	end
-
-	local rankA = rarityRank(a)
-	local rankB = rarityRank(b)
-	if rankA ~= rankB then
-		return rankA < rankB
-	end
-
-	local nameA = string.lower((defA and defA.name) or a)
-	local nameB = string.lower((defB and defB.name) or b)
-	return nameA < nameB
-end)
-
-rebuildOwnedSpellOrder()
 for _, spellId in ipairs(allSpellIds) do
-	local level = getSpellLevel(spellId)
-	if level > 0 then
-		updateCooldownRecord(spellId, level, true)
+	refreshCooldownRecord(spellId, true)
+	for _, suffix in ipairs({ "Level", "UpgradePower", "BaseMultiplier", "BasePower" }) do
+		player:GetAttributeChangedSignal(("Spell_%s_%s"):format(spellId, suffix)):Connect(function()
+			onSpellChanged(spellId)
+		end)
 	end
-
-	local watchedSpellId = spellId
-	player:GetAttributeChangedSignal(("Spell_%s_Level"):format(watchedSpellId)):Connect(function()
-		onSpellLevelChanged(watchedSpellId)
-	end)
 end
 
+rebuildActiveSpellOrder()
 refreshSlots()
 refreshCooldownVisuals(spellClock())
 

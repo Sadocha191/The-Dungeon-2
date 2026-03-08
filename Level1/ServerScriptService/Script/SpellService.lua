@@ -1,14 +1,9 @@
-
--- SpellService.server.lua (Level1/ServerScriptService/Script)
--- Horde-oriented spells + crowd control.
--- Activates spells by player attributes Spell_<id>_Level (set by ProgressService picks).
--- VFX are simple Parts, no external assets.
-
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
+
 local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes") or ReplicatedStorage:WaitForChild("Remotes", 5)
 if not remotesFolder then
 	error("[SpellService] Missing ReplicatedStorage.Remotes")
@@ -20,6 +15,7 @@ if not SpellVFXEvent then
 	SpellVFXEvent.Name = "SpellVFXEvent"
 	SpellVFXEvent.Parent = remotesFolder
 end
+
 local PauseState = ReplicatedStorage:FindFirstChild("PauseState")
 if not PauseState then
 	PauseState = Instance.new("BoolValue")
@@ -28,32 +24,7 @@ if not PauseState then
 	PauseState.Parent = ReplicatedStorage
 end
 
-local pauseAccum = 0
-local pauseStart: number? = nil
-
-local function isPaused(): boolean
-	return PauseState.Value == true
-end
-
-local function spellClock(): number
-	local realNow = os.clock()
-	if PauseState.Value then
-		if not pauseStart then
-			pauseStart = realNow
-		end
-		return pauseStart - pauseAccum
-	end
-	if pauseStart then
-		pauseAccum += (realNow - pauseStart)
-		pauseStart = nil
-	end
-	return realNow - pauseAccum
-end
-
-local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
-local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions"))
-
-local function findServerModule(name: string): ModuleScript?
+local function findServerModule(name)
 	local direct = ServerScriptService:FindFirstChild(name)
 	if direct and direct:IsA("ModuleScript") then
 		return direct
@@ -68,6 +39,8 @@ local function findServerModule(name: string): ModuleScript?
 	return nil
 end
 
+local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
+local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions"))
 local NpcService = require(findServerModule("NpcService") or error("[SpellService] Missing NpcService"))
 
 local vfxRoot = workspace:FindFirstChild("SpellVFX")
@@ -77,52 +50,58 @@ if not vfxRoot then
 	vfxRoot.Parent = workspace
 end
 
-local PROJECTILE_CAST_HEIGHT = 1.1
-local ORBIT_HIT_HEIGHT = 1.0
-local PROJECTILE_TARGET_SEARCH_RADIUS = 4
-local PROJECTILE_HIT_RADIUS = 3.2
+local pauseAccum = 0
+local pauseStart = nil
+local state = {}
 
--- ===== Utils =====
-local function getEnemyRoot(model: Model): BasePart?
+local function isPaused()
+	return PauseState.Value == true
+end
+
+local function spellClock()
+	local realNow = os.clock()
+	if PauseState.Value then
+		if not pauseStart then
+			pauseStart = realNow
+		end
+		return pauseStart - pauseAccum
+	end
+	if pauseStart then
+		pauseAccum += (realNow - pauseStart)
+		pauseStart = nil
+	end
+	return realNow - pauseAccum
+end
+
+local function getState(plr)
+	local s = state[plr.UserId]
+	if not s then
+		s = { cds = {}, orbit = {}, vfx = {} }
+		state[plr.UserId] = s
+	end
+	return s
+end
+
+local function getEnemyRoot(model)
 	return NpcService.GetRoot(model)
 end
 
-local function enemyAlive(model: Model): boolean
+local function enemyAlive(model)
 	return NpcService.IsAlive(model)
 end
 
-local function safeDamage(enemyModel: Model, dmg: number, meta)
-	if isPaused() then return 0 end
+local function safeDamage(enemyModel, dmg, meta)
+	if isPaused() then
+		return 0
+	end
 	dmg = math.floor(tonumber(dmg) or 0)
-	if dmg <= 0 then return 0 end
+	if dmg <= 0 then
+		return 0
+	end
 	return NpcService.ApplyDamage(enemyModel, dmg, meta)
 end
 
-local function getEnemyModels()
-	return NpcService.GetLivingModels()
-end
-
-local function getNearestEnemy(pos: Vector3, range: number)
-	return NpcService.GetNearestEnemy(pos, range or 9999)
-end
-
-local function getEnemiesInRadius(pos: Vector3, radius: number)
-	return NpcService.GetEnemiesInRadius(pos, radius or 10)
-end
-
-local function applySlow(model: Model, slowPct: number, duration: number)
-	NpcService.ApplySlow(model, slowPct, duration)
-end
-
-local function applyFreeze(model: Model, duration: number)
-	NpcService.ApplyFreeze(model, duration)
-end
-
-local function addImpulse(model: Model, impulse: Vector3)
-	NpcService.AddImpulse(model, impulse)
-end
-
-local function getEnemyPosition(model: Model): Vector3?
+local function getEnemyPosition(model)
 	local pos = NpcService.GetPosition(model)
 	if pos then
 		return pos
@@ -131,1202 +110,442 @@ local function getEnemyPosition(model: Model): Vector3?
 	return root and root.Position or nil
 end
 
-local function getEnemyDirection(fromPos: Vector3, model: Model): Vector3?
-	local enemyPos = getEnemyPosition(model)
-	if not enemyPos then
-		return nil
-	end
-
-	local delta = enemyPos - fromPos
-	if delta.Magnitude <= 1e-4 then
-		return nil
-	end
-
-	return delta.Unit
+local function getNearestEnemy(pos, range)
+	return NpcService.GetNearestEnemy(pos, range or 9999)
 end
 
-local function sortEnemiesByDistance(fromPos: Vector3, enemies: {Model})
-	table.sort(enemies, function(a, b)
-		local aPos = getEnemyPosition(a)
-		local bPos = getEnemyPosition(b)
-		if not aPos then
-			return false
-		end
-		if not bPos then
-			return true
-		end
-		return (aPos - fromPos).Magnitude < (bPos - fromPos).Magnitude
-	end)
+local function getEnemiesInRadius(pos, radius)
+	return NpcService.GetEnemiesInRadius(pos, radius or 10)
 end
 
-local function getSpellCastOrigin(basePos: Vector3): Vector3
-	return basePos + Vector3.new(0, PROJECTILE_CAST_HEIGHT, 0)
-end
--- ===== Per-player state =====
-local state = {} :: {[number]: any}
-
-local function getState(plr: Player)
-	local s = state[plr.UserId]
-	if not s then
-		s = {
-			orbit = {}, -- id -> {t=number, lastHit = {[enemy]=t}}
-			vfx = {},   -- id -> last sent VFX params
-			cds = {},   -- id -> nextFire
-			timers = {},-- id -> acc
-			cloneDelay = 0.15,
-		}
-		state[plr.UserId] = s
-	end
-	return s
+local function getAllEnemies()
+	return NpcService.GetLivingModels()
 end
 
-local function ensurePart(name: string, size: Vector3)
-	local p = Instance.new("Part")
-	p.Name = name
-	p.Anchored = true
-	p.CanCollide = false
-	p.CanTouch = true
-	p.CastShadow = false
-	p.Size = size
-	p.TopSurface = Enum.SurfaceType.Smooth
-	p.BottomSurface = Enum.SurfaceType.Smooth
-	p.Parent = vfxRoot
-	return p
+local function applySlow(model, slowPct, duration)
+	NpcService.ApplySlow(model, slowPct, duration)
 end
 
-local function getSpellLevel(plr: Player, id: string): number
-	return tonumber(plr:GetAttribute("Spell_"..id.."_Level")) or 0
+local function applyFreeze(model, duration)
+	NpcService.ApplyFreeze(model, duration)
 end
 
-local function getAtkMult(plr: Player): number
+local function addImpulse(model, impulse)
+	NpcService.AddImpulse(model, impulse)
+end
+
+local function ensurePart(name, size, color, transparency)
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Size = size
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Material = Enum.Material.Neon
+	part.Color = color or Color3.fromRGB(255, 255, 255)
+	part.Transparency = transparency or 0.25
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Parent = vfxRoot
+	return part
+end
+
+local function getSpellState(plr, spellId)
+	return {
+		level = tonumber(plr:GetAttribute(("Spell_%s_Level"):format(spellId))) or 0,
+		upgradePower = tonumber(plr:GetAttribute(("Spell_%s_UpgradePower"):format(spellId))) or 0,
+		baseMultiplier = tonumber(plr:GetAttribute(("Spell_%s_BaseMultiplier"):format(spellId))) or 1,
+		basePower = tonumber(plr:GetAttribute(("Spell_%s_BasePower"):format(spellId))) or 0,
+	}
+end
+
+local function getAtkMult(plr)
 	local runAtkMult = tonumber(plr:GetAttribute("RunAtkMult")) or 1
 	local shrineDamageMult = tonumber(plr:GetAttribute("ShrineDamageMult")) or 1
 	local spellDamageMult = tonumber(plr:GetAttribute("SpellDamageMult")) or 1
 	return runAtkMult * shrineDamageMult * spellDamageMult
 end
 
-local function getDurationMult(plr: Player?): number
-	if not plr then return 1 end
+local function getDurationMult(plr)
 	return math.max(0.1, 1 + (tonumber(plr:GetAttribute("ShrineDurationBonus")) or 0))
 end
 
-local function getEliteDamageMult(plr: Player?): number
-	if not plr then return 1 end
-	return math.max(0.1, 1 + (tonumber(plr:GetAttribute("ShrineEliteDamageBonus")) or 0))
-end
-
-local function getKnockbackMult(plr: Player?): number
-	if not plr then return 1 end
-	return math.max(0, tonumber(plr:GetAttribute("ShrineKnockbackMult")) or 1)
-end
-
-local function getProjectileBonus(plr: Player?): number
-	if not plr then return 0 end
-	return math.max(0, math.floor(tonumber(plr:GetAttribute("ShrineProjectileBonus")) or 0))
-end
-
-local function getLifestealBonus(plr: Player?): number
-	if not plr then return 0 end
-	return math.max(0, tonumber(plr:GetAttribute("ShrineLifestealPct")) or 0)
-end
-
-local function getCritDamageBonus(plr: Player?): number
-	if not plr then return 0 end
-	return math.max(0, tonumber(plr:GetAttribute("ShrineCritDamageBonus")) or 0)
-end
-
-local function projHitDamage(plr: Player, enemy: Model, dmg: number, opts)
-	if isPaused() or not enemy or not enemyAlive(enemy) then return end
-	opts = opts or {}
-	local enemyRoot = getEnemyRoot(enemy)
-	if not enemyRoot then return end
-
-	if enemy:GetAttribute("SoulLinkAnchor") then
-		local linkPct = tonumber(plr:GetAttribute("SoulLinkPct")) or 0
-		local linkRadius = tonumber(plr:GetAttribute("SoulLinkRadius")) or 0
-		if linkPct > 0 and linkRadius > 0 then
-			for _, other in ipairs(getEnemiesInRadius(enemyRoot.Position, linkRadius)) do
-				if other ~= enemy and enemyAlive(other) then
-					safeDamage(other, dmg * linkPct, { player = plr, showFloating = false })
-				end
-			end
-		end
+local function distancePointToSegment(point, a, b)
+	local ab = b - a
+	local denom = ab:Dot(ab)
+	if denom <= 1e-4 then
+		return (point - a).Magnitude
 	end
+	local t = math.clamp(((point - a):Dot(ab)) / denom, 0, 1)
+	local projection = a + (ab * t)
+	return (point - projection).Magnitude
+end
 
-	local dealt = math.floor(tonumber(dmg) or 0)
-	if dealt > 0 then
-		if enemy:GetAttribute("IsElite") == true or string.sub(enemy.Name, 1, 5) == "Boss_" then
-			dealt = dealt * getEliteDamageMult(plr)
+local function applyTimedDot(plr, enemy, dps, duration)
+	local endAt = spellClock() + duration
+	task.spawn(function()
+		while spellClock() < endAt and enemyAlive(enemy) do
+			safeDamage(enemy, dps * 0.5, { player = plr, showFloating = false })
+			task.wait(0.5)
 		end
+	end)
+end
 
-		local vulnUntil = tonumber(enemy:GetAttribute("VulnerableUntil")) or 0
-		local vulnPct = tonumber(enemy:GetAttribute("VulnerablePct")) or 0
-		if vulnUntil > spellClock() and vulnPct > 0 then
-			dealt = dealt * (1 + vulnPct)
-		end
-
-		if opts.crit == true then
-			dealt = dealt * (1 + getCritDamageBonus(plr))
-		end
-
-		dealt = math.max(1, math.floor(dealt + 0.5))
-		local applied = safeDamage(enemy, dealt, {
-			player = plr,
-			crit = opts.crit == true,
-			showFloating = opts.showFloating,
-		})
-
-		local lifesteal = getLifestealBonus(plr)
-		if lifesteal > 0 and applied > 0 then
-			local ownerHum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
-			if ownerHum and ownerHum.Health > 0 then
-				ownerHum.Health = math.min(ownerHum.MaxHealth, ownerHum.Health + applied * lifesteal)
-			end
-		end
-	end
-
+local function applyEffects(plr, enemy, stats, sourcePos)
+	local effects = stats.effects or {}
+	local effectPower = stats.effectPower or 1
 	local durationMult = getDurationMult(plr)
-	if opts.slowPct then
-		applySlow(enemy, opts.slowPct, (opts.slowDuration or 1) * durationMult)
+	local enemyPos = getEnemyPosition(enemy)
+
+	if effects.dot then
+		applyTimedDot(plr, enemy, (effects.dot.dps or 0) * effectPower, (effects.dot.duration or 0) * durationMult)
 	end
-	if opts.freezeChance and (math.random() < opts.freezeChance) then
-		applyFreeze(enemy, (opts.freezeDuration or 0.8) * durationMult)
+	if effects.slow then
+		applySlow(enemy, math.clamp((effects.slow.pct or 0) * (0.9 + (effectPower * 0.1)), 0, 0.7), (effects.slow.duration or 0) * durationMult)
 	end
-	if opts.burnDps and opts.burnDuration then
-		local endT = spellClock() + (opts.burnDuration * durationMult)
-		task.spawn(function()
-			while spellClock() < endT and enemyAlive(enemy) do
-				safeDamage(enemy, opts.burnDps * 0.5, { player = plr, showFloating = false })
-				task.wait(0.5)
-			end
-		end)
+	if effects.stun then
+		applyFreeze(enemy, (effects.stun.duration or 0) * durationMult * (0.9 + (effectPower * 0.1)))
 	end
-	if opts.poisonDps and opts.poisonDuration then
-		local endT = spellClock() + (opts.poisonDuration * durationMult)
-		task.spawn(function()
-			while spellClock() < endT and enemyAlive(enemy) do
-				safeDamage(enemy, opts.poisonDps * 0.5, { player = plr, showFloating = false })
-				task.wait(0.5)
-			end
-		end)
+	if effects.vulnerability then
+		enemy:SetAttribute("VulnerableUntil", spellClock() + ((effects.vulnerability.duration or 0) * durationMult))
+		enemy:SetAttribute("VulnerablePct", (effects.vulnerability.pct or 0) * (0.9 + (effectPower * 0.1)))
+	end
+	if enemyPos and sourcePos and effects.knockback then
+		local direction = enemyPos - sourcePos
+		if direction.Magnitude > 0.01 then
+			addImpulse(enemy, direction.Unit * (effects.knockback.force or 0) * (0.8 + (effectPower * 0.2)))
+		end
+	end
+	if enemyPos and sourcePos and effects.pull then
+		local direction = sourcePos - enemyPos
+		if direction.Magnitude > 0.01 then
+			addImpulse(enemy, direction.Unit * (effects.pull.force or 0) * (0.8 + (effectPower * 0.2)))
+		end
+	end
+	if enemyPos and sourcePos and tonumber(stats.pullStrength) and tonumber(stats.pullStrength) > 0 then
+		local direction = sourcePos - enemyPos
+		if direction.Magnitude > 0.01 then
+			addImpulse(enemy, direction.Unit * 10 * tonumber(stats.pullStrength) * (0.8 + (effectPower * 0.2)))
+		end
 	end
 end
 
-local function fireProjectile(plr: Player, origin: Vector3, dir: Vector3, speed: number, range: number, dmg: number, pierce: number, opts)
-	local s = getState(plr)
-	local cloneLv = getSpellLevel(plr, "PhantomClone")
-	local copyPct = 0
-	if cloneLv > 0 then
-		copyPct = ({0.35,0.45,0.45,0.60,0.35,0.90})[math.clamp(cloneLv,1,6)] or 0.35
+local function hitEnemy(plr, enemy, damage, stats, sourcePos)
+	if not enemy or not enemyAlive(enemy) then
+		return
 	end
-
-	local extraProjectiles = getProjectileBonus(plr)
-	local totalProjectiles = 1 + extraProjectiles
-	local spreadStep = math.rad(4)
-
-	local function spawnOne(mult: number, castDir: Vector3)
-		local p = ensurePart("Proj", Vector3.new(0.6,0.6,0.6))
-		p.CFrame = CFrame.new(origin)
-		p.Transparency = 0.3
-		local traveled = 0
-		local localPierce = pierce
-		local hit = {}
-		local conn
-		conn = RunService.Heartbeat:Connect(function(dt)
-			if not p.Parent then conn:Disconnect() return end
-			local step = speed * dt
-			traveled += step
-			p.CFrame = p.CFrame + (castDir * step)
-			if traveled >= range then
-				conn:Disconnect()
-				p:Destroy()
-				return
-			end
-
-			local nearest = getNearestEnemy(p.Position, PROJECTILE_TARGET_SEARCH_RADIUS)
-			local nearestRoot = nearest and getEnemyRoot(nearest)
-			if nearestRoot and (nearestRoot.Position - p.Position).Magnitude <= PROJECTILE_HIT_RADIUS then
-				if not hit[nearest] then
-					hit[nearest] = true
-					projHitDamage(plr, nearest, dmg * mult, opts)
-					if localPierce <= 0 then
-						conn:Disconnect()
-						p:Destroy()
-						return
-					else
-						localPierce -= 1
-					end
-				end
-			end
-		end)
-		Debris:AddItem(p, 5)
+	local dealt = damage * getAtkMult(plr)
+	local vulnUntil = tonumber(enemy:GetAttribute("VulnerableUntil")) or 0
+	local vulnPct = tonumber(enemy:GetAttribute("VulnerablePct")) or 0
+	if vulnUntil > spellClock() and vulnPct > 0 then
+		dealt *= (1 + vulnPct)
 	end
-
-	local function spawnVolley(mult: number)
-		if totalProjectiles <= 1 then
-			spawnOne(mult, dir)
-			return
-		end
-
-		for i = 1, totalProjectiles do
-			local centered = i - ((totalProjectiles + 1) / 2)
-			local angle = centered * spreadStep
-			local castDir = (CFrame.fromAxisAngle(Vector3.new(0,1,0), angle) * dir).Unit
-			spawnOne(mult, castDir)
-		end
-	end
-
-	spawnVolley(1)
-
-	if cloneLv > 0 and copyPct > 0 then
-		task.delay(s.cloneDelay, function()
-			if plr.Parent then
-				spawnVolley(copyPct)
-			end
-		end)
+	local applied = safeDamage(enemy, dealt, { player = plr })
+	if applied > 0 then
+		applyEffects(plr, enemy, stats, sourcePos)
 	end
 end
 
--- ===== Spell implementations (best-effort, gameplay first) =====
+local function getCastOrigin(hrp)
+	return hrp.Position + Vector3.new(0, 1.2, 0)
+end
 
--- Server tells client to render orbit VFX locally (so it stays glued to the player, no replication lag)
-local function syncOrbitVFX(plr: Player, id: string, enabled: boolean, params)
-	if not SpellVFXEvent then return end
+local function syncOrbitVFX(plr, spellId, enabled, params)
 	local s = getState(plr)
-	s.vfx[id] = s.vfx[id] or {}
-	local last = s.vfx[id]
+	s.vfx[spellId] = s.vfx[spellId] or {}
+	local last = s.vfx[spellId]
 
 	if not enabled then
 		if last.enabled ~= false then
 			last.enabled = false
-			SpellVFXEvent:FireClient(plr, id, false)
+			SpellVFXEvent:FireClient(plr, spellId, false)
 		end
 		return
 	end
 
 	params = params or {}
-	local changed = (last.enabled ~= true)
-	for k, v in pairs(params) do
-		if last[k] ~= v then
+	local changed = last.enabled ~= true
+	for key, value in pairs(params) do
+		if last[key] ~= value then
 			changed = true
 			break
 		end
 	end
-
 	if changed then
 		last.enabled = true
-		for k, v in pairs(params) do last[k] = v end
-		SpellVFXEvent:FireClient(plr, id, true, params)
+		for key, value in pairs(params) do
+			last[key] = value
+		end
+		SpellVFXEvent:FireClient(plr, spellId, true, params)
 	end
 end
 
-local function tickOrbit(plr: Player, dt: number, id: string, count: number, radius: number, orbitSpeed: number, hitCd: number, baseDmg: number, onHit)
+local function spawnRingVisual(pos, radius, duration, color)
+	local part = ensurePart("SpellRing", Vector3.new(radius * 2, 0.35, radius * 2), color, 0.55)
+	part.Shape = Enum.PartType.Cylinder
+	part.Orientation = Vector3.new(0, 0, 90)
+	part.Position = pos + Vector3.new(0, 0.15, 0)
+	Debris:AddItem(part, duration)
+end
+
+local function spawnNovaVisual(pos, radius, color)
+	local part = ensurePart("SpellNova", Vector3.new(radius * 2, 0.4, radius * 2), color, 0.45)
+	part.Shape = Enum.PartType.Cylinder
+	part.Orientation = Vector3.new(0, 0, 90)
+	part.Position = pos + Vector3.new(0, 0.2, 0)
+	Debris:AddItem(part, 0.25)
+end
+
+local function spawnBeamVisual(origin, dir, range, width, duration, color)
+	local part = ensurePart("SpellBeam", Vector3.new(width, width, range), color, 0.55)
+	part.CFrame = CFrame.lookAt(origin + (dir * (range * 0.5)), origin + dir) * CFrame.new(0, 0, -(range * 0.5))
+	Debris:AddItem(part, duration)
+end
+
+local function fireProjectile(plr, origin, dir, speed, range, damage, pierce, stats)
+	local part = ensurePart("SpellProjectile", Vector3.new(0.85, 0.85, 0.85), stats.visualColor, 0.15)
+	part.Shape = Enum.PartType.Ball
+	part.CFrame = CFrame.new(origin)
+	local traveled = 0
+	local remainingPierce = math.max(0, math.floor(pierce or 0))
+	local hit = {}
+	local conn
+	conn = RunService.Heartbeat:Connect(function(dt)
+		if not part.Parent then
+			conn:Disconnect()
+			return
+		end
+		if isPaused() then
+			return
+		end
+
+		local step = speed * dt
+		traveled += step
+		part.CFrame = part.CFrame + (dir * step)
+
+		local enemy = getNearestEnemy(part.Position, 3.5)
+		local enemyPos = enemy and getEnemyPosition(enemy)
+		if enemy and enemyPos and (enemyPos - part.Position).Magnitude <= 3.5 and not hit[enemy] then
+			hit[enemy] = true
+			hitEnemy(plr, enemy, damage, stats, origin)
+			if remainingPierce <= 0 then
+				conn:Disconnect()
+				part:Destroy()
+				return
+			end
+			remainingPierce -= 1
+		end
+
+		if traveled >= range then
+			conn:Disconnect()
+			part:Destroy()
+		end
+	end)
+	Debris:AddItem(part, 5)
+end
+
+local function runProjectile(plr, spellId, stats, hrp)
 	local s = getState(plr)
-	local bucket = s.orbit[id]
-	if not bucket then
-		bucket = { lastHit = {} }
-		s.orbit[id] = bucket
+	local now = spellClock()
+	if now < (s.cds[spellId] or 0) then
+		return
 	end
 
-	syncOrbitVFX(plr, id, count > 0, {
+	s.cds[spellId] = now + (stats.cooldown or 1)
+	local origin = getCastOrigin(hrp)
+	local target = getNearestEnemy(hrp.Position, stats.range or 60)
+	local targetPos = target and getEnemyPosition(target)
+	if not targetPos then
+		return
+	end
+
+	local direction = (targetPos - origin)
+	if direction.Magnitude <= 0.01 then
+		return
+	end
+	direction = direction.Unit
+
+	for index = 1, math.max(1, stats.count or 1) do
+		task.delay((index - 1) * 0.05, function()
+			fireProjectile(plr, origin, direction, stats.projectileSpeed or 90, stats.range or 60, stats.damage, stats.pierce or 0, stats)
+		end)
+	end
+end
+
+local function runOrbit(plr, spellId, stats, hrp, dt)
+	local s = getState(plr)
+	local bucket = s.orbit[spellId]
+	if not bucket then
+		bucket = { t = 0, lastHit = {} }
+		s.orbit[spellId] = bucket
+	end
+
+	local count = math.max(1, stats.count or 1)
+	local radius = stats.radius or 5.5
+	local orbitSpeed = stats.orbitSpeed or 2.6
+	local hitCooldown = stats.hitCooldown or 0.35
+
+	syncOrbitVFX(plr, spellId, true, {
 		count = count,
 		radius = radius,
 		orbitSpeed = orbitSpeed,
-		height = ORBIT_HIT_HEIGHT,
-		size = 1.2,
-		transparency = 0.25,
+		height = 1.1,
+		size = 1.1 + math.min(0.4, (stats.basePower or 0) * 0.1),
+		transparency = 0.18,
+		color = stats.visualColor,
 	})
 
-	local char = plr.Character
-	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	if not hrp then return end
-
-	bucket.t = (bucket.t or 0) + orbitSpeed * (dt or 0.016)
-
-	local t0 = bucket.t
-	for i = 1, count do
-		local ang = t0 + (i / math.max(1, count)) * math.pi * 2
-		local pos = hrp.Position + Vector3.new(math.cos(ang) * radius, ORBIT_HIT_HEIGHT, math.sin(ang) * radius)
-
-		local nearest = getNearestEnemy(pos, 3)
-		if nearest and enemyAlive(nearest) then
-			local key = nearest
-			local last = bucket.lastHit[key] or 0
-			if spellClock() - last >= hitCd then
-				bucket.lastHit[key] = spellClock()
-				safeDamage(nearest, baseDmg * getAtkMult(plr), { player = plr })
-				if onHit then onHit(nearest) end
+	bucket.t = (bucket.t or 0) + orbitSpeed * dt
+	for index = 1, count do
+		local angle = bucket.t + (index / count) * math.pi * 2
+		local orbPos = hrp.Position + Vector3.new(math.cos(angle) * radius, 1.1, math.sin(angle) * radius)
+		local enemy = getNearestEnemy(orbPos, 3.25)
+		if enemy and enemyAlive(enemy) then
+			local lastHit = bucket.lastHit[enemy] or 0
+			if spellClock() - lastHit >= hitCooldown then
+				bucket.lastHit[enemy] = spellClock()
+				hitEnemy(plr, enemy, stats.damage, stats, hrp.Position)
 			end
 		end
 	end
 end
 
-local function spawnZone(pos: Vector3, radius: number, duration: number, ownerPlr: Player?)
-	duration = (tonumber(duration) or 0) * getDurationMult(ownerPlr)
-	local p = ensurePart("Zone", Vector3.new(radius * 2, 0.4, radius * 2))
-	p.Position = pos + Vector3.new(0, 0.2, 0)
-	p.Transparency = 0.6
-	p.Shape = Enum.PartType.Cylinder
-	p.Orientation = Vector3.new(0, 0, 90)
-	Debris:AddItem(p, duration)
-	return p
-end
-
-local function pulseAt(plr: Player, pos: Vector3, radius: number, dmg: number, opts)
-	for _, enemy in ipairs(getEnemiesInRadius(pos, radius)) do
-		projHitDamage(plr, enemy, dmg * getAtkMult(plr), opts)
-	end
-end
-
--- ===== Main loop per player =====
-local function stepPlayer(plr: Player, dt: number)
-	if isPaused() then return end
-	local char = plr.Character
-	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	if not hrp then return end
-
-	local pos = hrp.Position
+local function runNova(plr, spellId, stats, hrp)
 	local s = getState(plr)
-
-	-- COMMON: Fire Orb
-	local lv = getSpellLevel(plr, "FireOrb")
-	if lv > 0 then
-		local count = (lv >= 6 and 3) or (lv >= 3 and 2) or 1
-		local dmg = 10 + (lv * 4)
-		local radius = 5 * (lv >= 4 and 1.10 or 1.0)
-		local hitCd = 0.25
-		local burn = (lv >= 5)
-		local burnDps = (lv >= 6 and 8 or 4)
-		local burnDur = 2.0
-		tickOrbit(plr, dt, "FireOrb", count, radius, 2.6, hitCd, dmg, function(enemy)
-			if burn then
-				applySlow(enemy, 0.05, 0.5 * getDurationMult(plr))
-				local endT = spellClock() + burnDur
-				task.spawn(function()
-					while spellClock() < endT and enemyAlive(enemy) do
-						safeDamage(enemy, burnDps, { player = plr, showFloating = false })
-						task.wait(0.5)
-					end
-				end)
-			end
-		end)
-	else
-		syncOrbitVFX(plr, "FireOrb", false)
+	local now = spellClock()
+	if now < (s.cds[spellId] or 0) then
+		return
 	end
+	s.cds[spellId] = now + (stats.cooldown or 3)
 
-	-- COMMON: Wind Blades
-	lv = getSpellLevel(plr, "WindBlades")
-	if lv > 0 then
-		local count = (lv >= 3 and 2) or 1
-		local dmg = 8 + (lv * 3)
-		local radius = 8 * (lv >= 4 and 1.15 or 1.0)
-		local speed = 2.2 * (1 + ((lv==2 and 0.10) or (lv>=6 and 0.30) or 0))
-		local hitCd = 0.35
-		local knock = (lv >= 5)
-		tickOrbit(plr, dt, "WindBlades", count, radius, speed, hitCd, dmg, function(enemy)
-			local epos = getEnemyPosition(enemy)
-			if knock and epos then
-				local dir = (epos - pos).Unit
-				addImpulse(enemy, dir * 12 * getKnockbackMult(plr))
-			end
-		end)
-	else
-		syncOrbitVFX(plr, "WindBlades", false)
-	end
-
-	-- UNCOMMON: Toxic Blades
-	lv = getSpellLevel(plr, "ToxicBlades")
-	if lv > 0 then
-		local count = math.clamp(1 + lv, 2, 6)
-		local dmg = 7 + (lv * 2)
-		local radius = 7
-		local speed = 2.2
-		local hitCd = 0.35
-		local poisonDps = 3 + (lv * 2)
-		local poisonDur = 2.5
-			tickOrbit(plr, dt, "ToxicBlades", count, radius, speed, hitCd, dmg, function(enemy)
-				applySlow(enemy, 0.10, 0.6 * getDurationMult(plr))
-				local endT = spellClock() + poisonDur
-				task.spawn(function()
-					while spellClock() < endT and enemyAlive(enemy) do
-						safeDamage(enemy, poisonDps, { player = plr, showFloating = false })
-						task.wait(0.5)
-					end
-				end)
-			end)
-	else
-		syncOrbitVFX(plr, "ToxicBlades", false)
-	end
-
-	-- COMMON: Shadow Dagger
-	lv = getSpellLevel(plr, "ShadowDagger")
-	if lv > 0 then
-		local cd = 0.8 * (lv >= 2 and 0.9 or 1)
-		if lv >= 2 then cd = cd * (0.9 ^ (lv-1)) end
-		local nextT = s.cds.ShadowDagger or 0
-		if spellClock() >= nextT then
-			s.cds.ShadowDagger = spellClock() + cd
-			local castOrigin = getSpellCastOrigin(pos)
-			local target = getNearestEnemy(pos, 40)
-			local dir = target and getEnemyDirection(castOrigin, target)
-			if dir then
-				local knives = (lv >= 3 and 2) or 1
-				for k=1,knives do
-					task.delay((k-1)*0.1, function()
-						local dmg = 14 + (lv*4)
-						local critChance = (lv >= 5 and 0.10) or 0
-						local mult = 1
-						if critChance > 0 and math.random() < critChance then
-							mult = 1.8
-						end
-						local pierce = (lv >= 6 and 2) or 0
-						fireProjectile(plr, castOrigin, dir, 85, 50, dmg*mult, pierce, { crit = mult > 1 })
-					end)
-				end
-			end
-		end
-	end
-
-	-- COMMON: Bone Spear
-	lv = getSpellLevel(plr, "BoneSpear")
-	if lv > 0 then
-		local cd = 1.4
-		local nextT = s.cds.BoneSpear or 0
-		if spellClock() >= nextT then
-			s.cds.BoneSpear = spellClock() + cd
-			local castOrigin = getSpellCastOrigin(pos)
-			local target = getNearestEnemy(pos, 60)
-			local dir0 = target and getEnemyDirection(castOrigin, target)
-			if dir0 then
-				local spears = (lv >= 6 and 3) or (lv >= 3 and 2) or 1
-				local pierce = (lv >= 6 and 5) or (lv >= 4 and 3) or (lv >= 1 and 2) or 1
-				for i=1,spears do
-					local ang = math.rad((math.random()*2-1) * (lv>=1 and 8 or 5))
-					local dir = (CFrame.fromAxisAngle(Vector3.new(0,1,0), ang) * dir0)
-					local dmg = 18 + (lv*6)
-					local speed = 95 * (lv >= 5 and 1.2 or 1.0)
-					fireProjectile(plr, castOrigin, dir, speed, 70, dmg, pierce, {})
-				end
-			end
-		end
-	end
-
-	-- COMMON: Ice Shards
-	lv = getSpellLevel(plr, "IceShards")
-	if lv > 0 then
-		local cd = 2.0
-		local nextT = s.cds.IceShards or 0
-		if spellClock() >= nextT then
-			s.cds.IceShards = spellClock() + cd
-			local count = (lv >= 6 and 5) or (lv >= 3 and 3) or 2
-			local impactR = 5 * (lv >= 2 and 1.15 or 1.0)
-			local slowPct = 0.25
-			local slowDur = 1.2 + (lv>=4 and 0.5 or 0)
-			local freezeChance = (lv >= 6 and 0.20) or (lv >= 5 and 0.10) or 0
-			for i=1,count do
-				local r = 6 + math.random()*12
-				local ang = math.random()*math.pi*2
-				local p = pos + Vector3.new(math.cos(ang)*r, 0, math.sin(ang)*r)
-				task.delay(0.25 + i*0.03, function()
-					pulseAt(plr, p, impactR, 18 + lv*5, {slowPct=slowPct, slowDuration=slowDur, freezeChance=freezeChance, freezeDuration=0.9})
-				end)
-			end
-		end
-	end
-
-	-- COMMON: Poison Cloud
-	lv = getSpellLevel(plr, "PoisonCloud")
-	if lv > 0 then
-		local interval = 2.5
-		local nextT = s.cds.PoisonCloud or 0
-		if spellClock() >= nextT then
-			s.cds.PoisonCloud = spellClock() + interval
-			local radius = 7 * (lv >= 2 and 1.15 or 1.0)
-			local dur = (2.5 + (lv>=3 and 1 or 0)) * getDurationMult(plr)
-			local tick = (lv>=4 and 0.4 or 0.5)
-			local dps = 8 + lv*3
-			local cloud = spawnZone(pos - hrp.CFrame.LookVector*3, radius, dur, plr)
-			local endT = spellClock() + dur
-			task.spawn(function()
-				while spellClock() < endT and cloud.Parent do
-					for _, enemy in ipairs(getEnemiesInRadius(cloud.Position, radius)) do
-						projHitDamage(plr, enemy, dps*tick, {poisonDps=0, poisonDuration=0})
-					end
-					task.wait(tick)
-				end
-			end)
-		end
-	end
-
-	-- COMMON: Flame Trail
-	lv = getSpellLevel(plr, "FlameTrail")
-	if lv > 0 then
-		local every = 0.35
-		s.timers.FlameTrail = (s.timers.FlameTrail or 0) + dt
-		if s.timers.FlameTrail >= every then
-			s.timers.FlameTrail = 0
-			local dur = ((lv>=3 and 3.0) or 2.0) * getDurationMult(plr)
-			local tick = (lv>=4 and 0.4) or 0.5
-			local size = 5 * (lv>=2 and 1.10 or 1.0)
-			local zone = spawnZone(pos, size/2, dur, plr)
-			local dps = 10 + lv*4
-			local endT = spellClock() + dur
-			task.spawn(function()
-				while spellClock() < endT and zone.Parent do
-					for _, enemy in ipairs(getEnemiesInRadius(zone.Position, size/2)) do
-						projHitDamage(plr, enemy, dps*tick, {burnDps=0,burnDuration=0})
-					end
-					task.wait(tick)
-				end
-			end)
-		end
-	end
-
-	-- UNCOMMON: Lightning Chain
-	lv = getSpellLevel(plr, "LightningChain")
-	if lv > 0 then
-		local cd = 1.8
-		local nextT = s.cds.LightningChain or 0
-		if spellClock() >= nextT then
-			s.cds.LightningChain = spellClock() + cd
-			local start = getNearestEnemy(pos, 55)
-			if getEnemyRoot(start) then
-				local jumps = (lv >= 6 and 6) or (lv >= 3 and 4) or 3
-				local jumpR = 12 * (lv>=4 and 1.2 or 1.0)
-				local dmg = 20 + lv*6
-				local stun = (lv >= 5) and ((lv>=6 and 0.5) or 0.3) or 0
-				local hit = {}
-				local cur = start
-				for j=1,jumps do
-					if not cur then break end
-					hit[cur] = true
-					projHitDamage(plr, cur, dmg, { })
-					if stun > 0 then
-						applyFreeze(cur, stun * getDurationMult(plr))
-				 end
-					-- next
-					local best=nil
-					local bestD=jumpR
-					local cpos = getEnemyPosition(cur)
-					if not cpos then
-						break
-					end
-					for _, e in ipairs(getEnemyModels()) do
-						local epos = (not hit[e]) and getEnemyPosition(e) or nil
-						if epos then
-							local d = (epos - cpos).Magnitude
-							if d < bestD then bestD=d best=e end
-						end
-					end
-					cur = best
-				end
-			end
-		end
-	end
-
-	-- UNCOMMON: Frost Nova
-	lv = getSpellLevel(plr, "FrostNova")
-	if lv > 0 then
-		local cd = 6.0 * (lv>=3 and 0.9 or 1.0)
-		local nextT = s.cds.FrostNova or 0
-		if spellClock() >= nextT then
-			s.cds.FrostNova = spellClock() + cd
-			local radius = (10 * (lv>=2 and 1.15 or 1.0)) * (lv>=6 and 1.15 or 1.0)
-			local slowPct = 0.35
-			local slowDur = 1.5
-			local freezeChance = (lv>=6 and 0.25) or (lv>=4 and 0.10) or 0
-			local freezeDur = (lv>=5 and 1.0) or 0.8
-			pulseAt(plr, pos, radius, 0, {slowPct=slowPct, slowDuration=slowDur, freezeChance=freezeChance, freezeDuration=freezeDur})
-		end
-	end
-
-	-- UNCOMMON: Gravity Pulse
-	lv = getSpellLevel(plr, "GravityPulse")
-	if lv > 0 then
-		local cd = 5.0 * (lv>=4 and 0.9 or 1.0)
-		local nextT = s.cds.GravityPulse or 0
-		if spellClock() >= nextT then
-			s.cds.GravityPulse = spellClock() + cd
-			local radius = (lv>=6 and 14) or (lv>=1 and 10)
-			local force = 40 * (lv>=2 and 1.2 or 1.0)
-			local dmg = 22 + lv*6
-			local pull = (lv>=5) and ((lv>=6 and 0.6) or 0.3) or 0
-			for _, e in ipairs(getEnemiesInRadius(pos, radius)) do
-				local enemyRoot = getEnemyRoot(e)
-				if enemyRoot then
-					local dir = (enemyRoot.Position - pos)
-					if dir.Magnitude < 0.1 then dir = Vector3.new(1,0,0) end
-					dir = dir.Unit
-					if pull > 0 then
-						addImpulse(e, -dir * force * getKnockbackMult(plr))
-						applySlow(e, 0.25, pull * getDurationMult(plr))
-					else
-						addImpulse(e, dir * force * getKnockbackMult(plr))
-					end
-					projHitDamage(plr, e, dmg, {})
-				end
-			end
-		end
-	end
-
-	-- UNCOMMON: Arcane Missile
-	lv = getSpellLevel(plr, "ArcaneMissile")
-	if lv > 0 then
-		local cd = 2.2
-		local nextT = s.cds.ArcaneMissile or 0
-		if spellClock() >= nextT then
-			s.cds.ArcaneMissile = spellClock() + cd
-			local count = (lv>=6 and 5) or (lv>=3 and 3) or 2
-			local range = 60
-			local speed = 75 * (lv>=2 and 1.15 or 1.0)
-			local dmg = 16 + lv*6
-			local impactR = (lv>=5 and 4) or 0
-			local castOrigin = getSpellCastOrigin(pos)
-			local enemies = getEnemyModels()
-			sortEnemiesByDistance(pos, enemies)
-			for i=1,count do
-				local t = enemies[i]
-				local targetPos = t and getEnemyPosition(t)
-				local dir = t and getEnemyDirection(castOrigin, t)
-				if dir and targetPos then
-					fireProjectile(plr, castOrigin, dir, speed, range, dmg, 0, { })
-					if impactR > 0 then
-						task.delay(0.15 + i*0.05, function()
-							pulseAt(plr, targetPos, impactR, dmg*0.6, {})
-						end)
-					end
-				end
-			end
-		end
-	end
-
-	-- UNCOMMON: Crystal Barrage
-	lv = getSpellLevel(plr, "CrystalBarrage")
-	if lv > 0 then
-		local cd = 2.6
-		local nextT = s.cds.CrystalBarrage or 0
-		if spellClock() >= nextT then
-			s.cds.CrystalBarrage = spellClock() + cd
-			local target = getNearestEnemy(pos, 55)
-			local castOrigin = getSpellCastOrigin(pos)
-			local dir0 = target and getEnemyDirection(castOrigin, target)
-			if dir0 then
-				local shards = (lv>=6 and 10) or (lv>=3 and 7) or 5
-				local cone = math.rad(28)
-				local dmg = 10 + lv*4
-				local speed = 90
-				local impactR = (lv>=4 and 3.5) or 0
-				for i=1,shards do
-					local ang = (math.random()-0.5) * cone
-					local dir = (CFrame.fromAxisAngle(Vector3.new(0,1,0), ang) * dir0)
-					fireProjectile(plr, castOrigin, dir, speed, 60, dmg, 0, {})
-					if impactR > 0 then
-						task.delay(0.10, function()
-							-- handled by projectile hit test; simple extra AoE not perfect
-						end)
-					end
-				end
-			end
-		end
-	end
-
-	-- UNCOMMON: Chain Hooks
-	lv = getSpellLevel(plr, "ChainHooks")
-	if lv > 0 then
-		local cd = 4.0
-		local nextT = s.cds.ChainHooks or 0
-		if spellClock() >= nextT then
-			s.cds.ChainHooks = spellClock() + cd
-			local hooks = (lv>=3 and 2) or 1
-			local range = 35 * (lv>=2 and 1.15 or 1.0)
-			local force = 60 * (lv>=4 and 1.2 or 1.0)
-			local stun = (lv>=5 and 0.3) or 0
-			local enemies = getEnemyModels()
-			sortEnemiesByDistance(pos, enemies)
-			local pulled = 0
-			for _, e in ipairs(enemies) do
-				if pulled >= hooks then break end
-				local enemyPos = getEnemyPosition(e)
-				if enemyPos and (enemyPos - pos).Magnitude <= range then
-					local dir = (pos - enemyPos).Unit
-					addImpulse(e, dir * force * getKnockbackMult(plr))
-					if stun>0 then applyFreeze(e, stun * getDurationMult(plr)) end
-					pulled += 1
-				end
-			end
-		end
-	end
-
-	-- UNCOMMON: Ice Wall (path block in 3D: simple collision wall)
-	lv = getSpellLevel(plr, "IceWall")
-	if lv > 0 then
-		local cd = 8.0
-		local nextT = s.cds.IceWall or 0
-		if spellClock() >= nextT then
-			s.cds.IceWall = spellClock() + cd
-			local count = (lv>=3 and 2) or 1
-			local dur = ((lv>=6 and 6) or (lv>=4 and 4) or 3) * getDurationMult(plr)
-			local size = Vector3.new(10, 8, 1.2)
-			for i=1,count do
-				local ang = math.random()*math.pi*2
-				local dist = 6 + math.random()*4
-				local p = ensurePart("IceWall", size)
-				p.Transparency = 0.4
-				p.CanCollide = true
-				p.Position = pos + Vector3.new(math.cos(ang)*dist, 4, math.sin(ang)*dist)
-				p.Orientation = Vector3.new(0, math.deg(ang), 0)
-				Debris:AddItem(p, dur)
-			end
-		end
-	end
-
-	-- RARE: Thunder Totem
-	lv = getSpellLevel(plr, "ThunderTotem")
-	if lv > 0 then
-		local cd = 10.0
-		local nextT = s.cds.ThunderTotem or 0
-		if spellClock() >= nextT then
-			s.cds.ThunderTotem = spellClock() + cd
-			local totems = (lv>=6 and 2) or 1
-			local dur = (10 + (lv>=3 and 2 or 0)) * getDurationMult(plr)
-			local range = 45
-			local fireRate = 0.9 * (lv>=2 and 0.9 or 1.0)
-			local baseDmg = 20 + lv*8
-			local chainJumps = (lv>=5 and 1) or 0
-			for i=1,totems do
-				local t = ensurePart("Totem", Vector3.new(1.2,4,1.2))
-				t.Position = pos + Vector3.new((i-1)*2,2,0)
-				t.Transparency = 0.2
-				local endT = spellClock() + dur
-				task.spawn(function()
-					while spellClock() < endT and t.Parent do
-						local target = getNearestEnemy(t.Position, range)
-						local targetPos = target and getEnemyPosition(target)
-						if targetPos then
-							projHitDamage(plr, target, baseDmg*getAtkMult(plr), {})
-							if chainJumps > 0 then
-								-- one extra jump
-								local next = nil
-								local bestD = 12
-								local cpos = targetPos
-								for _, e in ipairs(getEnemyModels()) do
-									local epos = e ~= target and getEnemyPosition(e) or nil
-									if epos then
-										local d = (epos - cpos).Magnitude
-										if d < bestD then bestD = d next = e end
-									end
-								end
-								if next then projHitDamage(plr, next, baseDmg*0.7*getAtkMult(plr), {}) end
-							end
-						end
-						task.wait(fireRate)
-					end
-					if t.Parent then t:Destroy() end
-				end)
-				Debris:AddItem(t, dur+0.5)
-			end
-		end
-	end
-
-	-- RARE: Spirit Wolves (simple orbit + dash bite)
-	lv = getSpellLevel(plr, "SpiritWolves")
-	if lv > 0 then
-		-- lightweight: treated as orbiting hitboxes that occasionally dash to nearest target
-		local count = (lv>=6 and 3) or (lv>=3 and 2) or 1
-		local dmg = 18 + lv*6
-		local hitCd = 1.0 * (lv>=2 and 0.9 or 1.0)
-		tickOrbit(plr, dt, "SpiritWolves", count, 9, 1.6, hitCd, dmg, function(enemy)
-			applySlow(enemy, 0.15, 0.8 * getDurationMult(plr))
-		end)
-	else
-		syncOrbitVFX(plr, "SpiritWolves", false)
-	end
-
-	-- RARE: Necro Swarm (homing skulls)
-	lv = getSpellLevel(plr, "NecroSwarm")
-	if lv > 0 then
-		local interval = 1.6
-		local nextT = s.cds.NecroSwarm or 0
-		if spellClock() >= nextT then
-			s.cds.NecroSwarm = spellClock() + interval
-			local count = (lv>=6 and 3) or (lv>=3 and 2) or 1
-			local speed = 55 * (lv>=2 and 1.15 or 1.0)
-			local dmg = 22 + lv*7
-			local aoe = 6 * (lv>=4 and 1.15 or 1.0)
-			for i=1,count do
-				local skull = ensurePart("Skull", Vector3.new(0.9,0.9,0.9))
-				skull.Position = getSpellCastOrigin(pos)
-				skull.Transparency = 0.2
-				local target = getNearestEnemy(pos, 70)
-				local life = 3.2
-				task.spawn(function()
-					local t0 = spellClock()
-					while spellClock() - t0 < life and skull.Parent do
-						local t = target
-						if not t or not getEnemyRoot(t) or not enemyAlive(t) then
-							t = getNearestEnemy(skull.Position, 70)
-							target = t
-						end
-						local targetPos = t and getEnemyPosition(t)
-						if targetPos then
-							local dir = (targetPos - skull.Position).Unit
-							skull.Position = skull.Position + dir * speed * RunService.Heartbeat:Wait()
-							if (targetPos - skull.Position).Magnitude <= 3 then
-								pulseAt(plr, skull.Position, aoe, dmg, {})
-								skull:Destroy()
-								return
-							end
-						else
-							skull.Position = skull.Position + Vector3.new(0,0,1) * speed * RunService.Heartbeat:Wait()
-						end
-					end
-					if skull.Parent then skull:Destroy() end
-				end)
-				Debris:AddItem(skull, life+1)
-			end
-		end
-	end
-
-	-- RARE: Arcane Mine
-	lv = getSpellLevel(plr, "ArcaneMine")
-	if lv > 0 then
-		local interval = 3.5
-		local nextT = s.cds.ArcaneMine or 0
-		if spellClock() >= nextT then
-			s.cds.ArcaneMine = spellClock() + interval
-			local mines = (lv>=6 and 5) or (lv>=3 and 3) or 2
-			local arm = 0.3
-			local trig = 4
-			local aoe = 7 * (lv>=4 and 1.15 or 1.0)
-			local dmg = 30 + lv*10
-			for i=1,mines do
-				local r = 6 + math.random()*8
-				local ang = math.random()*math.pi*2
-				local mpos = pos + Vector3.new(math.cos(ang)*r, 0.2, math.sin(ang)*r)
-				local mine = ensurePart("Mine", Vector3.new(1.2,0.6,1.2))
-				mine.Position = mpos
-				mine.Transparency = 0.2
-				local armed = false
-				task.delay(arm, function() armed = true end)
-				local maxLife = 5
-				task.spawn(function()
-					local t0 = spellClock()
-					while spellClock() - t0 < maxLife and mine.Parent do
-						if armed then
-							local e = getNearestEnemy(mine.Position, trig)
-							if e then
-								pulseAt(plr, mine.Position, aoe, dmg, {})
-								mine:Destroy()
-								return
-							end
-						end
-						task.wait(0.1)
-					end
-					if mine.Parent then mine:Destroy() end
-				end)
-				Debris:AddItem(mine, maxLife+1)
-			end
-		end
-	end
-
-	-- RARE: Dark Rift
-	lv = getSpellLevel(plr, "DarkRift")
-	if lv > 0 then
-		local interval = 7.0
-		local nextT = s.cds.DarkRift or 0
-		if spellClock() >= nextT then
-			s.cds.DarkRift = spellClock() + interval
-			local count = (lv>=6 and 2) or 1
-			local radius = 10 * (lv>=2 and 1.15 or 1.0)
-			local dur = (4 + (lv>=3 and 1 or 0)) * getDurationMult(plr)
-			local tick = (lv>=5 and 0.35) or 0.5
-			local pull = 70 * (lv>=4 and 1.2 or 1.0)
-			local dmg = 16 + lv*6
-			for i=1,count do
-				local ang = math.random()*math.pi*2
-				local r = 8 + math.random()*8
-				local rpos = pos + Vector3.new(math.cos(ang)*r,0,math.sin(ang)*r)
-				local zone = spawnZone(rpos, radius, dur, plr)
-				local endT = spellClock() + dur
-				task.spawn(function()
-					while spellClock() < endT and zone.Parent do
-						for _, e in ipairs(getEnemiesInRadius(zone.Position, radius)) do
-						local enemyPos = getEnemyPosition(e)
-						if enemyPos then
-							local dir = (zone.Position - enemyPos).Unit
-							addImpulse(e, dir * pull * tick * getKnockbackMult(plr))
-							projHitDamage(plr, e, dmg, {})
-							end
-						end
-						task.wait(tick)
-					end
-				end)
-			end
-		end
-	end
-
-	-- RARE: Meteor Strike
-	lv = getSpellLevel(plr, "MeteorStrike")
-	if lv > 0 then
-		local interval = 4.5 * (lv>=4 and 0.9 or 1.0)
-		local nextT = s.cds.MeteorStrike or 0
-		if spellClock() >= nextT then
-			s.cds.MeteorStrike = spellClock() + interval
-			local count = (lv>=6 and 3) or (lv>=3 and 2) or 1
-			local aoe = 10 * (lv>=2 and 1.15 or 1.0)
-			local dmg = 50 + lv*16
-			for i=1,count do
-				local r = 10 + math.random()*15
-				local ang = math.random()*math.pi*2
-				local p = pos + Vector3.new(math.cos(ang)*r,0,math.sin(ang)*r)
-				task.delay(0.6, function()
-					pulseAt(plr, p, aoe, dmg, {})
-					if lv>=5 then
-						-- fire pool 2s
-						local pool = spawnZone(p, aoe*0.7, 2, plr)
-						local endT = spellClock()+2
-						task.spawn(function()
-							while spellClock()<endT and pool.Parent do
-								for _, e in ipairs(getEnemiesInRadius(pool.Position, aoe*0.7)) do
-									projHitDamage(plr, e, 12*0.5, {})
-								end
-								task.wait(0.5)
-							end
-						end)
-					end
-				end)
-			end
-		end
-	end
-
-	-- RARE: Solar Beam
-	lv = getSpellLevel(plr, "SolarBeam")
-	if lv > 0 then
-		local interval = 6.5
-		local nextT = s.cds.SolarBeam or 0
-		if spellClock() >= nextT then
-			s.cds.SolarBeam = spellClock() + interval
-			local dur = ((lv>=6 and 2.2) or (lv>=3 and 1.6) or 1.2) * getDurationMult(plr)
-			local range = (lv>=6 and 90) or 70
-			local tick = 0.2
-			local dmg = (22 + lv*9)
-			local burn = (lv>=5)
-			local target = getNearestEnemy(pos, 70)
-			local dir = target and getEnemyDirection(pos, target)
-			if dir then
-				local t0 = spellClock()
-				while spellClock()-t0 < dur do
-					-- damage all enemies close to beam line (cheap)
-					for _, e in ipairs(getEnemyModels()) do
-						local enemyPos = getEnemyPosition(e)
-						if enemyPos then
-							local rel = enemyPos - pos
-							local proj = rel:Dot(dir)
-							if proj > 0 and proj < range then
-								local closest = (pos + dir*proj)
-								local dist = (enemyPos - closest).Magnitude
-								local width = (lv>=4 and 4) or 3
-								if dist <= width then
-									projHitDamage(plr, e, dmg*tick, {burnDps = burn and 6 or nil, burnDuration = burn and 2 or nil})
-								end
-							end
-						end
-					end
-					task.wait(tick)
-				end
-			end
-		end
-	end
-
-	-- EPIC: Void Ring
-	lv = getSpellLevel(plr, "VoidRing")
-	if lv > 0 then
-		local interval = 5.5
-		local nextT = s.cds.VoidRing or 0
-		if spellClock() >= nextT then
-			s.cds.VoidRing = spellClock() + interval
-			local endR = 18 * (lv>=2 and 1.15 or 1.0)
-			local dmg = 40 + lv*14
-			local pull = (lv>=5 and 30) or 0
-			local waves = (lv>=6 and 3) or (lv>=3 and 2) or 1
-			for w=1,waves do
-				task.delay((w-1)*0.25, function()
-					local r = 2
-					while r <= endR do
-						-- hit enemies near ring
-						for _, e in ipairs(getEnemiesInRadius(pos, r+3)) do
-							local enemyPos = getEnemyPosition(e)
-							if enemyPos then
-								local d = (enemyPos - pos).Magnitude
-								if math.abs(d - r) <= 2.2 then
-									projHitDamage(plr, e, dmg*0.12, {})
-									if pull > 0 then
-										local dir = (pos - enemyPos).Unit
-										addImpulse(e, dir * pull * getKnockbackMult(plr))
-									end
-								end
-							end
-						end
-						r += 2
-						task.wait(0.05)
-					end
-				end)
-			end
-		end
-	end
-
-	-- EPIC: Blood Nova
-	lv = getSpellLevel(plr, "BloodNova")
-	if lv > 0 then
-		local interval = 7.0 * (lv>=3 and 0.9 or 1.0)
-		local nextT = s.cds.BloodNova or 0
-		if spellClock() >= nextT then
-			s.cds.BloodNova = spellClock() + interval
-			local hum = char:FindFirstChildOfClass("Humanoid")
-			if hum then
-				local hpPct = hum.Health / math.max(1, hum.MaxHealth)
-				local missing = (1 - hpPct)
-				local base = 35 + lv*12
-				local mult = 80 * (lv>=6 and 1.25 or 1.0)
-				local radius = 12 * (lv>=2 and 1.15 or 1.0)
-				local dmg = base + missing*mult
-				pulseAt(plr, pos, radius, dmg, {})
-				if lv>=4 then
-					local lifesteal = (lv>=6 and 0.10) or 0.05
-					local healed = math.floor(dmg * lifesteal)
-					hum.Health = math.min(hum.MaxHealth, hum.Health + healed)
-				end
-			end
-		end
-	end
-
-	-- EPIC: Rage Pulse (buff helper used by SpellService only)
-	lv = getSpellLevel(plr, "RagePulse")
-	if lv > 0 then
-		local hum = char:FindFirstChildOfClass("Humanoid")
-		if hum then
-			local hpPct = hum.Health / math.max(1, hum.MaxHealth)
-			local maxBonus = ({0.20,0.30,0.30,0.30,0.30,0.50})[math.clamp(lv,1,6)] or 0.20
-			local bonus = (0.05 + (1-hpPct) * (maxBonus-0.05))
-			plr:SetAttribute("SpellDamageMult", 1 + bonus)
-		end
-	else
-		if plr:GetAttribute("SpellDamageMult") then
-			plr:SetAttribute("SpellDamageMult", nil)
-		end
-	end
-
-	-- EPIC: Time Fracture
-	lv = getSpellLevel(plr, "TimeFracture")
-	if lv > 0 then
-		local interval = 10
-		local nextT = s.cds.TimeFracture or 0
-		if spellClock() >= nextT then
-			s.cds.TimeFracture = spellClock() + interval
-			local radius = 14 * (lv>=2 and 1.15 or 1.0)
-			local dur = ((lv>=6 and 5) or (lv>=4 and 4) or 3) * getDurationMult(plr)
-			local slowPct = (lv>=6 and 0.55) or (lv>=3 and 0.40) or 0.30
-			local vuln = (lv>=5 and 0.20) or 0
-			local endT = spellClock() + dur
-			task.spawn(function()
-				while spellClock()<endT do
-					for _, e in ipairs(getEnemiesInRadius(pos, radius)) do
-						applySlow(e, slowPct, 0.35 * getDurationMult(plr))
-						if vuln > 0 then
-							e:SetAttribute("VulnerableUntil", spellClock()+0.4)
-							e:SetAttribute("VulnerablePct", vuln)
-						end
-					end
-					task.wait(0.2)
-				end
-			end)
-		end
-	end
-
-	-- EPIC: Soul Link
-	lv = getSpellLevel(plr, "SoulLink")
-	if lv > 0 then
-		local interval = 9
-		local nextT = s.cds.SoulLink or 0
-		if spellClock() >= nextT then
-			s.cds.SoulLink = spellClock() + interval
-			local dur = (4 + (lv>=4 and 1.5 or 0)) * getDurationMult(plr)
-			local linkPct = (lv>=6 and 0.50) or (lv>=3 and 0.35) or 0.25
-			local radius = 14 * (lv>=2 and 1.15 or 1.0)
-			local anchor = getNearestEnemy(pos, 70)
-			if getEnemyRoot(anchor) then
-				anchor:SetAttribute("SoulLinkAnchor", true)
-				plr:SetAttribute("SoulLinkPct", linkPct)
-				plr:SetAttribute("SoulLinkRadius", radius)
-				task.delay(dur, function()
-					if anchor and anchor.Parent then
-						anchor:SetAttribute("SoulLinkAnchor", nil)
-					end
-					plr:SetAttribute("SoulLinkPct", nil)
-					plr:SetAttribute("SoulLinkRadius", nil)
-				end)
-			end
-		end
-	end
-
-	-- EPIC: Starfall
-	lv = getSpellLevel(plr, "Starfall")
-	if lv > 0 then
-		local interval = 8.5
-		local nextT = s.cds.Starfall or 0
-		if spellClock() >= nextT then
-			s.cds.Starfall = spellClock() + interval
-			local strikes = ({5,5,7,7,9,12})[math.clamp(lv,1,6)] or 5
-			local stun = (lv>=4 and 0.3) or 0
-			local aoe = 8 * (lv>=2 and 1.15 or 1.0)
-			local dmg = 28 + lv*9
-			for i=1,strikes do
-				task.delay(i*0.08, function()
-					local r = 20 + math.random()*15
-					local ang = math.random()*math.pi*2
-					local p = pos + Vector3.new(math.cos(ang)*r,0,math.sin(ang)*r)
-					task.delay(0.6, function()
-						pulseAt(plr, p, aoe, dmg, {})
-						if stun>0 then
-							for _, e in ipairs(getEnemiesInRadius(p, aoe)) do
-								applyFreeze(e, stun * getDurationMult(plr))
-							end
-						end
-					end)
-				end)
-			end
-		end
-	end
-
-	-- COMMON: Ember Spirits (orbit then launch)
-	lv = getSpellLevel(plr, "EmberSpirits")
-	if lv > 0 then
-		local count = (lv>=6 and 5) or (lv>=3 and 3) or 2
-		-- orbit hitboxes handled by orbit function, but we only use them as visuals; launch is real dmg
-		tickOrbit(plr, dt, "EmberSpirits", count, 4, 2.2, 999, 0, nil)
-		local interval = 1.2 * (lv>=4 and 0.9 or 1.0)
-		local nextT = s.cds.EmberSpirits or 0
-		if spellClock() >= nextT then
-			s.cds.EmberSpirits = spellClock() + interval
-			local target = getNearestEnemy(pos, 50)
-			local targetPos = target and getEnemyPosition(target)
-			local castOrigin = getSpellCastOrigin(pos)
-			local dir = target and getEnemyDirection(castOrigin, target)
-			if dir and targetPos then
-				local dmg = 24 + lv*8
-				local aoe = 7 * (lv>=2 and 1.10 or 1.0)
-				fireProjectile(plr, castOrigin, dir, 85, 55, dmg, 0, {})
-				task.delay(0.2, function()
-					pulseAt(plr, targetPos, aoe, dmg*0.7, {})
-				end)
-			end
-		end
-	else
-		syncOrbitVFX(plr, "EmberSpirits", false)
+	local radius = stats.radius or 8
+	spawnNovaVisual(hrp.Position, radius, stats.visualColor)
+	for _, enemy in ipairs(getEnemiesInRadius(hrp.Position, radius)) do
+		hitEnemy(plr, enemy, stats.damage, stats, hrp.Position)
 	end
 end
 
--- Heartbeat driver
+local function runZone(plr, spellId, stats, hrp)
+	local s = getState(plr)
+	local now = spellClock()
+	if now < (s.cds[spellId] or 0) then
+		return
+	end
+	s.cds[spellId] = now + (stats.cooldown or 4)
+
+	local origin = hrp.Position
+	local center = origin
+	if stats.spawnAtEnemy then
+		local target = getNearestEnemy(origin, 70)
+		local targetPos = target and getEnemyPosition(target)
+		if targetPos then
+			center = targetPos
+		end
+	end
+
+	local radius = stats.radius or 6
+	local duration = (stats.duration or 3) * getDurationMult(plr)
+	local tickRate = stats.tickRate or 0.45
+	local tickDamage = stats.damage * math.max(0.3, tickRate)
+	spawnRingVisual(center, radius, duration, stats.visualColor)
+
+	local endAt = spellClock() + duration
+	task.spawn(function()
+		while spellClock() < endAt do
+			for _, enemy in ipairs(getEnemiesInRadius(center, radius)) do
+				hitEnemy(plr, enemy, tickDamage, stats, center)
+			end
+			task.wait(tickRate)
+		end
+	end)
+end
+
+local function runBeam(plr, spellId, stats, hrp)
+	local s = getState(plr)
+	local now = spellClock()
+	if now < (s.cds[spellId] or 0) then
+		return
+	end
+	s.cds[spellId] = now + (stats.cooldown or 5)
+
+	local origin = getCastOrigin(hrp)
+	local target = getNearestEnemy(hrp.Position, stats.range or 60)
+	local targetPos = target and getEnemyPosition(target)
+	local direction = targetPos and (targetPos - origin) or hrp.CFrame.LookVector
+	if direction.Magnitude <= 0.01 then
+		return
+	end
+	direction = direction.Unit
+
+	local range = stats.range or 50
+	local width = stats.width or 4
+	local duration = stats.duration or 1.5
+	local tickRate = stats.tickRate or 0.18
+	local beamDamage = stats.damage * math.max(0.6, tickRate * 4)
+	spawnBeamVisual(origin, direction, range, width, duration, stats.visualColor)
+
+	local endAt = spellClock() + duration
+	task.spawn(function()
+		while spellClock() < endAt do
+			local hitThisTick = {}
+			local beamEnd = origin + (direction * range)
+			for _, enemy in ipairs(getAllEnemies()) do
+				local enemyPos = getEnemyPosition(enemy)
+				if enemyPos and not hitThisTick[enemy] and distancePointToSegment(enemyPos, origin, beamEnd) <= (width * 0.5) then
+					hitThisTick[enemy] = true
+					hitEnemy(plr, enemy, beamDamage, stats, origin)
+				end
+			end
+			task.wait(tickRate)
+		end
+	end)
+end
+
+local function stopOrbitIfNeeded(plr, spellId)
+	local s = getState(plr)
+	if s.vfx[spellId] and s.vfx[spellId].enabled then
+		syncOrbitVFX(plr, spellId, false)
+	end
+end
+
+local function stepPlayer(plr, dt)
+	if isPaused() then
+		return
+	end
+	local char = plr.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp then
+		return
+	end
+
+	for _, spellId in ipairs(SpellDefs.SPELL_ORDER or {}) do
+		local spellState = getSpellState(plr, spellId)
+		if spellState.level > 0 then
+			local def = SpellDefs.GetSpell(spellId)
+			local stats = SpellDefs.ComputeRuntimeStats(def, spellState)
+			local archetype = stats and stats.archetype
+			if archetype == "Projectile" then
+				runProjectile(plr, spellId, stats, hrp)
+			elseif archetype == "Orbit" then
+				runOrbit(plr, spellId, stats, hrp, dt)
+			elseif archetype == "Nova" then
+				runNova(plr, spellId, stats, hrp)
+			elseif archetype == "Zone" then
+				runZone(plr, spellId, stats, hrp)
+			elseif archetype == "Beam" then
+				runBeam(plr, spellId, stats, hrp)
+			end
+		else
+			local def = SpellDefs.GetSpell(spellId)
+			if def and def.attackType == "Orbit" then
+				stopOrbitIfNeeded(plr, spellId)
+			end
+		end
+	end
+end
+
 RunService.Heartbeat:Connect(function(dt)
 	if isPaused() then
 		return
@@ -1338,14 +557,8 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 end)
 
-Players.PlayerRemoving:Connect(function(plr: Player)
+Players.PlayerRemoving:Connect(function(plr)
 	state[plr.UserId] = nil
 end)
 
-print("[SpellService] Ready (horde spells)")
-
-
-
-
-
-
+print("[SpellService] Ready (elemental spell engine)")

@@ -216,17 +216,7 @@ local function clearSlot(slot: Instance)
 	end
 end
 
-local function nextDescForSpell(spellId: string): string
-	local def = SpellDefs.SPELLS[spellId]
-	if not def then return "" end
-	local lv = plr:GetAttribute(("Spell_%s_Level"):format(spellId)) or 0
-	if typeof(def.nextDesc) == "function" then
-		return def.nextDesc(lv)
-	end
-	return ""
-end
-
-local function mountCardInSlot(slot: Frame, spellId: string, rarity: string, def)
+local function mountCardInSlot(slot: Frame, offer)
 	clearSlot(slot)
 
 	local card = cardTemplate:Clone()
@@ -239,14 +229,16 @@ local function mountCardInSlot(slot: Frame, spellId: string, rarity: string, def
 	card.AutoButtonColor = false
 
 	-- rarity background
-	card.Image = rarityImage[rarity] or rarityImage.Common
+	card.Image = rarityImage[tostring(offer.cardQuality or offer.quality or "Common")] or rarityImage.Common
 
 	-- write into the dedicated boxes
 	local titleLabel = card:WaitForChild("TitleBox"):WaitForChild("Title")
 	local descLabel = card:WaitForChild("DescBox"):WaitForChild("Desc")
+	local accent = typeof(offer.color) == "Color3" and offer.color or Color3.fromRGB(255, 255, 255)
 
-	titleLabel.Text = (def and def.name) or spellId
-	descLabel.Text = nextDescForSpell(spellId)
+	titleLabel.Text = string.format("%s\n%s", tostring(offer.name or offer.spellId or "Spell"), tostring(offer.subtitle or "Upgrade"))
+	titleLabel.TextColor3 = accent
+	descLabel.Text = tostring(offer.desc or "")
 
 	return card
 end
@@ -275,10 +267,8 @@ local function renderOffers(token: string, offers: {any})
 			slot.Visible = true
 
 			local spellId = tostring(off.spellId)
-			local rarity = tostring(off.rarity or "Common")
-			local def = SpellDefs.SPELLS[spellId]
 
-			local cardBtn = mountCardInSlot(slot, spellId, rarity, def)
+			local cardBtn = mountCardInSlot(slot, off)
 
 			cardBtn.MouseButton1Click:Connect(function()
 		if os.clock() < choiceLockedUntil then return end

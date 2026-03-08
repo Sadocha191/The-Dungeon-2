@@ -31,6 +31,7 @@ local function applyPartDefaults(p: BasePart)
 	p.CanTouch = false
 	p.CanQuery = false
 	p.CastShadow = false
+	p.Material = Enum.Material.Neon
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.BottomSurface = Enum.SurfaceType.Smooth
 end
@@ -52,9 +53,11 @@ local function ensureParts(id: string, cfg)
 
 	local size = tonumber(cfg.size) or 1.2
 	local transparency = tonumber(cfg.transparency) or 0.25
+	local color = typeof(cfg.color) == "Color3" and cfg.color or Color3.fromRGB(255, 255, 255)
 	for _, p in ipairs(cfg.parts) do
 		p.Size = Vector3.new(size, size, size)
 		p.Transparency = transparency
+		p.Color = color
 	end
 end
 
@@ -83,6 +86,7 @@ SpellVFXEvent.OnClientEvent:Connect(function(id: string, enabled: boolean, param
 	cfg.height = tonumber(params.height) or cfg.height or 1.5
 	cfg.size = tonumber(params.size) or cfg.size or 1.2
 	cfg.transparency = tonumber(params.transparency) or cfg.transparency or 0.25
+	cfg.color = typeof(params.color) == "Color3" and params.color or cfg.color
 
 	ensureParts(id, cfg)
 end)

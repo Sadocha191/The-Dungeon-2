@@ -1,966 +1,422 @@
--- SpellDefinitions.lua (ReplicatedStorage/ModuleScripts)
--- Updated: new spells, English descriptions, and per-level upgrade previews.
-
 local SpellDefs = {}
 
-SpellDefs.MAX_RUN_SPELLS = 6
+SpellDefs.MAX_MAGIC_RUN_SPELLS = 8
+SpellDefs.MAX_PHYSICAL_RUN_SPELLS = 2
+SpellDefs.MAX_RUN_SPELLS = 10
 
-SpellDefs.RARITY_WEIGHTS = {
-	Common = 0.50,
-	Uncommon = 0.335,
-	Rare = 0.115,
-	Epic = 0.05,
+SpellDefs.RARITY_WEIGHTS = { Common = 0.52, Uncommon = 0.28, Rare = 0.14, Epic = 0.06 }
+SpellDefs.COLOR_BASE = Color3.fromRGB(120, 190, 255)
+SpellDefs.COLOR_SHOP = Color3.fromRGB(190, 120, 255)
+
+SpellDefs.UPGRADE_QUALITIES = {
+	Common = { id = "Common", label = "Common Upgrade", power = 1.00, cardColor = Color3.fromRGB(220, 220, 220), bonusText = "Steady scaling gain." },
+	Uncommon = { id = "Uncommon", label = "Uncommon Upgrade", power = 1.40, cardColor = Color3.fromRGB(120, 255, 175), bonusText = "Better scaling and stronger utility." },
+	Rare = { id = "Rare", label = "Rare Upgrade", power = 1.85, cardColor = Color3.fromRGB(120, 175, 255), bonusText = "Stronger bonuses and cleaner end effect." },
+	Epic = { id = "Epic", label = "Epic Upgrade", power = 2.35, cardColor = Color3.fromRGB(255, 170, 120), bonusText = "High-impact upgrade spike for core builds." },
 }
 
-SpellDefs.COLOR_BASE  = Color3.fromRGB(120, 190, 255)
-SpellDefs.COLOR_SHOP  = Color3.fromRGB(190, 120, 255)
+SpellDefs.BASE_VARIANT_QUALITIES = {
+	Standard = { id = "Standard", label = "Standard Base", shortLabel = "Standard", cardQuality = "Common", costMultiplier = 1.00, baseMultiplier = 1.00, basePower = 0.00 },
+	Amplified = { id = "Amplified", label = "Amplified Base", shortLabel = "Amplified", cardQuality = "Rare", costMultiplier = 1.85, baseMultiplier = 1.18, basePower = 0.85 },
+}
 
--- 6 starter spells (given early / tutorial)
+SpellDefs.ELEMENTS = {
+	Fire = { order = 1, color = Color3.fromRGB(255, 98, 54) },
+	Electricity = { order = 2, color = Color3.fromRGB(255, 221, 84) },
+	Air = { order = 3, color = Color3.fromRGB(232, 236, 240) },
+	Water = { order = 4, color = Color3.fromRGB(70, 160, 255) },
+	Earth = { order = 5, color = Color3.fromRGB(118, 168, 88) },
+	Void = { order = 6, color = Color3.fromRGB(118, 78, 168) },
+	Light = { order = 7, color = Color3.fromRGB(255, 236, 176) },
+	Physical = { order = 8, color = Color3.fromRGB(138, 128, 132) },
+}
+
 SpellDefs.BASE_STARTER = {
-	"FireOrb",
-	"ShadowDagger",
-	"PoisonCloud",
-	"BoneSpear",
-	"WindBlades",
-	"IceShards",
+	"FireBolt_Standard",
+	"Tornado_Standard",
+	"WaterShard_Standard",
+	"StoneSpike_Standard",
+	"AxeThrow_Standard",
 }
 
-local function makeNextDesc(upgrades, maxLevel)
-	return function(currentLevel)
-		if currentLevel >= maxLevel then return "MAX LEVEL" end
-		local nextLevel = currentLevel + 1
-		return upgrades[nextLevel] or ""
+SpellDefs.SPELLS = {}
+SpellDefs.SHOP_PRODUCTS = {}
+SpellDefs.SPELL_ORDER = {}
+SpellDefs.SHOP_ORDER = {}
+SpellDefs.SYNERGIES = {}
+
+local BASE_VARIANT_ORDER = { "Standard", "Amplified" }
+local QUALITY_ORDER = { "Common", "Uncommon", "Rare", "Epic" }
+
+local EFFECTS = {
+	Fire = { dot = { kind = "Burn", dps = 4.5, duration = 2.2 }, note = "Applies burn damage over time." },
+	Electricity = { stun = { duration = 0.22 }, note = "Briefly shocks and interrupts enemies." },
+	Air = { knockback = { force = 22 }, note = "Pushes enemies away from you." },
+	Water = { slow = { pct = 0.30, duration = 1.3 }, note = "Slows targets and controls their approach." },
+	Earth = { slow = { pct = 0.18, duration = 1.0 }, knockback = { force = 14 }, note = "Hits hard and staggers targets." },
+	Void = { pull = { force = 16 }, vulnerability = { pct = 0.08, duration = 1.2 }, note = "Pulls enemies in and opens them for follow-up damage." },
+	Light = { vulnerability = { pct = 0.12, duration = 1.5 }, pierceBonus = 1, note = "Marks enemies to take more damage." },
+	Physical = { dot = { kind = "Bleed", dps = 4.0, duration = 2.0 }, note = "Uses weapon-style physical impact and bleed." },
+}
+
+local ATTACK_NOTES = {
+	Projectile = "Auto-fires at the nearest enemy.",
+	Orbit = "Rotates around the player and damages on contact.",
+	Nova = "Triggers a burst around the player.",
+	Zone = "Creates an area that punishes enemies standing inside.",
+	Beam = "Fires a sustained line attack through nearby enemies.",
+}
+
+local function copyTable(src)
+	local out = {}
+	for key, value in pairs(src or {}) do
+		out[key] = typeof(value) == "table" and copyTable(value) or value
+	end
+	return out
+end
+
+local function blend(a, b, alpha)
+	return Color3.new(
+		a.R + ((b.R - a.R) * alpha),
+		a.G + ((b.G - a.G) * alpha),
+		a.B + ((b.B - a.B) * alpha)
+	)
+end
+
+local function makeCategory(def)
+	return string.format("%s / %s / %s", def.spellType, def.element, def.attackType)
+end
+
+local function makeDescription(def)
+	local effect = EFFECTS[def.element] or EFFECTS.Physical
+	return string.format("%s %s", ATTACK_NOTES[def.attackType] or "Basic spell effect.", effect.note or "")
+end
+
+local function addProduct(def, variantId, variant)
+	local productId = string.format("%s_%s", def.id, variantId)
+	local cost = math.floor((def.shopCost or 200) * (variant.costMultiplier or 1))
+	SpellDefs.SHOP_PRODUCTS[productId] = {
+		id = productId,
+		familyId = def.id,
+		name = def.name,
+		displayName = string.format("%s (%s)", def.name, variant.shortLabel),
+		element = def.element,
+		attackType = def.attackType,
+		spellType = def.spellType,
+		category = def.category,
+		description = def.description,
+		baseQuality = variantId,
+		cardQuality = variant.cardQuality,
+		baseMultiplier = variant.baseMultiplier,
+		basePower = variant.basePower,
+		costCoins = cost,
+		costSouls = cost,
+		color = def.color,
+	}
+	table.insert(SpellDefs.SHOP_ORDER, productId)
+end
+
+local function registerSpell(def)
+	local primaryColor = (SpellDefs.ELEMENTS[def.element] and SpellDefs.ELEMENTS[def.element].color) or SpellDefs.COLOR_BASE
+	local secondaryColor = def.secondaryElement and SpellDefs.ELEMENTS[def.secondaryElement] and SpellDefs.ELEMENTS[def.secondaryElement].color or primaryColor
+	def.color = primaryColor
+	def.displayColor = def.secondaryElement and blend(primaryColor, secondaryColor, 0.45) or primaryColor
+	def.category = def.category or makeCategory(def)
+	def.description = def.description or makeDescription(def)
+	def.maxLevel = def.maxLevel or 6
+	SpellDefs.SPELLS[def.id] = def
+	table.insert(SpellDefs.SPELL_ORDER, def.id)
+	if def.shopAvailable ~= false then
+		for _, variantId in ipairs(BASE_VARIANT_ORDER) do
+			addProduct(def, variantId, SpellDefs.BASE_VARIANT_QUALITIES[variantId])
+		end
 	end
 end
 
-SpellDefs.SPELLS = {
+local function addSynergy(resultId, a, b)
+	table.insert(SpellDefs.SYNERGIES, {
+		resultId = resultId,
+		ingredients = { a, b },
+		key = (a < b) and (a .. "|" .. b) or (b .. "|" .. a),
+	})
+end
 
-	-- =========================
-	-- COMMON
-	-- =========================
-
-	FireOrb = {
-		id = "FireOrb",
-		name = "Fire Orb",
-		category = "Offense",
-		rarity = "Common",
-		maxLevel = 6,
-		costCoins = 250,
+local function addBaseSpell(spec)
+	registerSpell({
+		id = spec[1],
+		name = spec[2],
+		spellType = spec[3],
+		element = spec[4],
+		attackType = spec[5],
+		shopCost = spec[6],
+		runtime = spec[7],
 		base = true,
-		tags = { "offense" },
-		description = "1–3 fiery orbs orbit around you and deal contact damage on hit. Can apply Burn at higher levels.",
-		upgrades = {
-			"Gain 1 orbiting orb.",
-			"+10% damage.",
-			"Gain a second orb.",
-			"+10% orbit radius.",
-			"Burn on hit (2s, refreshes).",
-			"Gain a third orb and Burn can stack (x2).",
-		},
-		params = { orbitRadius = 6, orbitSpeed = 4, hitCooldownPerEnemy = 0.25, baseDmg = 10, burnDmg = 4, burnDuration = 2 },
-		nextDesc = makeNextDesc({
-			"Gain 1 orbiting orb.",
-			"+10% damage.",
-			"Gain a second orb.",
-			"+10% orbit radius.",
-			"Burn on hit (2s, refreshes).",
-			"Gain a third orb and Burn can stack (x2).",
-		}, 6),
-	},
+	})
+end
 
-	ShadowDagger = {
-		id = "ShadowDagger",
-		name = "Shadow Dagger",
-		category = "Offense",
-		rarity = "Common",
-		maxLevel = 6,
-		costCoins = 250,
-		base = true,
-		tags = { "offense", "projectile" },
-		description = "Throws daggers at the nearest enemy in range. Projectiles travel straight and can hit enemies along the path.",
-		upgrades = {
-			"Throw 1 dagger every 0.8s.",
-			"-10% cooldown.",
-			"Throw 2 daggers (0.1s burst).",
-			"+20% projectile speed.",
-			"+10% crit chance.",
-			"Pierce up to 2 enemies.",
-		},
-		params = { range = 30, fireRate = 0.8, projectileSpeed = 90, spread = 0, pierce = 0, critChance = 0, critMulti = 2 },
-		nextDesc = makeNextDesc({
-			"Throw 1 dagger every 0.8s.",
-			"-10% cooldown.",
-			"Throw 2 daggers (0.1s burst).",
-			"+20% projectile speed.",
-			"+10% crit chance.",
-			"Pierce up to 2 enemies.",
-		}, 6),
-	},
-
-	PoisonCloud = {
-		id = "PoisonCloud",
-		name = "Poison Cloud",
-		category = "Control",
-		rarity = "Common",
-		maxLevel = 6,
-		costCoins = 250,
-		base = true,
-		tags = { "control", "dot", "placement" },
-		description = "Drops a poison puddle behind you. Enemies standing in it take damage over time.",
-		upgrades = {
-			"Drop 1 cloud every 2.5s.",
-			"+15% cloud radius.",
-			"+1s duration.",
-			"Faster ticks (every 0.4s).",
-			"Poison stacks (max 5) for bonus damage.",
-			"Drop 2 clouds (left/right) every 2.5s.",
-		},
-		params = { spawnInterval = 2.5, cloudRadius = 7, duration = 3, tickRate = 0.5, stackMax = 0, stackBonus = 0.12 },
-		nextDesc = makeNextDesc({
-			"Drop 1 cloud every 2.5s.",
-			"+15% cloud radius.",
-			"+1s duration.",
-			"Faster ticks (every 0.4s).",
-			"Poison stacks (max 5) for bonus damage.",
-			"Drop 2 clouds (left/right) every 2.5s.",
-		}, 6),
-	},
-
-	BoneSpear = {
-		id = "BoneSpear",
-		name = "Bone Spear",
-		category = "Offense",
-		rarity = "Common",
-		maxLevel = 6,
-		costCoins = 250,
-		base = true,
-		tags = { "offense", "projectile" },
-		description = "Fires spears toward the nearest enemy with a slight random spread. Spears pierce multiple targets.",
-		upgrades = {
-			"Fire 1 spear (pierce 2).",
-			"+15% damage.",
-			"Fire +1 spear.",
-			"+1 pierce.",
-			"+20% projectile speed.",
-			"Fire +1 spear and increase pierce to 5.",
-		},
-		params = { fireRate = 1.4, projectileSpeed = 110, pierce = 2, spreadAngle = 8, baseDmg = 18 },
-		nextDesc = makeNextDesc({
-			"Fire 1 spear (pierce 2).",
-			"+15% damage.",
-			"Fire +1 spear.",
-			"+1 pierce.",
-			"+20% projectile speed.",
-			"Fire +1 spear and increase pierce to 5.",
-		}, 6),
-	},
-
-	WindBlades = {
-		id = "WindBlades",
-		name = "Wind Blades",
-		category = "Control",
-		rarity = "Common",
-		maxLevel = 6,
-		costCoins = 250,
-		base = true,
-		tags = { "control", "orbit" },
-		description = "A spinning blade orbits you at a larger radius, hitting enemies on contact with a per-enemy hit cooldown. Can knock enemies back at higher levels.",
-		upgrades = {
-			"Gain 1 blade.",
-			"+10% orbit speed.",
-			"Gain a second blade.",
-			"+15% orbit radius.",
-			"Small knockback on hit.",
-			"+20% orbit speed and +15% damage.",
-		},
-		params = { orbitRadius = 9, orbitSpeed = 3.5, hitCooldownPerEnemy = 0.35, baseDmg = 14, knockback = 0 },
-		nextDesc = makeNextDesc({
-			"Gain 1 blade.",
-			"+10% orbit speed.",
-			"Gain a second blade.",
-			"+15% orbit radius.",
-			"Small knockback on hit.",
-			"+20% orbit speed and +15% damage.",
-		}, 6),
-	},
-
-	IceShards = {
-		id = "IceShards",
-		name = "Ice Shards",
-		category = "Control",
-		rarity = "Common",
-		maxLevel = 6,
-		costCoins = 250,
-		base = true,
-		tags = { "control", "aoe" },
-		description = "Drops ice shards from above around you. Impacts deal small AoE damage and slow enemies.",
-		upgrades = {
-			"Drop 2 shards every 2.0s.",
-			"+15% impact AoE.",
-			"Drop 3 shards.",
-			"+0.5s slow duration.",
-			"+10% chance to Freeze.",
-			"Drop 5 shards and increase Freeze chance to 20%.",
-		},
-		params = { interval = 2.0, count = 2, dropHeight = 35, impactRadius = 6, slowPct = 0.30, slowDuration = 1.0, freezeChance = 0 },
-		nextDesc = makeNextDesc({
-			"Drop 2 shards every 2.0s.",
-			"+15% impact AoE.",
-			"Drop 3 shards.",
-			"+0.5s slow duration.",
-			"+10% chance to Freeze.",
-			"Drop 5 shards and increase Freeze chance to 20%.",
-		}, 6),
-	},
-
-	EmberSpirits = {
-		id = "EmberSpirits",
-		name = "Ember Spirits",
-		category = "Offense",
-		rarity = "Common",
-		maxLevel = 6,
-		costCoins = 250,
+local function addComboSpell(spec)
+	registerSpell({
+		id = spec[1],
+		name = spec[2],
+		spellType = "Magic",
+		element = spec[3],
+		secondaryElement = spec[4],
+		attackType = spec[5],
+		shopAvailable = false,
+		runtime = spec[6],
 		base = false,
-		tags = { "offense", "summon" },
-		description = "Small spirits orbit close to you. One spirit launches at the nearest enemy and explodes in a small AoE.",
-		upgrades = {
-			"Summon 2 spirits.",
-			"+10% explosion radius.",
-			"Summon 3 spirits.",
-			"+10% launch rate.",
-			"Burn on explosion.",
-			"Summon 5 spirits.",
-		},
-		params = { spiritCount = 2, orbitRadius = 4, launchInterval = 1.2, homingStrength = 1, explosionRadius = 7, baseDmg = 22, burnDmg = 4, burnDuration = 2 },
-		nextDesc = makeNextDesc({
-			"Summon 2 spirits.",
-			"+10% explosion radius.",
-			"Summon 3 spirits.",
-			"+10% launch rate.",
-			"Burn on explosion.",
-			"Summon 5 spirits.",
-		}, 6),
-	},
+		isCombo = true,
+		description = string.format("Synergy spell created by merging %s and %s. %s", spec[7], spec[8], ATTACK_NOTES[spec[5]] or ""),
+	})
+	addSynergy(spec[1], spec[7], spec[8])
+end
 
-	FlameTrail = {
-		id = "FlameTrail",
-		name = "Flame Trail",
-		category = "Control",
-		rarity = "Common",
-		maxLevel = 6,
-		costCoins = 250,
-		base = false,
-		tags = { "control", "dot", "placement" },
-		description = "Leaves burning segments under you. Enemies on the trail take damage over time.",
-		upgrades = {
-			"Trail segments last 2s.",
-			"+10% segment size.",
-			"Trail segments last 3s.",
-			"Faster ticks (every 0.4s).",
-			"Burn can stack.",
-			"Double trail width.",
-		},
-		params = { spawnEvery = 0.35, segmentSize = 6, duration = 2, tickRate = 0.5, baseDmg = 10 },
-		nextDesc = makeNextDesc({
-			"Trail segments last 2s.",
-			"+10% segment size.",
-			"Trail segments last 3s.",
-			"Faster ticks (every 0.4s).",
-			"Burn can stack.",
-			"Double trail width.",
-		}, 6),
-	},
+for _, spec in ipairs({
+	{ "FireBolt", "Fire Bolt", "Magic", "Fire", "Projectile", 180, { archetype = "Projectile", baseDamage = 19, cooldown = 1.05, projectileSpeed = 98, range = 66, baseCount = 1, countPerThreeLevels = 1, pierce = 0 } },
+	{ "EmberOrbit", "Ember Orbit", "Magic", "Fire", "Orbit", 220, { archetype = "Orbit", baseDamage = 12, hitCooldown = 0.35, baseRadius = 5.0, baseCount = 2, countPerThreeLevels = 1, orbitSpeed = 2.8 } },
+	{ "FlameBurst", "Flame Burst", "Magic", "Fire", "Nova", 230, { archetype = "Nova", baseDamage = 28, cooldown = 3.2, baseRadius = 8.5 } },
+	{ "ScorchField", "Scorch Field", "Magic", "Fire", "Zone", 250, { archetype = "Zone", baseDamage = 9.2, cooldown = 4.1, baseRadius = 6.6, duration = 3.4, tickRate = 0.45, spawnAtEnemy = true } },
+	{ "InfernoBeam", "Inferno Beam", "Magic", "Fire", "Beam", 280, { archetype = "Beam", baseDamage = 8.4, cooldown = 5.0, duration = 1.6, tickRate = 0.18, range = 56, width = 4.4 } },
+	{ "VoltNeedle", "Volt Needle", "Magic", "Electricity", "Projectile", 180, { archetype = "Projectile", baseDamage = 18, cooldown = 1.00, projectileSpeed = 108, range = 68, baseCount = 1, countPerThreeLevels = 1, pierce = 0 } },
+	{ "StaticHalo", "Static Halo", "Magic", "Electricity", "Orbit", 220, { archetype = "Orbit", baseDamage = 11, hitCooldown = 0.34, baseRadius = 5.8, baseCount = 2, countPerThreeLevels = 1, orbitSpeed = 3.0 } },
+	{ "ShockBurst", "Shock Burst", "Magic", "Electricity", "Nova", 230, { archetype = "Nova", baseDamage = 24, cooldown = 2.8, baseRadius = 9.0 } },
+	{ "StormField", "Storm Field", "Magic", "Electricity", "Zone", 250, { archetype = "Zone", baseDamage = 8.7, cooldown = 4.0, baseRadius = 6.4, duration = 3.8, tickRate = 0.40, spawnAtEnemy = true } },
+	{ "ThunderRay", "Thunder Ray", "Magic", "Electricity", "Beam", 280, { archetype = "Beam", baseDamage = 8.0, cooldown = 4.9, duration = 1.45, tickRate = 0.16, range = 54, width = 4.0 } },
+	{ "GaleKnife", "Gale Knife", "Magic", "Air", "Projectile", 180, { archetype = "Projectile", baseDamage = 16, cooldown = 1.00, projectileSpeed = 102, range = 70, baseCount = 1, countPerThreeLevels = 1, pierce = 1 } },
+	{ "WindRing", "Wind Ring", "Magic", "Air", "Orbit", 220, { archetype = "Orbit", baseDamage = 10, hitCooldown = 0.32, baseRadius = 6.2, baseCount = 2, countPerThreeLevels = 1, orbitSpeed = 3.2 } },
+	{ "GustBurst", "Gust Burst", "Magic", "Air", "Nova", 230, { archetype = "Nova", baseDamage = 22, cooldown = 2.8, baseRadius = 9.6 } },
+	{ "Tornado", "Tornado", "Magic", "Air", "Zone", 260, { archetype = "Zone", baseDamage = 7.8, cooldown = 4.2, baseRadius = 6.8, duration = 4.2, tickRate = 0.42, spawnAtEnemy = true, pullStrength = 1.1 } },
+	{ "Jetstream", "Jetstream", "Magic", "Air", "Beam", 280, { archetype = "Beam", baseDamage = 7.6, cooldown = 4.6, duration = 1.7, tickRate = 0.17, range = 58, width = 4.6 } },
+	{ "WaterShard", "Water Shard", "Magic", "Water", "Projectile", 180, { archetype = "Projectile", baseDamage = 17, cooldown = 1.08, projectileSpeed = 92, range = 67, baseCount = 1, countPerThreeLevels = 1, pierce = 0 } },
+	{ "TideOrbit", "Tide Orbit", "Magic", "Water", "Orbit", 220, { archetype = "Orbit", baseDamage = 10, hitCooldown = 0.36, baseRadius = 5.7, baseCount = 2, countPerThreeLevels = 1, orbitSpeed = 2.7 } },
+	{ "FrostSplash", "Frost Splash", "Magic", "Water", "Nova", 230, { archetype = "Nova", baseDamage = 23, cooldown = 3.0, baseRadius = 8.8 } },
+	{ "RiptidePool", "Riptide Pool", "Magic", "Water", "Zone", 250, { archetype = "Zone", baseDamage = 8.2, cooldown = 4.2, baseRadius = 6.9, duration = 3.8, tickRate = 0.45, spawnAtEnemy = true } },
+	{ "TidalBeam", "Tidal Beam", "Magic", "Water", "Beam", 280, { archetype = "Beam", baseDamage = 7.8, cooldown = 5.0, duration = 1.6, tickRate = 0.18, range = 54, width = 4.4 } },
+	{ "StoneSpike", "Stone Spike", "Magic", "Earth", "Projectile", 190, { archetype = "Projectile", baseDamage = 21, cooldown = 1.18, projectileSpeed = 84, range = 62, baseCount = 1, countPerThreeLevels = 1, pierce = 0 } },
+	{ "RockOrbit", "Rock Orbit", "Magic", "Earth", "Orbit", 220, { archetype = "Orbit", baseDamage = 13, hitCooldown = 0.40, baseRadius = 5.4, baseCount = 2, countPerThreeLevels = 1, orbitSpeed = 2.3 } },
+	{ "QuakeBurst", "Quake Burst", "Magic", "Earth", "Nova", 235, { archetype = "Nova", baseDamage = 30, cooldown = 3.2, baseRadius = 8.6 } },
+	{ "BramblePatch", "Bramble Patch", "Magic", "Earth", "Zone", 255, { archetype = "Zone", baseDamage = 8.6, cooldown = 4.3, baseRadius = 6.7, duration = 4.2, tickRate = 0.46, spawnAtEnemy = true } },
+	{ "FaultLine", "Fault Line", "Magic", "Earth", "Beam", 285, { archetype = "Beam", baseDamage = 8.2, cooldown = 5.2, duration = 1.4, tickRate = 0.20, range = 50, width = 4.8 } },
+	{ "VoidShard", "Void Shard", "Magic", "Void", "Projectile", 185, { archetype = "Projectile", baseDamage = 18, cooldown = 1.10, projectileSpeed = 90, range = 66, baseCount = 1, countPerThreeLevels = 1, pierce = 1 } },
+	{ "AbyssHalo", "Abyss Halo", "Magic", "Void", "Orbit", 220, { archetype = "Orbit", baseDamage = 11, hitCooldown = 0.36, baseRadius = 5.6, baseCount = 2, countPerThreeLevels = 1, orbitSpeed = 2.4 } },
+	{ "NullBurst", "Null Burst", "Magic", "Void", "Nova", 230, { archetype = "Nova", baseDamage = 25, cooldown = 3.0, baseRadius = 8.8 } },
+	{ "Singularity", "Singularity", "Magic", "Void", "Zone", 260, { archetype = "Zone", baseDamage = 8.4, cooldown = 4.4, baseRadius = 6.3, duration = 4.0, tickRate = 0.38, spawnAtEnemy = true, pullStrength = 1.3 } },
+	{ "EntropyRay", "Entropy Ray", "Magic", "Void", "Beam", 285, { archetype = "Beam", baseDamage = 8.1, cooldown = 5.1, duration = 1.55, tickRate = 0.18, range = 55, width = 4.2 } },
+	{ "RadiantBolt", "Radiant Bolt", "Magic", "Light", "Projectile", 185, { archetype = "Projectile", baseDamage = 19, cooldown = 1.08, projectileSpeed = 100, range = 68, baseCount = 1, countPerThreeLevels = 1, pierce = 1 } },
+	{ "HaloOrbit", "Halo Orbit", "Magic", "Light", "Orbit", 220, { archetype = "Orbit", baseDamage = 11, hitCooldown = 0.34, baseRadius = 5.8, baseCount = 2, countPerThreeLevels = 1, orbitSpeed = 2.7 } },
+	{ "Sunburst", "Sunburst", "Magic", "Light", "Nova", 235, { archetype = "Nova", baseDamage = 27, cooldown = 3.1, baseRadius = 8.7 } },
+	{ "ConsecratedGround", "Consecrated Ground", "Magic", "Light", "Zone", 255, { archetype = "Zone", baseDamage = 8.6, cooldown = 4.2, baseRadius = 6.9, duration = 3.8, tickRate = 0.42, spawnAtEnemy = true } },
+	{ "SolarBeam", "Solar Beam", "Magic", "Light", "Beam", 285, { archetype = "Beam", baseDamage = 8.6, cooldown = 5.0, duration = 1.6, tickRate = 0.17, range = 57, width = 4.4 } },
+	{ "AxeThrow", "Axe Throw", "Physical", "Physical", "Projectile", 210, { archetype = "Projectile", baseDamage = 23, cooldown = 1.18, projectileSpeed = 86, range = 58, baseCount = 1, countPerThreeLevels = 1, pierce = 0 } },
+	{ "GuardHammers", "Guard Hammers", "Physical", "Physical", "Orbit", 235, { archetype = "Orbit", baseDamage = 14, hitCooldown = 0.38, baseRadius = 5.8, baseCount = 2, countPerThreeLevels = 1, orbitSpeed = 2.4 } },
+	{ "GroundSlam", "Ground Slam", "Physical", "Physical", "Nova", 245, { archetype = "Nova", baseDamage = 31, cooldown = 3.4, baseRadius = 8.4 } },
+	{ "CaltropField", "Caltrop Field", "Physical", "Physical", "Zone", 250, { archetype = "Zone", baseDamage = 9.4, cooldown = 4.0, baseRadius = 6.2, duration = 4.0, tickRate = 0.42, spawnAtEnemy = true } },
+	{ "WhirlwindSlash", "Whirlwind Slash", "Physical", "Physical", "Beam", 265, { archetype = "Beam", baseDamage = 8.8, cooldown = 4.7, duration = 1.2, tickRate = 0.16, range = 18, width = 9.0, arcBeam = true } },
+}) do
+	addBaseSpell(spec)
+end
 
-	-- =========================
-	-- UNCOMMON
-	-- =========================
+for _, spec in ipairs({
+	{ "FireTornado", "Fire Tornado", "Fire", "Air", "Zone", { archetype = "Zone", baseDamage = 11.0, cooldown = 4.4, baseRadius = 7.4, duration = 4.6, tickRate = 0.34, spawnAtEnemy = true, pullStrength = 1.5 }, "Tornado", "FireBolt" },
+	{ "StormSurge", "Storm Surge", "Electricity", "Water", "Zone", { archetype = "Zone", baseDamage = 10.4, cooldown = 4.2, baseRadius = 7.0, duration = 4.2, tickRate = 0.34, spawnAtEnemy = true }, "StormField", "WaterShard" },
+	{ "MagmaCrash", "Magma Crash", "Fire", "Earth", "Nova", { archetype = "Nova", baseDamage = 35, cooldown = 3.4, baseRadius = 9.6 }, "FlameBurst", "QuakeBurst" },
+	{ "RadiantTempest", "Radiant Tempest", "Light", "Air", "Zone", { archetype = "Zone", baseDamage = 10.0, cooldown = 4.2, baseRadius = 7.2, duration = 4.0, tickRate = 0.34, spawnAtEnemy = true }, "ConsecratedGround", "GaleKnife" },
+	{ "VoidFlood", "Void Flood", "Void", "Water", "Zone", { archetype = "Zone", baseDamage = 10.1, cooldown = 4.4, baseRadius = 7.0, duration = 4.3, tickRate = 0.34, spawnAtEnemy = true, pullStrength = 1.4 }, "Singularity", "RiptidePool" },
+	{ "ThunderQuake", "Thunder Quake", "Electricity", "Earth", "Nova", { archetype = "Nova", baseDamage = 34, cooldown = 3.3, baseRadius = 9.2 }, "ShockBurst", "QuakeBurst" },
+	{ "SolarFlare", "Solar Flare", "Light", "Fire", "Beam", { archetype = "Beam", baseDamage = 9.6, cooldown = 5.2, duration = 1.8, tickRate = 0.16, range = 60, width = 4.8 }, "SolarBeam", "InfernoBeam" },
+}) do
+	addComboSpell(spec)
+end
 
-	LightningChain = {
-		id = "LightningChain",
-		name = "Lightning Chain",
-		category = "Control",
-		rarity = "Uncommon",
-		maxLevel = 6,
-		costCoins = 600,
-		base = false,
-		tags = { "control", "chain" },
-		description = "Strikes the nearest enemy, then chains to additional nearby enemies.",
-		upgrades = {
-			"Chain up to 3 jumps.",
-			"+10% damage.",
-			"Chain up to 4 jumps.",
-			"+20% jump radius.",
-			"Stun 0.3s on hit.",
-			"Chain up to 6 jumps and stun 0.5s.",
-		},
-		params = { range = 35, jumpRadius = 12, jumps = 3, baseDmg = 26, stunDuration = 0 },
-		nextDesc = makeNextDesc({
-			"Chain up to 3 jumps.",
-			"+10% damage.",
-			"Chain up to 4 jumps.",
-			"+20% jump radius.",
-			"Stun 0.3s on hit.",
-			"Chain up to 6 jumps and stun 0.5s.",
-		}, 6),
-	},
+local SYNERGY_LOOKUP = {}
+local SYNERGY_BY_INGREDIENT = {}
 
-	FrostNova = {
-		id = "FrostNova",
-		name = "Frost Nova",
-		category = "Control",
-		rarity = "Uncommon",
-		maxLevel = 6,
-		costCoins = 600,
-		base = false,
-		tags = { "control", "aoe" },
-		description = "Emits a freezing pulse from you, slowing enemies in range. Can Freeze at higher levels.",
-		upgrades = {
-			"Slow 35% for 1.5s (every 6.0s).",
-			"+15% radius.",
-			"-10% cooldown.",
-			"+10% Freeze chance.",
-			"Freeze lasts 1.0s.",
-			"Freeze chance 25% and +15% radius.",
-		},
-		params = { interval = 6.0, radius = 12, slowPct = 0.35, slowDuration = 1.5, freezeChance = 0, freezeDuration = 0 },
-		nextDesc = makeNextDesc({
-			"Slow 35% for 1.5s (every 6.0s).",
-			"+15% radius.",
-			"-10% cooldown.",
-			"+10% Freeze chance.",
-			"Freeze lasts 1.0s.",
-			"Freeze chance 25% and +15% radius.",
-		}, 6),
-	},
+for _, synergy in ipairs(SpellDefs.SYNERGIES) do
+	SYNERGY_LOOKUP[synergy.key] = synergy
+	for _, ingredient in ipairs(synergy.ingredients) do
+		SYNERGY_BY_INGREDIENT[ingredient] = SYNERGY_BY_INGREDIENT[ingredient] or {}
+		table.insert(SYNERGY_BY_INGREDIENT[ingredient], synergy)
+	end
+end
 
-	ArcaneMissile = {
-		id = "ArcaneMissile",
-		name = "Arcane Missile",
-		category = "Offense",
-		rarity = "Uncommon",
-		maxLevel = 6,
-		costCoins = 600,
-		base = false,
-		tags = { "offense", "projectile" },
-		description = "Fires a volley of homing missiles. Missiles retarget if their target dies mid-flight.",
-		upgrades = {
-			"Fire 2 missiles every 2.2s.",
-			"+15% missile speed.",
-			"Fire 3 missiles.",
-			"+15% damage.",
-			"Small impact explosion.",
-			"Fire 5 missiles.",
-		},
-		params = { missileCount = 2, range = 40, speed = 95, turnRate = 10, impactRadius = 0, baseDmg = 20 },
-		nextDesc = makeNextDesc({
-			"Fire 2 missiles every 2.2s.",
-			"+15% missile speed.",
-			"Fire 3 missiles.",
-			"+15% damage.",
-			"Small impact explosion.",
-			"Fire 5 missiles.",
-		}, 6),
-	},
+function SpellDefs.Get(id)
+	return SpellDefs.SPELLS[id] or SpellDefs.SHOP_PRODUCTS[id]
+end
 
-	GravityPulse = {
-		id = "GravityPulse",
-		name = "Gravity Pulse",
-		category = "Control",
-		rarity = "Uncommon",
-		maxLevel = 6,
-		costCoins = 600,
-		base = false,
-		tags = { "control", "knockback" },
-		description = "Sends out a pulse that damages and knocks enemies away. Can briefly pull enemies inward at higher levels.",
-		upgrades = {
-			"Pulse radius 10 (every 5.0s).",
-			"+20% knockback force.",
-			"+15% damage.",
-			"-10% cooldown.",
-			"Brief pull-in (0.3s) before pushing.",
-			"Bigger radius and pull lasts 0.6s.",
-		},
-		params = { interval = 5.0, radius = 10, force = 60, baseDmg = 22, pullDuration = 0 },
-		nextDesc = makeNextDesc({
-			"Pulse radius 10 (every 5.0s).",
-			"+20% knockback force.",
-			"+15% damage.",
-			"-10% cooldown.",
-			"Brief pull-in (0.3s) before pushing.",
-			"Bigger radius and pull lasts 0.6s.",
-		}, 6),
-	},
-
-	ToxicBlades = {
-		id = "ToxicBlades",
-		name = "Toxic Blades",
-		category = "Control",
-		rarity = "Uncommon",
-		maxLevel = 6,
-		costCoins = 600,
-		base = false,
-		tags = { "control", "orbit", "dot" },
-		description = "Poisoned blades orbit you. Hits apply a stacking poison debuff.",
-		upgrades = {
-			"Gain 2 blades.",
-			"+10% poison damage.",
-			"Gain 3 blades.",
-			"+2 max poison stacks.",
-			"Gain +1 blade.",
-			"Gain 6 blades and increase max stacks to 10.",
-		},
-		params = { bladeCount = 2, orbitRadius = 8, orbitSpeed = 3.2, hitCooldown = 0.35, poisonTick = 0.5, poisonDuration = 3, stackMax = 5 },
-		nextDesc = makeNextDesc({
-			"Gain 2 blades.",
-			"+10% poison damage.",
-			"Gain 3 blades.",
-			"+2 max poison stacks.",
-			"Gain +1 blade.",
-			"Gain 6 blades and increase max stacks to 10.",
-		}, 6),
-	},
-
-	CrystalBarrage = {
-		id = "CrystalBarrage",
-		name = "Crystal Barrage",
-		category = "Offense",
-		rarity = "Uncommon",
-		maxLevel = 6,
-		costCoins = 600,
-		base = false,
-		tags = { "offense", "projectile", "cone" },
-		description = "Fires a cone of crystal shards toward the nearest enemy. Shards can gain AoE and ricochet at higher levels.",
-		upgrades = {
-			"Fire 5 shards every 2.6s.",
-			"+10% damage (or tighter spread).",
-			"Fire 7 shards.",
-			"Impact creates a small AoE.",
-			"Ricochet once.",
-			"Fire 10 shards and increase AoE.",
-		},
-		params = { shardCount = 5, coneAngle = 28, range = 35, speed = 105, impactRadius = 0, ricochet = 0, baseDmg = 14 },
-		nextDesc = makeNextDesc({
-			"Fire 5 shards every 2.6s.",
-			"+10% damage (or tighter spread).",
-			"Fire 7 shards.",
-			"Impact creates a small AoE.",
-			"Ricochet once.",
-			"Fire 10 shards and increase AoE.",
-		}, 6),
-	},
-
-	ChainHooks = {
-		id = "ChainHooks",
-		name = "Chain Hooks",
-		category = "Control",
-		rarity = "Uncommon",
-		maxLevel = 6,
-		costCoins = 600,
-		base = false,
-		tags = { "control", "pull" },
-		description = "Launches hooks at nearby enemies, pulling them closer without teleporting them.",
-		upgrades = {
-			"Launch 1 hook every 4.0s.",
-			"+15% range.",
-			"Launch 2 hooks.",
-			"+20% pull force.",
-			"Stun 0.3s after pull.",
-			"2 hooks and bigger range.",
-		},
-		params = { range = 28, hookCount = 1, pullForce = 90, stunDuration = 0 },
-		nextDesc = makeNextDesc({
-			"Launch 1 hook every 4.0s.",
-			"+15% range.",
-			"Launch 2 hooks.",
-			"+20% pull force.",
-			"Stun 0.3s after pull.",
-			"2 hooks and bigger range.",
-		}, 6),
-	},
-
-	IceWall = {
-		id = "IceWall",
-		name = "Ice Wall",
-		category = "Control",
-		rarity = "Uncommon",
-		maxLevel = 6,
-		costCoins = 600,
-		base = false,
-		tags = { "control", "block" },
-		description = "Creates ice walls around you. Walls block movement and slow enemies on contact.",
-		upgrades = {
-			"Create 1 wall for 3s (every 8.0s).",
-			"+25% wall HP.",
-			"Create 2 walls.",
-			"+1s duration.",
-			"+10% Freeze chance on touch.",
-			"Create 2 walls lasting 6s.",
-		},
-		params = { interval = 8.0, wallCount = 1, wallSize = 10, wallHP = 200, duration = 3, slowPct = 0.35, freezeChance = 0 },
-		nextDesc = makeNextDesc({
-			"Create 1 wall for 3s (every 8.0s).",
-			"+25% wall HP.",
-			"Create 2 walls.",
-			"+1s duration.",
-			"+10% Freeze chance on touch.",
-			"Create 2 walls lasting 6s.",
-		}, 6),
-	},
-
-	-- =========================
-	-- RARE
-	-- =========================
-
-	ThunderTotem = {
-		id = "ThunderTotem",
-		name = "Thunder Totem",
-		category = "Summon",
-		rarity = "Rare",
-		maxLevel = 6,
-		costCoins = 1400,
-		base = false,
-		tags = { "summon", "turret" },
-		description = "Places a totem near you that periodically fires lightning bolts at the nearest enemy.",
-		upgrades = {
-			"Place 1 totem (10s duration).",
-			"+10% fire rate.",
-			"+2s duration.",
-			"+15% damage.",
-			"Bolts chain 1 extra jump.",
-			"Place 2 totems.",
-		},
-		params = { totemCount = 1, duration = 10, range = 35, fireRate = 0.9, baseDmg = 18, chainJumps = 0 },
-		nextDesc = makeNextDesc({
-			"Place 1 totem (10s duration).",
-			"+10% fire rate.",
-			"+2s duration.",
-			"+15% damage.",
-			"Bolts chain 1 extra jump.",
-			"Place 2 totems.",
-		}, 6),
-	},
-
-	SpiritWolves = {
-		id = "SpiritWolves",
-		name = "Spirit Wolves",
-		category = "Summon",
-		rarity = "Rare",
-		maxLevel = 6,
-		costCoins = 1400,
-		base = false,
-		tags = { "summon", "melee" },
-		description = "Summons spirit wolves that lunge to bite nearby enemies, then return to you.",
-		upgrades = {
-			"Summon 1 wolf.",
-			"+10% attack speed.",
-			"Summon 2 wolves.",
-			"+15% damage.",
-			"Apply Bleed (DoT).",
-			"Summon 3 wolves and Bleed can stack.",
-		},
-		params = { wolfCount = 1, leashRadius = 10, aggroRange = 26, biteRate = 1.0, baseDmg = 24, bleedDmg = 6, bleedDuration = 3 },
-		nextDesc = makeNextDesc({
-			"Summon 1 wolf.",
-			"+10% attack speed.",
-			"Summon 2 wolves.",
-			"+15% damage.",
-			"Apply Bleed (DoT).",
-			"Summon 3 wolves and Bleed can stack.",
-		}, 6),
-	},
-
-	NecroSwarm = {
-		id = "NecroSwarm",
-		name = "Necro Swarm",
-		category = "Offense",
-		rarity = "Rare",
-		maxLevel = 6,
-		costCoins = 1400,
-		base = false,
-		tags = { "offense", "summon" },
-		description = "Summons homing skulls that seek enemies and explode on impact.",
-		upgrades = {
-			"Spawn 1 skull every 1.6s.",
-			"+15% skull speed.",
-			"Spawn 2 skulls.",
-			"+15% explosion AoE.",
-			"Pierce 1 target, then explode.",
-			"Spawn 3 skulls.",
-		},
-		params = { spawnRate = 1.6, skullCount = 1, speed = 80, homing = 1, impactRadius = 7, baseDmg = 22 },
-		nextDesc = makeNextDesc({
-			"Spawn 1 skull every 1.6s.",
-			"+15% skull speed.",
-			"Spawn 2 skulls.",
-			"+15% explosion AoE.",
-			"Pierce 1 target, then explode.",
-			"Spawn 3 skulls.",
-		}, 6),
-	},
-
-	ArcaneMine = {
-		id = "ArcaneMine",
-		name = "Arcane Mine",
-		category = "Control",
-		rarity = "Rare",
-		maxLevel = 6,
-		costCoins = 1400,
-		base = false,
-		tags = { "control", "placement" },
-		description = "Scatters mines around you. Mines arm shortly after placement and explode when enemies enter their trigger radius.",
-		upgrades = {
-			"Place 2 mines every 3.5s.",
-			"+15% damage.",
-			"Place 3 mines.",
-			"+15% explosion radius.",
-			"Chain reaction: explosions can trigger nearby mines.",
-			"Place 5 mines.",
-		},
-		params = { interval = 3.5, mineCount = 2, armTime = 0.3, maxLife = 4.0, triggerRadius = 5, explosionRadius = 8, baseDmg = 30, chainRadius = 10 },
-		nextDesc = makeNextDesc({
-			"Place 2 mines every 3.5s.",
-			"+15% damage.",
-			"Place 3 mines.",
-			"+15% explosion radius.",
-			"Chain reaction: explosions can trigger nearby mines.",
-			"Place 5 mines.",
-		}, 6),
-	},
-
-	DarkRift = {
-		id = "DarkRift",
-		name = "Dark Rift",
-		category = "Control",
-		rarity = "Rare",
-		maxLevel = 6,
-		costCoins = 1400,
-		base = false,
-		tags = { "control", "pull", "aoe" },
-		description = "Opens a rift near you that damages enemies over time and pulls them toward its center.",
-		upgrades = {
-			"Spawn 1 rift (4s duration) every 7s.",
-			"+15% radius.",
-			"+1s duration.",
-			"+20% pull force.",
-			"Faster damage ticks.",
-			"Spawn 2 rifts on opposite sides.",
-		},
-		params = { interval = 7.0, riftCount = 1, radius = 10, duration = 4, tickRate = 0.5, pullForce = 80, baseDmg = 12 },
-		nextDesc = makeNextDesc({
-			"Spawn 1 rift (4s duration) every 7s.",
-			"+15% radius.",
-			"+1s duration.",
-			"+20% pull force.",
-			"Faster damage ticks.",
-			"Spawn 2 rifts on opposite sides.",
-		}, 6),
-	},
-
-	MeteorStrike = {
-		id = "MeteorStrike",
-		name = "Meteor Strike",
-		category = "Offense",
-		rarity = "Rare",
-		maxLevel = 6,
-		costCoins = 1400,
-		base = false,
-		tags = { "offense", "aoe" },
-		description = "Calls down meteors around you. Each impact has a short warning marker, then deals heavy AoE damage.",
-		upgrades = {
-			"Call 1 meteor every 4.5s.",
-			"+15% impact AoE.",
-			"Call 2 meteors.",
-			"-10% cooldown.",
-			"Leave a fire pool for 2s.",
-			"Call 3 meteors.",
-		},
-		params = { interval = 4.5, meteorCount = 1, minRadius = 10, maxRadius = 25, warningTime = 0.6, impactRadius = 10, baseDmg = 55, firePoolDmg = 10, firePoolDuration = 0 },
-		nextDesc = makeNextDesc({
-			"Call 1 meteor every 4.5s.",
-			"+15% impact AoE.",
-			"Call 2 meteors.",
-			"-10% cooldown.",
-			"Leave a fire pool for 2s.",
-			"Call 3 meteors.",
-		}, 6),
-	},
-
-	SolarBeam = {
-		id = "SolarBeam",
-		name = "Solar Beam",
-		category = "Offense",
-		rarity = "Rare",
-		maxLevel = 6,
-		costCoins = 1400,
-		base = false,
-		tags = { "offense", "beam" },
-		description = "Fires a sustained beam toward the nearest enemy, damaging everything in a line.",
-		upgrades = {
-			"Beam lasts 1.2s (every 6.5s).",
-			"+10% tick damage.",
-			"Beam lasts 1.6s.",
-			"+20% beam width.",
-			"Burn on hit.",
-			"Beam lasts 2.2s and has longer range.",
-		},
-		params = { interval = 6.5, duration = 1.2, range = 60, width = 3, tickRate = 0.18, baseDmg = 10, rotateSpeed = 6, burnDmg = 4, burnDuration = 2 },
-		nextDesc = makeNextDesc({
-			"Beam lasts 1.2s (every 6.5s).",
-			"+10% tick damage.",
-			"Beam lasts 1.6s.",
-			"+20% beam width.",
-			"Burn on hit.",
-			"Beam lasts 2.2s and has longer range.",
-		}, 6),
-	},
-
-	-- =========================
-	-- EPIC
-	-- =========================
-
-	VoidRing = {
-		id = "VoidRing",
-		name = "Void Ring",
-		category = "Control",
-		rarity = "Epic",
-		maxLevel = 6,
-		costCoins = 3200,
-		base = false,
-		tags = { "control", "aoe" },
-		description = "Expands a void ring from you. Enemies are hit when they cross the ring’s edge. Can return for extra waves at higher levels.",
-		upgrades = {
-			"Cast 1 expanding wave every 5.5s.",
-			"+15% max radius.",
-			"Cast 2 waves (out and back).",
-			"+15% damage.",
-			"Light pull toward the center.",
-			"Cast 3 waves with faster speed.",
-		},
-		params = { interval = 5.5, startRadius = 4, endRadius = 24, speed = 30, baseDmg = 40, pullForce = 0 },
-		nextDesc = makeNextDesc({
-			"Cast 1 expanding wave every 5.5s.",
-			"+15% max radius.",
-			"Cast 2 waves (out and back).",
-			"+15% damage.",
-			"Light pull toward the center.",
-			"Cast 3 waves with faster speed.",
-		}, 6),
-	},
-
-	BloodNova = {
-		id = "BloodNova",
-		name = "Blood Nova",
-		category = "Offense",
-		rarity = "Epic",
-		maxLevel = 6,
-		costCoins = 3200,
-		base = false,
-		tags = { "offense", "aoe" },
-		description = "Explodes around you, dealing damage that scales with your missing HP (lower HP = higher damage).",
-		upgrades = {
-			"Blood Nova every 7.0s.",
-			"+15% radius.",
-			"-10% cooldown.",
-			"+5% lifesteal from hits.",
-			"Apply Bleed.",
-			"Stronger missing-HP scaling and 10% lifesteal.",
-		},
-		params = { interval = 7.0, radius = 12, baseDmg = 45, missingHpMultiplier = 0.9, lifestealPct = 0, bleedDmg = 8, bleedDuration = 3 },
-		nextDesc = makeNextDesc({
-			"Blood Nova every 7.0s.",
-			"+15% radius.",
-			"-10% cooldown.",
-			"+5% lifesteal from hits.",
-			"Apply Bleed.",
-			"Stronger missing-HP scaling and 10% lifesteal.",
-		}, 6),
-	},
-
-	PhantomClone = {
-		id = "PhantomClone",
-		name = "Phantom Clone",
-		category = "Summon",
-		rarity = "Epic",
-		maxLevel = 6,
-		costCoins = 3200,
-		base = false,
-		tags = { "summon", "utility" },
-		description = "Summons a clone that repeats your projectile casts with a short delay and reduced damage.",
-		upgrades = {
-			"Clone copies projectiles at 35% damage.",
-			"Copy damage 45%.",
-			"Clone positions more aggressively.",
-			"Copy damage 60%.",
-			"Summon 2 clones at 35% damage each.",
-			"Upgrade to 1 clone at 90% damage (or keep 2 at 60%).",
-		},
-		params = { copyPct = 0.35, delay = 0.15, cloneCount = 1 },
-		nextDesc = makeNextDesc({
-			"Clone copies projectiles at 35% damage.",
-			"Copy damage 45%.",
-			"Clone positions more aggressively.",
-			"Copy damage 60%.",
-			"Summon 2 clones at 35% damage each.",
-			"Upgrade to 1 clone at 90% damage (or keep 2 at 60%).",
-		}, 6),
-	},
-
-	Starfall = {
-		id = "Starfall",
-		name = "Starfall",
-		category = "Control",
-		rarity = "Epic",
-		maxLevel = 6,
-		costCoins = 3200,
-		base = false,
-		tags = { "control", "aoe" },
-		description = "Calls down a series of strikes from the sky around you. Impacts deal AoE damage and can briefly stun enemies.",
-		upgrades = {
-			"5 strikes every 8.5s.",
-			"+15% impact AoE.",
-			"7 strikes.",
-			"Stun 0.3s on hit.",
-			"9 strikes.",
-			"12 strikes and a larger strike area.",
-		},
-		params = { interval = 8.5, strikes = 5, radiusMin = 20, radiusMax = 35, warningTime = 0.6, impactRadius = 8, baseDmg = 28, stunDuration = 0 },
-		nextDesc = makeNextDesc({
-			"5 strikes every 8.5s.",
-			"+15% impact AoE.",
-			"7 strikes.",
-			"Stun 0.3s on hit.",
-			"9 strikes.",
-			"12 strikes and a larger strike area.",
-		}, 6),
-	},
-
-	RagePulse = {
-		id = "RagePulse",
-		name = "Rage Pulse",
-		category = "Offense",
-		rarity = "Epic",
-		maxLevel = 6,
-		costCoins = 3200,
-		base = false,
-		tags = { "offense", "passive" },
-		description = "A passive aura that increases your damage as your HP gets lower. Can also deal aura damage at higher levels.",
-		upgrades = {
-			"Missing-HP damage bonus up to 20%.",
-			"Max bonus up to 30%.",
-			"Gain aura damage ticks.",
-			"+15% aura radius.",
-			"Small lifesteal.",
-			"Max bonus up to 50% and stronger aura.",
-		},
-		params = { minBonus = 0.0, maxBonus = 0.20, auraRadius = 0, auraTick = 0.6, auraDmg = 6, lifestealPct = 0 },
-		nextDesc = makeNextDesc({
-			"Missing-HP damage bonus up to 20%.",
-			"Max bonus up to 30%.",
-			"Gain aura damage ticks.",
-			"+15% aura radius.",
-			"Small lifesteal.",
-			"Max bonus up to 50% and stronger aura.",
-		}, 6),
-	},
-
-	TimeFracture = {
-		id = "TimeFracture",
-		name = "Time Fracture",
-		category = "Control",
-		rarity = "Epic",
-		maxLevel = 6,
-		costCoins = 3200,
-		base = false,
-		tags = { "control", "slow" },
-		description = "Creates a time zone around you that slows enemy movement and attacks for a short duration.",
-		upgrades = {
-			"Slow 30% for 3s every 10s.",
-			"+15% radius.",
-			"Slow 40%.",
-			"+1s duration.",
-			"Enemies inside take increased damage.",
-			"Slow 55% for 5s and bigger radius.",
-		},
-		params = { interval = 10.0, radius = 14, duration = 3.0, slowPct = 0.30, vulnPct = 0 },
-		nextDesc = makeNextDesc({
-			"Slow 30% for 3s every 10s.",
-			"+15% radius.",
-			"Slow 40%.",
-			"+1s duration.",
-			"Enemies inside take increased damage.",
-			"Slow 55% for 5s and bigger radius.",
-		}, 6),
-	},
-
-	SoulLink = {
-		id = "SoulLink",
-		name = "Soul Link",
-		category = "Control",
-		rarity = "Epic",
-		maxLevel = 6,
-		costCoins = 3200,
-		base = false,
-		tags = { "control", "utility" },
-		description = "Links a priority enemy. Damage dealt to the anchor splashes to nearby enemies for a duration.",
-		upgrades = {
-			"Link 25% damage to nearby enemies every 9s.",
-			"+15% link radius.",
-			"Link 35% damage.",
-			"+1.5s duration.",
-			"Link also applies from indirect sources.",
-			"Link 50% damage and bigger radius.",
-		},
-		params = { interval = 9.0, duration = 4.0, linkPct = 0.25, radius = 14, retargetDelay = 0.2 },
-		nextDesc = makeNextDesc({
-			"Link 25% damage to nearby enemies every 9s.",
-			"+15% link radius.",
-			"Link 35% damage.",
-			"+1.5s duration.",
-			"Link also applies from indirect sources.",
-			"Link 50% damage and bigger radius.",
-		}, 6),
-	},
-}
-
--- =========================
--- Helpers used by Lobby SpellService / Witch shop
--- =========================
-
-function SpellDefs.Get(id: string)
+function SpellDefs.GetSpell(id)
 	return SpellDefs.SPELLS[id]
 end
 
-function SpellDefs.IsValid(id: string): boolean
-	return SpellDefs.SPELLS[id] ~= nil
+function SpellDefs.GetProduct(id)
+	return SpellDefs.SHOP_PRODUCTS[id]
 end
 
--- List of spells that should appear in the witch shop.
--- Includes all non-base spells with a coin cost.
-function SpellDefs.GetShopList(): {string}
-	local list = {}
-	for id, def in pairs(SpellDefs.SPELLS) do
-		if typeof(def) == "table" then
-			local cost = tonumber(def.costCoins) or 0
-			local isBase = def.base == true
-			if (not isBase) and cost > 0 then
-				table.insert(list, id)
+function SpellDefs.IsValid(id)
+	return SpellDefs.Get(id) ~= nil
+end
+
+function SpellDefs.GetShopList()
+	local out = {}
+	for _, id in ipairs(SpellDefs.SHOP_ORDER) do
+		table.insert(out, id)
+	end
+	return out
+end
+
+function SpellDefs.GetSpellIds()
+	local out = {}
+	for _, id in ipairs(SpellDefs.SPELL_ORDER) do
+		table.insert(out, id)
+	end
+	return out
+end
+
+function SpellDefs.GetElementColor(element)
+	local info = element and SpellDefs.ELEMENTS[element] or nil
+	return info and info.color or SpellDefs.COLOR_BASE
+end
+
+function SpellDefs.GetSpellColor(spellIdOrDef)
+	local def = typeof(spellIdOrDef) == "string" and SpellDefs.GetSpell(spellIdOrDef) or spellIdOrDef
+	return (def and def.displayColor) or (def and def.color) or SpellDefs.COLOR_BASE
+end
+
+function SpellDefs.GetTypeLimit(spellType)
+	return spellType == "Physical" and SpellDefs.MAX_PHYSICAL_RUN_SPELLS or SpellDefs.MAX_MAGIC_RUN_SPELLS
+end
+
+function SpellDefs.ResolveUnlockedProducts(unlockedIds)
+	local strongest = {}
+	for _, id in ipairs(unlockedIds or {}) do
+		local product = SpellDefs.SHOP_PRODUCTS[id]
+		if product then
+			local current = strongest[product.familyId]
+			if not current or (SpellDefs.BASE_VARIANT_QUALITIES[product.baseQuality].basePower > SpellDefs.BASE_VARIANT_QUALITIES[current.baseQuality].basePower) then
+				strongest[product.familyId] = product
 			end
 		end
 	end
-	-- stable ordering (cheaper first, then name) so the shop doesn't jump around
-	table.sort(list, function(a, b)
-		local da = SpellDefs.SPELLS[a]
-		local db = SpellDefs.SPELLS[b]
-		local ca = tonumber(da and da.costCoins) or 0
-		local cb = tonumber(db and db.costCoins) or 0
-		if ca ~= cb then
-			return ca < cb
+	return strongest
+end
+
+function SpellDefs.GetSynergyResult(a, b)
+	if typeof(a) ~= "string" or typeof(b) ~= "string" or a == "" or b == "" then
+		return nil
+	end
+	local key = (a < b) and (a .. "|" .. b) or (b .. "|" .. a)
+	local synergy = SYNERGY_LOOKUP[key]
+	return synergy and synergy.resultId or nil
+end
+
+function SpellDefs.GetSynergiesFor(spellId)
+	local out = {}
+	for _, synergy in ipairs(SYNERGY_BY_INGREDIENT[spellId] or {}) do
+		table.insert(out, synergy)
+	end
+	return out
+end
+
+function SpellDefs.IsIngredientBlockedByCombo(spellId, activeSet)
+	for _, synergy in ipairs(SYNERGY_BY_INGREDIENT[spellId] or {}) do
+		if activeSet[synergy.resultId] then
+			return true
 		end
-		local na = tostring(da and da.name or a)
-		local nb = tostring(db and db.name or b)
-		return na < nb
+	end
+	return false
+end
+
+function SpellDefs.GetSynergyHint(spellId, activeSet)
+	for _, synergy in ipairs(SYNERGY_BY_INGREDIENT[spellId] or {}) do
+		local other = synergy.ingredients[1] == spellId and synergy.ingredients[2] or synergy.ingredients[1]
+		if activeSet[other] then
+			return synergy.resultId, other
+		end
+	end
+	return nil, nil
+end
+
+function SpellDefs.DescribeShopProduct(productIdOrDef)
+	local product = typeof(productIdOrDef) == "string" and SpellDefs.GetProduct(productIdOrDef) or productIdOrDef
+	if not product then return "" end
+	local variant = SpellDefs.BASE_VARIANT_QUALITIES[product.baseQuality]
+	return string.format("%s\n%s\n%s\nStronger variants start with better baseline stats and build potential.", product.category, variant and variant.label or "Base Variant", product.description or "")
+end
+
+function SpellDefs.DescribeNewOffer(productIdOrDef)
+	local product = typeof(productIdOrDef) == "string" and SpellDefs.GetProduct(productIdOrDef) or productIdOrDef
+	if not product then return "" end
+	local variant = SpellDefs.BASE_VARIANT_QUALITIES[product.baseQuality]
+	return string.format("%s\n%s\nUnlocks %s with %s values from the start.", product.category, variant and variant.label or "Base Variant", product.name, string.lower((variant and variant.shortLabel) or "standard"))
+end
+
+function SpellDefs.DescribeUpgradeOffer(spellIdOrDef, qualityId, currentLevel)
+	local def = typeof(spellIdOrDef) == "string" and SpellDefs.GetSpell(spellIdOrDef) or spellIdOrDef
+	if not def then return "" end
+	local quality = SpellDefs.UPGRADE_QUALITIES[qualityId] or SpellDefs.UPGRADE_QUALITIES.Common
+	local nextLevel = math.clamp((currentLevel or 0) + 1, 1, def.maxLevel or 6)
+	return string.format("%s\n%s\nUpgrade to Lv.%d. +%.2f upgrade power improves damage, size and effect scaling.", def.category, quality.bonusText, nextLevel, quality.power)
+end
+
+function SpellDefs.ComputeRuntimeStats(spellIdOrDef, state)
+	local def = typeof(spellIdOrDef) == "string" and SpellDefs.GetSpell(spellIdOrDef) or spellIdOrDef
+	if not def then return nil end
+	local runtime = copyTable(def.runtime or {})
+	local level = math.max(1, math.floor(tonumber(state and state.level) or 1))
+	local baseMultiplier = math.max(0.5, tonumber(state and state.baseMultiplier) or 1)
+	local basePower = math.max(0, tonumber(state and state.basePower) or 0)
+	local upgradePower = math.max(0, tonumber(state and state.upgradePower) or 0)
+	local levelFactor = 1 + ((level - 1) * 0.18)
+	local powerFactor = 1 + (basePower * 0.10) + (upgradePower * 0.08)
+	local areaFactor = 1 + ((level - 1) * 0.05) + (basePower * 0.03) + (upgradePower * 0.02)
+	local cooldownFactor = math.max(0.55, 1 - ((level - 1) * 0.025) - (upgradePower * 0.012) - (basePower * 0.01))
+	runtime.damage = (runtime.baseDamage or 10) * baseMultiplier * levelFactor * powerFactor
+	runtime.cooldown = (runtime.cooldown or 1) * cooldownFactor
+	runtime.radius = (runtime.baseRadius or 0) * areaFactor
+	runtime.duration = (runtime.duration or 0) * (1 + ((level - 1) * 0.06) + (upgradePower * 0.02))
+	runtime.width = (runtime.width or 0) * areaFactor
+	runtime.range = (runtime.range or 0) * (1 + ((level - 1) * 0.03) + (upgradePower * 0.01))
+	runtime.projectileSpeed = (runtime.projectileSpeed or 0) * (1 + ((level - 1) * 0.02) + (upgradePower * 0.01))
+	runtime.orbitSpeed = (runtime.orbitSpeed or 0) * (1 + ((level - 1) * 0.03) + (upgradePower * 0.01))
+	runtime.count = math.max(1, math.floor((runtime.baseCount or 1) + math.floor((level - 1) / 3) * (runtime.countPerThreeLevels or 0) + math.floor(upgradePower / 4)))
+	runtime.pierce = math.max(0, math.floor((runtime.pierce or 0) + (basePower >= 0.8 and 1 or 0) + math.floor(upgradePower / 6)))
+	runtime.level = level
+	runtime.baseMultiplier = baseMultiplier
+	runtime.basePower = basePower
+	runtime.upgradePower = upgradePower
+	runtime.effectPower = 1 + ((level - 1) * 0.08) + (upgradePower * 0.06) + (basePower * 0.03)
+	runtime.visualColor = SpellDefs.GetSpellColor(def)
+	local effects = copyTable(EFFECTS[def.element] or {})
+	if def.secondaryElement then
+		for key, value in pairs(EFFECTS[def.secondaryElement] or {}) do
+			if key ~= "note" and effects[key] == nil then
+				effects[key] = value
+			end
+		end
+	end
+	runtime.effects = effects
+	return runtime
+end
+
+function SpellDefs.SortSpellIds(ids)
+	table.sort(ids, function(a, b)
+		local da, db = SpellDefs.GetSpell(a), SpellDefs.GetSpell(b)
+		if not da or not db then return tostring(a) < tostring(b) end
+		if da.spellType ~= db.spellType then return da.spellType == "Magic" end
+		local oa = SpellDefs.ELEMENTS[da.element] and SpellDefs.ELEMENTS[da.element].order or 99
+		local ob = SpellDefs.ELEMENTS[db.element] and SpellDefs.ELEMENTS[db.element].order or 99
+		if oa ~= ob then return oa < ob end
+		if da.attackType ~= db.attackType then return tostring(da.attackType) < tostring(db.attackType) end
+		return tostring(da.name) < tostring(db.name)
 	end)
-	return list
+	return ids
+end
+
+function SpellDefs.GetQualityOrder()
+	local out = {}
+	for _, id in ipairs(QUALITY_ORDER) do
+		table.insert(out, id)
+	end
+	return out
 end
 
 return SpellDefs

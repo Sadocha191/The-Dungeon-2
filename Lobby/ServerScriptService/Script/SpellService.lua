@@ -1,21 +1,19 @@
--- SpellService.server.lua (ServerScriptService/Script)
-
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
--- PlayerData
 local playerDataModule = (ServerScriptService:FindFirstChild("ModuleScript") and ServerScriptService.ModuleScript:FindFirstChild("PlayerData"))
 	or (ServerScriptService:FindFirstChild("ModuleScripts") and ServerScriptService.ModuleScripts:FindFirstChild("PlayerData"))
 	or ServerScriptService:FindFirstChild("PlayerData")
 assert(playerDataModule, "Missing PlayerData module")
 local PlayerData = require(playerDataModule)
 
--- Spell defs
-local moduleFolder = (ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5))
+local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
 local SpellDefs = require(moduleFolder:WaitForChild("SpellDefinitions"))
 
--- Remotes
 local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
 if not remoteEvents then
 	remoteEvents = Instance.new("Folder")
@@ -23,225 +21,92 @@ if not remoteEvents then
 	remoteEvents.Parent = ReplicatedStorage
 end
 
-local function ensureRemote(name: string): RemoteEvent
-	local r = remoteEvents:FindFirstChild(name)
-	if r and r:IsA("RemoteEvent") then return r end
-	r = Instance.new("RemoteEvent")
-	r.Name = name
-	r.Parent = remoteEvents
-	return r
+local function ensureRemote(name)
+	local remote = remoteEvents:FindFirstChild(name)
+	if remote and remote:IsA("RemoteEvent") then
+		return remote
+	end
+	remote = Instance.new("RemoteEvent")
+	remote.Name = name
+	remote.Parent = remoteEvents
+	return remote
 end
 
 local SpellEvent = ensureRemote("SpellEvent")
 local WitchShopEvent = ensureRemote("WitchShopEvent")
 
--- Run state (per serwer/instancję)
-local runOwned: {[number]: {[string]: number}} = {} -- [uid][spellId] = level
-local pending: {[number]: {token: string, choices: {[string]: boolean}}} = {}
-
-local function getRunTable(plr: Player)
-	local uid = plr.UserId
-	runOwned[uid] = runOwned[uid] or {}
-	return runOwned[uid]
+local function getPlayerData(plr)
+	return PlayerData.Get(plr)
 end
 
-local function getUnlockedTable(plr: Player)
-	local d = PlayerData.Get(plr)
-	d.spellsUnlocked = d.spellsUnlocked or {}
-	return d.spellsUnlocked
+local function getUnlockedTable(plr)
+	local data = getPlayerData(plr)
+	data.spellsUnlocked = data.spellsUnlocked or {}
+	return data.spellsUnlocked
 end
 
-local function setSpellAttr(plr: Player, spellId: string, level: number)
-	plr:SetAttribute(("Spell_%s_Level"):format(spellId), level)
-end
+local function buildShopPayload(plr)
+	local unlocked = getUnlockedTable(plr)
+	local payload = {}
 
-local function clearAllSpellAttrs(plr: Player)
-	for id,_ in pairs(SpellDefs.SPELLS) do
-		plr:SetAttribute(("Spell_%s_Level"):format(id), 0)
+	for _, productId in ipairs(SpellDefs.GetShopList()) do
+		local product = SpellDefs.GetProduct(productId)
+		if product then
+			payload[#payload + 1] = {
+				id = product.id,
+				familyId = product.familyId,
+				name = product.name,
+				displayName = product.displayName,
+				category = product.category,
+				spellType = product.spellType,
+				element = product.element,
+				attackType = product.attackType,
+				baseQuality = product.baseQuality,
+				costCoins = product.costSouls or product.costCoins or 0,
+				color = product.color,
+				owned = unlocked[product.id] == true,
+				desc = SpellDefs.DescribeShopProduct(product),
+			}
+		end
 	end
+
+	return payload
 end
 
-local function unlockSpell(plr: Player, spellId: string)
-	if not SpellDefs.IsValid(spellId) then return false end
-	local d = PlayerData.Get(plr)
-	d.spellsUnlocked = d.spellsUnlocked or {}
-	if d.spellsUnlocked[spellId] == true then
-		return false
-	end
-	d.spellsUnlocked[spellId] = true
-	PlayerData.MarkDirty(plr)
-	PlayerData.Save(plr, false)
-	return true
-end
-
-local function grantStarterSpellbook(plr: Player)
-	local d = PlayerData.Get(plr)
-	if d.spellbookUnlocked == true then
+local function grantStarterSpellbook(plr)
+	local data = getPlayerData(plr)
+	if data.spellbookUnlocked == true then
 		return
 	end
 
-	d.spellbookUnlocked = true
-	d.spellsUnlocked = d.spellsUnlocked or {}
+	data.spellbookUnlocked = true
+	data.spellsUnlocked = data.spellsUnlocked or {}
 
-	for _, spellId in ipairs(SpellDefs.BASE_STARTER) do
-		d.spellsUnlocked[spellId] = true
+	for _, productId in ipairs(SpellDefs.BASE_STARTER or {}) do
+		data.spellsUnlocked[productId] = true
 	end
 
 	PlayerData.MarkDirty(plr)
 	PlayerData.Save(plr, false)
 end
 
-local function buildShopPayload(plr: Player)
-	local d = PlayerData.Get(plr)
-	local unlocked = d.spellsUnlocked or {}
-	local list = SpellDefs.GetShopList()
-	local out = {}
-
-	for _, id in ipairs(list) do
-		local def = SpellDefs.Get(id)
-		table.insert(out, {
-			id = id,
-			name = def.name,
-			category = def.category,
-			costCoins = def.costCoins or 0,
-			owned = unlocked[id] == true,
-		})
+local function resetSpellAttrs(plr)
+	for id in pairs(SpellDefs.SPELLS) do
+		plr:SetAttribute(("Spell_%s_Level"):format(id), 0)
+		plr:SetAttribute(("Spell_%s_UpgradePower"):format(id), 0)
+		plr:SetAttribute(("Spell_%s_BaseMultiplier"):format(id), 0)
+		plr:SetAttribute(("Spell_%s_BasePower"):format(id), 0)
 	end
-
-	return out
 end
 
-local function rollSpellChoices(plr: Player)
-	local unlocked = getUnlockedTable(plr)
-	local owned = getRunTable(plr)
+SpellEvent.OnServerEvent:Connect(function() end)
 
-	local upgrades = {}
-	local news = {}
-
-	for spellId, ok in pairs(unlocked) do
-		if ok == true and owned[spellId] == nil then
-			table.insert(news, spellId)
-		end
+WitchShopEvent.OnServerEvent:Connect(function(plr, payload)
+	if typeof(payload) ~= "table" then
+		return
 	end
 
-	for spellId, lv in pairs(owned) do
-		local def = SpellDefs.Get(spellId)
-		if def and lv < (def.maxLevel or 8) then
-			table.insert(upgrades, spellId)
-		end
-	end
-
-	local runCount = 0
-	for _ in pairs(owned) do runCount += 1 end
-	local canAddNew = runCount < SpellDefs.MAX_RUN_SPELLS
-
-	local function pickRandom(t)
-		if #t == 0 then return nil end
-		local idx = math.random(1, #t)
-		local val = t[idx]
-		table.remove(t, idx)
-		return val
-	end
-
-	local picks = {}
-	local pickedSet = {}
-
-	for _=1,3 do
-		local chosen
-
-		if not canAddNew then
-			chosen = pickRandom(upgrades)
-		else
-			if #upgrades > 0 and (#news == 0 or math.random() < 0.65) then
-				chosen = pickRandom(upgrades)
-			else
-				chosen = pickRandom(news) or pickRandom(upgrades)
-			end
-		end
-
-		if not chosen then break end
-
-		if not pickedSet[chosen] then
-			pickedSet[chosen] = true
-			table.insert(picks, chosen)
-		end
-	end
-
-	while #picks < 3 do
-		local fallback = pickRandom(upgrades) or (canAddNew and pickRandom(news)) or nil
-		if not fallback then break end
-		if not pickedSet[fallback] then
-			pickedSet[fallback] = true
-			table.insert(picks, fallback)
-		end
-	end
-
-	local uiChoices = {}
-	for _, spellId in ipairs(picks) do
-		local def = SpellDefs.Get(spellId)
-		if def then
-			local lv = owned[spellId] or 0
-			local nextText = def.nextDesc and def.nextDesc(lv) or "Upgrade."
-			table.insert(uiChoices, {
-				id = spellId,
-				name = def.name,
-				desc = nextText,
-				value = nil,
-				rarity = (def.base and "Base Spell" or "Spell"),
-				color = (def.base and SpellDefs.COLOR_BASE or SpellDefs.COLOR_SHOP),
-			})
-		end
-	end
-
-	return uiChoices
-end
-
-local function openSpellChoice(plr: Player)
-	local token = ("%d_%d"):format(plr.UserId, math.floor(os.clock()*1000))
-	local choices = rollSpellChoices(plr)
-	if #choices == 0 then return end
-
-	local allowed = {}
-	for _, c in ipairs(choices) do
-		allowed[c.id] = true
-	end
-
-	pending[plr.UserId] = { token = token, choices = allowed }
-	SpellEvent:FireClient(plr, { type = "SHOW", token = token, choices = choices })
-end
-
-local function applyPick(plr: Player, token: string, spellId: string)
-	local pend = pending[plr.UserId]
-	if not pend then return end
-	if pend.token ~= token then return end
-	if pend.choices[spellId] ~= true then return end
-
-	local owned = getRunTable(plr)
-	local def = SpellDefs.Get(spellId)
-	if not def then return end
-
-	local current = owned[spellId] or 0
-	local nextLv = math.clamp(current + 1, 1, def.maxLevel or 8)
-	owned[spellId] = nextLv
-
-	setSpellAttr(plr, spellId, nextLv)
-	pending[plr.UserId] = nil
-end
-
--- ======== Remotes wiring ========
-
-SpellEvent.OnServerEvent:Connect(function(plr: Player, payload)
-	if typeof(payload) ~= "table" then return end
-	if payload.type == "PICK" then
-		applyPick(plr, tostring(payload.token or ""), tostring(payload.id or ""))
-	end
-end)
-
-WitchShopEvent.OnServerEvent:Connect(function(plr: Player, payload)
-	if typeof(payload) ~= "table" then return end
-	local d = PlayerData.Get(plr)
-
-	-- gating: shop dopiero po tutorialu (ATTR: TutorialComplete)
+	local data = getPlayerData(plr)
 	if plr:GetAttribute("TutorialComplete") ~= true then
 		WitchShopEvent:FireClient(plr, { type = "INFO", message = "Finish the tutorial first." })
 		return
@@ -250,54 +115,61 @@ WitchShopEvent.OnServerEvent:Connect(function(plr: Player, payload)
 	if payload.type == "OPEN" then
 		WitchShopEvent:FireClient(plr, {
 			type = "OPEN",
-			souls = d.souls,
+			souls = tonumber(data.souls) or 0,
 			spells = buildShopPayload(plr),
 		})
 		return
 	end
 
-	if payload.type == "BUY" then
-		local spellId = tostring(payload.id or "")
-		local def = SpellDefs.Get(spellId)
-		if not def or def.base == true then return end
+	if payload.type ~= "BUY" then
+		return
+	end
 
-		d.spellsUnlocked = d.spellsUnlocked or {}
-		if d.spellsUnlocked[spellId] == true then
-			WitchShopEvent:FireClient(plr, { type = "BOUGHT", id = spellId, souls = d.souls })
-			return
-		end
+	local productId = tostring(payload.id or "")
+	local product = SpellDefs.GetProduct(productId)
+	if not product then
+		WitchShopEvent:FireClient(plr, { type = "ERROR", message = "Unknown spell offer." })
+		return
+	end
 
-		local cost = math.max(0, tonumber(def.costCoins) or 0) -- now treated as Souls cost
-		if (tonumber(d.souls) or 0) < cost then
-			WitchShopEvent:FireClient(plr, { type = "ERROR", message = "Not enough souls." })
-			return
-		end
-
-		d.souls = (tonumber(d.souls) or 0) - cost
-		d.spellsUnlocked[spellId] = true
-
-		PlayerData.MarkDirty(plr)
-		PlayerData.Save(plr, false)
-
+	data.spellsUnlocked = data.spellsUnlocked or {}
+	if data.spellsUnlocked[productId] == true then
 		WitchShopEvent:FireClient(plr, {
 			type = "BOUGHT",
-			id = spellId,
-			souls = d.souls,
+			id = productId,
+			souls = tonumber(data.souls) or 0,
 			spells = buildShopPayload(plr),
 		})
+		return
 	end
+
+	local cost = math.max(0, tonumber(product.costSouls or product.costCoins) or 0)
+	if (tonumber(data.souls) or 0) < cost then
+		WitchShopEvent:FireClient(plr, { type = "ERROR", message = "Not enough souls." })
+		return
+	end
+
+	data.souls = (tonumber(data.souls) or 0) - cost
+	data.spellsUnlocked[productId] = true
+	PlayerData.MarkDirty(plr)
+	PlayerData.Save(plr, false)
+
+	WitchShopEvent:FireClient(plr, {
+		type = "BOUGHT",
+		id = productId,
+		souls = tonumber(data.souls) or 0,
+		spells = buildShopPayload(plr),
+	})
 end)
 
--- ======== Public hooki (dla innych skryptów) ========
-_G.Spells_OpenChoice = openSpellChoice
-_G.Spells_GrantStarterBook = grantStarterSpellbook
-_G.Spells_ResetRun = function(plr: Player)
-	runOwned[plr.UserId] = {}
-	pending[plr.UserId] = nil
-	clearAllSpellAttrs(plr)
+_G.Spells_OpenChoice = function()
+	return false
 end
 
-Players.PlayerRemoving:Connect(function(plr)
-	runOwned[plr.UserId] = nil
-	pending[plr.UserId] = nil
-end)
+_G.Spells_GrantStarterBook = grantStarterSpellbook
+
+_G.Spells_ResetRun = function(plr)
+	resetSpellAttrs(plr)
+end
+
+Players.PlayerRemoving:Connect(function() end)

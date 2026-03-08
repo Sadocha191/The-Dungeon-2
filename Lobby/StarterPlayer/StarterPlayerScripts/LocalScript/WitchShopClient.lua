@@ -159,11 +159,16 @@ local function setRight(spell)
 		return
 	end
 
-	rName.Text = spell.name
-	rInfo.Text = ("Category: %s\nCost: %d coins\nStatus: %s\n\nUnlocks the spell so it can appear during level up."):format(
-		tostring(spell.category),
+	rName.Text = tostring(spell.displayName or spell.name)
+	rInfo.Text = string.format(
+		"Type: %s\nElement: %s\nAttack: %s\nBase Variant: %s\nCost: %d Souls\nStatus: %s\n\n%s",
+		tostring(spell.spellType or "Spell"),
+		tostring(spell.element or "-"),
+		tostring(spell.attackType or "-"),
+		tostring(spell.baseQuality or "Standard"),
 		tonumber(spell.costCoins) or 0,
-		spell.owned and "Owned" or "Locked"
+		spell.owned and "Owned" or "Locked",
+		tostring(spell.desc or "Unlocks the spell so it can appear during level up.")
 	)
 
 	if spell.owned then
@@ -189,8 +194,8 @@ local function addRow(spell)
 	row.TextColor3 = Color3.fromRGB(230,230,230)
 	row.TextXAlignment = Enum.TextXAlignment.Left
 	row.Text = ("  %s  [%s]  %s"):format(
-		spell.name,
-		spell.category,
+		tostring(spell.displayName or spell.name),
+		tostring(spell.element or spell.category or "Spell"),
 		spell.owned and "Owned" or ("Cost: "..tostring(spell.costCoins).." Souls")
 	)
 	row.Parent = left

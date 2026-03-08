@@ -350,6 +350,55 @@ local function getSpellLevel(plr: Player, id: string): number
 	return tonumber(plr:GetAttribute(("Spell_%s_Level"):format(id))) or 0
 end
 
+local function getSpellUpgradePower(plr: Player, id: string): number
+	return tonumber(plr:GetAttribute(("Spell_%s_UpgradePower"):format(id))) or 0
+end
+
+local function getSpellBaseMultiplier(plr: Player, id: string): number
+	return tonumber(plr:GetAttribute(("Spell_%s_BaseMultiplier"):format(id))) or 0
+end
+
+local function getSpellBasePower(plr: Player, id: string): number
+	return tonumber(plr:GetAttribute(("Spell_%s_BasePower"):format(id))) or 0
+end
+
+local function setSpellState(plr: Player, id: string, level: number, upgradePower: number, baseMultiplier: number, basePower: number)
+	plr:SetAttribute(("Spell_%s_Level"):format(id), level)
+	plr:SetAttribute(("Spell_%s_UpgradePower"):format(id), upgradePower)
+	plr:SetAttribute(("Spell_%s_BaseMultiplier"):format(id), baseMultiplier)
+	plr:SetAttribute(("Spell_%s_BasePower"):format(id), basePower)
+end
+
+local function clearSpellState(plr: Player, id: string)
+	setSpellState(plr, id, 0, 0, 0, 0)
+end
+
+local function buildActiveSet(plr: Player): {[string]: boolean}
+	local active = {}
+	if not SpellDefs or not SpellDefs.SPELLS then
+		return active
+	end
+	for id in pairs(SpellDefs.SPELLS) do
+		if getSpellLevel(plr, id) > 0 then
+			active[id] = true
+		end
+	end
+	return active
+end
+
+local function countOwnedByType(plr: Player, spellType: string): number
+	if not SpellDefs or not SpellDefs.SPELLS then
+		return 0
+	end
+	local count = 0
+	for id, def in pairs(SpellDefs.SPELLS) do
+		if def.spellType == spellType and getSpellLevel(plr, id) > 0 then
+			count += 1
+		end
+	end
+	return count
+end
+
 local function distinctOwnedCount(plr: Player): number
 	if not SpellDefs or not SpellDefs.SPELLS then return 0 end
 	local n = 0
@@ -373,8 +422,12 @@ local function canOffer(plr: Player, id: string): boolean
 	local maxLv = tonumber(def.maxLevel) or 1
 	if lv >= maxLv then return false end
 
-	local maxSpells = tonumber(SpellDefs.MAX_RUN_SPELLS) or 6
-	if lv == 0 and distinctOwnedCount(plr) >= maxSpells then
+	local activeSet = buildActiveSet(plr)
+	if lv == 0 and SpellDefs.IsIngredientBlockedByCombo and SpellDefs.IsIngredientBlockedByCombo(id, activeSet) then
+		return false
+	end
+
+	if lv == 0 and countOwnedByType(plr, def.spellType or "Magic") >= (SpellDefs.GetTypeLimit and SpellDefs.GetTypeLimit(def.spellType) or SpellDefs.MAX_RUN_SPELLS or 10) then
 		return false
 	end
 
@@ -446,88 +499,207 @@ local function finishUpgrade(plr: Player)
 end
 
 
--- rarity rolling
-local RARITY_ORDER = { "Common", "Uncommon", "Rare", "Epic" }
+local QUALITY_ORDER = SpellDefs and SpellDefs.GetQualityOrder and SpellDefs.GetQualityOrder() or { "Common", "Uncommon", "Rare", "Epic" }
 
 local function rollRarity(weights: table): string
 	local r = math.random()
 	local acc = 0
-	for _, key in ipairs(RARITY_ORDER) do
+	for _, key in ipairs(QUALITY_ORDER) do
 		acc += (weights[key] or 0)
 		if r <= acc then return key end
 	end
 	return "Common"
 end
 
-local function buildPoolsByRarity(plr: Player)
-	local unlocked = parseUnlocked(plr)
-	local pools = { Common = {}, Uncommon = {}, Rare = {}, Epic = {} }
+local function strongestUnlockedProducts(plr: Player)
+	return SpellDefs.ResolveUnlockedProducts(parseUnlocked(plr))
+end
 
-	for _, id in ipairs(unlocked) do
-		if canOffer(plr, id) then
-			local def = SpellDefs.SPELLS[id]
-			local rarity = (def and def.rarity) or "Common"
-			if not pools[rarity] then rarity = "Common" end
-			table.insert(pools[rarity], id)
+local function buildElementCounts(activeSet: {[string]: boolean}): {[string]: number}
+	local counts = {}
+	for spellId in pairs(activeSet) do
+		local def = SpellDefs.SPELLS[spellId]
+		if def and def.element then
+			counts[def.element] = (counts[def.element] or 0) + 1
+		end
+	end
+	return counts
+end
+
+local function candidateScore(plr: Player, spellId: string, offerType: string, activeSet: {[string]: boolean}, elementCounts: {[string]: number}): number
+	local def = SpellDefs.SPELLS[spellId]
+	if not def then
+		return 0
+	end
+
+	local score = offerType == "upgrade" and 1.20 or 1.00
+	score += (elementCounts[def.element] or 0) * 0.22
+	score += def.spellType == "Physical" and 0.10 or 0.05
+
+	local synergyResult = SpellDefs.GetSynergyHint and SpellDefs.GetSynergyHint(spellId, activeSet) or nil
+	if synergyResult then
+		score += offerType == "new" and 2.40 or 0.75
+	end
+
+	if def.isCombo then
+		score += 0.90
+	end
+
+	local level = getSpellLevel(plr, spellId)
+	if offerType == "upgrade" then
+		score += math.max(0, 0.45 - (level * 0.05))
+	end
+
+	return score
+end
+
+local function buildOfferCandidates(plr: Player)
+	local candidates = {}
+	local seen = {}
+	local activeSet = buildActiveSet(plr)
+	local elementCounts = buildElementCounts(activeSet)
+
+	for familyId, product in pairs(strongestUnlockedProducts(plr)) do
+		if canOffer(plr, familyId) then
+			local offerType = getSpellLevel(plr, familyId) > 0 and "upgrade" or "new"
+			candidates[#candidates + 1] = {
+				spellId = familyId,
+				productId = product.id,
+				offerType = offerType,
+				score = candidateScore(plr, familyId, offerType, activeSet, elementCounts),
+			}
+			seen[familyId] = true
 		end
 	end
 
-	return pools
+	for spellId, def in pairs(SpellDefs.SPELLS) do
+		if def.isCombo and getSpellLevel(plr, spellId) > 0 and canOffer(plr, spellId) and not seen[spellId] then
+			candidates[#candidates + 1] = {
+				spellId = spellId,
+				offerType = "upgrade",
+				score = candidateScore(plr, spellId, "upgrade", activeSet, elementCounts),
+			}
+		end
+	end
+
+	return candidates, activeSet
+end
+
+local function drawWeighted(candidates: {any})
+	local total = 0
+	for _, candidate in ipairs(candidates) do
+		total += math.max(0.01, tonumber(candidate.score) or 0.01)
+	end
+	if total <= 0 then
+		return nil
+	end
+
+	local roll = math.random() * total
+	local acc = 0
+	for index, candidate in ipairs(candidates) do
+		acc += math.max(0.01, tonumber(candidate.score) or 0.01)
+		if roll <= acc then
+			table.remove(candidates, index)
+			return candidate
+		end
+	end
+	return table.remove(candidates, #candidates)
+end
+
+local function makeOfferPayload(plr: Player, candidate: any, activeSet: {[string]: boolean})
+	local def = SpellDefs.SPELLS[candidate.spellId]
+	if not def then
+		return nil
+	end
+
+	local synergyResult = SpellDefs.GetSynergyHint and SpellDefs.GetSynergyHint(candidate.spellId, activeSet) or nil
+	local payload = {
+		spellId = candidate.spellId,
+		productId = candidate.productId,
+		offerType = candidate.offerType,
+		name = def.name,
+		spellType = def.spellType,
+		element = def.element,
+		attackType = def.attackType,
+		color = SpellDefs.GetSpellColor(def),
+		synergyResult = synergyResult,
+	}
+
+	if candidate.offerType == "new" then
+		local product = SpellDefs.GetProduct(candidate.productId)
+		if not product then
+			return nil
+		end
+		local baseVariant = SpellDefs.BASE_VARIANT_QUALITIES[product.baseQuality]
+		payload.quality = product.baseQuality
+		payload.cardQuality = product.cardQuality or "Common"
+		payload.subtitle = baseVariant and baseVariant.label or "Base Spell"
+		payload.desc = SpellDefs.DescribeNewOffer(product)
+	else
+		local quality = rollRarity(SpellDefs.RARITY_WEIGHTS or { Common = 1 })
+		local qualityDef = SpellDefs.UPGRADE_QUALITIES[quality] or SpellDefs.UPGRADE_QUALITIES.Common
+		payload.quality = quality
+		payload.cardQuality = quality
+		payload.subtitle = qualityDef.label
+		payload.desc = SpellDefs.DescribeUpgradeOffer(def, quality, getSpellLevel(plr, candidate.spellId))
+	end
+
+	if synergyResult and SpellDefs.SPELLS[synergyResult] then
+		payload.desc = string.format("%s\nSynergy: merges with your current build into %s.", payload.desc, SpellDefs.SPELLS[synergyResult].name)
+	end
+
+	return payload
 end
 
 local function rollOffers(plr: Player)
-	if not SpellDefs or not SpellDefs.SPELLS then return {} end
+	if not SpellDefs or not SpellDefs.SPELLS then
+		return {}
+	end
 
-	local pools = buildPoolsByRarity(plr)
-	local weights = SpellDefs.RARITY_WEIGHTS or { Common=1, Uncommon=0, Rare=0, Epic=0 }
-
+	local candidates, activeSet = buildOfferCandidates(plr)
 	local offers = {}
-	local picked = {}
 
 	for _ = 1, 3 do
-		local pickedId, pickedRarity
-
-		-- retry: wylosuj rarity, ale tylko jeśli w tej puli jest jeszcze unikalny spell
-		for attempt = 1, 25 do
-			local rarity = rollRarity(weights)
-			local pool = pools[rarity]
-			if pool and #pool > 0 then
-				for _ = 1, 10 do
-					local candidate = pool[math.random(1, #pool)]
-					if candidate and not picked[candidate] then
-						pickedId = candidate
-						pickedRarity = rarity
-						break
-					end
-				end
-				if pickedId then break end
-			end
+		local candidate = drawWeighted(candidates)
+		if not candidate then
+			break
 		end
-
-		-- fallback: dowolna niepusta pula z jeszcze nieużytym spell'em
-		if not pickedId then
-			for _, rarity in ipairs(RARITY_ORDER) do
-				local pool = pools[rarity]
-				if pool and #pool > 0 then
-					for _, candidate in ipairs(pool) do
-						if candidate and not picked[candidate] then
-							pickedId = candidate
-							pickedRarity = rarity
-							break
-						end
-					end
-					if pickedId then break end
-				end
-			end
-		end
-
-		if pickedId then
-			picked[pickedId] = true
-			table.insert(offers, { spellId = pickedId, rarity = pickedRarity or "Common" })
+		local offer = makeOfferPayload(plr, candidate, activeSet)
+		if offer then
+			offers[#offers + 1] = offer
 		end
 	end
 
 	return offers
+end
+
+local function resolveSynergies(plr: Player)
+	if not SpellDefs or not SpellDefs.SYNERGIES then
+		return
+	end
+
+	local changed = true
+	while changed do
+		changed = false
+		for _, synergy in ipairs(SpellDefs.SYNERGIES) do
+			local a = synergy.ingredients[1]
+			local b = synergy.ingredients[2]
+			local resultId = synergy.resultId
+			if getSpellLevel(plr, a) > 0 and getSpellLevel(plr, b) > 0 and getSpellLevel(plr, resultId) <= 0 then
+				local resultDef = SpellDefs.SPELLS[resultId]
+				local resultLevel = math.clamp(math.max(getSpellLevel(plr, a), getSpellLevel(plr, b)), 1, resultDef and resultDef.maxLevel or 6)
+				local resultUpgradePower = getSpellUpgradePower(plr, a) + getSpellUpgradePower(plr, b) + 0.75
+				local resultBaseMultiplier = math.max(getSpellBaseMultiplier(plr, a), getSpellBaseMultiplier(plr, b), 1) + 0.06
+				local resultBasePower = math.max(getSpellBasePower(plr, a), getSpellBasePower(plr, b)) + 0.50
+
+				clearSpellState(plr, a)
+				clearSpellState(plr, b)
+				setSpellState(plr, resultId, resultLevel, resultUpgradePower, resultBaseMultiplier, resultBasePower)
+				changed = true
+				break
+			end
+		end
+	end
 end
 
 openSpellMenu = function(plr: Player)
@@ -564,23 +736,41 @@ SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 	local t = tostring(payload.type or "")
 
 	-- helper: sprawdź czy spell był w aktualnych ofertach (walidacja)
-	local function offered(spellId: string): boolean
+	local function offered(spellId: string)
 		for _, off in ipairs(p.offers or {}) do
 			if off.spellId == spellId then
-				return true
+				return off
 			end
 		end
-		return false
+		return nil
 	end
 
 	if t == "pick" then
 		local id = tostring(payload.spellId or "")
 		if id == "" then return end
-		if not offered(id) then return end
+		local offer = offered(id)
+		if not offer then return end
 		if not canOffer(plr, id) then return end
 
-		local lv = getSpellLevel(plr, id)
-		plr:SetAttribute(("Spell_%s_Level"):format(id), lv + 1)
+		if offer.offerType == "new" then
+			local product = SpellDefs.GetProduct(tostring(offer.productId or ""))
+			if not product then return end
+			setSpellState(plr, id, 1, 0, tonumber(product.baseMultiplier) or 1, tonumber(product.basePower) or 0)
+		else
+			local qualityDef = SpellDefs.UPGRADE_QUALITIES[tostring(offer.quality or "Common")] or SpellDefs.UPGRADE_QUALITIES.Common
+			local nextLevel = math.clamp(getSpellLevel(plr, id) + 1, 1, (SpellDefs.SPELLS[id] and SpellDefs.SPELLS[id].maxLevel) or 6)
+			local baseMultiplier = math.max(getSpellBaseMultiplier(plr, id), 1)
+			setSpellState(
+				plr,
+				id,
+				nextLevel,
+				getSpellUpgradePower(plr, id) + (qualityDef.power or 1),
+				baseMultiplier,
+				getSpellBasePower(plr, id)
+			)
+		end
+
+		resolveSynergies(plr)
 
 		-- Missions: count picked upgrades
 		if MissionProgress and MissionProgress.Add then
@@ -1001,6 +1191,9 @@ Players.PlayerAdded:Connect(function(plr: Player)
 	if SpellDefs and SpellDefs.SPELLS then
 		for id, _ in pairs(SpellDefs.SPELLS) do
 			plr:SetAttribute(("Spell_%s_Level"):format(id), 0)
+			plr:SetAttribute(("Spell_%s_UpgradePower"):format(id), 0)
+			plr:SetAttribute(("Spell_%s_BaseMultiplier"):format(id), 0)
+			plr:SetAttribute(("Spell_%s_BasePower"):format(id), 0)
 		end
 	end
 
