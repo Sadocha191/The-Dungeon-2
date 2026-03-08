@@ -6,10 +6,11 @@ local NpcService = require(ServerScriptService:WaitForChild("ModuleScript"):Wait
 
 local STATUE_RAYCAST_TRIES = 60
 local STATUE_HEIGHT = 2.4
-local MIN_STATUE_GAP = 40
+local MIN_STATUE_GAP = 32
 
 local MAGNET_DURATION = 10
 local BATTLE_SPAWN_COUNT = 8
+local STATUE_SPAWN_ORDER = { "battle", "magnet", "battle", "magnet" }
 
 local RunStarted = ReplicatedStorage:FindFirstChild("RunStarted")
 if not RunStarted then
@@ -407,7 +408,7 @@ local function spawnStatuesForRun()
 	clearStatues()
 
 	local usedPositions = {}
-	for i, statueType in ipairs({ "battle", "magnet" }) do
+	for i, statueType in ipairs(STATUE_SPAWN_ORDER) do
 		local pos = randomGroundPoint(usedPositions)
 		if pos then
 			table.insert(usedPositions, pos)

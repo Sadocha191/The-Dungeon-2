@@ -77,6 +77,11 @@ if not vfxRoot then
 	vfxRoot.Parent = workspace
 end
 
+local PROJECTILE_CAST_HEIGHT = 1.1
+local ORBIT_HIT_HEIGHT = 1.0
+local PROJECTILE_TARGET_SEARCH_RADIUS = 4
+local PROJECTILE_HIT_RADIUS = 3.2
+
 -- ===== Utils =====
 local function getEnemyRoot(model: Model): BasePart?
 	return NpcService.GetRoot(model)
@@ -152,6 +157,10 @@ local function sortEnemiesByDistance(fromPos: Vector3, enemies: {Model})
 		end
 		return (aPos - fromPos).Magnitude < (bPos - fromPos).Magnitude
 	end)
+end
+
+local function getSpellCastOrigin(basePos: Vector3): Vector3
+	return basePos + Vector3.new(0, PROJECTILE_CAST_HEIGHT, 0)
 end
 -- ===== Per-player state =====
 local state = {} :: {[number]: any}
@@ -334,9 +343,9 @@ local function fireProjectile(plr: Player, origin: Vector3, dir: Vector3, speed:
 				return
 			end
 
-			local nearest = getNearestEnemy(p.Position, 3)
+			local nearest = getNearestEnemy(p.Position, PROJECTILE_TARGET_SEARCH_RADIUS)
 			local nearestRoot = nearest and getEnemyRoot(nearest)
-			if nearestRoot and (nearestRoot.Position - p.Position).Magnitude <= 2.5 then
+			if nearestRoot and (nearestRoot.Position - p.Position).Magnitude <= PROJECTILE_HIT_RADIUS then
 				if not hit[nearest] then
 					hit[nearest] = true
 					projHitDamage(plr, nearest, dmg * mult, opts)
@@ -423,7 +432,7 @@ local function tickOrbit(plr: Player, dt: number, id: string, count: number, rad
 		count = count,
 		radius = radius,
 		orbitSpeed = orbitSpeed,
-		height = 1.5,
+		height = ORBIT_HIT_HEIGHT,
 		size = 1.2,
 		transparency = 0.25,
 	})
@@ -437,7 +446,7 @@ local function tickOrbit(plr: Player, dt: number, id: string, count: number, rad
 	local t0 = bucket.t
 	for i = 1, count do
 		local ang = t0 + (i / math.max(1, count)) * math.pi * 2
-		local pos = hrp.Position + Vector3.new(math.cos(ang) * radius, 1.5, math.sin(ang) * radius)
+		local pos = hrp.Position + Vector3.new(math.cos(ang) * radius, ORBIT_HIT_HEIGHT, math.sin(ang) * radius)
 
 		local nearest = getNearestEnemy(pos, 3)
 		if nearest and enemyAlive(nearest) then
@@ -557,8 +566,9 @@ local function stepPlayer(plr: Player, dt: number)
 		local nextT = s.cds.ShadowDagger or 0
 		if spellClock() >= nextT then
 			s.cds.ShadowDagger = spellClock() + cd
+			local castOrigin = getSpellCastOrigin(pos)
 			local target = getNearestEnemy(pos, 40)
-			local dir = target and getEnemyDirection(pos, target)
+			local dir = target and getEnemyDirection(castOrigin, target)
 			if dir then
 				local knives = (lv >= 3 and 2) or 1
 				for k=1,knives do
@@ -570,7 +580,7 @@ local function stepPlayer(plr: Player, dt: number)
 							mult = 1.8
 						end
 						local pierce = (lv >= 6 and 2) or 0
-						fireProjectile(plr, pos + Vector3.new(0,2,0), dir, 85, 50, dmg*mult, pierce, { crit = mult > 1 })
+						fireProjectile(plr, castOrigin, dir, 85, 50, dmg*mult, pierce, { crit = mult > 1 })
 					end)
 				end
 			end
@@ -584,8 +594,9 @@ local function stepPlayer(plr: Player, dt: number)
 		local nextT = s.cds.BoneSpear or 0
 		if spellClock() >= nextT then
 			s.cds.BoneSpear = spellClock() + cd
+			local castOrigin = getSpellCastOrigin(pos)
 			local target = getNearestEnemy(pos, 60)
-			local dir0 = target and getEnemyDirection(pos, target)
+			local dir0 = target and getEnemyDirection(castOrigin, target)
 			if dir0 then
 				local spears = (lv >= 6 and 3) or (lv >= 3 and 2) or 1
 				local pierce = (lv >= 6 and 5) or (lv >= 4 and 3) or (lv >= 1 and 2) or 1
@@ -594,7 +605,7 @@ local function stepPlayer(plr: Player, dt: number)
 					local dir = (CFrame.fromAxisAngle(Vector3.new(0,1,0), ang) * dir0)
 					local dmg = 18 + (lv*6)
 					local speed = 95 * (lv >= 5 and 1.2 or 1.0)
-					fireProjectile(plr, pos + Vector3.new(0,2,0), dir, speed, 70, dmg, pierce, {})
+					fireProjectile(plr, castOrigin, dir, speed, 70, dmg, pierce, {})
 				end
 			end
 		end
@@ -770,14 +781,15 @@ local function stepPlayer(plr: Player, dt: number)
 			local speed = 75 * (lv>=2 and 1.15 or 1.0)
 			local dmg = 16 + lv*6
 			local impactR = (lv>=5 and 4) or 0
+			local castOrigin = getSpellCastOrigin(pos)
 			local enemies = getEnemyModels()
 			sortEnemiesByDistance(pos, enemies)
 			for i=1,count do
 				local t = enemies[i]
 				local targetPos = t and getEnemyPosition(t)
-				local dir = t and getEnemyDirection(pos, t)
+				local dir = t and getEnemyDirection(castOrigin, t)
 				if dir and targetPos then
-					fireProjectile(plr, pos + Vector3.new(0,2,0), dir, speed, range, dmg, 0, { })
+					fireProjectile(plr, castOrigin, dir, speed, range, dmg, 0, { })
 					if impactR > 0 then
 						task.delay(0.15 + i*0.05, function()
 							pulseAt(plr, targetPos, impactR, dmg*0.6, {})
@@ -796,7 +808,8 @@ local function stepPlayer(plr: Player, dt: number)
 		if spellClock() >= nextT then
 			s.cds.CrystalBarrage = spellClock() + cd
 			local target = getNearestEnemy(pos, 55)
-			local dir0 = target and getEnemyDirection(pos, target)
+			local castOrigin = getSpellCastOrigin(pos)
+			local dir0 = target and getEnemyDirection(castOrigin, target)
 			if dir0 then
 				local shards = (lv>=6 and 10) or (lv>=3 and 7) or 5
 				local cone = math.rad(28)
@@ -806,7 +819,7 @@ local function stepPlayer(plr: Player, dt: number)
 				for i=1,shards do
 					local ang = (math.random()-0.5) * cone
 					local dir = (CFrame.fromAxisAngle(Vector3.new(0,1,0), ang) * dir0)
-					fireProjectile(plr, pos + Vector3.new(0,2,0), dir, speed, 60, dmg, 0, {})
+					fireProjectile(plr, castOrigin, dir, speed, 60, dmg, 0, {})
 					if impactR > 0 then
 						task.delay(0.10, function()
 							-- handled by projectile hit test; simple extra AoE not perfect
@@ -942,7 +955,7 @@ local function stepPlayer(plr: Player, dt: number)
 			local aoe = 6 * (lv>=4 and 1.15 or 1.0)
 			for i=1,count do
 				local skull = ensurePart("Skull", Vector3.new(0.9,0.9,0.9))
-				skull.Position = pos + Vector3.new(0,2,0)
+				skull.Position = getSpellCastOrigin(pos)
 				skull.Transparency = 0.2
 				local target = getNearestEnemy(pos, 70)
 				local life = 3.2
@@ -1297,11 +1310,12 @@ local function stepPlayer(plr: Player, dt: number)
 			s.cds.EmberSpirits = spellClock() + interval
 			local target = getNearestEnemy(pos, 50)
 			local targetPos = target and getEnemyPosition(target)
-			local dir = target and getEnemyDirection(pos, target)
+			local castOrigin = getSpellCastOrigin(pos)
+			local dir = target and getEnemyDirection(castOrigin, target)
 			if dir and targetPos then
 				local dmg = 24 + lv*8
 				local aoe = 7 * (lv>=2 and 1.10 or 1.0)
-				fireProjectile(plr, pos + Vector3.new(0,2,0), dir, 85, 55, dmg, 0, {})
+				fireProjectile(plr, castOrigin, dir, 85, 55, dmg, 0, {})
 				task.delay(0.2, function()
 					pulseAt(plr, targetPos, aoe, dmg*0.7, {})
 				end)
