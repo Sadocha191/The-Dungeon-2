@@ -44,13 +44,10 @@ assert(fill, "Health bar Fill image was not found")
 inner.ZIndex = 1
 mask.ZIndex = 1
 fill.ZIndex = 1
-bg.ZIndex = 2
 
 mask.ClipsDescendants = true
 fill.SizeConstraint = Enum.SizeConstraint.RelativeXY
 fill.ScaleType = Enum.ScaleType.Crop
-bg.SizeConstraint = Enum.SizeConstraint.RelativeXY
-bg.ScaleType = Enum.ScaleType.Stretch
 
 local baseMaskSize = mask.Size
 local baseMaskPosition = mask.Position
