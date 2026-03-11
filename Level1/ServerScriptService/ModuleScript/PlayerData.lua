@@ -9,6 +9,16 @@ PlayerData._cache = {}
 PlayerData._dirty = {}
 PlayerData._saving = {}
 
+local function defaultCraftingData()
+	return {
+		recipes = {},
+		mineResources = {},
+		mobMaterials = {},
+		upgradeMaterials = {},
+		miningSession = nil,
+	}
+end
+
 local function defaultProfile()
 	return {
 		level = 1,
@@ -69,6 +79,8 @@ local function defaultProfile()
 
 		-- Loadout (weapon entries: { id, level, rarity, stats })
 		Loadout = {},
+
+		crafting = defaultCraftingData(),
 	}
 end
 
@@ -77,6 +89,93 @@ local function clampInt(x)
 	x = math.floor(x)
 	if x < 0 then x = 0 end
 	return x
+end
+
+local function sanitizeCountMap(raw)
+	local out = {}
+	if typeof(raw) ~= "table" then
+		return out
+	end
+	for key, value in pairs(raw) do
+		if typeof(key) == "string" and key ~= "" then
+			local amount = clampInt(value)
+			if amount > 0 then
+				out[key] = amount
+			end
+		end
+	end
+	return out
+end
+
+local function sanitizeStringList(raw)
+	local out = {}
+	local seen = {}
+	if typeof(raw) ~= "table" then
+		return out
+	end
+	for _, value in ipairs(raw) do
+		if typeof(value) == "string" and value ~= "" and not seen[value] then
+			seen[value] = true
+			table.insert(out, value)
+		end
+	end
+	return out
+end
+
+local function sanitizeRecipes(raw)
+	local out = {}
+	if typeof(raw) ~= "table" then
+		return out
+	end
+	for recipeId, state in pairs(raw) do
+		if typeof(recipeId) == "string" and recipeId ~= "" then
+			if state == true then
+				out[recipeId] = {
+					found = true,
+					copies = 1,
+					tier = 1,
+					unlocked = false,
+					lastFoundAt = 0,
+				}
+			elseif typeof(state) == "table" then
+				local found = state.found == true or state.discovered == true or state.copies ~= nil
+				local copies = clampInt(state.copies or state.foundCount or state.duplicates or 0)
+				if found and copies <= 0 then
+					copies = 1
+				end
+				if found then
+					out[recipeId] = {
+						found = true,
+						copies = copies,
+						tier = math.max(1, clampInt(state.tier or 1)),
+						unlocked = state.unlocked == true,
+						lastFoundAt = clampInt(state.lastFoundAt or state.discoveredAt or 0),
+					}
+				end
+			end
+		end
+	end
+	return out
+end
+
+local function sanitizeMiningSession(raw)
+	if typeof(raw) ~= "table" then
+		return nil
+	end
+
+	local startedAt = clampInt(raw.startedAt or raw.StartedAt)
+	local endsAt = clampInt(raw.endsAt or raw.EndsAt)
+	local durationSec = clampInt(raw.durationSec or raw.DurationSec)
+	if startedAt <= 0 or endsAt <= startedAt or durationSec <= 0 then
+		return nil
+	end
+
+	return {
+		startedAt = startedAt,
+		endsAt = endsAt,
+		durationSec = durationSec,
+		priority = sanitizeStringList(raw.priority or raw.Priority),
+	}
 end
 
 function PlayerData.Get(plr)
@@ -177,6 +276,14 @@ function PlayerData.Get(plr)
 	if typeof(data.Loadout) ~= "table" then
 		data.Loadout = {}
 	end
+	if typeof(data.crafting) ~= "table" then
+		data.crafting = defaultCraftingData()
+	end
+	data.crafting.recipes = sanitizeRecipes(data.crafting.recipes)
+	data.crafting.mineResources = sanitizeCountMap(data.crafting.mineResources)
+	data.crafting.mobMaterials = sanitizeCountMap(data.crafting.mobMaterials)
+	data.crafting.upgradeMaterials = sanitizeCountMap(data.crafting.upgradeMaterials)
+	data.crafting.miningSession = sanitizeMiningSession(data.crafting.miningSession)
 
 	PlayerData._cache[uid] = data
 	PlayerData._dirty[uid] = false

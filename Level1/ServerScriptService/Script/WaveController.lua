@@ -60,6 +60,8 @@ end)
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local NpcService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("NpcService"))
+local PlayerData = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerData"))
+local CraftingConfig = require((ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5)):WaitForChild("CraftingConfig"))
 
 local MissionProgress = nil
 pcall(function()
@@ -418,6 +420,7 @@ local ENEMY_HP_MULTIPLIER = 1.5
 local ELITE_SOUL_DROP_MIN = 12
 local ELITE_SOUL_DROP_MAX = 18
 local ELITE_INTERVAL_SECONDS = 5 * 60
+local materialRng = Random.new()
 
 local function timeScaleMult(elapsed: number)
 	-- Per minute: HP +5%, Damage +3%
@@ -483,10 +486,73 @@ local function cleanupTemplateScripts(mob: Model)
     end
 end
 
-local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, _ctx)
-    local pos = (_ctx and _ctx.position) or NpcService.GetPosition(mob) or mob:GetPivot().Position
+local function getActiveRunPlayers(): {Player}
+	local out = {}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr.Parent and plr:GetAttribute("RunEnded") ~= true then
+			table.insert(out, plr)
+		end
+	end
+	return out
+end
 
-    if _G.RegisterEnemyKill then
+local function addPersistentCount(plr: Player, bucketName: string, itemId: string, amount: number)
+	if typeof(itemId) ~= "string" or itemId == "" then
+		return
+	end
+	amount = math.max(0, math.floor(tonumber(amount) or 0))
+	if amount <= 0 then
+		return
+	end
+
+	local data = PlayerData.Get(plr)
+	data.crafting = data.crafting or {}
+	data.crafting[bucketName] = data.crafting[bucketName] or {}
+	local bucket = data.crafting[bucketName]
+	bucket[itemId] = math.max(0, math.floor(tonumber(bucket[itemId]) or 0)) + amount
+	if PlayerData.MarkDirty then
+		PlayerData.MarkDirty(plr)
+	end
+end
+
+local function awardPersistentMobDrops(mobType: string, isElite: boolean, isBoss: boolean)
+	local materialId = CraftingConfig.GetMobMaterialForMob(mobType)
+	local activePlayers = getActiveRunPlayers()
+	if #activePlayers == 0 then
+		return
+	end
+
+	local crystalAward = 0
+	if isBoss then
+		local range = CraftingConfig.BOSS_UPGRADE_CRYSTAL_RANGE or { min = 8, max = 12 }
+		crystalAward = materialRng:NextInteger(range.min or 8, range.max or 12)
+	elseif isElite then
+		local range = CraftingConfig.ELITE_UPGRADE_CRYSTAL_RANGE or { min = 3, max = 5 }
+		crystalAward = materialRng:NextInteger(range.min or 3, range.max or 5)
+	elseif materialRng:NextNumber() <= (tonumber(CraftingConfig.NORMAL_MOB_UPGRADE_CRYSTAL_CHANCE) or 0) then
+		crystalAward = 1
+	end
+
+	for _, plr in ipairs(activePlayers) do
+		if materialId then
+			local materialCount = isBoss and 3 or (isElite and 2 or 1)
+			addPersistentCount(plr, "mobMaterials", materialId, materialCount)
+		end
+		if crystalAward > 0 then
+			addPersistentCount(plr, "upgradeMaterials", CraftingConfig.UPGRADE_CRYSTAL_ID, crystalAward)
+		end
+		if isBoss then
+			addPersistentCount(plr, "upgradeMaterials", CraftingConfig.BOSS_SPECIAL_ID, 1)
+		elseif isElite then
+			addPersistentCount(plr, "upgradeMaterials", CraftingConfig.ELITE_SPECIAL_ID, 1)
+		end
+	end
+end
+
+local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, isBoss: boolean, _ctx)
+	local pos = (_ctx and _ctx.position) or NpcService.GetPosition(mob) or mob:GetPivot().Position
+
+	if _G.RegisterEnemyKill then
         pcall(function() _G.RegisterEnemyKill(pos) end)
     end
 
@@ -501,25 +567,27 @@ local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, _ctx)
     local xpDrop = rewardCfg.xp or 5
     local coinDrop = rewardCfg.coins or 1
     local soulsDrop = 0
-    if isElite then
-        xpDrop = math.floor(xpDrop * 10)
-        coinDrop = math.floor(coinDrop * 8)
-        soulsDrop = math.random(ELITE_SOUL_DROP_MIN, ELITE_SOUL_DROP_MAX)
-    end
-    if _G.SpawnDropsAt then
-        pcall(function() _G.SpawnDropsAt(pos, xpDrop, coinDrop, soulsDrop) end)
-    end
+	if isElite then
+		xpDrop = math.floor(xpDrop * 10)
+		coinDrop = math.floor(coinDrop * 8)
+		soulsDrop = math.random(ELITE_SOUL_DROP_MIN, ELITE_SOUL_DROP_MAX)
+	end
+	awardPersistentMobDrops(tostring(mob:GetAttribute("MobType") or mob.Name), isElite, isBoss)
+	if _G.SpawnDropsAt then
+		pcall(function() _G.SpawnDropsAt(pos, xpDrop, coinDrop, soulsDrop) end)
+	end
 end
 
-local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, isElite: boolean, extraOnDeath)
-    mob:SetAttribute("MobType", mobType)
-    mob:SetAttribute("Damage", stats.dmg)
-    mob:SetAttribute("AttackRange", stats.range)
-    mob:SetAttribute("AttackCooldown", stats.cd)
-    mob:SetAttribute("IsElite", isElite)
-    mob:SetAttribute("IsRanged", stats.isRanged == true)
-    mob:SetAttribute("IsDead", false)
-    mob:SetAttribute("IsAttacking", false)
+local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, isElite: boolean, isBoss: boolean, extraOnDeath)
+	mob:SetAttribute("MobType", mobType)
+	mob:SetAttribute("Damage", stats.dmg)
+	mob:SetAttribute("AttackRange", stats.range)
+	mob:SetAttribute("AttackCooldown", stats.cd)
+	mob:SetAttribute("IsElite", isElite)
+	mob:SetAttribute("IsBoss", isBoss == true)
+	mob:SetAttribute("IsRanged", stats.isRanged == true)
+	mob:SetAttribute("IsDead", false)
+	mob:SetAttribute("IsAttacking", false)
 
     local registeredId = NpcService.Register(mob, {
         mobType = mobType,
@@ -533,7 +601,7 @@ local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, i
         despawnDelay = 3,
         attackWindup = math.min(0.6, math.max(0.2, stats.cd * 0.45)),
         onDeath = function(_npc, ctx)
-            handleMobDeath(mob, rewardCfg, isElite, ctx)
+            handleMobDeath(mob, rewardCfg, isElite, isBoss == true, ctx)
             if extraOnDeath then
                 extraOnDeath(mob, ctx)
             end
@@ -588,7 +656,7 @@ local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vecto
         cd = cfg.cd,
         dmg = dmg,
         isRanged = cfg.isRanged == true,
-    }, cfg, isElite, nil)
+    }, cfg, isElite, false, nil)
 end
 
 local elapsed: () -> number
@@ -921,7 +989,7 @@ local function ensurePortal()
 		cd = 1.4,
 		dmg = 24,
 		isRanged = false,
-	}, { xp = 120, coins = 60 }, true, function()
+	}, { xp = 120, coins = 60 }, true, true, function()
 		bossDefeated = true
 		broadcast({ type = "portalBossDefeated" })
 		setPromptState()

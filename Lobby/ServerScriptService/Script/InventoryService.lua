@@ -10,7 +10,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 
 local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
-local CurrencyService = require(serverModules:WaitForChild("CurrencyService"))
+local CraftingService = require(serverModules:WaitForChild("CraftingService"))
 local WeaponConfigs = require((ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5)):WaitForChild("WeaponConfigs"))
 
 local function findWeaponCatalog(): ModuleScript?
@@ -116,7 +116,9 @@ local function applyInstanceAttributes(tool: Tool, inst: any)
 end
 
 local function equipWeaponInstance(player: Player, instanceId: string): boolean
-	PlayerStateStore.Load(player)
+	if not PlayerStateStore.Get(player) then
+		PlayerStateStore.Load(player)
+	end
 	local inst = PlayerStateStore.GetWeaponInstance(player, instanceId)
 	if not inst then
 		return false
@@ -229,19 +231,6 @@ local function buildItemData(inst: any, favorites: {[string]: boolean})
 	return item
 end
 
-local function getSellValue(weaponName: string): number
-	local def = WeaponConfigs.Get(weaponName)
-	if not def then return 0 end
-	local rarityMultiplier = ({
-		Common = 1,
-		Rare = 1.4,
-		Epic = 1.8,
-		Legendary = 2.4,
-		Mythical = 3,
-	})[def.rarity] or 1
-	return def.sellValue or math.max(1, math.floor((def.baseDamage or 0) * 3 * rarityMultiplier))
-end
-
 local function sendInventory(player: Player)
 	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
 	local favorites = buildFavoriteSet(state.FavoriteWeapons)
@@ -292,16 +281,19 @@ InventoryAction.OnServerEvent:Connect(function(player: Player, payload: any)
 	if actionType == "sell" then
 		local inst = PlayerStateStore.GetWeaponInstance(player, instanceId)
 		if not inst then return end
-		PlayerStateStore.RemoveWeaponInstance(player, instanceId)
+		local ok = CraftingService.SellWeaponInstance(player, instanceId)
+		if not ok then return end
 		PlayerStateStore.SetFavoriteWeapon(player, inst.weaponId, false)
-		local sellValue = getSellValue(inst.weaponId)
-		if sellValue > 0 then
-			CurrencyService.AddCoins(player, sellValue)
-		end
+
+		local updatedState = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
 		if state.EquippedWeaponInstanceId == instanceId then
-			PlayerStateStore.SetEquippedWeaponInstance(player, nil)
-			clearWeaponTools(player:FindFirstChildOfClass("Backpack"))
-			clearWeaponTools(player.Character)
+			local nextEquippedId = updatedState.EquippedWeaponInstanceId
+			if typeof(nextEquippedId) == "string" and nextEquippedId ~= "" then
+				equipWeaponInstance(player, nextEquippedId)
+			else
+				clearWeaponTools(player:FindFirstChildOfClass("Backpack"))
+				clearWeaponTools(player.Character)
+			end
 		end
 		sendInventory(player)
 		return

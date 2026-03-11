@@ -1,105 +1,13 @@
--- BlacksmithService.server.lua
--- Forge: losuje broń (max Epic), losuje prefix jakości (modyfikuje WSZYSTKIE staty), tworzy instancję.
--- Upgrade: x1 lub +10 (zatrzymuje się na maxLevel albo gdy brakuje Silver).
--- UI: Sync wysyła listę instancji + computed stats + dane do forge panelu.
-
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local ServerStorage = game:GetService("ServerStorage")
 
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
-local CurrencyService = require(serverModules:WaitForChild("CurrencyService"))
+local CraftingService = require(serverModules:WaitForChild("CraftingService"))
+local WeaponCatalog = require(serverModules:WaitForChild("WeaponCatalog"))
 
-local WeaponConfigs = require((ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5)):WaitForChild("WeaponConfigs"))
-
-local CRAFT_COST = 500
-
-local RARITY_BASE_UPGRADE = {
-	Common = 40,
-	Rare = 80,
-	Epic = 140,
-	Legendary = 220,
-	Mythical = 320,
-}
-
-local function computeUpgradeCost(rarity: string, level: number): number
-	local base = RARITY_BASE_UPGRADE[rarity] or 60
-	level = math.max(1, math.floor(tonumber(level) or 1))
-	-- zależne od rarity + rośnie z levelem
-	local factor = 1 + (level - 1) * 0.08
-	return math.max(1, math.floor(base * factor))
-end
-
--- Prefixy jakości (globalny roll)
-local PREFIX_POOL = {
-	{ name = "Flawed",        weight = 15, min = 0.85, max = 0.95 },
-	{ name = "Worn",          weight = 20, min = 0.95, max = 1.00 },
-	{ name = "Balanced",      weight = 30, min = 1.00, max = 1.05 },
-	{ name = "Fine",          weight = 20, min = 1.05, max = 1.12 },
-	{ name = "Masterwork",    weight = 12, min = 1.12, max = 1.20 },
-	{ name = "Mythic-Forged", weight = 3,  min = 1.20, max = 1.35 },
-}
-
-local rng = Random.new()
-
-local function rollPrefix()
-	local total = 0
-	for _, p in ipairs(PREFIX_POOL) do total += p.weight end
-	local pick = rng:NextNumber(0, total)
-	local acc = 0
-	for _, p in ipairs(PREFIX_POOL) do
-		acc += p.weight
-		if pick <= acc then
-			local mult = rng:NextNumber(p.min, p.max)
-			return p.name, mult
-		end
-	end
-	return "Balanced", 1.0
-end
-
--- RollStats jest ADDITIVE (różnica od bazowych), żeby łatwo to sumować
-local function buildRollStats(def: any, mult: number): any
-	local combat = def.combat or {}
-	local baseAtk = combat.baseAtk or def.baseDamage or 0
-	local atkPerLevel = combat.atkPerLevel or 0
-
-	local function diff(x: number): number
-		return (x * mult) - x
-	end
-
-	return {
-		BaseATK = diff(baseAtk),
-		ATKPerLevel = diff(atkPerLevel),
-
-		BonusHP = diff(combat.bonusHP or 0),
-		BonusSpeed = diff(combat.bonusSpeed or 0),
-		BonusCritRate = diff(combat.bonusCritRate or 0),
-		BonusCritDmg = diff(combat.bonusCritDmg or 0),
-		BonusLifesteal = diff(combat.bonusLifesteal or 0),
-		BonusDefense = diff(combat.bonusDefense or 0),
-	}
-end
-
-local function listForgeableWeapons()
-	local out = {}
-	for _, def in ipairs(WeaponConfigs.GetAll()) do
-		local r = def.rarity
-		if r == "Common" or r == "Rare" or r == "Epic" then
-			table.insert(out, def)
-		end
-	end
-	return out
-end
-
-local FORGE_POOL = listForgeableWeapons()
-
-local function pickRandomForgeWeapon(): any?
-	if #FORGE_POOL == 0 then return nil end
-	return FORGE_POOL[rng:NextInteger(1, #FORGE_POOL)]
-end
-
--- ===== Remotes =====
 local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
 if not remoteEvents then
 	remoteEvents = Instance.new("Folder")
@@ -107,28 +15,35 @@ if not remoteEvents then
 	remoteEvents.Parent = ReplicatedStorage
 end
 
-local function ensureRemote(name: string): RemoteEvent
-	local ev = remoteEvents:FindFirstChild(name)
-	if ev and ev:IsA("RemoteEvent") then return ev end
-	ev = Instance.new("RemoteEvent")
-	ev.Name = name
-	ev.Parent = remoteEvents
-	return ev
+local function ensureRemote(name)
+	local remote = remoteEvents:FindFirstChild(name)
+	if remote and remote:IsA("RemoteEvent") then
+		return remote
+	end
+	remote = Instance.new("RemoteEvent")
+	remote.Name = name
+	remote.Parent = remoteEvents
+	return remote
 end
 
 local OpenBlacksmithUI = ensureRemote("OpenBlacksmithUI")
 local BlacksmithSync = ensureRemote("BlacksmithSync")
 local BlacksmithAction = ensureRemote("BlacksmithAction")
 
--- ===== NPC Prompt =====
-local function findAnyBasePart(model: Model): BasePart?
+local WeaponTemplates = ServerStorage:FindFirstChild("WeaponTemplates")
+
+local function findAnyBasePart(model)
 	if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
 		return model.PrimaryPart
 	end
-	local hrp = model:FindFirstChild("HumanoidRootPart")
-	if hrp and hrp:IsA("BasePart") then return hrp end
-	for _, d in ipairs(model:GetDescendants()) do
-		if d:IsA("BasePart") then return d end
+	local root = model:FindFirstChild("HumanoidRootPart")
+	if root and root:IsA("BasePart") then
+		return root
+	end
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			return descendant
+		end
 	end
 	return nil
 end
@@ -157,210 +72,165 @@ local function setupBlacksmithPrompt()
 	end
 
 	prompt.ObjectText = "Blacksmith"
-	prompt.ActionText = "Forge / Upgrade"
+	prompt.ActionText = "Craft / Upgrade"
 
-	prompt.Triggered:Connect(function(player: Player)
+	prompt.Triggered:Connect(function(player)
 		OpenBlacksmithUI:FireClient(player)
 	end)
 end
 
-setupBlacksmithPrompt()
-
--- ===== Stat compute dla UI =====
-local function toPct(x: number): number
-	return math.floor((x or 0) * 100 + 0.5)
+local function isWeaponTool(inst)
+	if not inst:IsA("Tool") then
+		return false
+	end
+	if typeof(inst:GetAttribute("WeaponType")) == "string" then
+		return true
+	end
+	if typeof(inst:GetAttribute("WeaponInstanceId")) == "string" then
+		return true
+	end
+	return WeaponTemplates and WeaponTemplates:FindFirstChild(inst.Name, true) ~= nil
 end
 
-local function computeInstanceStats(def: any, inst: any)
-	local combat = def.combat or {}
-	local roll = (typeof(inst.rollStats) == "table") and inst.rollStats or {}
-
-	local lvl = math.max(1, math.floor(tonumber(inst.level) or 1))
-
-	local baseAtk = (combat.baseAtk or def.baseDamage or 0) + (roll.BaseATK or 0)
-	local atkPerLevel = (combat.atkPerLevel or 0) + (roll.ATKPerLevel or 0)
-	local atk = baseAtk + (lvl - 1) * atkPerLevel
-
-	local hp = (combat.bonusHP or 0) + (roll.BonusHP or 0)
-	local defv = (combat.bonusDefense or 0) + (roll.BonusDefense or 0)
-	local spd = (combat.bonusSpeed or 0) + (roll.BonusSpeed or 0)
-	local critRate = (combat.bonusCritRate or 0) + (roll.BonusCritRate or 0)
-	local critDmg = (combat.bonusCritDmg or 0) + (roll.BonusCritDmg or 0)
-	local lifesteal = (combat.bonusLifesteal or 0) + (roll.BonusLifesteal or 0)
-
-	return {
-		ATK = math.floor(atk + 0.5),
-		HP = math.floor(hp + 0.5),
-		DEF = math.floor(defv + 0.5),
-		SPD = toPct(spd),
-		CRIT_RATE = toPct(critRate),
-		CRIT_DMG = toPct(critDmg),
-		LIFESTEAL = toPct(lifesteal),
-	}
-end
-
--- ===== Snapshot =====
-local lastForgedByUser: {[number]: string} = {} -- instanceId
-
-local function buildSnapshot(player: Player)
-	local balances = CurrencyService.GetBalances(player)
-	local silver = balances.Silver or 0
-
-	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
-	local equippedInst = PlayerStateStore.GetEquippedWeaponInstance(player)
-	local equippedId = equippedInst and equippedInst.instanceId or nil
-
-	local instancesOut = {}
-	for _, inst in ipairs(state.WeaponInstances or {}) do
-		local def = WeaponConfigs.Get(inst.weaponId)
-		if def then
-			local rarity = (inst.rarity ~= "" and inst.rarity) or def.rarity or "Common"
-			local maxLevel = def.maxLevel or 1
-			local lvl = math.max(1, math.floor(tonumber(inst.level) or 1))
-			local canUpgrade = lvl < maxLevel
-			local stats = computeInstanceStats(def, inst)
-
-			table.insert(instancesOut, {
-				instanceId = inst.instanceId,
-				weaponId = inst.weaponId,
-				weaponType = def.weaponType or "",
-				rarity = rarity,
-				rarityColor = def.rarityColor or (WeaponConfigs.RarityColors and WeaponConfigs.RarityColors[rarity]) or "#B0B0B0",
-				level = lvl,
-				maxLevel = maxLevel,
-				prefix = inst.prefix or "Standard",
-				stats = stats,
-				passiveName = def.passiveName or "",
-				abilityName = def.abilityName or "",
-				upgradeCost = canUpgrade and computeUpgradeCost(rarity, lvl) or 0,
-				canUpgrade = canUpgrade,
-			})
+local function clearWeaponTools(container)
+	if not container then
+		return
+	end
+	for _, inst in ipairs(container:GetChildren()) do
+		if isWeaponTool(inst) then
+			inst:Destroy()
 		end
 	end
+end
 
-	-- sort: equipped first, potem rarity, potem level
-	local rarityRank = { Common = 1, Rare = 2, Epic = 3, Legendary = 4, Mythical = 5 }
-	table.sort(instancesOut, function(a, b)
-		if a.instanceId == equippedId then return true end
-		if b.instanceId == equippedId then return false end
-		local ra = rarityRank[a.rarity] or 0
-		local rb = rarityRank[b.rarity] or 0
-		if ra ~= rb then return ra > rb end
-		if a.level ~= b.level then return a.level > b.level end
-		return tostring(a.weaponId) < tostring(b.weaponId)
-	end)
-
-	-- last forged details (pełne info do prawego panelu Forge)
-	local lastId = lastForgedByUser[player.UserId]
-	local lastDetails = nil
-	if typeof(lastId) == "string" and lastId ~= "" then
-		for _, row in ipairs(instancesOut) do
-			if row.instanceId == lastId then
-				lastDetails = row
-				break
+local function applyInstanceAttributes(tool, inst)
+	tool:SetAttribute("WeaponInstanceId", inst.instanceId)
+	tool:SetAttribute("WeaponLevel", tonumber(inst.level) or 1)
+	tool:SetAttribute("WeaponPrefix", tostring(inst.prefix or "Standard"))
+	if typeof(inst.rollStats) == "table" then
+		for key, value in pairs(inst.rollStats) do
+			if typeof(key) == "string" and typeof(value) == "number" then
+				tool:SetAttribute("Roll_" .. key, value)
 			end
 		end
 	end
-
-	return {
-		silver = silver,
-		coins = silver,
-		craftCost = CRAFT_COST,
-		equippedInstanceId = equippedId,
-		instances = instancesOut,
-		lastForged = lastDetails,
-	}
 end
 
-local function sync(player: Player)
-	BlacksmithSync:FireClient(player, buildSnapshot(player))
-end
-
--- ===== Actions =====
-local function tryUpgradeSteps(player: Player, instanceId: string, steps: number)
+local function equipWeaponInstance(player, instanceId)
+	if not PlayerStateStore.Get(player) then
+		PlayerStateStore.Load(player)
+	end
 	local inst = PlayerStateStore.GetWeaponInstance(player, instanceId)
-	if not inst then return end
-
-	local def = WeaponConfigs.Get(inst.weaponId)
-	if not def then return end
-
-	local rarity = (inst.rarity ~= "" and inst.rarity) or def.rarity or "Common"
-	local maxLevel = def.maxLevel or 1
-
-	steps = math.clamp(math.floor(tonumber(steps) or 1), 1, 10)
-
-	for _ = 1, steps do
-		local lvl = math.max(1, math.floor(tonumber(inst.level) or 1))
-		if lvl >= maxLevel then break end
-
-		local cost = computeUpgradeCost(rarity, lvl)
-		if not CurrencyService.RemoveCurrency(player, "Silver", cost) then
-			break
-		end
-
-		inst.level = lvl + 1
+	if not inst then
+		return false
 	end
 
-	PlayerStateStore.Save(player)
+	local template = WeaponCatalog.FindTemplate(inst.weaponId)
+	if not template then
+		warn("[BlacksmithService] Missing weapon template:", inst.weaponId)
+		return false
+	end
+
+	local backpack = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 10)
+	if not backpack then
+		warn("[BlacksmithService] No Backpack for", player.Name)
+		return false
+	end
+
+	clearWeaponTools(backpack)
+	clearWeaponTools(player.Character)
+
+	local clone = template:Clone()
+	WeaponCatalog.PrepareTool(clone, inst.weaponId)
+	applyInstanceAttributes(clone, inst)
+	clone.Parent = backpack
+
+	PlayerStateStore.SetEquippedWeaponInstance(player, instanceId)
+	PlayerStateStore.EnsureOwnedWeapon(player, inst.weaponId)
+	return true
 end
 
-BlacksmithAction.OnServerEvent:Connect(function(player: Player, payload: any)
-	if typeof(payload) ~= "table" then return end
-	local t = payload.type
+local function sync(player, result)
+	local snapshot = CraftingService.BuildBlacksmithSnapshot(player)
+	if result then
+		snapshot.lastResult = result
+	end
+	BlacksmithSync:FireClient(player, snapshot)
+end
 
-	if t == "request" then
+setupBlacksmithPrompt()
+
+BlacksmithAction.OnServerEvent:Connect(function(player, payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+
+	local actionType = tostring(payload.type or "")
+	if actionType == "request" then
 		sync(player)
 		return
 	end
 
-	if t == "forge" then
-		if not CurrencyService.RemoveCurrency(player, "Silver", CRAFT_COST) then
-			sync(player)
-			return
+	local ok = false
+	local details = nil
+	local reason = nil
+	local equippedBefore = nil
+	local playerState = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
+	if playerState then
+		equippedBefore = playerState.EquippedWeaponInstanceId
+	end
+
+	if actionType == "unlockRecipe" then
+		ok, details = CraftingService.UnlockRecipe(player, tostring(payload.recipeId or ""))
+		if ok ~= true then
+			reason = details
 		end
-
-		local def = pickRandomForgeWeapon()
-		if not def then
-			CurrencyService.AddSilver(player, CRAFT_COST)
-			sync(player)
-			return
+	elseif actionType == "craft" then
+		ok, details = CraftingService.CraftRecipe(player, tostring(payload.recipeId or ""))
+		if ok ~= true then
+			reason = details
+		elseif not (typeof(equippedBefore) == "string" and equippedBefore ~= "") and typeof(details.instanceId) == "string" then
+			equipWeaponInstance(player, details.instanceId)
 		end
-
-		local prefix, mult = rollPrefix()
-		local rollStats = buildRollStats(def, mult)
-
-		local created = PlayerStateStore.AddWeaponInstance(player, def.id, def.rarity, 1, prefix, rollStats)
-		PlayerStateStore.EnsureOwnedWeapon(player, def.id)
-
-		if created then
-			lastForgedByUser[player.UserId] = created.instanceId
+	elseif actionType == "upgrade" then
+		ok, details = CraftingService.TryUpgradeWeapon(player, tostring(payload.instanceId or ""), tonumber(payload.steps) or 1)
+		if ok ~= true then
+			reason = typeof(details) == "string" and details or "UpgradeFailed"
 		end
-
-		sync(player)
-		return
+	elseif actionType == "sell" then
+		ok, details = CraftingService.SellWeaponInstance(player, tostring(payload.instanceId or ""))
+		if ok ~= true then
+			reason = details
+		elseif equippedBefore ~= nil and tostring(payload.instanceId or "") == tostring(equippedBefore) then
+			local updatedState = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
+			local nextEquippedId = updatedState and updatedState.EquippedWeaponInstanceId or nil
+			if typeof(nextEquippedId) == "string" and nextEquippedId ~= "" then
+				if not equipWeaponInstance(player, nextEquippedId) then
+					clearWeaponTools(player:FindFirstChildOfClass("Backpack"))
+					clearWeaponTools(player.Character)
+				end
+			else
+				clearWeaponTools(player:FindFirstChildOfClass("Backpack"))
+				clearWeaponTools(player.Character)
+			end
+		end
+	else
+		reason = "UnknownAction"
 	end
 
-	if t == "upgrade" then
-		local instanceId = tostring(payload.instanceId or "")
-		local steps = tonumber(payload.steps) or 1 -- 1 albo 10
-		tryUpgradeSteps(player, instanceId, steps)
-		sync(player)
-		return
-	end
-
-	if t == "equip" then
-		local instanceId = tostring(payload.instanceId or "")
-		PlayerStateStore.SetEquippedWeaponInstance(player, instanceId)
-		sync(player)
-		return
-	end
+	sync(player, {
+		type = actionType,
+		ok = ok == true,
+		reason = reason,
+		details = ok == true and details or nil,
+	})
 end)
 
-Players.PlayerAdded:Connect(function(player: Player)
+Players.PlayerAdded:Connect(function(player)
 	PlayerStateStore.Load(player)
 end)
 
-Players.PlayerRemoving:Connect(function(player: Player)
+Players.PlayerRemoving:Connect(function(player)
 	PlayerStateStore.Save(player, true)
 end)
 

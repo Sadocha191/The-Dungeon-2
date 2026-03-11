@@ -3,6 +3,10 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local PlayerData = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerData"))
+local CraftingConfig = require(ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("CraftingConfig"))
 
 local MIN_CHESTS = 30
 local MAX_CHESTS = 30
@@ -56,6 +60,7 @@ end
 local chests = {}
 local spawnedForRun = false
 local nextChestId = 0
+local recipeRng = Random.new()
 
 local NUM_DEFAULTS = {
 	ShrineDamageMult = 1,
@@ -367,6 +372,42 @@ local function applyReward(plr, reward)
 	end
 end
 
+local function awardRecipeDiscovery(plr)
+	if recipeRng:NextNumber() > (tonumber(CraftingConfig.RECIPE_DROP_CHANCE) or 0) then
+		return nil
+	end
+
+	local recipeId = CraftingConfig.RollRecipeId(recipeRng)
+	if typeof(recipeId) ~= "string" or recipeId == "" then
+		return nil
+	end
+
+	local data = PlayerData.Get(plr)
+	data.crafting = data.crafting or {}
+	data.crafting.recipes = data.crafting.recipes or {}
+
+	local state = data.crafting.recipes[recipeId]
+	if typeof(state) ~= "table" then
+		state = {
+			found = true,
+			copies = 1,
+			tier = 1,
+			unlocked = false,
+			lastFoundAt = os.time(),
+		}
+	else
+		state.found = true
+		state.copies = math.max(1, math.floor(tonumber(state.copies) or 1)) + 1
+		state.lastFoundAt = os.time()
+	end
+	state.tier = CraftingConfig.GetRecipeTierFromCopies(state.copies)
+	data.crafting.recipes[recipeId] = state
+	if PlayerData.MarkDirty then
+		PlayerData.MarkDirty(plr)
+	end
+	return recipeId, state
+end
+
 local function createChestModel(pos, idx, config)
 	config = config or {}
 
@@ -500,6 +541,7 @@ handleOpen = function(chest, plr)
 
 	local reward, rarity = pickReward(plr)
 	applyReward(plr, reward)
+	local foundRecipeId, recipeState = awardRecipeDiscovery(plr)
 	if chest.countsForScaling ~= false then
 		setNumAttr(plr, "ChestOpenedCount", getNumAttr(plr, "ChestOpenedCount", 0) + 1)
 	end
@@ -512,6 +554,15 @@ handleOpen = function(chest, plr)
 		free = openedForFree,
 		cost = chest.forceFree == true and 0 or cost,
 	})
+
+	if foundRecipeId then
+		WaveStatusEvent:FireClient(plr, {
+			type = "recipeFound",
+			recipeId = foundRecipeId,
+			copies = recipeState and recipeState.copies or 1,
+			tier = recipeState and recipeState.tier or 1,
+		})
+	end
 
 	task.delay(1.8, function()
 		if chest.model and chest.model.Parent then

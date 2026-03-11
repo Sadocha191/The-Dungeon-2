@@ -1070,8 +1070,7 @@ local function endRunForPlayer(plr: Player, reason: string)
 
 	local d = PlayerData.Get(plr)
 	d.xp = (tonumber(d.xp) or 0) + accountXp
-	-- PlayerData.coins is now SILVER
-	d.coins = (tonumber(d.coins) or 0) + coinsGained
+	d.silver = (tonumber(d.silver) or 0) + coinsGained
 
 	if tonumber(d.level) and tonumber(d.nextXp) and PlayerData.RollNextXp then
 		while d.xp >= d.nextXp do
