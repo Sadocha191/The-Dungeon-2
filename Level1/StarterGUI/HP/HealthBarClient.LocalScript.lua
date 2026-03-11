@@ -1,73 +1,77 @@
--- HealthBarClient (LocalScript) - full
--- Wymaga struktury:
+-- HealthBarClient (LocalScript)
+-- Expected structure:
 -- HP(ScreenGui)
---  └ HealthBar(Frame)
---     ├ Inner(Frame)
---     │   └ FillMask(Frame, ClipsDescendants=true)
---     │       └ Fill(ImageLabel)
---     └ BG(ImageLabel)
+--   HealthBar(Frame)
+--     Inner(Frame)
+--       FillMask(Frame, ClipsDescendants=true)
+--         Fill(ImageLabel)
+--     BG(ImageLabel)
 
 local Players = game:GetService("Players")
 
 local plr = Players.LocalPlayer
 local gui = script.Parent
 
--- dobrze żeby to było ustawione w Properties, ale tu też zabezpieczamy
+local function findFirstChildByNames(parent: Instance, names: { string })
+	for _, name in ipairs(names) do
+		local child = parent:FindFirstChild(name)
+		if child then
+			return child
+		end
+	end
+
+	return nil
+end
+
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 
 local root = gui:WaitForChild("HealthBar")
-local bg = root:WaitForChild("BG")
+local bg = root:FindFirstChild("BG") or root:FindFirstChildWhichIsA("ImageLabel")
+assert(bg, "Health bar BG image was not found")
 
-local inner = root:WaitForChild("Inner")
-local mask = inner:WaitForChild("FillMask")
-local fill = mask:WaitForChild("Fill")
+local inner = root:FindFirstChild("Inner") or root
+local mask = findFirstChildByNames(inner, { "FillMask", "FIllMask" })
+	or findFirstChildByNames(bg, { "FillMask", "FIllMask" })
+	or root:FindFirstChild("FillMask", true)
+	or root:FindFirstChild("FIllMask", true)
+assert(mask, "Health bar FillMask was not found")
 
--- warstwy (BG jako overlay)
+local fill = mask:FindFirstChild("Fill") or mask:FindFirstChildWhichIsA("ImageLabel")
+assert(fill, "Health bar Fill image was not found")
+
 inner.ZIndex = 1
 mask.ZIndex = 1
 fill.ZIndex = 1
 bg.ZIndex = 2
 
--- sanity: pozycje/rozmiary (żeby nic nie “uciekało”)
-root.AnchorPoint = Vector2.new(0.5, 1)
--- root.Position/Size ustawiasz w Properties
-
-inner.BackgroundTransparency = 1
-inner.Position = UDim2.new(0, 0, 0, 0)
-inner.Size = UDim2.new(1, 0, 1, 0)
-
-mask.BackgroundTransparency = 1
-mask.Position = UDim2.new(0, 0, 0, 0)
-mask.Size = UDim2.new(1, 0, 1, 0)
 mask.ClipsDescendants = true
-
-fill.BackgroundTransparency = 1
-fill.Position = UDim2.new(0, 0, 0, 0)
-fill.Size = UDim2.new(1, 0, 1, 0)
 fill.SizeConstraint = Enum.SizeConstraint.RelativeXY
--- Polecam Crop, żeby nie rozciągało tekstury
 fill.ScaleType = Enum.ScaleType.Crop
-
-bg.BackgroundTransparency = 1
-bg.Position = UDim2.new(0, 0, 0, 0)
-bg.Size = UDim2.new(1, 0, 1, 0)
 bg.SizeConstraint = Enum.SizeConstraint.RelativeXY
 bg.ScaleType = Enum.ScaleType.Stretch
 
-local function getHumanoid()
-	local char = plr.Character
-	if not char then return nil end
-	return char:FindFirstChildOfClass("Humanoid")
-end
+local baseMaskSize = mask.Size
+local baseMaskPosition = mask.Position
+local baseMaskAnchorPoint = mask.AnchorPoint
 
 local function setBar(hp: number, maxHp: number)
 	maxHp = math.max(1, maxHp)
 	local ratio = math.clamp(hp / maxHp, 0, 1)
 
-	-- ZMIENIAMY SZEROKOŚĆ MASKI (to obcina fill)
-	mask.Size = UDim2.new(ratio, 0, 1, 0)
+	-- Keep the mask aligned to the original left edge and only scale its width.
+	local leftXScale = baseMaskPosition.X.Scale - (baseMaskSize.X.Scale * baseMaskAnchorPoint.X)
+	local leftXOffset = baseMaskPosition.X.Offset - math.round(baseMaskSize.X.Offset * baseMaskAnchorPoint.X)
+
+	mask.AnchorPoint = Vector2.new(0, baseMaskAnchorPoint.Y)
+	mask.Position = UDim2.new(leftXScale, leftXOffset, baseMaskPosition.Y.Scale, baseMaskPosition.Y.Offset)
+	mask.Size = UDim2.new(
+		baseMaskSize.X.Scale * ratio,
+		math.round(baseMaskSize.X.Offset * ratio),
+		baseMaskSize.Y.Scale,
+		baseMaskSize.Y.Offset
+	)
 end
 
 local function bindHumanoid(hum: Humanoid)
@@ -92,4 +96,5 @@ end
 if plr.Character then
 	onCharacter(plr.Character)
 end
+
 plr.CharacterAdded:Connect(onCharacter)
