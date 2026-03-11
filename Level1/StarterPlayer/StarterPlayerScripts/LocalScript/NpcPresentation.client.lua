@@ -7,10 +7,10 @@ local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local batchEvent = remotes:WaitForChild("NpcBatchEvent")
 local syncRequestEvent = remotes:WaitForChild("NpcSyncRequest")
 
-local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
-if not moduleFolder then
-	moduleFolder = ReplicatedStorage:WaitForChild("ModuleScripts")
-end
+local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
 
 local NpcShared = require(moduleFolder:WaitForChild("NpcShared"))
 local LoadingOverlay = require(moduleFolder:WaitForChild("ClientLoadingOverlay"))

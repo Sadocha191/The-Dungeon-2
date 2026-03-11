@@ -6,7 +6,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerData = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerData"))
-local CraftingConfig = require(ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("CraftingConfig"))
+local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
+
+local CraftingConfig = require(moduleFolder:WaitForChild("CraftingConfig"))
 
 local MIN_CHESTS = 30
 local MAX_CHESTS = 30

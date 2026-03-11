@@ -7,10 +7,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local ClientReady = remotes:WaitForChild("ClientReady")
 
-local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
-if not moduleFolder then
-	moduleFolder = ReplicatedStorage:WaitForChild("ModuleScripts")
-end
+local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
 
 local LoadingOverlay = require(moduleFolder:WaitForChild("ClientLoadingOverlay"))
 
