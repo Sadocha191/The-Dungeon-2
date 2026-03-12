@@ -16,6 +16,14 @@ local MissionService = {}
 
 local DAILY_COUNT = 6
 local WEEKLY_COUNT = 3
+local SECONDS_PER_DAY = 24 * 60 * 60
+
+local function utcMidnightTimestamp(t: number?): number
+	local now = t or os.time()
+	local dt = os.date("!*t", now)
+	local secondsIntoDay = (((dt.hour or 0) * 60) + (dt.min or 0)) * 60 + (dt.sec or 0)
+	return now - secondsIntoDay
+end
 
 local function utcDayKey(t: number?): number
 	local dt = os.date("!*t", t or os.time())
@@ -23,9 +31,11 @@ local function utcDayKey(t: number?): number
 end
 
 local function utcWeekKey(t: number?): number
-	local dt = os.date("!*t", t or os.time())
-	local week = math.floor(((dt.yday or 1) - 1) / 7) + 1
-	return (dt.year * 100) + week
+	local midnight = utcMidnightTimestamp(t)
+	local dt = os.date("!*t", midnight)
+	local daysSinceMonday = ((dt.wday or 1) + 5) % 7
+	local monday = os.date("!*t", midnight - (daysSinceMonday * SECONDS_PER_DAY))
+	return (monday.year * 10000) + (monday.month * 100) + (monday.day or 0)
 end
 
 local function ensureMissionState(player: Player)

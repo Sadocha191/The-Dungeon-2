@@ -29,26 +29,28 @@ end
 
 local RF_GetMissions = ensureFunction("RF_GetMissions")
 local RF_ClaimMission = ensureFunction("RF_ClaimMission")
+local SECONDS_PER_DAY = 24 * 60 * 60
+
+local function utcMidnightTimestamp(now: number): number
+	local dt = os.date("!*t", now)
+	local secondsIntoDay = (((dt.hour or 0) * 60) + (dt.min or 0)) * 60 + (dt.sec or 0)
+	return now - secondsIntoDay
+end
 
 -- === Reset timers (UTC) ===
 local function nextDailyResetAt(now: number): number
-	local dt = os.date("!*t", now)
-	-- next day at 00:00:00 UTC
-	dt.hour, dt.min, dt.sec = 0, 0, 0
-	local todayMidnight = os.time(dt)
-	return todayMidnight + 24 * 60 * 60
+	return utcMidnightTimestamp(now) + SECONDS_PER_DAY
 end
 
 local function nextWeeklyResetAt(now: number): number
-	-- aligns with MissionService.utcWeekKey(): weeks are 7-day blocks starting Jan 1 (UTC)
-	local dt = os.date("!*t", now)
-	local yday = dt.yday or 1
-	local dayIndex = (yday - 1) % 7
-	local daysUntilNextBlock = 7 - dayIndex
-	-- next reset at next block start 00:00 UTC
-	dt.hour, dt.min, dt.sec = 0, 0, 0
-	local midnight = os.time(dt)
-	return midnight + daysUntilNextBlock * 24 * 60 * 60
+	local midnight = utcMidnightTimestamp(now)
+	local dt = os.date("!*t", midnight)
+	local daysSinceMonday = ((dt.wday or 1) + 5) % 7
+	local daysUntilNextMonday = 7 - daysSinceMonday
+	if daysUntilNextMonday <= 0 then
+		daysUntilNextMonday = 7
+	end
+	return midnight + (daysUntilNextMonday * SECONDS_PER_DAY)
 end
 
 RF_GetMissions.OnServerInvoke = function(player: Player)
