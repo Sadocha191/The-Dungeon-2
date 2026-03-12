@@ -4,6 +4,9 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local WorldBounds = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WorldBounds"))
 
 local MIN_SHRINES = 10
 local MAX_SHRINES = 20
@@ -182,41 +185,7 @@ local function clearShrines()
 end
 
 local function getWorldBoundsXZ()
-	local minX, minZ = math.huge, math.huge
-	local maxX, maxZ = -math.huge, -math.huge
-	local count = 0
-
-	local function consider(inst)
-		if not inst:IsA("BasePart") then return end
-		if not inst.CanCollide then return end
-		if inst.Size.Magnitude <= 6 then return end
-
-		local p = inst.Position
-		minX = math.min(minX, p.X)
-		maxX = math.max(maxX, p.X)
-		minZ = math.min(minZ, p.Z)
-		maxZ = math.max(maxZ, p.Z)
-		count += 1
-	end
-
-	local map = workspace:FindFirstChild("Map")
-	if map then
-		for _, d in ipairs(map:GetDescendants()) do
-			consider(d)
-		end
-	else
-		for _, d in ipairs(workspace:GetDescendants()) do
-			if count > 1000 then break end
-			consider(d)
-		end
-	end
-
-	if count < 10 or minX == math.huge then
-		return Vector2.new(-180, -180), Vector2.new(180, 180)
-	end
-
-	local pad = 20
-	return Vector2.new(minX + pad, minZ + pad), Vector2.new(maxX - pad, maxZ - pad)
+	return WorldBounds.GetXZ(20, Vector2.new(-180, -180), Vector2.new(180, 180))
 end
 
 local rayParams = RaycastParams.new()

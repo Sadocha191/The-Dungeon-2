@@ -41,7 +41,8 @@ local cam = Workspace.CurrentCamera
 -- USTAWIENIA
 local DISTANCE = 20
 local HEIGHT = 2.5
-local SENSITIVITY = 0.0022
+local MOUSE_SENSITIVITY = 0.0022
+local TOUCH_SENSITIVITY = 0.0065
 local LAG_SPEED = 7
 
 -- ograniczenia patrzenia (to blokuje “pod mapę”)
@@ -57,6 +58,8 @@ rayParams.IgnoreWater = true
 local targetYaw, targetPitch = 0, 0
 local yaw, pitch = 0, 0
 local frozenCFrame
+local touchLookDelta = Vector2.zero
+local lastTouchPanTranslation = Vector2.zero
 
 local function getHRP()
 	local char = player.Character
@@ -73,6 +76,43 @@ local function setUiInput()
 	UIS.MouseBehavior = Enum.MouseBehavior.Default
 	UIS.MouseIconEnabled = true
 end
+
+UIS.TouchPan:Connect(function(touchPositions, totalTranslation, _velocity, state, gameProcessedEvent)
+	if gameProcessedEvent or isBlockingUIOpen() then
+		touchLookDelta = Vector2.zero
+		lastTouchPanTranslation = Vector2.zero
+		return
+	end
+
+	local viewportWidth = math.max(1, cam.ViewportSize.X)
+	local controlsZone = viewportWidth * 0.35
+	local shouldRotate = false
+	for _, touchPos in ipairs(touchPositions or {}) do
+		if typeof(touchPos) == "Vector2" and touchPos.X >= controlsZone then
+			shouldRotate = true
+			break
+		end
+	end
+	if not shouldRotate then
+		if state == Enum.UserInputState.End or state == Enum.UserInputState.Cancel then
+			lastTouchPanTranslation = Vector2.zero
+		end
+		return
+	end
+
+	if state == Enum.UserInputState.Begin then
+		lastTouchPanTranslation = totalTranslation
+		return
+	end
+
+	local delta = totalTranslation - lastTouchPanTranslation
+	lastTouchPanTranslation = totalTranslation
+	touchLookDelta += delta
+
+	if state == Enum.UserInputState.End or state == Enum.UserInputState.Cancel then
+		lastTouchPanTranslation = Vector2.zero
+	end
+end)
 
 local function orbitStep(dt)
 	-- Only freeze/unlock for Upgrades + end-of-run menus (whitelist).
@@ -94,11 +134,18 @@ local function orbitStep(dt)
 	-- raycast ignoruje postać
 	rayParams.FilterDescendantsInstances = { player.Character }
 
-	local delta = UIS:GetMouseDelta()
-	targetYaw -= delta.X * SENSITIVITY
+	local mouseDelta = UIS:GetMouseDelta()
+	local touchDelta = touchLookDelta
+	touchLookDelta = Vector2.zero
+	targetYaw -= mouseDelta.X * MOUSE_SENSITIVITY
+	targetYaw -= touchDelta.X * TOUCH_SENSITIVITY
 
 	-- bez inverta (góra = patrzy w górę)
-	targetPitch = math.clamp(targetPitch + delta.Y * SENSITIVITY, MIN_PITCH, MAX_PITCH)
+	targetPitch = math.clamp(
+		targetPitch + (mouseDelta.Y * MOUSE_SENSITIVITY) + (touchDelta.Y * TOUCH_SENSITIVITY),
+		MIN_PITCH,
+		MAX_PITCH
+	)
 
 	local a = 1 - math.exp(-LAG_SPEED * dt)
 	yaw += (targetYaw - yaw) * a

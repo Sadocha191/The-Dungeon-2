@@ -191,6 +191,40 @@ WaveStatusEvent.OnClientEvent:Connect(function(p)
 		center.Text = ("CHEST: NEED %d COINS"):format(cost)
 		task.delay(2, function() center.Visible = false end)
 
+	elseif p.type == "recipeFound" then
+		local recipeName = tostring(p.recipeName or p.recipeId or "Recipe")
+		local rarity = tostring(p.rarity or "Common")
+		center.Visible = true
+		center.Text = ("RECIPE [%s]: %s"):format(rarity, recipeName)
+		task.delay(3, function() center.Visible = false end)
+
+	elseif p.type == "heroMonumentsSpawned" then
+		local count = math.max(0, math.floor(tonumber(p.count) or 0))
+		center.Visible = true
+		center.Text = ("HERO MONUMENTS: %d"):format(count)
+		task.delay(3, function() center.Visible = false end)
+
+	elseif p.type == "heroMonumentActivated" then
+		local playerName = tostring(p.playerName or "Player")
+		local duration = math.max(1, math.floor(tonumber(p.duration) or 0))
+		local rarity = tostring(p.rarity or "Common")
+		center.Visible = true
+		center.Text = ("HERO TRIAL [%s]: %ds (%s)"):format(rarity, duration, playerName)
+		task.delay(3, function() center.Visible = false end)
+
+	elseif p.type == "heroMonumentRewardReady" then
+		local rarity = tostring(p.rarity or "Common")
+		local recipeName = tostring(p.recipeName or "Recipe")
+		center.Visible = true
+		center.Text = ("RECIPE CHEST [%s]: %s"):format(rarity, recipeName)
+		task.delay(3, function() center.Visible = false end)
+
+	elseif p.type == "heroMonumentFailed" then
+		local playerName = tostring(p.playerName or "Player")
+		center.Visible = true
+		center.Text = ("HERO TRIAL FAILED (%s)"):format(playerName)
+		task.delay(3, function() center.Visible = false end)
+
 	elseif p.type == "statuesSpawned" then
 		local count = math.max(0, math.floor(tonumber(p.count) or 0))
 		center.Visible = true
@@ -225,6 +259,11 @@ WaveStatusEvent.OnClientEvent:Connect(function(p)
 	elseif p.type == "swarmEnd" then
 		center.Visible = true
 		center.Text = "SWARM ENDED"
+		task.delay(2, function() center.Visible = false end)
+
+	elseif p.type == "portalLocked" then
+		center.Visible = true
+		center.Text = ("PORTAL LOCKED: %s"):format(fmtTime(p.secondsLeft))
 		task.delay(2, function() center.Visible = false end)
 
 	elseif p.type == "complete" then

@@ -1,16 +1,34 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local NpcService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("NpcService"))
+local WorldBounds = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WorldBounds"))
+local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
+local CraftingConfig = require(moduleFolder:WaitForChild("CraftingConfig"))
 
-local STATUE_RAYCAST_TRIES = 60
-local STATUE_HEIGHT = 2.4
-local MIN_STATUE_GAP = 32
+local MONUMENT_COUNT = 3
+local MONUMENT_RAYCAST_TRIES = 60
+local MONUMENT_HEIGHT = 2.6
+local MIN_MONUMENT_GAP = 110
+local CHALLENGE_DURATION = 120
+local EXTRA_SPAWN_INTERVAL = 15
+local EXTRA_SPAWN_COUNT = 8
+local REWARD_OFFSET = 9
 
-local MAGNET_DURATION = 10
-local BATTLE_SPAWN_COUNT = 8
-local STATUE_SPAWN_ORDER = { "battle", "magnet", "battle", "magnet" }
+local RARITY_COLORS = {
+	Common = Color3.fromRGB(206, 206, 206),
+	Uncommon = Color3.fromRGB(88, 214, 121),
+	Rare = Color3.fromRGB(79, 172, 255),
+	Epic = Color3.fromRGB(185, 111, 255),
+	Legendary = Color3.fromRGB(255, 177, 66),
+	Mythical = Color3.fromRGB(255, 84, 129),
+}
+
+local recipeRng = Random.new()
 
 local RunStarted = ReplicatedStorage:FindFirstChild("RunStarted")
 if not RunStarted then
@@ -50,7 +68,16 @@ if not statuesFolder then
 end
 
 local spawnedForRun = false
-local statues = {}
+local monuments = {}
+local activeChallenge = nil
+
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+rayParams.IgnoreWater = false
+
+local function getRarityColor(rarity)
+	return RARITY_COLORS[tostring(rarity or "")] or Color3.fromRGB(255, 192, 92)
+end
 
 local function broadcast(payload)
 	for _, plr in ipairs(Players:GetPlayers()) do
@@ -58,7 +85,10 @@ local function broadcast(payload)
 	end
 end
 
-local function isAlive(plr: Player): boolean
+local function isAlive(plr: Player?): boolean
+	if not plr or plr.Parent ~= Players then
+		return false
+	end
 	local char = plr.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
 	return hum ~= nil and hum.Health > 0 and plr:GetAttribute("RunEnded") ~= true
@@ -74,56 +104,19 @@ local function getDisplayName(plr: Player?): string
 	return plr.Name
 end
 
-local function clearStatues()
-	for _, statue in ipairs(statues) do
-		if statue.model and statue.model.Parent then
-			statue.model:Destroy()
+local function clearMonuments()
+	activeChallenge = nil
+	for _, monument in ipairs(monuments) do
+		if monument.model and monument.model.Parent then
+			monument.model:Destroy()
 		end
 	end
-	table.clear(statues)
+	table.clear(monuments)
 end
 
 local function getWorldBoundsXZ()
-	local minX, minZ = math.huge, math.huge
-	local maxX, maxZ = -math.huge, -math.huge
-	local count = 0
-
-	local function consider(inst)
-		if not inst:IsA("BasePart") then return end
-		if not inst.CanCollide then return end
-		if inst.Size.Magnitude <= 6 then return end
-
-		local p = inst.Position
-		minX = math.min(minX, p.X)
-		maxX = math.max(maxX, p.X)
-		minZ = math.min(minZ, p.Z)
-		maxZ = math.max(maxZ, p.Z)
-		count += 1
-	end
-
-	local map = workspace:FindFirstChild("Map")
-	if map then
-		for _, d in ipairs(map:GetDescendants()) do
-			consider(d)
-		end
-	else
-		for _, d in ipairs(workspace:GetDescendants()) do
-			if count > 1000 then break end
-			consider(d)
-		end
-	end
-
-	if count < 10 or minX == math.huge then
-		return Vector2.new(-180, -180), Vector2.new(180, 180)
-	end
-
-	local pad = 20
-	return Vector2.new(minX + pad, minZ + pad), Vector2.new(maxX - pad, maxZ - pad)
+	return WorldBounds.GetXZ(28, Vector2.new(-180, -180), Vector2.new(180, 180))
 end
-
-local rayParams = RaycastParams.new()
-rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-rayParams.IgnoreWater = false
 
 local function buildRaycastBlacklist()
 	local list = {
@@ -143,7 +136,7 @@ end
 
 local function farEnoughFromOthers(pos, used)
 	for _, other in ipairs(used) do
-		if (other - pos).Magnitude < MIN_STATUE_GAP then
+		if (other - pos).Magnitude < MIN_MONUMENT_GAP then
 			return false
 		end
 	end
@@ -154,13 +147,13 @@ local function randomGroundPoint(existing)
 	local pMin, pMax = getWorldBoundsXZ()
 	rayParams.FilterDescendantsInstances = buildRaycastBlacklist()
 
-	for _ = 1, STATUE_RAYCAST_TRIES do
+	for _ = 1, MONUMENT_RAYCAST_TRIES do
 		local x = pMin.X + math.random() * (pMax.X - pMin.X)
 		local z = pMin.Y + math.random() * (pMax.Y - pMin.Y)
 		local origin = Vector3.new(x, 420, z)
 		local result = workspace:Raycast(origin, Vector3.new(0, -900, 0), rayParams)
 		if result then
-			local pos = result.Position + Vector3.new(0, STATUE_HEIGHT, 0)
+			local pos = result.Position + Vector3.new(0, MONUMENT_HEIGHT, 0)
 			if farEnoughFromOthers(pos, existing) then
 				return pos
 			end
@@ -180,59 +173,38 @@ local function newPart(parent, name, size, color, material)
 	return p
 end
 
-local function waitForGlobalFunction(name: string, timeoutSec: number)
-	local deadline = os.clock() + math.max(0.1, timeoutSec)
-	while os.clock() <= deadline do
-		local fn = _G[name]
-		if type(fn) == "function" then
-			return fn
+local function updatePromptStates()
+	for _, monument in ipairs(monuments) do
+		if monument.prompt then
+			local blockedByChallenge = activeChallenge ~= nil and activeChallenge.monument ~= monument
+			monument.prompt.Enabled = (not monument.activated) and (not monument.resolved) and (not blockedByChallenge)
 		end
-		task.wait(0.1)
 	end
-	return nil
 end
 
-local function queueCleanup(statue, delaySec)
-	if statue.cleanupQueued then
+local function queueCleanup(monument, delaySec)
+	if monument.cleanupQueued then
 		return
 	end
-	statue.cleanupQueued = true
+	monument.cleanupQueued = true
 	task.delay(delaySec or 0, function()
-		if statue.model and statue.model.Parent then
-			statue.model:Destroy()
+		if monument.model and monument.model.Parent then
+			monument.model:Destroy()
 		end
 	end)
 end
 
-local completeBattleStatue
-
-local function activateBattleStatue(statue, plr: Player)
-	statue.activated = true
-	statue.owner = plr
-	if statue.prompt then
-		statue.prompt.Enabled = false
-	end
-	if statue.core then
-		statue.core.Color = Color3.fromRGB(255, 121, 72)
-	end
-
-	broadcast({
-		type = "statueActivated",
-		statueType = "battle",
-		playerName = getDisplayName(plr),
-		spawnCount = BATTLE_SPAWN_COUNT,
-	})
-
-	local spawnEnemyBurst = waitForGlobalFunction("SpawnEnemyBurst", 2)
-	if not spawnEnemyBurst then
-		statue.activated = false
-		if statue.prompt then
-			statue.prompt.Enabled = true
-		end
-		if statue.core then
-			statue.core.Color = statue.idleCoreColor
-		end
+local function spawnChallengeBurst(monument, plr)
+	local spawnEnemyBurst = _G.SpawnEnemyBurst
+	if type(spawnEnemyBurst) ~= "function" then
 		return
+	end
+
+	local anchorPos = monument.core and monument.core.Position or monument.rewardPos
+	local char = plr and plr.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if hrp then
+		anchorPos = hrp.Position
 	end
 
 	local runSeconds = 0
@@ -240,163 +212,209 @@ local function activateBattleStatue(statue, plr: Player)
 		runSeconds = _G.GetRunSeconds()
 	end
 
-	local spawned = spawnEnemyBurst(BATTLE_SPAWN_COUNT, statue.core.Position, runSeconds)
-	statue.remaining = #spawned
-	if statue.remaining <= 0 then
-		completeBattleStatue(statue)
-		return
-	end
-
-	for _, mob in ipairs(spawned) do
-		NpcService.BindDeath(mob, function()
-			if statue.resolved then
-				return
-			end
-			statue.remaining = math.max(0, (statue.remaining or 0) - 1)
-			if statue.remaining <= 0 then
-				completeBattleStatue(statue)
-			end
-		end)
-	end
+	spawnEnemyBurst(EXTRA_SPAWN_COUNT, anchorPos, runSeconds)
 end
 
-local function activateMagnetStatue(statue, plr: Player)
-	statue.activated = true
-	statue.resolved = true
-	statue.owner = plr
-	if statue.prompt then
-		statue.prompt.Enabled = false
-	end
-	if statue.core then
-		statue.core.Color = Color3.fromRGB(80, 255, 197)
-	end
-
-	local activateGlobalMagnet = waitForGlobalFunction("ActivateGlobalMagnet", 2)
-	if not activateGlobalMagnet then
-		statue.activated = false
-		statue.resolved = false
-		if statue.prompt then
-			statue.prompt.Enabled = true
-		end
-		if statue.core then
-			statue.core.Color = statue.idleCoreColor
-		end
+local function finishChallenge(monument, success)
+	if monument.resolved then
 		return
 	end
-	activateGlobalMagnet(plr, MAGNET_DURATION)
+
+	monument.resolved = true
+	activeChallenge = nil
+	updatePromptStates()
+
+	if success and monument.owner and isAlive(monument.owner) then
+		if monument.core then
+			monument.core.Color = Color3.fromRGB(95, 255, 153)
+		end
+		if monument.label then
+			monument.label.Text = "REWARD"
+		end
+
+		local spawnRewardChest = _G.SpawnRewardChestForPlayer
+		if type(spawnRewardChest) == "function" then
+			spawnRewardChest(monument.owner, monument.rewardPos, {
+				recipeId = monument.recipeId,
+				recipeRarity = monument.recipeRarity,
+				rewardLabel = string.format("Recipe: %s", monument.recipeName),
+				accentColor = getRarityColor(monument.recipeRarity),
+			})
+		end
+
+		broadcast({
+			type = "heroMonumentRewardReady",
+			playerName = getDisplayName(monument.owner),
+			rarity = monument.recipeRarity,
+			recipeName = monument.recipeName,
+		})
+	else
+		if monument.core then
+			monument.core.Color = Color3.fromRGB(255, 98, 98)
+		end
+		if monument.label then
+			monument.label.Text = "FAILED"
+		end
+
+		broadcast({
+			type = "heroMonumentFailed",
+			playerName = getDisplayName(monument.owner),
+			rarity = monument.recipeRarity,
+		})
+	end
+
+	queueCleanup(monument, 3)
+end
+
+local function startChallenge(monument, plr: Player)
+	if activeChallenge then
+		return
+	end
+
+	local recipeId = CraftingConfig.RollRecipeId(recipeRng)
+	local recipeDef = recipeId and CraftingConfig.GetRecipe(recipeId) or nil
+	if not recipeDef then
+		return
+	end
+
+	monument.activated = true
+	monument.owner = plr
+	monument.recipeId = recipeId
+	monument.recipeName = recipeDef.weaponId or recipeId
+	monument.recipeRarity = recipeDef.rarity or "Common"
+	monument.challengeRemaining = CHALLENGE_DURATION
+
+	local rarityColor = getRarityColor(monument.recipeRarity)
+	if monument.core then
+		monument.core.Color = rarityColor
+	end
+	if monument.prompt then
+		monument.prompt.Enabled = false
+	end
+	if monument.billboard then
+		monument.billboard.Enabled = true
+	end
+	if monument.label then
+		monument.label.Text = ("%ds"):format(CHALLENGE_DURATION)
+		monument.label.TextColor3 = rarityColor
+	end
+
+	activeChallenge = {
+		monument = monument,
+		owner = plr,
+		remaining = CHALLENGE_DURATION,
+		nextBurstIn = 0,
+	}
+	updatePromptStates()
 
 	broadcast({
-		type = "statueActivated",
-		statueType = "magnet",
+		type = "heroMonumentActivated",
 		playerName = getDisplayName(plr),
-		duration = MAGNET_DURATION,
+		duration = CHALLENGE_DURATION,
+		rarity = monument.recipeRarity,
+		recipeName = monument.recipeName,
 	})
-
-	queueCleanup(statue, 1)
 end
 
-completeBattleStatue = function(statue)
-	if statue.resolved then
-		return
-	end
-	statue.resolved = true
-	statue.remaining = 0
+local function buildMonument(pos: Vector3, idx: number)
+	local yaw = math.rad(math.random(0, 359))
+	local baseCf = CFrame.new(pos) * CFrame.Angles(0, yaw, 0)
 
-	if statue.core then
-		statue.core.Color = Color3.fromRGB(84, 255, 130)
-	end
-
-	local spawnRewardChest = waitForGlobalFunction("SpawnRewardChestForPlayer", 2)
-	if spawnRewardChest and statue.owner and statue.core then
-		spawnRewardChest(statue.owner, statue.core.Position)
-	end
-
-	broadcast({
-		type = "statueRewardReady",
-		statueType = "battle",
-		playerName = getDisplayName(statue.owner),
-	})
-
-	queueCleanup(statue, 1.25)
-end
-
-local function buildStatue(pos: Vector3, idx: number, statueType: string)
 	local model = Instance.new("Model")
-	model.Name = ("%sStatue_%d"):format(statueType == "battle" and "Battle" or "Magnet", idx)
+	model.Name = ("HeroMonument_%d"):format(idx)
 
-	local pedestalColor = statueType == "battle" and Color3.fromRGB(88, 76, 72) or Color3.fromRGB(62, 86, 92)
-	local coreColor = statueType == "battle" and Color3.fromRGB(255, 178, 82) or Color3.fromRGB(114, 241, 220)
-	local lightColor = statueType == "battle" and Color3.fromRGB(255, 161, 70) or Color3.fromRGB(99, 255, 228)
-
-	local pedestal = newPart(model, "Pedestal", Vector3.new(8, 1.3, 8), pedestalColor, Enum.Material.Slate)
-	pedestal.CFrame = CFrame.new(pos - Vector3.new(0, 1.6, 0))
+	local pedestal = newPart(model, "Pedestal", Vector3.new(9, 1.4, 9), Color3.fromRGB(76, 80, 95), Enum.Material.Slate)
+	pedestal.CFrame = baseCf * CFrame.new(0, -1.8, 0)
 	pedestal.CanCollide = true
 
-	local body = newPart(model, "Body", Vector3.new(2.8, 4.8, 2.8), Color3.fromRGB(116, 122, 138), Enum.Material.Rock)
-	body.CFrame = CFrame.new(pos + Vector3.new(0, 0.7, 0))
+	local body = newPart(model, "Body", Vector3.new(3.2, 5.2, 3.2), Color3.fromRGB(124, 130, 145), Enum.Material.Rock)
+	body.CFrame = baseCf * CFrame.new(0, 0.6, 0)
 	body.CanCollide = true
 
-	local crown = newPart(model, "Crown", Vector3.new(3.2, 1.4, 3.2), Color3.fromRGB(136, 143, 160), Enum.Material.Rock)
-	crown.CFrame = CFrame.new(pos + Vector3.new(0, 3.5, 0))
-	crown.CanCollide = true
+	local crest = newPart(model, "Crest", Vector3.new(4.4, 1.1, 1.2), Color3.fromRGB(188, 176, 124), Enum.Material.Metal)
+	crest.CFrame = baseCf * CFrame.new(0, 2.7, -1.25)
+	crest.CanCollide = false
 
-	local core = newPart(model, "Core", Vector3.new(1.8, 1.8, 1.8), coreColor, Enum.Material.Neon)
+	local blade = newPart(model, "Blade", Vector3.new(0.6, 5.6, 0.6), Color3.fromRGB(210, 214, 222), Enum.Material.Metal)
+	blade.CFrame = baseCf * CFrame.new(0, 2.2, -0.95) * CFrame.Angles(math.rad(10), 0, 0)
+	blade.CanCollide = false
+
+	local core = newPart(model, "Core", Vector3.new(1.9, 1.9, 1.9), Color3.fromRGB(255, 214, 94), Enum.Material.Neon)
 	core.Shape = Enum.PartType.Ball
-	core.CFrame = CFrame.new(pos + Vector3.new(0, 2.1, 0))
+	core.CFrame = baseCf * CFrame.new(0, 2.15, 0.9)
 	core.CanCollide = false
 	core.CanTouch = false
 	core.CanQuery = false
 
 	local light = Instance.new("PointLight")
-	light.Color = lightColor
-	light.Brightness = 2.2
-	light.Range = 15
+	light.Color = Color3.fromRGB(255, 214, 94)
+	light.Brightness = 2.5
+	light.Range = 16
 	light.Parent = core
 
 	local prompt = Instance.new("ProximityPrompt")
-	prompt.Name = "StatuePrompt"
-	prompt.ActionText = statueType == "battle" and "Awaken Statue" or "Activate Magnet"
-	prompt.ObjectText = statueType == "battle" and "War Statue" or "Magnet Statue"
-	prompt.HoldDuration = 0.65
+	prompt.Name = "MonumentPrompt"
+	prompt.ActionText = "Invoke Hero"
+	prompt.ObjectText = "Hero Monument"
+	prompt.HoldDuration = 0.8
 	prompt.MaxActivationDistance = 12
 	prompt.RequiresLineOfSight = false
 	prompt.Parent = core
 
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "Billboard"
+	billboard.Size = UDim2.fromOffset(260, 62)
+	billboard.StudsOffset = Vector3.new(0, 3.3, 0)
+	billboard.AlwaysOnTop = true
+	billboard.Enabled = false
+	billboard.Parent = core
+
+	local text = Instance.new("TextLabel")
+	text.Size = UDim2.fromScale(1, 1)
+	text.BackgroundTransparency = 1
+	text.TextColor3 = Color3.fromRGB(255, 240, 194)
+	text.TextStrokeTransparency = 0.2
+	text.Font = Enum.Font.GothamBold
+	text.TextScaled = true
+	text.Text = "READY"
+	text.Parent = billboard
+
 	model.PrimaryPart = core
 	model.Parent = statuesFolder
 
-	local statue = {
+	local rewardPos = core.Position + (baseCf.LookVector * REWARD_OFFSET)
+
+	local monument = {
 		model = model,
 		core = core,
 		prompt = prompt,
-		statueType = statueType,
-		idleCoreColor = coreColor,
+		billboard = billboard,
+		label = text,
 		activated = false,
 		resolved = false,
-		owner = nil,
-		remaining = 0,
 		cleanupQueued = false,
+		owner = nil,
+		rewardPos = rewardPos,
+		recipeId = nil,
+		recipeName = nil,
+		recipeRarity = nil,
 	}
 
 	prompt.Triggered:Connect(function(plr)
 		if not RunStarted.Value or PauseState.Value then
 			return
 		end
-		if statue.activated or statue.resolved then
+		if monument.activated or monument.resolved then
 			return
 		end
-		if not plr or not plr.Parent or not isAlive(plr) then
+		if not isAlive(plr) then
 			return
 		end
 
-		if statueType == "battle" then
-			activateBattleStatue(statue, plr)
-		else
-			activateMagnetStatue(statue, plr)
-		end
+		startChallenge(monument, plr)
 	end)
 
-	return statue
+	return monument
 end
 
 local function spawnStatuesForRun()
@@ -405,20 +423,21 @@ local function spawnStatuesForRun()
 	end
 	spawnedForRun = true
 
-	clearStatues()
+	clearMonuments()
 
 	local usedPositions = {}
-	for i, statueType in ipairs(STATUE_SPAWN_ORDER) do
+	for i = 1, MONUMENT_COUNT do
 		local pos = randomGroundPoint(usedPositions)
 		if pos then
 			table.insert(usedPositions, pos)
-			table.insert(statues, buildStatue(pos, i, statueType))
+			table.insert(monuments, buildMonument(pos, i))
 		end
 	end
 
+	updatePromptStates()
 	broadcast({
-		type = "statuesSpawned",
-		count = #statues,
+		type = "heroMonumentsSpawned",
+		count = #monuments,
 	})
 end
 
@@ -427,7 +446,7 @@ RunStarted.Changed:Connect(function(v)
 		spawnStatuesForRun()
 	else
 		spawnedForRun = false
-		clearStatues()
+		clearMonuments()
 	end
 end)
 
@@ -435,4 +454,44 @@ if RunStarted.Value == true then
 	spawnStatuesForRun()
 end
 
-print("[StatueService] Ready")
+RunService.Heartbeat:Connect(function(dt)
+	if PauseState.Value then
+		return
+	end
+	if not RunStarted.Value then
+		return
+	end
+	if not activeChallenge then
+		return
+	end
+
+	local challenge = activeChallenge
+	local monument = challenge.monument
+	if not monument or monument.resolved or not monument.model or not monument.model.Parent then
+		activeChallenge = nil
+		updatePromptStates()
+		return
+	end
+
+	if not isAlive(challenge.owner) then
+		finishChallenge(monument, false)
+		return
+	end
+
+	challenge.remaining = math.max(0, challenge.remaining - dt)
+	challenge.nextBurstIn -= dt
+	if challenge.nextBurstIn <= 0 then
+		spawnChallengeBurst(monument, challenge.owner)
+		challenge.nextBurstIn = EXTRA_SPAWN_INTERVAL
+	end
+
+	if monument.label then
+		monument.label.Text = ("%ds"):format(math.ceil(challenge.remaining))
+	end
+
+	if challenge.remaining <= 0 then
+		finishChallenge(monument, true)
+	end
+end)
+
+print("[HeroMonumentService] Ready")

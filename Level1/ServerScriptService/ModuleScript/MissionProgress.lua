@@ -213,8 +213,9 @@ function MissionProgress.OnRunComplete(plr: Player, waves: number, seconds: numb
 		if extraStats.winStreak3 then MissionProgress.Add(plr, "WIN_STREAK_3", 1) end
 	end
 
-	-- Boss missions: traktujemy ukończenie runa jako "boss".
-	MissionProgress.Add(plr, "BOSSES", 1)
+	if diedThisRun == false then
+		MissionProgress.Add(plr, "BOSSES", 1)
+	end
 
 	PlayerData.Save(plr, false)
 end

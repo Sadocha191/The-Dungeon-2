@@ -61,6 +61,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local NpcService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("NpcService"))
 local PlayerData = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerData"))
+local WorldBounds = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WorldBounds"))
 local CraftingConfig = require((ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5)):WaitForChild("CraftingConfig"))
 
 local MissionProgress = nil
@@ -337,7 +338,14 @@ local function computeSpawnBounds()
             maxZ = mapPart.Position.Z + halfZ,
         }
     end
-    return nil
+
+	local pMin, pMax = WorldBounds.GetXZ(6)
+	return {
+		minX = pMin.X,
+		maxX = pMax.X,
+		minZ = pMin.Y,
+		maxZ = pMax.Y,
+	}
 end
 
 local function getSpawnBounds()
@@ -551,17 +559,14 @@ end
 
 local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, isBoss: boolean, _ctx)
 	local pos = (_ctx and _ctx.position) or NpcService.GetPosition(mob) or mob:GetPivot().Position
+	local killer = _ctx and _ctx.player
 
 	if _G.RegisterEnemyKill then
-        pcall(function() _G.RegisterEnemyKill(pos) end)
+        pcall(function() _G.RegisterEnemyKill(pos, killer) end)
     end
 
-    if MissionProgress and MissionProgress.OnKill then
-        for _, plr in ipairs(Players:GetPlayers()) do
-            if plr:GetAttribute("RunEnded") ~= true then
-                pcall(function() MissionProgress.OnKill(plr, mob) end)
-            end
-        end
+    if MissionProgress and MissionProgress.OnKill and killer and killer.Parent == Players and killer:GetAttribute("RunEnded") ~= true then
+        pcall(function() MissionProgress.OnKill(killer, mob) end)
     end
 
     local xpDrop = rewardCfg.xp or 5
@@ -727,9 +732,13 @@ if not _G.__InfoUI_Wrapped then
 
 	-- Kills: WaveController already calls _G.RegisterEnemyKill on enemy death.
 	local prevKill = _G.RegisterEnemyKill
-	_G.RegisterEnemyKill = function(pos)
+	_G.RegisterEnemyKill = function(pos, killer)
 		runKills += 1
-		if prevKill then pcall(function() prevKill(pos) end) end
+		if prevKill then
+			pcall(function()
+				prevKill(pos, killer)
+			end)
+		end
 	end
 
 	-- Coins: wrap AwardPlayer *when it exists* (ProgressService defines it).
@@ -828,6 +837,7 @@ local portalModel: Model? = nil
 local portalActivated = false
 local bossModel: Model? = nil
 local bossDefeated = false
+local refreshPortalPromptState = nil
 
 -- Stats for InfoUI
 local function fmtTimePayload(tSeconds: number)
@@ -864,39 +874,7 @@ local function watchEliteDeath(mob: Model)
     end)
 end
 local function getWorldBoundsXZ()
-	-- Find bounds from collidable map parts (good enough for random portal/spawn positioning)
-	local minX, minZ = math.huge, math.huge
-	local maxX, maxZ = -math.huge, -math.huge
-	local count = 0
-
-	local function consider(inst: Instance)
-		if inst:IsA("BasePart") and inst.CanCollide and inst.Size.Magnitude > 6 then
-			local p = inst.Position
-			minX = math.min(minX, p.X)
-			maxX = math.max(maxX, p.X)
-			minZ = math.min(minZ, p.Z)
-			maxZ = math.max(maxZ, p.Z)
-			count += 1
-		end
-	end
-
-	local map = workspace:FindFirstChild("Map")
-	if map then
-		for _, d in ipairs(map:GetDescendants()) do consider(d) end
-	else
-		for _, d in ipairs(workspace:GetDescendants()) do
-			if count > 900 then break end
-			consider(d)
-		end
-	end
-
-	if count < 10 or minX == math.huge then
-		return Vector2.new(-200, -200), Vector2.new(200, 200)
-	end
-
-	-- Add padding so we don't spawn on the extreme edge
-	local pad = 18
-	return Vector2.new(minX + pad, minZ + pad), Vector2.new(maxX - pad, maxZ - pad)
+	return WorldBounds.GetXZ(18, Vector2.new(-200, -200), Vector2.new(200, 200))
 end
 
 local portalRayParams = RaycastParams.new()
@@ -942,7 +920,7 @@ local function ensurePortal()
 
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "PortalPrompt"
-	prompt.ActionText = "Activate Portal"
+	prompt.ActionText = "Portal Locked"
 	prompt.ObjectText = "Portal"
 	prompt.HoldDuration = 1
 	prompt.MaxActivationDistance = 10
@@ -951,61 +929,87 @@ local function ensurePortal()
 
 	local function setPromptState()
 		if not portalActivated then
-			prompt.ActionText = "Activate Portal"
+			if elapsed() < RUN_TIME_LIMIT then
+				prompt.ActionText = "Portal Locked"
+				prompt.ObjectText = "Boss Phase"
+			else
+				prompt.ActionText = "Awaken Boss"
+				prompt.ObjectText = "Portal"
+			end
 			prompt.Enabled = true
 		elseif not bossDefeated then
 			prompt.ActionText = "Defeat the Boss"
+			prompt.ObjectText = "Portal"
 			prompt.Enabled = false
 		else
 			prompt.ActionText = "Enter Portal"
+			prompt.ObjectText = "Portal"
 			prompt.Enabled = true
 		end
 	end
 
 	local function spawnBossNearPortal()
-	if bossModel and bossModel.Parent then return end
-	bossDefeated = false
-	local bossName = "Golem" -- change if you have a dedicated boss model
-	local tpl = EliteFolder:FindFirstChild(bossName) or NormalFolder:FindFirstChild(bossName)
-	if not tpl or not tpl:IsA("Model") then
-		warn("[Portal] Missing boss template:", bossName)
-		return
+		if bossModel and bossModel.Parent then
+			return
+		end
+
+		bossDefeated = false
+		local bossName = "Golem" -- change if you have a dedicated boss model
+		local tpl = EliteFolder:FindFirstChild(bossName) or NormalFolder:FindFirstChild(bossName)
+		if not tpl or not tpl:IsA("Model") then
+			warn("[Portal] Missing boss template:", bossName)
+			return
+		end
+
+		local mob = tpl:Clone()
+		mob.Name = "Boss_" .. bossName
+		cleanupTemplateScripts(mob)
+		setMobGroup(mob)
+		mob.Parent = ENEMIES_FOLDER
+
+		pcall(function()
+			mob:PivotTo(base.CFrame * CFrame.new(0, 0, -18))
+		end)
+
+		local registered = registerMobModel(mob, bossName, {
+			hp = math.floor(1200 * ENEMY_HP_MULTIPLIER),
+			speed = 10,
+			range = 7,
+			cd = 1.4,
+			dmg = 24,
+			isRanged = false,
+		}, { xp = 120, coins = 60 }, true, true, function()
+			bossDefeated = true
+			broadcast({ type = "portalBossDefeated" })
+			setPromptState()
+		end)
+		if not registered then
+			return
+		end
+
+		bossModel = registered
+		if type(_G.NotifyBossSpawn) == "function" then
+			pcall(function()
+				_G.NotifyBossSpawn()
+			end)
+		end
+		broadcast({ type = "portalBossSpawn" })
 	end
 
-	local mob = tpl:Clone()
-	mob.Name = "Boss_" .. bossName
-	cleanupTemplateScripts(mob)
-	setMobGroup(mob)
-	mob.Parent = ENEMIES_FOLDER
-
-	pcall(function()
-		mob:PivotTo(base.CFrame * CFrame.new(0, 0, -18))
-	end)
-
-	local registered = registerMobModel(mob, bossName, {
-		hp = math.floor(1200 * ENEMY_HP_MULTIPLIER),
-		speed = 10,
-		range = 7,
-		cd = 1.4,
-		dmg = 24,
-		isRanged = false,
-	}, { xp = 120, coins = 60 }, true, true, function()
-		bossDefeated = true
-		broadcast({ type = "portalBossDefeated" })
-		setPromptState()
-	end)
-	if not registered then
-		return
-	end
-
-	bossModel = registered
-	broadcast({ type = "portalBossSpawn" })
-end
-prompt.Triggered:Connect(function(plr)
+	prompt.Triggered:Connect(function(plr)
 		if not RunStarted.Value then return end
 		if plr:GetAttribute("RunEnded") == true then return end
 
 		if not portalActivated then
+			local remaining = math.max(0, math.ceil(RUN_TIME_LIMIT - elapsed()))
+			if remaining > 0 then
+				WaveStatusEvent:FireClient(plr, {
+					type = "portalLocked",
+					secondsLeft = remaining,
+				})
+				setPromptState()
+				return
+			end
 			portalActivated = true
 			broadcast({ type = "portalActivated" })
 			spawnBossNearPortal()
@@ -1019,6 +1023,7 @@ prompt.Triggered:Connect(function(plr)
 	end)
 
 	setPromptState()
+	refreshPortalPromptState = setPromptState
 	m.PrimaryPart = base
 	m.Parent = workspace
 	portalModel = m
@@ -1061,6 +1066,9 @@ RunService.Heartbeat:Connect(function()
         return
     end
     local t = elapsed()
+	if refreshPortalPromptState then
+		refreshPortalPromptState()
+	end
 
     if PauseState.Value then
         return

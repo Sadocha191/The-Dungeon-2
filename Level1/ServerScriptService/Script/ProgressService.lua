@@ -217,6 +217,8 @@ local function getRun(plr: Player)
 			damageTaken = 0,
 			healAmount = 0,
 			bossNoHit20Failed = false,
+			bossSpawnClock = nil,
+			bossSpawnRunSeconds = nil,
 			killTimes = {},
 			multikill30_5Done = false,
 			multikill60_20Done = false,
@@ -256,9 +258,8 @@ local function hookHealthForMissions(plr: Player)
 				r.maxNoDamageStreak = math.max(r.maxNoDamageStreak or 0, now - streakStart)
 				r.lastDamageClock = now
 
-				-- boss no-hit window (first 20s after 20:00)
-				local bossSpawnClock = (r.startClock or now) + 1200
-				if now >= bossSpawnClock and now <= bossSpawnClock + 20 then
+				local bossSpawnClock = tonumber(r.bossSpawnClock)
+				if bossSpawnClock and now >= bossSpawnClock and now <= bossSpawnClock + 20 then
 					r.bossNoHit20Failed = true
 				end
 			elseif delta > 0 then
@@ -1011,41 +1012,69 @@ function _G.AwardSouls(plr: Player, souls: number)
 	syncHud(plr)
 end
 
-function _G.RegisterEnemyKill(_pos: Vector3?)
-	for _, plr in ipairs(Players:GetPlayers()) do
-		local r = getRun(plr)
-		if not r.ended then
-			r.kills += 1
-			-- multikill windows (shared kills in current design)
-			local now = os.clock()
-			r.killTimes = r.killTimes or {}
-			table.insert(r.killTimes, now)
-			-- prune older than 20s
-			local kt = r.killTimes
-			local j = 1
-			for i = 1, #kt do
-				if now - kt[i] <= 20 then
-					kt[j] = kt[i]
-					j += 1
-				end
-			end
-			for i = j, #kt do kt[i] = nil end
+function _G.RegisterEnemyKill(_pos: Vector3?, killer: Player?)
+	if not killer or killer.Parent ~= Players or killer:GetAttribute("RunEnded") == true then
+		return
+	end
 
-			-- 30 kills / 5s
-			if not r.multikill30_5Done then
-				local c5 = 0
-				for i = #kt, 1, -1 do
-					if now - kt[i] <= 5 then c5 += 1 else break end
-				end
-				if c5 >= 30 then
-					r.multikill30_5Done = true
-				end
+	local r = getRun(killer)
+	if r.ended then
+		return
+	end
+
+	r.kills += 1
+
+	local now = os.clock()
+	r.killTimes = r.killTimes or {}
+	table.insert(r.killTimes, now)
+
+	local kt = r.killTimes
+	local j = 1
+	for i = 1, #kt do
+		if now - kt[i] <= 20 then
+			kt[j] = kt[i]
+			j += 1
+		end
+	end
+	for i = j, #kt do
+		kt[i] = nil
+	end
+
+	if not r.multikill30_5Done then
+		local c5 = 0
+		for i = #kt, 1, -1 do
+			if now - kt[i] <= 5 then
+				c5 += 1
+			else
+				break
 			end
-			-- 60 kills / 20s
-			if not r.multikill60_20Done and #kt >= 60 then
-				r.multikill60_20Done = true
+		end
+		if c5 >= 30 then
+			r.multikill30_5Done = true
+		end
+	end
+
+	if not r.multikill60_20Done and #kt >= 60 then
+		r.multikill60_20Done = true
+	end
+
+	syncHud(killer)
+end
+
+function _G.NotifyBossSpawn()
+	local spawnSeconds = nil
+	if type(_G.GetRunSeconds) == "function" then
+		spawnSeconds = tonumber(_G.GetRunSeconds())
+	end
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr:GetAttribute("RunEnded") ~= true then
+			local r = getRun(plr)
+			if not r.ended then
+				r.bossSpawnClock = os.clock()
+				r.bossSpawnRunSeconds = spawnSeconds or runSeconds(plr)
+				r.bossNoHit20Failed = false
 			end
-			syncHud(plr)
 		end
 	end
 end
@@ -1121,6 +1150,8 @@ local function endRunForPlayer(plr: Player, reason: string)
 			r.winStreak += 1
 		end
 
+		local bossSpawnAt = tonumber(r.bossSpawnRunSeconds)
+		local bossSpawned = bossSpawnAt ~= nil and bossSpawnAt >= 0
 		local extra = {
 			coinsGained = coinsGained,
 			runLevel = r.runLevel or 0,
@@ -1133,10 +1164,10 @@ local function endRunForPlayer(plr: Player, reason: string)
 			multikill30_5 = r.multikill30_5Done == true,
 			multikill60_20 = r.multikill60_20Done == true,
 			noDamage5min = (r.maxNoDamageStreak or 0) >= 300,
-			bossNoHit20 = (not diedThisRun) and seconds >= 1200 and (r.bossNoHit20Failed ~= true),
+			bossNoHit20 = (not diedThisRun) and bossSpawned and seconds >= (bossSpawnAt + 20) and (r.bossNoHit20Failed ~= true),
 			bossClutch = (not diedThisRun) and hpRatio < 0.30,
-			burst90 = (not diedThisRun) and seconds >= 1200 and seconds <= 1290,
-			burst120 = (not diedThisRun) and seconds >= 1200 and seconds <= 1320,
+			burst90 = (not diedThisRun) and bossSpawned and seconds >= bossSpawnAt and seconds <= (bossSpawnAt + 90),
+			burst120 = (not diedThisRun) and bossSpawned and seconds >= bossSpawnAt and seconds <= (bossSpawnAt + 120),
 			noRerollWin = (not diedThisRun) and (r.rerollsUsed or 0) == 0,
 			max1RerollWin = (not diedThisRun) and (r.rerollsUsed or 0) <= 1,
 			max1SkipWin = (not diedThisRun) and (r.skipsUsed or 0) <= 1,
@@ -1178,6 +1209,8 @@ Players.PlayerAdded:Connect(function(plr: Player)
 	r.damageTaken = 0
 	r.healAmount = 0
 	r.bossNoHit20Failed = false
+	r.bossSpawnClock = nil
+	r.bossSpawnRunSeconds = nil
 	r.killTimes = {}
 	r.multikill30_5Done = false
 	r.multikill60_20Done = false

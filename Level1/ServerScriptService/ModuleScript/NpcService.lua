@@ -1,11 +1,19 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
 	or ReplicatedStorage:WaitForChild("ModuleScript")
 local NpcShared = require(moduleFolder:WaitForChild("NpcShared"))
+local serverModuleFolder = ServerScriptService:FindFirstChild("ModuleScript") or ServerScriptService:FindFirstChild("ModuleScripts")
+local MissionProgress = nil
+if serverModuleFolder then
+	pcall(function()
+		MissionProgress = require(serverModuleFolder:WaitForChild("MissionProgress"))
+	end)
+end
 
 local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 if not remotes then
@@ -740,6 +748,11 @@ function NpcService.ApplyDamage(target: any, amount: number, meta: {[string]: an
 	local sourcePlayer = meta and meta.player
 	if not (meta and meta.showFloating == false) then
 		fireDamageIndicator(sourcePlayer, npc, dealt, meta and meta.crit)
+	end
+	if MissionProgress and sourcePlayer and sourcePlayer.Parent == Players and sourcePlayer:GetAttribute("RunEnded") ~= true then
+		pcall(function()
+			MissionProgress.OnDamage(sourcePlayer, dealt, meta and meta.crit == true)
+		end)
 	end
 
 	if npc.health <= 0 then

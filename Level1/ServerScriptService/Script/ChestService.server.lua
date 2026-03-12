@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerData = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerData"))
+local WorldBounds = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WorldBounds"))
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:FindFirstChild("ModuleScript")
 	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
@@ -66,6 +67,15 @@ local chests = {}
 local spawnedForRun = false
 local nextChestId = 0
 local recipeRng = Random.new()
+
+local RARITY_COLORS = {
+	Common = Color3.fromRGB(206, 206, 206),
+	Uncommon = Color3.fromRGB(88, 214, 121),
+	Rare = Color3.fromRGB(79, 172, 255),
+	Epic = Color3.fromRGB(185, 111, 255),
+	Legendary = Color3.fromRGB(255, 177, 66),
+	Mythical = Color3.fromRGB(255, 84, 129),
+}
 
 local NUM_DEFAULTS = {
 	ShrineDamageMult = 1,
@@ -165,41 +175,7 @@ local function clearChests()
 end
 
 local function getWorldBoundsXZ()
-	local minX, minZ = math.huge, math.huge
-	local maxX, maxZ = -math.huge, -math.huge
-	local count = 0
-
-	local function consider(inst)
-		if not inst:IsA("BasePart") then return end
-		if not inst.CanCollide then return end
-		if inst.Size.Magnitude <= 6 then return end
-
-		local p = inst.Position
-		minX = math.min(minX, p.X)
-		maxX = math.max(maxX, p.X)
-		minZ = math.min(minZ, p.Z)
-		maxZ = math.max(maxZ, p.Z)
-		count += 1
-	end
-
-	local map = workspace:FindFirstChild("Map")
-	if map then
-		for _, d in ipairs(map:GetDescendants()) do
-			consider(d)
-		end
-	else
-		for _, d in ipairs(workspace:GetDescendants()) do
-			if count > 1000 then break end
-			consider(d)
-		end
-	end
-
-	if count < 10 or minX == math.huge then
-		return Vector2.new(-180, -180), Vector2.new(180, 180)
-	end
-
-	local pad = 20
-	return Vector2.new(minX + pad, minZ + pad), Vector2.new(maxX - pad, maxZ - pad)
+	return WorldBounds.GetXZ(20, Vector2.new(-180, -180), Vector2.new(180, 180))
 end
 
 local rayParams = RaycastParams.new()
@@ -290,6 +266,10 @@ local function getChestCost(plr)
 	return math.max(MIN_CHEST_COST, math.floor(raw + 0.5))
 end
 
+local function getRarityColor(rarity)
+	return RARITY_COLORS[tostring(rarity or "")] or Color3.fromRGB(255, 209, 83)
+end
+
 local function pickRewardRarity(plr)
 	local luck = math.max(0, getNumAttr(plr, "ShrineLuckBonus", 0))
 	local commonW = math.max(8, 75 * (1 - luck * 0.8))
@@ -377,12 +357,14 @@ local function applyReward(plr, reward)
 	end
 end
 
-local function awardRecipeDiscovery(plr)
-	if recipeRng:NextNumber() > (tonumber(CraftingConfig.RECIPE_DROP_CHANCE) or 0) then
-		return nil
+local function awardRecipeDiscovery(plr, forcedRecipeId)
+	local recipeId = forcedRecipeId
+	if typeof(recipeId) ~= "string" or recipeId == "" then
+		if recipeRng:NextNumber() > (tonumber(CraftingConfig.RECIPE_DROP_CHANCE) or 0) then
+			return nil
+		end
+		recipeId = CraftingConfig.RollRecipeId(recipeRng)
 	end
-
-	local recipeId = CraftingConfig.RollRecipeId(recipeRng)
 	if typeof(recipeId) ~= "string" or recipeId == "" then
 		return nil
 	end
@@ -415,6 +397,11 @@ end
 
 local function createChestModel(pos, idx, config)
 	config = config or {}
+	local accentColor = typeof(config.accentColor) == "Color3" and config.accentColor or Color3.fromRGB(213, 168, 69)
+	local coreColor = typeof(config.coreColor) == "Color3" and config.coreColor or accentColor
+	if config.forceFree == true and not config.recipeId and typeof(config.coreColor) ~= "Color3" then
+		coreColor = Color3.fromRGB(109, 255, 157)
+	end
 
 	local model = Instance.new("Model")
 	model.Name = tostring(config.name or ("Chest_%d"):format(idx))
@@ -427,7 +414,7 @@ local function createChestModel(pos, idx, config)
 	body.CFrame = CFrame.new(pos)
 	body.CanCollide = true
 
-	local band = newPart(model, "Band", Vector3.new(4.5, 0.4, 3.6), Color3.fromRGB(213, 168, 69), Enum.Material.Metal)
+	local band = newPart(model, "Band", Vector3.new(4.5, 0.4, 3.6), accentColor, Enum.Material.Metal)
 	band.CFrame = CFrame.new(pos + Vector3.new(0, 0.75, 0))
 	band.CanCollide = false
 
@@ -435,18 +422,15 @@ local function createChestModel(pos, idx, config)
 	lid.CFrame = CFrame.new(pos + Vector3.new(0, 1.5, -0.2))
 	lid.CanCollide = true
 
-	local core = newPart(model, "Core", Vector3.new(1.2, 1.2, 1.2), Color3.fromRGB(255, 209, 83), Enum.Material.Neon)
+	local core = newPart(model, "Core", Vector3.new(1.2, 1.2, 1.2), coreColor, Enum.Material.Neon)
 	core.Shape = Enum.PartType.Ball
 	core.CFrame = CFrame.new(pos + Vector3.new(0, 1.3, 0.8))
 	core.CanCollide = false
 	core.CanTouch = false
 	core.CanQuery = false
-	if config.forceFree == true then
-		core.Color = Color3.fromRGB(109, 255, 157)
-	end
 
 	local light = Instance.new("PointLight")
-	light.Color = Color3.fromRGB(255, 210, 89)
+	light.Color = coreColor
 	light.Brightness = 1.8
 	light.Range = 14
 	light.Parent = core
@@ -454,7 +438,7 @@ local function createChestModel(pos, idx, config)
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "OpenPrompt"
 	prompt.ActionText = tostring(config.actionText or "Open Chest")
-	prompt.ObjectText = ""
+	prompt.ObjectText = tostring(config.objectText or "")
 	prompt.HoldDuration = 0.45
 	prompt.MaxActivationDistance = 12
 	prompt.RequiresLineOfSight = false
@@ -472,6 +456,10 @@ local function createChestModel(pos, idx, config)
 		forceFree = config.forceFree == true,
 		ownerUserId = tonumber(config.ownerUserId),
 		countsForScaling = config.countsForScaling ~= false,
+		recipeId = typeof(config.recipeId) == "string" and config.recipeId or nil,
+		recipeRarity = typeof(config.recipeRarity) == "string" and config.recipeRarity or nil,
+		specialRewardOnly = config.specialRewardOnly == true,
+		rewardLabel = typeof(config.rewardLabel) == "string" and config.rewardLabel or nil,
 	}
 end
 
@@ -544,9 +532,22 @@ handleOpen = function(chest, plr)
 		chest.core.Color = Color3.fromRGB(93, 255, 137)
 	end
 
-	local reward, rarity = pickReward(plr)
-	applyReward(plr, reward)
-	local foundRecipeId, recipeState = awardRecipeDiscovery(plr)
+	local rewardName = nil
+	local rarity = "Common"
+	local foundRecipeId, recipeState = nil, nil
+
+	if chest.recipeId then
+		foundRecipeId, recipeState = awardRecipeDiscovery(plr, chest.recipeId)
+		local recipeDef = foundRecipeId and CraftingConfig.GetRecipe(foundRecipeId) or nil
+		rarity = chest.recipeRarity or (recipeDef and recipeDef.rarity) or "Common"
+		rewardName = chest.rewardLabel or ((recipeDef and recipeDef.weaponId) or foundRecipeId or "Recipe")
+	else
+		local reward
+		reward, rarity = pickReward(plr)
+		applyReward(plr, reward)
+		rewardName = reward.label
+	end
+
 	if chest.countsForScaling ~= false then
 		setNumAttr(plr, "ChestOpenedCount", getNumAttr(plr, "ChestOpenedCount", 0) + 1)
 	end
@@ -554,18 +555,21 @@ handleOpen = function(chest, plr)
 	broadcast({
 		type = "chestOpened",
 		playerName = plr.DisplayName ~= "" and plr.DisplayName or plr.Name,
-		rewardName = reward.label,
+		rewardName = rewardName or "Reward",
 		rarity = rarity,
 		free = openedForFree,
 		cost = chest.forceFree == true and 0 or cost,
 	})
 
 	if foundRecipeId then
+		local recipeDef = CraftingConfig.GetRecipe(foundRecipeId)
 		WaveStatusEvent:FireClient(plr, {
 			type = "recipeFound",
 			recipeId = foundRecipeId,
+			recipeName = recipeDef and recipeDef.weaponId or foundRecipeId,
 			copies = recipeState and recipeState.copies or 1,
 			tier = recipeState and recipeState.tier or 1,
+			rarity = recipeDef and recipeDef.rarity or chest.recipeRarity,
 		})
 	end
 
@@ -608,18 +612,31 @@ local function spawnChestsForRun()
 	})
 end
 
-function _G.SpawnRewardChestForPlayer(plr: Player, pos: Vector3)
+function _G.SpawnRewardChestForPlayer(plr: Player, pos: Vector3, config)
 	if not plr or not plr.Parent then
 		return nil
 	end
 
-	return spawnChestInstance(pos, {
-		name = ("RewardChest_%d"):format(nextChestId + 1),
-		forceFree = true,
-		ownerUserId = plr.UserId,
-		countsForScaling = false,
-		actionText = "Claim Chest",
-	})
+	local chestConfig = typeof(config) == "table" and table.clone(config) or {}
+	chestConfig.name = chestConfig.name or ("RewardChest_%d"):format(nextChestId + 1)
+	chestConfig.forceFree = true
+	chestConfig.ownerUserId = plr.UserId
+	chestConfig.countsForScaling = false
+
+	if chestConfig.recipeId then
+		local recipeDef = CraftingConfig.GetRecipe(chestConfig.recipeId)
+		chestConfig.recipeRarity = chestConfig.recipeRarity or (recipeDef and recipeDef.rarity) or "Common"
+		chestConfig.rewardLabel = chestConfig.rewardLabel or ((recipeDef and recipeDef.weaponId) or chestConfig.recipeId)
+		chestConfig.actionText = chestConfig.actionText or "Claim Recipe"
+		chestConfig.objectText = chestConfig.objectText or "Hero Reward"
+		chestConfig.specialRewardOnly = chestConfig.specialRewardOnly ~= false
+		chestConfig.accentColor = chestConfig.accentColor or getRarityColor(chestConfig.recipeRarity)
+		chestConfig.coreColor = chestConfig.coreColor or chestConfig.accentColor
+	else
+		chestConfig.actionText = chestConfig.actionText or "Claim Chest"
+	end
+
+	return spawnChestInstance(pos, chestConfig)
 end
 
 Players.PlayerAdded:Connect(function(plr)
