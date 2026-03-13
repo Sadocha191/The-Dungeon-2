@@ -13,25 +13,28 @@ local FADE_DURATION = 0.32
 local POP_DURATION = 0.18
 local RISE_DISTANCE = 0.55
 local BASE_STROKE_TRANSPARENCY = 0.10
+local INDICATOR_WIDTH = 180
+local INDICATOR_HEIGHT = 30
+local INDICATOR_TEXT_SIZE = 18
 
 local INDICATOR_CONFIG = {
 	xp = {
 		label = "XP",
 		color = Color3.fromRGB(96, 165, 250),
 		strokeColor = Color3.fromRGB(17, 32, 71),
-		offset = Vector3.new(-1.25, 4.7, 0),
+		offset = Vector3.new(2.75, 1.75, 0),
 	},
 	coins = {
 		label = "Coins",
 		color = Color3.fromRGB(255, 210, 80),
 		strokeColor = Color3.fromRGB(102, 62, 10),
-		offset = Vector3.new(0, 5.2, 0),
+		offset = Vector3.new(2.75, 1.2, 0),
 	},
 	souls = {
 		label = "Souls",
 		color = Color3.fromRGB(190, 150, 255),
 		strokeColor = Color3.fromRGB(38, 22, 85),
-		offset = Vector3.new(1.25, 4.9, 0),
+		offset = Vector3.new(2.75, 0.65, 0),
 		gradient = ColorSequence.new({
 			ColorSequenceKeypoint.new(0, Color3.fromRGB(194, 115, 255)),
 			ColorSequenceKeypoint.new(1, Color3.fromRGB(100, 170, 255)),
@@ -51,7 +54,10 @@ local function getAdornee(): BasePart?
 	if not char then
 		return nil
 	end
-	return char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+	return char:FindFirstChild("HumanoidRootPart")
+		or char:FindFirstChild("UpperTorso")
+		or char:FindFirstChild("Torso")
+		or char:FindFirstChild("Head")
 end
 
 local indicators = {}
@@ -76,7 +82,7 @@ local function createIndicator(kind: string, config)
 	billboard.AlwaysOnTop = true
 	billboard.LightInfluence = 0
 	billboard.MaxDistance = 90
-	billboard.Size = UDim2.fromOffset(230, 64)
+	billboard.Size = UDim2.fromOffset(INDICATOR_WIDTH, INDICATOR_HEIGHT)
 	billboard.StudsOffset = config.offset
 	billboard.Enabled = false
 	billboard.Parent = playerGui
@@ -86,17 +92,19 @@ local function createIndicator(kind: string, config)
 	label.BackgroundTransparency = 1
 	label.Size = UDim2.fromScale(1, 1)
 	label.Font = Enum.Font.GothamBlack
-	label.TextScaled = true
+	label.TextSize = INDICATOR_TEXT_SIZE
+	label.TextScaled = false
 	label.TextTransparency = 1
 	label.TextStrokeTransparency = 1
 	label.TextStrokeColor3 = config.strokeColor
 	label.TextColor3 = config.color
+	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.Text = ""
 	label.Parent = billboard
 
 	local textSizeConstraint = Instance.new("UITextSizeConstraint")
-	textSizeConstraint.MaxTextSize = 28
-	textSizeConstraint.MinTextSize = 14
+	textSizeConstraint.MaxTextSize = INDICATOR_TEXT_SIZE
+	textSizeConstraint.MinTextSize = INDICATOR_TEXT_SIZE
 	textSizeConstraint.Parent = label
 
 	if config.gradient then
