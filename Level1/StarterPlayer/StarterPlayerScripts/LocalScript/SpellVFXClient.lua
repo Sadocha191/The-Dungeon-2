@@ -39,6 +39,12 @@ local function brightenColor(color, alpha)
 	return blendColor(color, Color3.new(1, 1, 1), alpha or 0.3)
 end
 
+local function getVisualIntensity(cfg)
+	local level = math.max(1, tonumber(cfg and cfg.level) or 1)
+	local intensity = tonumber(cfg and cfg.visualIntensity) or 1
+	return math.max(1, intensity + ((level - 1) * 0.04))
+end
+
 local function applyPartDefaults(part)
 	part.Anchored = true
 	part.CanCollide = false
@@ -129,7 +135,9 @@ end
 local function createOrbModel(id, cfg, index)
 	local primary = typeof(cfg.color) == "Color3" and cfg.color or Color3.fromRGB(255, 255, 255)
 	local secondary = typeof(cfg.secondaryColor) == "Color3" and cfg.secondaryColor or brightenColor(primary, 0.32)
-	local scale = math.max(0.75, tonumber(cfg.size) or 1.1)
+	local level = math.max(1, tonumber(cfg.level) or 1)
+	local intensity = getVisualIntensity(cfg)
+	local scale = math.max(0.75, (tonumber(cfg.size) or 1.1) * math.clamp(0.96 + (intensity * 0.08), 1, 1.75))
 	local baseTransparency = tonumber(cfg.transparency) or 0.18
 	local function alpha(extra)
 		return math.clamp(baseTransparency + (extra or 0), 0, 0.95)
@@ -140,8 +148,8 @@ local function createOrbModel(id, cfg, index)
 	model.Parent = vfxRoot
 
 	local guide = ensurePart(model, "Guide", Vector3.new(0.22, 0.22, 1.1) * scale, primary, 1, Enum.Material.SmoothPlastic)
-	addPointLight(guide, primary, tonumber(cfg.lightBrightness) or 1.7, tonumber(cfg.lightRange) or 9)
-	addTrail(guide, primary, secondary, scale * 0.36, tonumber(cfg.trailLifetime) or 0.12)
+	addPointLight(guide, primary, (tonumber(cfg.lightBrightness) or 1.7) + ((intensity - 1) * 0.55), (tonumber(cfg.lightRange) or 9) + ((level - 1) * 0.45))
+	addTrail(guide, primary, secondary, scale * (0.36 + math.min(0.16, (level - 1) * 0.025)), (tonumber(cfg.trailLifetime) or 0.12) + math.min(0.06, (level - 1) * 0.008))
 
 	local spinSpeed = 6
 	local element = cfg.element
@@ -217,10 +225,26 @@ local function createOrbModel(id, cfg, index)
 		shell.CFrame = CFrame.new()
 	end
 
+	if level >= 2 then
+		local aura = ensurePart(model, "Aura", Vector3.new(1.14, 1.14, 1.14) * scale, brightenColor(primary, 0.08), alpha(0.48), Enum.Material.Glass, Enum.PartType.Ball)
+		aura.CFrame = CFrame.new()
+	end
+	if level >= 4 then
+		local ring = ensurePart(model, "LevelRing", Vector3.new(0.92, 0.08, 0.92) * scale, secondary, alpha(0.12), Enum.Material.Neon)
+		ring.Shape = Enum.PartType.Cylinder
+		ring.CFrame = CFrame.Angles(0, 0, math.rad(90))
+	end
+	if level >= 6 then
+		local sparkA = ensurePart(model, "SparkA", Vector3.new(0.14, 0.14, 0.14) * scale, brightenColor(primary, 0.2), alpha(-0.08), Enum.Material.Neon, Enum.PartType.Ball)
+		sparkA.CFrame = CFrame.new(0.46 * scale, 0, 0)
+		local sparkB = ensurePart(model, "SparkB", Vector3.new(0.14, 0.14, 0.14) * scale, brightenColor(secondary, 0.2), alpha(-0.04), Enum.Material.Glass, Enum.PartType.Ball)
+		sparkB.CFrame = CFrame.new(-0.46 * scale, 0, 0)
+	end
+
 	return {
 		model = model,
 		spin = (index - 1) * 0.35,
-		spinSpeed = spinSpeed,
+		spinSpeed = spinSpeed + math.min(6, (level - 1) * 0.45),
 	}
 end
 
@@ -262,6 +286,8 @@ SpellVFXEvent.OnClientEvent:Connect(function(id, enabled, params)
 	cfg.lightRange = tonumber(params.lightRange) or 9
 	cfg.lightBrightness = tonumber(params.lightBrightness) or 1.7
 	cfg.trailLifetime = tonumber(params.trailLifetime) or 0.12
+	cfg.level = tonumber(params.level) or 1
+	cfg.visualIntensity = tonumber(params.visualIntensity) or 1
 
 	rebuildOrbs(id, cfg)
 end)

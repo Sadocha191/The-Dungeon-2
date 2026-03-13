@@ -1,4 +1,5 @@
--- DropService.server.lua (ServerScriptService) - larger orbs, no physics, close-range magnet
+-- DropService.server.lua
+-- Animated drops with idle bobbing, magnet motion and a short pickup spiral into the player.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -10,8 +11,8 @@ if not dropsFolder then
 	dropsFolder.Parent = workspace
 end
 
-local active = {} -- [part] = {type="xp"/"coins"/"souls", amount=number}
-local activeGlobalMagnets = {} -- [userId] = { player = Player, expiresAt = number }
+local active = {}
+local activeGlobalMagnets = {}
 
 local ATTRACT_RADIUS = 8
 local PICKUP_DIST = 2.5
@@ -23,10 +24,32 @@ local GLOBAL_MAGNET_SPEED = 180
 local ORB_SIZE = Vector3.new(1, 1, 1)
 local ORB_HALF_HEIGHT = ORB_SIZE.Y * 0.5
 local ORB_SPAWN_HEIGHT = 2.5
+local ORB_IDLE_BOB = 0.28
+local ORB_IDLE_BOB_SPEED = 4.8
+local ORB_IDLE_WOBBLE = 0.12
+local PICKUP_ANIM_DURATION = 0.24
 
 local GROUND_RAY_PARAMS = RaycastParams.new()
 GROUND_RAY_PARAMS.FilterType = Enum.RaycastFilterType.Blacklist
 GROUND_RAY_PARAMS.IgnoreWater = false
+
+local DROP_COLORS = {
+	xp = Color3.fromRGB(96, 165, 250),
+	coins = Color3.fromRGB(255, 180, 60),
+	souls = Color3.fromRGB(168, 85, 247),
+}
+
+local function blendColor(a, b, alpha)
+	return Color3.new(
+		a.R + ((b.R - a.R) * alpha),
+		a.G + ((b.G - a.G) * alpha),
+		a.B + ((b.B - a.B) * alpha)
+	)
+end
+
+local function brightenColor(color, alpha)
+	return blendColor(color, Color3.new(1, 1, 1), alpha or 0.28)
+end
 
 local function getPickupRangeMult(plr)
 	local bonus = plr and plr:GetAttribute("ShrinePickupRangeBonus")
@@ -37,13 +60,17 @@ local function getPickupRangeMult(plr)
 end
 
 local function getGroundedPosition(pos: Vector3)
-	local ignore = {dropsFolder}
+	local ignore = { dropsFolder }
 
 	local enemiesFolder = workspace:FindFirstChild("Enemies")
-	if enemiesFolder then table.insert(ignore, enemiesFolder) end
+	if enemiesFolder then
+		table.insert(ignore, enemiesFolder)
+	end
 
 	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr.Character then table.insert(ignore, plr.Character) end
+		if plr.Character then
+			table.insert(ignore, plr.Character)
+		end
 	end
 
 	GROUND_RAY_PARAMS.FilterDescendantsInstances = ignore
@@ -112,7 +139,176 @@ local function getGlobalMagnetTarget(pos: Vector3, kind: string)
 	return bestPlr, bestDist
 end
 
+local function createDropTrail(part: BasePart, color: Color3)
+	local top = Instance.new("Attachment")
+	top.Name = "TrailTop"
+	top.Position = Vector3.new(0, part.Size.Y * 0.45, 0)
+	top.Parent = part
+
+	local bottom = Instance.new("Attachment")
+	bottom.Name = "TrailBottom"
+	bottom.Position = Vector3.new(0, -part.Size.Y * 0.45, 0)
+	bottom.Parent = part
+
+	local trail = Instance.new("Trail")
+	trail.Attachment0 = top
+	trail.Attachment1 = bottom
+	trail.Color = ColorSequence.new(color, brightenColor(color, 0.32))
+	trail.LightEmission = 1
+	trail.FaceCamera = true
+	trail.Lifetime = 0.12
+	trail.MinLength = 0.02
+	trail.Enabled = false
+	trail.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.08),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	trail.WidthScale = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.38),
+		NumberSequenceKeypoint.new(1, 0.08),
+	})
+	trail.Parent = part
+
+	return trail
+end
+
+local function createDropSparkles(part: BasePart, color: Color3)
+	local attachment = Instance.new("Attachment")
+	attachment.Name = "SparkAttachment"
+	attachment.Parent = part
+
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Name = "Sparkles"
+	emitter.Color = ColorSequence.new(color, brightenColor(color, 0.34))
+	emitter.LightEmission = 1
+	emitter.Lifetime = NumberRange.new(0.35, 0.75)
+	emitter.Speed = NumberRange.new(0.12, 0.55)
+	emitter.Rate = 8
+	emitter.SpreadAngle = Vector2.new(40, 40)
+	emitter.Rotation = NumberRange.new(0, 360)
+	emitter.RotSpeed = NumberRange.new(-90, 90)
+	emitter.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.12),
+		NumberSequenceKeypoint.new(0.55, 0.08),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	emitter.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.25),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	emitter.Parent = attachment
+
+	return emitter
+end
+
+local function awardDrop(plr: Player, meta)
+	if meta.awarded or not plr or not plr.Parent then
+		return
+	end
+
+	meta.awarded = true
+	if meta.type == "xp" then
+		if _G.AwardPlayer then
+			_G.AwardPlayer(plr, meta.amount, 0)
+		end
+	elseif meta.type == "coins" then
+		if _G.AwardPlayer then
+			_G.AwardPlayer(plr, 0, meta.amount)
+		end
+	elseif meta.type == "souls" then
+		if _G.AwardSouls then
+			_G.AwardSouls(plr, meta.amount)
+		end
+	end
+end
+
+local function removeDrop(orb, meta, plr)
+	awardDrop(plr, meta)
+	if orb and orb.Parent then
+		orb:Destroy()
+	end
+	active[orb] = nil
+end
+
+local function startPickupAnimation(orb, meta, plr, now)
+	if meta.collecting then
+		return
+	end
+
+	meta.collecting = {
+		player = plr,
+		startedAt = now,
+		duration = PICKUP_ANIM_DURATION + (math.random() * 0.06),
+		origin = orb.Position,
+		lastTarget = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") and (plr.Character.HumanoidRootPart.Position + Vector3.new(0, 1.8, 0)) or orb.Position,
+	}
+	if meta.trail then
+		meta.trail.Enabled = true
+		meta.trail.Lifetime = 0.18
+	end
+	if meta.light then
+		meta.light.Brightness = meta.baseLightBrightness * 1.8
+		meta.light.Range = meta.baseLightRange * 1.35
+	end
+end
+
+local function updateCollectingDrop(orb, meta, now)
+	local collect = meta.collecting
+	if not collect then
+		return false
+	end
+
+	local plr = collect.player
+	local char = plr and plr.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hrp and hum and hum.Health > 0 then
+		collect.lastTarget = hrp.Position + Vector3.new(0, 1.8, 0)
+	end
+
+	local alpha = math.clamp((now - collect.startedAt) / collect.duration, 0, 1)
+	local eased = 1 - ((1 - alpha) ^ 3)
+	local targetPos = collect.lastTarget or collect.origin
+	local travelPos = collect.origin:Lerp(targetPos, eased)
+	local swirlRadius = (1 - eased) * 0.75
+	local swirlAngle = meta.phase + (alpha * math.pi * 6)
+	local swirlOffset = Vector3.new(
+		math.cos(swirlAngle) * swirlRadius,
+		(math.sin(swirlAngle * 0.5) * 0.2) + (math.sin(alpha * math.pi) * 0.7),
+		math.sin(swirlAngle) * swirlRadius
+	)
+
+	orb.Size = ORB_SIZE:Lerp(ORB_SIZE * 0.28, eased)
+	orb.Transparency = 0.05 + (eased * 0.88)
+	orb.CFrame = CFrame.new(travelPos + swirlOffset) * CFrame.Angles(alpha * 12, alpha * 18, alpha * 10)
+	if meta.light then
+		meta.light.Brightness = meta.baseLightBrightness + ((1 - alpha) * 2.2)
+	end
+
+	if alpha >= 1 then
+		removeDrop(orb, meta, plr)
+		return true
+	end
+
+	return false
+end
+
+local function updateIdleVisual(orb, meta, now)
+	local bob = math.sin(((now - meta.spawnAt) * ORB_IDLE_BOB_SPEED) + meta.phase) * ORB_IDLE_BOB
+	local wobble = math.sin(((now - meta.spawnAt) * 2.4) + meta.phase) * ORB_IDLE_WOBBLE
+	local spin = meta.spinBase + ((now - meta.spawnAt) * meta.spinSpeed)
+	orb.Size = ORB_SIZE
+	orb.Transparency = 0.05
+	orb.CFrame = CFrame.new(meta.corePos + Vector3.new(0, bob, 0)) * CFrame.Angles(wobble * 0.35, spin, -wobble * 0.35)
+	if meta.light then
+		meta.light.Brightness = meta.baseLightBrightness + (math.sin(((now - meta.spawnAt) * 5) + meta.phase) * 0.25)
+		meta.light.Range = meta.baseLightRange + (math.cos(((now - meta.spawnAt) * 3.2) + meta.phase) * 0.15)
+	end
+end
+
 local function makeOrb(kind: "xp" | "coins" | "souls", amount: number, pos: Vector3)
+	local color = DROP_COLORS[kind] or Color3.fromRGB(255, 255, 255)
+	local groundedPos = getGroundedPosition(pos)
 	local p = Instance.new("Part")
 	if kind == "xp" then
 		p.Name = "XPOrb"
@@ -123,23 +319,42 @@ local function makeOrb(kind: "xp" | "coins" | "souls", amount: number, pos: Vect
 	end
 	p.Shape = Enum.PartType.Ball
 	p.Material = Enum.Material.Neon
-	if kind == "xp" then
-		p.Color = Color3.fromRGB(96, 165, 250)
-	elseif kind == "coins" then
-		p.Color = Color3.fromRGB(255, 180, 60)
-	else
-		p.Color = Color3.fromRGB(168, 85, 247)
-	end
+	p.Color = color
 	p.Size = ORB_SIZE
+	p.Transparency = 0.05
 	p.CanCollide = false
 	p.CanQuery = false
 	p.Anchored = true
-	p.CFrame = CFrame.new(getGroundedPosition(pos))
+	p.CFrame = CFrame.new(groundedPos)
 	p.Parent = dropsFolder
-	p.AssemblyLinearVelocity = Vector3.new((math.random() - 0.5) * 6, math.random(5, 8), (math.random() - 0.5) * 6)
-	p.AssemblyAngularVelocity = Vector3.new((math.random() - 0.5) * 5, (math.random() - 0.5) * 5, (math.random() - 0.5) * 5)
 
-	active[p] = { type = kind, amount = math.max(1, math.floor(amount)) }
+	local light = Instance.new("PointLight")
+	light.Color = color
+	light.Brightness = kind == "coins" and 2.2 or 1.8
+	light.Range = kind == "souls" and 8.5 or 7.5
+	light.Shadows = false
+	light.Parent = p
+
+	local trail = createDropTrail(p, color)
+	local sparkles = createDropSparkles(p, color)
+
+	active[p] = {
+		type = kind,
+		amount = math.max(1, math.floor(amount)),
+		corePos = groundedPos,
+		spawnAt = os.clock(),
+		phase = math.random() * math.pi * 2,
+		spinBase = math.random() * math.pi * 2,
+		spinSpeed = math.rad(55 + math.random(0, 45)),
+		light = light,
+		baseLightBrightness = light.Brightness,
+		baseLightRange = light.Range,
+		trail = trail,
+		sparkles = sparkles,
+		awarded = false,
+		collecting = nil,
+	}
+
 	return p
 end
 
@@ -147,9 +362,15 @@ function _G.SpawnDropsAt(pos: Vector3, xp: number, coins: number, souls: number)
 	local function jitter()
 		return Vector3.new((math.random() - 0.5) * 2.6, 0, (math.random() - 0.5) * 2.6)
 	end
-	if xp and xp > 0 then makeOrb("xp", xp, pos + jitter()) end
-	if coins and coins > 0 then makeOrb("coins", coins, pos + jitter()) end
-	if souls and souls > 0 then makeOrb("souls", souls, pos + jitter()) end
+	if xp and xp > 0 then
+		makeOrb("xp", xp, pos + jitter())
+	end
+	if coins and coins > 0 then
+		makeOrb("coins", coins, pos + jitter())
+	end
+	if souls and souls > 0 then
+		makeOrb("souls", souls, pos + jitter())
+	end
 end
 
 function _G.ActivateGlobalMagnet(plr: Player, duration: number)
@@ -167,49 +388,65 @@ end
 RunService.Heartbeat:Connect(function(dt)
 	cleanupGlobalMagnets()
 
+	local now = os.clock()
 	for orb, meta in pairs(active) do
 		if not orb or not orb.Parent then
 			active[orb] = nil
 			continue
 		end
 
-		local plr, dist = getGlobalMagnetTarget(orb.Position, meta.type)
+		if meta.collecting then
+			if updateCollectingDrop(orb, meta, now) then
+				continue
+			end
+			continue
+		end
+
+		local plr, dist = getGlobalMagnetTarget(meta.corePos, meta.type)
 		local usingGlobalMagnet = plr ~= nil
 		if not plr then
-			plr, dist = nearestAlivePlayer(orb.Position)
+			plr, dist = nearestAlivePlayer(meta.corePos)
 		end
+
 		if not plr then
+			if meta.trail then
+				meta.trail.Enabled = false
+			end
+			updateIdleVisual(orb, meta, now)
 			continue
 		end
 
 		local char = plr.Character
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
-		if not hrp then continue end
+		if not hrp or not hum or hum.Health <= 0 then
+			if meta.trail then
+				meta.trail.Enabled = false
+			end
+			updateIdleVisual(orb, meta, now)
+			continue
+		end
 
 		local pickupMult = getPickupRangeMult(plr)
 		local pickupDist = PICKUP_DIST * pickupMult
 		local attractRadius = ATTRACT_RADIUS * pickupMult
 
 		if dist <= pickupDist then
-			if meta.type == "xp" then
-				if _G.AwardPlayer then _G.AwardPlayer(plr, meta.amount, 0) end
-			elseif meta.type == "coins" then
-				if _G.AwardPlayer then _G.AwardPlayer(plr, 0, meta.amount) end
-			elseif meta.type == "souls" then
-				if _G.AwardSouls then _G.AwardSouls(plr, meta.amount) end
-			end
-			orb:Destroy()
-			active[orb] = nil
+			startPickupAnimation(orb, meta, plr, now)
+			updateCollectingDrop(orb, meta, now)
 			continue
 		end
 
 		if usingGlobalMagnet or dist <= attractRadius then
 			local target = hrp.Position + Vector3.new(0, 1.6, 0)
-			local toTarget = target - orb.Position
+			local toTarget = target - meta.corePos
 			local toTargetDist = toTarget.Magnitude
+			if meta.trail then
+				meta.trail.Enabled = true
+				meta.trail.Lifetime = usingGlobalMagnet and 0.18 or 0.12
+			end
 			if toTargetDist > 0 then
-				local walkSpeed = (hum and hum.WalkSpeed) or 16
+				local walkSpeed = hum.WalkSpeed or 16
 				local attractSpeed
 				if usingGlobalMagnet then
 					attractSpeed = math.max(GLOBAL_MAGNET_SPEED, walkSpeed * 6)
@@ -217,8 +454,14 @@ RunService.Heartbeat:Connect(function(dt)
 					attractSpeed = math.max(ATTRACT_SPEED_MIN, walkSpeed * ATTRACT_SPEED_MULT + ATTRACT_SPEED_BONUS)
 				end
 				local step = math.min(toTargetDist, attractSpeed * dt)
-				orb.CFrame = CFrame.new(orb.Position + toTarget.Unit * step)
+				meta.corePos += toTarget.Unit * step
+			end
+		else
+			if meta.trail then
+				meta.trail.Enabled = false
 			end
 		end
+
+		updateIdleVisual(orb, meta, now)
 	end
 end)
