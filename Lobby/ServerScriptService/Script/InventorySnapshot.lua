@@ -57,6 +57,34 @@ local function computeInstanceStats(def: any, inst: any)
 	}
 end
 
+local function buildCountEntries(rawMap)
+	local entries = {}
+	if typeof(rawMap) ~= "table" then
+		return entries
+	end
+
+	for id, amount in pairs(rawMap) do
+		if typeof(id) == "string" and id ~= "" then
+			local count = math.max(0, math.floor(tonumber(amount) or 0))
+			if count > 0 then
+				table.insert(entries, {
+					id = id,
+					amount = count,
+				})
+			end
+		end
+	end
+
+	table.sort(entries, function(a, b)
+		if a.amount == b.amount then
+			return a.id < b.id
+		end
+		return a.amount > b.amount
+	end)
+
+	return entries
+end
+
 local remoteFunctions = ReplicatedStorage:FindFirstChild("RemoteFunctions")
 if not remoteFunctions then
 	remoteFunctions = Instance.new("Folder")
@@ -82,11 +110,13 @@ GetInventorySnapshot.OnServerInvoke = function(player)
 		return {
 			playerInfo = {},
 			currencies = {},
+			resources = {},
 			weapons = {},
 		}
 	end
 	local data = PlayerData.Get(player)
 	local currencies = CurrencyService.GetBalances(player)
+	local crafting = (typeof(data.crafting) == "table") and data.crafting or {}
 
 	local weapons = {}
 	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
@@ -127,8 +157,16 @@ GetInventorySnapshot.OnServerInvoke = function(player)
 			race = player:GetAttribute("Race"),
 		},
 		currencies = {
+			Silver = currencies.Silver,
 			Coins = currencies.Coins,
+			Souls = math.max(0, math.floor(tonumber(data.souls) or 0)),
 			WeaponPoints = currencies.WeaponPoints,
+			Tickets = currencies.Tickets,
+		},
+		resources = {
+			mineResources = buildCountEntries(crafting.mineResources),
+			mobMaterials = buildCountEntries(crafting.mobMaterials),
+			upgradeMaterials = buildCountEntries(crafting.upgradeMaterials),
 		},
 		equippedId = state.EquippedWeaponInstanceId,
 		weapons = weapons,

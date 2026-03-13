@@ -26,6 +26,7 @@ ensureRemoteEvent("PartyXPUpdate")       -- server -> all clients (xp/level upda
 
 -- Floating damage numbers
 ensureRemoteEvent("DamageIndicatorEvent")  -- server -> all clients (pos, amount, crit)
+ensureRemoteEvent("PickupIndicatorEvent")  -- server -> client (kind, amount)
 -- Loading gate (client preload handshake)
 ensureRemoteEvent("ClientReady")          -- client -> server (loaded/preloaded)
 

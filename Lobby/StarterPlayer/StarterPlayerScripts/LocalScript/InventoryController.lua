@@ -80,6 +80,21 @@ do
 	end
 end
 
+local CraftingConfig = {}
+do
+	local module = findModule(ReplicatedStorage, "CraftingConfig")
+	if module then
+		local ok, result = pcall(require, module)
+		if ok and result then
+			CraftingConfig = result
+		else
+			warn("[InventoryController] Failed to load CraftingConfig")
+		end
+	else
+		warn("[InventoryController] Missing CraftingConfig module")
+	end
+end
+
 local function hexToColor3(hex)
 	hex = tostring(hex or "")
 	hex = hex:gsub("#", "")
@@ -92,9 +107,22 @@ local function hexToColor3(hex)
 	return Color3.fromRGB(r, g, b)
 end
 
+local extraRarityColors = {
+	Uncommon = "#73C991",
+}
+
 local function rarityColor(rarity)
-	local hex = WeaponConfigs.RarityColors and WeaponConfigs.RarityColors[rarity or ""]
+	local key = tostring(rarity or "")
+	local hex = (WeaponConfigs.RarityColors and WeaponConfigs.RarityColors[key]) or extraRarityColors[key]
 	return hexToColor3(hex or "#B0B0B0")
+end
+
+local function blendColor(fromColor, toColor, alpha)
+	return Color3.new(
+		fromColor.R + (toColor.R - fromColor.R) * alpha,
+		fromColor.G + (toColor.G - fromColor.G) * alpha,
+		fromColor.B + (toColor.B - fromColor.B) * alpha
+	)
 end
 
 local function addHover(frame, normalColor, hoverColor)
@@ -138,8 +166,8 @@ overlay.Parent = inventoryGui
 local panel = Instance.new("Frame")
 panel.AnchorPoint = Vector2.new(0.5, 0.5)
 panel.Position = UDim2.fromScale(0.5, 0.5)
-panel.Size = UDim2.fromOffset(980, 560)
-panel.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+panel.Size = UDim2.fromOffset(1120, 620)
+panel.BackgroundColor3 = Color3.fromRGB(16, 18, 24)
 panel.BackgroundTransparency = 0.06
 panel.BorderSizePixel = 0
 panel.Parent = overlay
@@ -190,8 +218,8 @@ leftColumn.Parent = body
 
 local playerPanel = Instance.new("ScrollingFrame")
 playerPanel.Position = UDim2.fromOffset(0, 0)
-playerPanel.Size = UDim2.new(1, 0, 0, 250)
-playerPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+playerPanel.Size = UDim2.new(1, 0, 0, 242)
+playerPanel.BackgroundColor3 = Color3.fromRGB(20, 24, 32)
 playerPanel.BackgroundTransparency = 0.08
 playerPanel.BorderSizePixel = 0
 playerPanel.ScrollBarThickness = 6
@@ -199,6 +227,9 @@ playerPanel.CanvasSize = UDim2.fromOffset(0, 0)
 playerPanel.AutomaticCanvasSize = Enum.AutomaticSize.Y
 playerPanel.Parent = leftColumn
 Instance.new("UICorner", playerPanel).CornerRadius = UDim.new(0, 12)
+local playerPanelStroke = Instance.new("UIStroke", playerPanel)
+playerPanelStroke.Color = Color3.fromRGB(48, 56, 72)
+playerPanelStroke.Thickness = 1
 local playerPad = Instance.new("UIPadding", playerPanel)
 playerPad.PaddingTop = UDim.new(0, 16)
 playerPad.PaddingBottom = UDim.new(0, 16)
@@ -321,13 +352,22 @@ wpLabel.Text = "WP: 0"
 wpLabel.Parent = currenciesFrame
 
 local equippedPanel = Instance.new("Frame")
-equippedPanel.Position = UDim2.fromOffset(0, 264)
-equippedPanel.Size = UDim2.new(1, 0, 1, -264)
-equippedPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+equippedPanel.Position = UDim2.fromOffset(0, 256)
+equippedPanel.Size = UDim2.new(1, 0, 1, -256)
+equippedPanel.BackgroundColor3 = Color3.fromRGB(20, 24, 32)
 equippedPanel.BackgroundTransparency = 0.08
 equippedPanel.BorderSizePixel = 0
 equippedPanel.Parent = leftColumn
 Instance.new("UICorner", equippedPanel).CornerRadius = UDim.new(0, 12)
+local equippedPanelStroke = Instance.new("UIStroke", equippedPanel)
+equippedPanelStroke.Color = Color3.fromRGB(48, 56, 72)
+equippedPanelStroke.Thickness = 1
+local equippedAccent = Instance.new("Frame")
+equippedAccent.Size = UDim2.new(1, 0, 0, 4)
+equippedAccent.BackgroundColor3 = Color3.fromRGB(96, 165, 250)
+equippedAccent.BorderSizePixel = 0
+equippedAccent.Parent = equippedPanel
+Instance.new("UICorner", equippedAccent).CornerRadius = UDim.new(0, 10)
 local equippedPad = Instance.new("UIPadding", equippedPanel)
 equippedPad.PaddingTop = UDim.new(0, 16)
 equippedPad.PaddingBottom = UDim.new(0, 16)
@@ -431,16 +471,102 @@ rightColumn.BackgroundTransparency = 1
 rightColumn.Parent = body
 
 local rightLayout = Instance.new("UIListLayout", rightColumn)
-rightLayout.FillDirection = Enum.FillDirection.Horizontal
+rightLayout.FillDirection = Enum.FillDirection.Vertical
 rightLayout.Padding = UDim.new(0, 16)
+
+local summaryStrip = Instance.new("Frame")
+summaryStrip.Size = UDim2.new(1, 0, 0, 136)
+summaryStrip.BackgroundTransparency = 1
+summaryStrip.Parent = rightColumn
+
+local summaryLayout = Instance.new("UIListLayout", summaryStrip)
+summaryLayout.FillDirection = Enum.FillDirection.Horizontal
+summaryLayout.Padding = UDim.new(0, 8)
+summaryLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local function createSummaryCard(titleText, subtitleText)
+	local card = Instance.new("Frame")
+	card.Size = UDim2.fromOffset(171, 136)
+	card.BackgroundColor3 = Color3.fromRGB(20, 24, 32)
+	card.BackgroundTransparency = 0.04
+	card.BorderSizePixel = 0
+	card.Parent = summaryStrip
+	Instance.new("UICorner", card).CornerRadius = UDim.new(0, 12)
+
+	local stroke = Instance.new("UIStroke", card)
+	stroke.Color = Color3.fromRGB(48, 56, 72)
+	stroke.Thickness = 1
+
+	local pad = Instance.new("UIPadding", card)
+	pad.PaddingTop = UDim.new(0, 14)
+	pad.PaddingBottom = UDim.new(0, 14)
+	pad.PaddingLeft = UDim.new(0, 14)
+	pad.PaddingRight = UDim.new(0, 14)
+
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Size = UDim2.new(1, 0, 0, 18)
+	titleLabel.Font = Enum.Font.GothamBold
+	titleLabel.TextSize = 13
+	titleLabel.TextColor3 = Color3.fromRGB(235, 239, 246)
+	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	titleLabel.Text = titleText
+	titleLabel.Parent = card
+
+	local subtitleLabel = Instance.new("TextLabel")
+	subtitleLabel.BackgroundTransparency = 1
+	subtitleLabel.Position = UDim2.fromOffset(0, 20)
+	subtitleLabel.Size = UDim2.new(1, 0, 0, 14)
+	subtitleLabel.Font = Enum.Font.Gotham
+	subtitleLabel.TextSize = 11
+	subtitleLabel.TextColor3 = Color3.fromRGB(154, 165, 184)
+	subtitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	subtitleLabel.Text = subtitleText
+	subtitleLabel.Parent = card
+
+	local body = Instance.new("Frame")
+	body.BackgroundTransparency = 1
+	body.Position = UDim2.fromOffset(0, 42)
+	body.Size = UDim2.new(1, 0, 1, -42)
+	body.Parent = card
+
+	local bodyLayout = Instance.new("UIListLayout", body)
+	bodyLayout.Padding = UDim.new(0, 5)
+	bodyLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+	return card, stroke, subtitleLabel, body
+end
+
+local walletCard, walletStroke, walletSubtitle, walletBody = createSummaryCard("Wallet", "Lobby balances")
+local mineCard, mineStroke, mineSubtitle, mineBody = createSummaryCard("Mine Cache", "Owned ore and minerals")
+local mobCard, mobStroke, mobSubtitle, mobBody = createSummaryCard("Monster Loot", "Materials from enemies")
+local upgradeCard, upgradeStroke, upgradeSubtitle, upgradeBody = createSummaryCard("Forge Stock", "Upgrade materials")
+
+walletStroke.Color = Color3.fromRGB(94, 167, 255)
+mineStroke.Color = Color3.fromRGB(88, 196, 139)
+mobStroke.Color = Color3.fromRGB(233, 174, 94)
+upgradeStroke.Color = Color3.fromRGB(176, 135, 255)
+
+local inventorySection = Instance.new("Frame")
+inventorySection.Size = UDim2.new(1, 0, 1, -152)
+inventorySection.BackgroundTransparency = 1
+inventorySection.Parent = rightColumn
+
+local inventorySectionLayout = Instance.new("UIListLayout", inventorySection)
+inventorySectionLayout.FillDirection = Enum.FillDirection.Horizontal
+inventorySectionLayout.Padding = UDim.new(0, 16)
+inventorySectionLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
 local gridPanel = Instance.new("Frame")
 gridPanel.Size = UDim2.new(0.62, -8, 1, 0)
-gridPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+gridPanel.BackgroundColor3 = Color3.fromRGB(20, 24, 32)
 gridPanel.BackgroundTransparency = 0.08
 gridPanel.BorderSizePixel = 0
-gridPanel.Parent = rightColumn
+gridPanel.Parent = inventorySection
 Instance.new("UICorner", gridPanel).CornerRadius = UDim.new(0, 12)
+local gridPanelStroke = Instance.new("UIStroke", gridPanel)
+gridPanelStroke.Color = Color3.fromRGB(48, 56, 72)
+gridPanelStroke.Thickness = 1
 local gridPad = Instance.new("UIPadding", gridPanel)
 gridPad.PaddingTop = UDim.new(0, 16)
 gridPad.PaddingBottom = UDim.new(0, 16)
@@ -449,18 +575,30 @@ gridPad.PaddingRight = UDim.new(0, 16)
 
 local gridTitle = Instance.new("TextLabel")
 gridTitle.BackgroundTransparency = 1
-gridTitle.Size = UDim2.new(1, 0, 0, 20)
+gridTitle.Size = UDim2.new(1, -120, 0, 20)
 gridTitle.Font = Enum.Font.GothamBold
 gridTitle.TextSize = 16
-gridTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
+gridTitle.TextColor3 = Color3.fromRGB(235, 239, 246)
 gridTitle.TextXAlignment = Enum.TextXAlignment.Left
-gridTitle.Text = "Inventory Slots"
+gridTitle.Text = "Weapons"
 gridTitle.Parent = gridPanel
+
+local gridCountLabel = Instance.new("TextLabel")
+gridCountLabel.AnchorPoint = Vector2.new(1, 0)
+gridCountLabel.Position = UDim2.new(1, 0, 0, 2)
+gridCountLabel.Size = UDim2.fromOffset(110, 16)
+gridCountLabel.BackgroundTransparency = 1
+gridCountLabel.Font = Enum.Font.Gotham
+gridCountLabel.TextSize = 11
+gridCountLabel.TextColor3 = Color3.fromRGB(154, 165, 184)
+gridCountLabel.TextXAlignment = Enum.TextXAlignment.Right
+gridCountLabel.Text = "0 collected"
+gridCountLabel.Parent = gridPanel
 
 local slotsFrame = Instance.new("ScrollingFrame")
 slotsFrame.BackgroundTransparency = 1
-slotsFrame.Position = UDim2.fromOffset(0, 30)
-slotsFrame.Size = UDim2.new(1, 0, 1, -30)
+slotsFrame.Position = UDim2.fromOffset(0, 38)
+slotsFrame.Size = UDim2.new(1, 0, 1, -38)
 slotsFrame.ScrollBarThickness = 6
 slotsFrame.BorderSizePixel = 0
 slotsFrame.CanvasSize = UDim2.fromOffset(0, 0)
@@ -468,16 +606,16 @@ slotsFrame.Parent = gridPanel
 
 local slotsLayout = Instance.new("UIGridLayout", slotsFrame)
 slotsLayout.CellPadding = UDim2.fromOffset(12, 12)
-slotsLayout.CellSize = UDim2.fromOffset(110, 110)
+slotsLayout.CellSize = UDim2.fromOffset(126, 144)
 slotsLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
 local emptyLabel = Instance.new("TextLabel")
 emptyLabel.BackgroundTransparency = 1
-emptyLabel.Position = UDim2.fromOffset(0, 30)
-emptyLabel.Size = UDim2.new(1, 0, 1, -30)
+emptyLabel.Position = UDim2.fromOffset(0, 38)
+emptyLabel.Size = UDim2.new(1, 0, 1, -38)
 emptyLabel.Font = Enum.Font.Gotham
 emptyLabel.TextSize = 14
-emptyLabel.TextColor3 = Color3.fromRGB(160, 160, 160)
+emptyLabel.TextColor3 = Color3.fromRGB(160, 170, 188)
 emptyLabel.Text = "No weapons yet."
 emptyLabel.TextWrapped = true
 emptyLabel.TextXAlignment = Enum.TextXAlignment.Center
@@ -487,11 +625,20 @@ emptyLabel.Parent = gridPanel
 
 local detailsPanel = Instance.new("Frame")
 detailsPanel.Size = UDim2.new(0.38, -8, 1, 0)
-detailsPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+detailsPanel.BackgroundColor3 = Color3.fromRGB(20, 24, 32)
 detailsPanel.BackgroundTransparency = 0.08
 detailsPanel.BorderSizePixel = 0
-detailsPanel.Parent = rightColumn
+detailsPanel.Parent = inventorySection
 Instance.new("UICorner", detailsPanel).CornerRadius = UDim.new(0, 12)
+local detailsPanelStroke = Instance.new("UIStroke", detailsPanel)
+detailsPanelStroke.Color = Color3.fromRGB(48, 56, 72)
+detailsPanelStroke.Thickness = 1
+local detailsAccent = Instance.new("Frame")
+detailsAccent.Size = UDim2.new(1, 0, 0, 4)
+detailsAccent.BackgroundColor3 = Color3.fromRGB(96, 165, 250)
+detailsAccent.BorderSizePixel = 0
+detailsAccent.Parent = detailsPanel
+Instance.new("UICorner", detailsAccent).CornerRadius = UDim.new(0, 10)
 local detailsPad = Instance.new("UIPadding", detailsPanel)
 detailsPad.PaddingTop = UDim.new(0, 16)
 detailsPad.PaddingBottom = UDim.new(0, 16)
@@ -503,7 +650,7 @@ detailsTitle.BackgroundTransparency = 1
 detailsTitle.Size = UDim2.new(1, 0, 0, 18)
 detailsTitle.Font = Enum.Font.GothamBold
 detailsTitle.TextSize = 14
-detailsTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
+detailsTitle.TextColor3 = Color3.fromRGB(235, 239, 246)
 detailsTitle.TextXAlignment = Enum.TextXAlignment.Left
 detailsTitle.Text = "Weapon Details"
 detailsTitle.Parent = detailsPanel
@@ -522,7 +669,7 @@ detailsLayout.Padding = UDim.new(0, 8)
 
 local iconFrame = Instance.new("Frame")
 iconFrame.Size = UDim2.fromOffset(72, 72)
-iconFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+iconFrame.BackgroundColor3 = Color3.fromRGB(30, 36, 46)
 iconFrame.BorderSizePixel = 0
 iconFrame.Parent = detailsScroll
 Instance.new("UICorner", iconFrame).CornerRadius = UDim.new(0, 12)
@@ -751,7 +898,113 @@ local selectedIndex
 local equippedWeaponId
 local contextIndex
 local weaponPoints = 0
+local souls = 0
+local tickets = 0
+local inventoryResources = {
+	mineResources = {},
+	mobMaterials = {},
+	upgradeMaterials = {},
+}
 local level, xp, nextXp, coins = 1, 0, 120, 0
+
+local resourceMetaById = {}
+for _, def in ipairs(CraftingConfig.MINE_RESOURCE_DEFS or {}) do
+	if typeof(def) == "table" and typeof(def.id) == "string" then
+		resourceMetaById[def.id] = {
+			rarity = def.rarity,
+		}
+	end
+end
+
+for _, def in ipairs(CraftingConfig.MOB_MATERIAL_DEFS or {}) do
+	if typeof(def) == "table" and typeof(def.id) == "string" then
+		resourceMetaById[def.id] = resourceMetaById[def.id] or {}
+	end
+end
+
+resourceMetaById[CraftingConfig.UPGRADE_CRYSTAL_ID or "Upgrade Crystal"] = { rarity = "Rare" }
+resourceMetaById[CraftingConfig.ELITE_SPECIAL_ID or "Elite Sigil"] = { rarity = "Epic" }
+resourceMetaById[CraftingConfig.BOSS_SPECIAL_ID or "Boss Core"] = { rarity = "Legendary" }
+
+local function clearTextRows(container)
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("TextLabel") then
+			child:Destroy()
+		end
+	end
+end
+
+local function addCardRow(container, order, text, color)
+	local row = Instance.new("TextLabel")
+	row.BackgroundTransparency = 1
+	row.Size = UDim2.new(1, 0, 0, 16)
+	row.Font = Enum.Font.Gotham
+	row.TextSize = 11
+	row.TextColor3 = color or Color3.fromRGB(220, 226, 238)
+	row.TextXAlignment = Enum.TextXAlignment.Left
+	row.TextWrapped = false
+	row.LayoutOrder = order
+	row.Text = text
+	row.Parent = container
+	return row
+end
+
+local function getResourceColor(resourceId, fallbackColor)
+	local meta = resourceMetaById[resourceId]
+	if meta and meta.rarity then
+		return rarityColor(meta.rarity)
+	end
+	return fallbackColor or Color3.fromRGB(220, 226, 238)
+end
+
+local function totalAmount(entries)
+	local total = 0
+	for _, entry in ipairs(entries or {}) do
+		total += math.max(0, math.floor(tonumber(entry.amount) or 0))
+	end
+	return total
+end
+
+local function renderEntryCard(body, subtitleLabel, entries, emptyText, fallbackColor)
+	clearTextRows(body)
+
+	if typeof(entries) ~= "table" or #entries == 0 then
+		subtitleLabel.Text = "Nothing stored"
+		addCardRow(body, 1, emptyText, Color3.fromRGB(145, 153, 171))
+		return
+	end
+
+	subtitleLabel.Text = ("%d types | %d total"):format(#entries, totalAmount(entries))
+	local limit = 4
+	for index = 1, math.min(#entries, limit) do
+		local entry = entries[index]
+		addCardRow(
+			body,
+			index,
+			("%s x%d"):format(tostring(entry.id or "?"), math.max(0, math.floor(tonumber(entry.amount) or 0))),
+			getResourceColor(entry.id, fallbackColor)
+		)
+	end
+	if #entries > limit then
+		addCardRow(body, limit + 1, ("+%d more types"):format(#entries - limit), Color3.fromRGB(154, 165, 184))
+	end
+end
+
+local function renderWalletCard()
+	clearTextRows(walletBody)
+	walletSubtitle.Text = "Lobby balances"
+	addCardRow(walletBody, 1, ("Silver: %d"):format(coins), Color3.fromRGB(242, 198, 92))
+	addCardRow(walletBody, 2, ("Souls: %d"):format(souls), Color3.fromRGB(134, 164, 255))
+	addCardRow(walletBody, 3, ("WP: %d"):format(weaponPoints), Color3.fromRGB(111, 218, 255))
+	addCardRow(walletBody, 4, ("Tickets: %d"):format(tickets), Color3.fromRGB(226, 232, 242))
+end
+
+local function renderResourceCards()
+	renderWalletCard()
+	renderEntryCard(mineBody, mineSubtitle, inventoryResources.mineResources, "No ore or crystals", Color3.fromRGB(88, 196, 139))
+	renderEntryCard(mobBody, mobSubtitle, inventoryResources.mobMaterials, "No monster materials", Color3.fromRGB(233, 174, 94))
+	renderEntryCard(upgradeBody, upgradeSubtitle, inventoryResources.upgradeMaterials, "No upgrade stock", Color3.fromRGB(176, 135, 255))
+end
 
 local function formatStats(stats)
 	if typeof(stats) ~= "table" then
@@ -868,8 +1121,9 @@ local function updatePlayerInfo()
 	local raceName = tostring(plr:GetAttribute("Race") or "-")
 	raceLabel.Text = ("Race: %s"):format(raceName)
 	refreshFinalStats(raceName)
-	coinsLabel.Text = ("Silver: %d"):format(coins)
-	wpLabel.Text = ("WP: %d"):format(weaponPoints)
+	coinsLabel.Text = ("Silver: %d | Souls: %d"):format(coins, souls)
+	wpLabel.Text = ("WP: %d | Tickets: %d"):format(weaponPoints, tickets)
+	renderResourceCards()
 end
 
 
@@ -884,6 +1138,9 @@ local function applyEquipped(item)
 		equippedPassive.Text = "Passive/Ability: -"
 		equippedIconLabel.Text = "?"
 		equippedIconStroke.Color = Color3.fromRGB(50, 50, 64)
+		equippedIconFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+		equippedPanelStroke.Color = Color3.fromRGB(48, 56, 72)
+		equippedAccent.BackgroundColor3 = Color3.fromRGB(96, 165, 250)
 		return
 	end
 
@@ -911,6 +1168,9 @@ local function applyEquipped(item)
 
 	equippedIconLabel.Text = def.weaponType and def.weaponType:sub(1, 1) or "?"
 	equippedIconStroke.Color = color
+	equippedIconFrame.BackgroundColor3 = blendColor(Color3.fromRGB(26, 30, 40), color, 0.18)
+	equippedPanelStroke.Color = blendColor(Color3.fromRGB(48, 56, 72), color, 0.45)
+	equippedAccent.BackgroundColor3 = color
 end
 
 local function refreshEquippedPanel()
@@ -941,6 +1201,10 @@ local function applyDetails(item)
 		abilityTitle.Text = "Ability"
 		abilityDesc.Text = "-"
 		iconLabel.Text = "?"
+		iconFrame.BackgroundColor3 = Color3.fromRGB(30, 36, 46)
+		iconStroke.Color = Color3.fromRGB(50, 50, 64)
+		detailsPanelStroke.Color = Color3.fromRGB(48, 56, 72)
+		detailsAccent.BackgroundColor3 = Color3.fromRGB(96, 165, 250)
 		updateDetailsCanvas()
 		return
 	end
@@ -981,7 +1245,10 @@ local function applyDetails(item)
 
 	local iconText = def.weaponType and def.weaponType:sub(1, 1) or "?"
 	iconLabel.Text = iconText
+	iconFrame.BackgroundColor3 = blendColor(Color3.fromRGB(26, 30, 40), color, 0.18)
 	iconStroke.Color = color
+	detailsPanelStroke.Color = blendColor(Color3.fromRGB(48, 56, 72), color, 0.45)
+	detailsAccent.BackgroundColor3 = color
 
 	updateDetailsCanvas()
 end
@@ -1032,13 +1299,16 @@ local function setSelected(index)
 	selectedIndex = index
 	for i, slot in ipairs(slotWidgets) do
 		local selected = i == index
+		local item = inventoryItems[i]
+		local accent = rarityColor(item and item.rarity or "Common")
 		local stroke = slot:FindFirstChild("Stroke")
 		if stroke and stroke:IsA("UIStroke") then
-			stroke.Color = selected and Color3.fromRGB(96, 165, 250) or Color3.fromRGB(50, 50, 64)
+			stroke.Color = selected and accent or blendColor(Color3.fromRGB(48, 56, 72), accent, 0.35)
 			stroke.Thickness = selected and 2 or 1
 		end
 		local glow = slot:FindFirstChild("SelectedGlow")
 		if glow and glow:IsA("Frame") then
+			glow.BackgroundColor3 = accent
 			glow.Visible = selected
 		end
 	end
@@ -1057,13 +1327,19 @@ local function rebuildSlots()
 	slotWidgets = {}
 
 	emptyLabel.Visible = #inventoryItems == 0
+	gridCountLabel.Text = ("%d collected"):format(#inventoryItems)
 
 	for index, item in ipairs(inventoryItems) do
 		local def = item.def
+		local rarity = item.rarity or (def and def.rarity) or "Common"
+		local accent = rarityColor(rarity)
+		local baseColor = blendColor(Color3.fromRGB(24, 28, 38), accent, 0.09)
+		local hoverColor = blendColor(baseColor, accent, 0.12)
+
 		local slot = Instance.new("TextButton")
 		slot.Name = "Slot_" .. index
-		slot.Size = UDim2.fromOffset(110, 110)
-		slot.BackgroundColor3 = Color3.fromRGB(26, 26, 34)
+		slot.Size = UDim2.fromOffset(126, 144)
+		slot.BackgroundColor3 = baseColor
 		slot.BorderSizePixel = 0
 		slot.Text = ""
 		slot.AutoButtonColor = false
@@ -1072,36 +1348,58 @@ local function rebuildSlots()
 
 		local stroke = Instance.new("UIStroke")
 		stroke.Name = "Stroke"
-		stroke.Color = Color3.fromRGB(50, 50, 64)
+		stroke.Color = blendColor(Color3.fromRGB(48, 56, 72), accent, 0.35)
 		stroke.Thickness = 1
 		stroke.Parent = slot
 
 		local glow = Instance.new("Frame")
 		glow.Name = "SelectedGlow"
 		glow.Size = UDim2.new(1, 0, 1, 0)
-		glow.BackgroundColor3 = Color3.fromRGB(60, 140, 255)
-		glow.BackgroundTransparency = 0.85
+		glow.BackgroundColor3 = accent
+		glow.BackgroundTransparency = 0.88
 		glow.BorderSizePixel = 0
 		glow.Visible = false
 		glow.Parent = slot
 		Instance.new("UICorner", glow).CornerRadius = UDim.new(0, 12)
 
+		local iconBubble = Instance.new("Frame")
+		iconBubble.Position = UDim2.fromOffset(10, 10)
+		iconBubble.Size = UDim2.fromOffset(34, 34)
+		iconBubble.BackgroundColor3 = blendColor(Color3.fromRGB(24, 28, 38), accent, 0.24)
+		iconBubble.BorderSizePixel = 0
+		iconBubble.Parent = slot
+		Instance.new("UICorner", iconBubble).CornerRadius = UDim.new(0, 10)
+
 		local icon = Instance.new("TextLabel")
 		icon.BackgroundTransparency = 1
-		icon.Position = UDim2.fromOffset(8, 8)
-		icon.Size = UDim2.fromOffset(28, 28)
+		icon.Size = UDim2.fromScale(1, 1)
 		icon.Font = Enum.Font.GothamBold
-		icon.TextSize = 14
-		icon.TextColor3 = Color3.fromRGB(220, 220, 220)
+		icon.TextSize = 15
+		icon.TextColor3 = Color3.fromRGB(236, 242, 250)
 		icon.Text = def and def.weaponType and def.weaponType:sub(1, 1) or "?"
-		icon.Parent = slot
+		icon.Parent = iconBubble
+
+		if item.favorite then
+			local favoriteTag = Instance.new("TextLabel")
+			favoriteTag.AnchorPoint = Vector2.new(1, 0)
+			favoriteTag.Position = UDim2.new(1, -10, 0, 10)
+			favoriteTag.Size = UDim2.fromOffset(18, 18)
+			favoriteTag.BackgroundColor3 = Color3.fromRGB(255, 210, 96)
+			favoriteTag.BorderSizePixel = 0
+			favoriteTag.Font = Enum.Font.GothamBold
+			favoriteTag.TextSize = 10
+			favoriteTag.TextColor3 = Color3.fromRGB(30, 24, 10)
+			favoriteTag.Text = "F"
+			favoriteTag.Parent = slot
+			Instance.new("UICorner", favoriteTag).CornerRadius = UDim.new(0, 6)
+		end
 
 		if equippedWeaponId == item.id then
 			local equippedTag = Instance.new("TextLabel")
 			equippedTag.AnchorPoint = Vector2.new(1, 0)
-			equippedTag.Position = UDim2.new(1, -8, 0, 8)
+			equippedTag.Position = UDim2.new(1, -10, 0, item.favorite and 34 or 10)
 			equippedTag.Size = UDim2.fromOffset(18, 18)
-			equippedTag.BackgroundColor3 = Color3.fromRGB(60, 140, 255)
+			equippedTag.BackgroundColor3 = accent
 			equippedTag.BorderSizePixel = 0
 			equippedTag.Font = Enum.Font.GothamBold
 			equippedTag.TextSize = 11
@@ -1113,30 +1411,42 @@ local function rebuildSlots()
 
 		local name = Instance.new("TextLabel")
 		name.BackgroundTransparency = 1
-		name.Position = UDim2.fromOffset(8, 40)
-		name.Size = UDim2.new(1, -16, 0, 40)
+		name.Position = UDim2.fromOffset(10, 52)
+		name.Size = UDim2.new(1, -20, 0, 46)
 		name.Font = Enum.Font.GothamBold
 		name.TextSize = 12
 		name.TextXAlignment = Enum.TextXAlignment.Left
 		name.TextYAlignment = Enum.TextYAlignment.Top
 		name.TextWrapped = true
-		name.TextColor3 = def and rarityColor(def.rarity) or Color3.fromRGB(220, 220, 220)
-		name.Text = def and def.name or item.id
+		name.TextColor3 = accent
+		name.Text = item.displayName or (def and def.name) or item.id
 		name.Parent = slot
 
 		local rarityTag = Instance.new("TextLabel")
 		rarityTag.BackgroundTransparency = 1
 		rarityTag.AnchorPoint = Vector2.new(0, 1)
-		rarityTag.Position = UDim2.new(0, 8, 1, -8)
-		rarityTag.Size = UDim2.new(1, -16, 0, 14)
+		rarityTag.Position = UDim2.new(0, 10, 1, -28)
+		rarityTag.Size = UDim2.new(1, -20, 0, 14)
 		rarityTag.Font = Enum.Font.Gotham
 		rarityTag.TextSize = 11
 		rarityTag.TextXAlignment = Enum.TextXAlignment.Left
-		rarityTag.TextColor3 = def and rarityColor(def.rarity) or Color3.fromRGB(180, 180, 180)
-		rarityTag.Text = def and (def.rarity or "") or ""
+		rarityTag.TextColor3 = Color3.fromRGB(198, 206, 220)
+		rarityTag.Text = ("%s | Lv %d"):format(rarity, tonumber(item.level) or 1)
 		rarityTag.Parent = slot
 
-		addHover(slot, slot.BackgroundColor3, Color3.fromRGB(32, 32, 44))
+		local statTag = Instance.new("TextLabel")
+		statTag.BackgroundTransparency = 1
+		statTag.AnchorPoint = Vector2.new(0, 1)
+		statTag.Position = UDim2.new(0, 10, 1, -10)
+		statTag.Size = UDim2.new(1, -20, 0, 14)
+		statTag.Font = Enum.Font.Gotham
+		statTag.TextSize = 10
+		statTag.TextXAlignment = Enum.TextXAlignment.Left
+		statTag.TextColor3 = Color3.fromRGB(154, 165, 184)
+		statTag.Text = ("ATK %s"):format(tostring((item.stats and item.stats.ATK) or (def and def.baseDamage) or "-"))
+		statTag.Parent = slot
+
+		addHover(slot, baseColor, hoverColor)
 
 		slot.MouseButton1Click:Connect(function()
 			setSelected(index)
@@ -1183,8 +1493,15 @@ local function loadSnapshot()
 	nextXp = tonumber(info.nextXp) or nextXp
 
 	local currencies = payload.currencies or {}
-	coins = tonumber(currencies.Silver) or coins
+	coins = tonumber(currencies.Silver or currencies.Coins) or coins
+	souls = tonumber(currencies.Souls) or souls
 	weaponPoints = tonumber(currencies.WeaponPoints) or weaponPoints
+	tickets = tonumber(currencies.Tickets) or tickets
+
+	local resources = payload.resources or {}
+	inventoryResources.mineResources = resources.mineResources or {}
+	inventoryResources.mobMaterials = resources.mobMaterials or {}
+	inventoryResources.upgradeMaterials = resources.upgradeMaterials or {}
 
 	equippedWeaponId = payload.equippedId
 
@@ -1196,7 +1513,8 @@ local function loadSnapshot()
 			local def = WeaponConfigs.Get and WeaponConfigs.Get(weaponId) or nil
 			local rarity = entry.Rarity or (def and def.rarity) or "Common"
 			local prefix = entry.Prefix or "Standard"
-			local displayName = prefix .. " " .. ((def and def.name) or weaponId)
+			local baseName = (def and def.name) or weaponId
+			local displayName = prefix ~= "Standard" and (prefix .. " " .. baseName) or baseName
 			table.insert(inventoryItems, {
 				id = instanceId,
 				weaponId = weaponId,

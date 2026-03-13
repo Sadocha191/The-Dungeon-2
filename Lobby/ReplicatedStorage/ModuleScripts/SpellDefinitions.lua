@@ -9,10 +9,10 @@ SpellDefs.COLOR_BASE = Color3.fromRGB(120, 190, 255)
 SpellDefs.COLOR_SHOP = Color3.fromRGB(190, 120, 255)
 
 SpellDefs.UPGRADE_QUALITIES = {
-	Common = { id = "Common", label = "Common Upgrade", power = 1.00, cardColor = Color3.fromRGB(220, 220, 220), bonusText = "Steady scaling gain." },
-	Uncommon = { id = "Uncommon", label = "Uncommon Upgrade", power = 1.40, cardColor = Color3.fromRGB(120, 255, 175), bonusText = "Better scaling and stronger utility." },
-	Rare = { id = "Rare", label = "Rare Upgrade", power = 1.85, cardColor = Color3.fromRGB(120, 175, 255), bonusText = "Stronger bonuses and cleaner end effect." },
-	Epic = { id = "Epic", label = "Epic Upgrade", power = 2.35, cardColor = Color3.fromRGB(255, 170, 120), bonusText = "High-impact upgrade spike for core builds." },
+	Common = { id = "Common", label = "Common Upgrade", power = 1.00, cardColor = Color3.fromRGB(220, 220, 220), bonusText = "Reliable scaling bump" },
+	Uncommon = { id = "Uncommon", label = "Uncommon Upgrade", power = 1.40, cardColor = Color3.fromRGB(120, 255, 175), bonusText = "Sharper growth and utility" },
+	Rare = { id = "Rare", label = "Rare Upgrade", power = 1.85, cardColor = Color3.fromRGB(120, 175, 255), bonusText = "Heavy spike to core stats" },
+	Epic = { id = "Epic", label = "Epic Upgrade", power = 2.35, cardColor = Color3.fromRGB(255, 170, 120), bonusText = "Run-defining power jump" },
 }
 
 SpellDefs.BASE_VARIANT_QUALITIES = {
@@ -67,6 +67,75 @@ local ATTACK_NOTES = {
 	Beam = "Fires a sustained line attack through nearby enemies.",
 }
 
+local UPGRADE_COPY_BY_ELEMENT_AND_ATTACK = {
+	Fire = {
+		Projectile = "Bolts hit harder, fly faster, and stack nastier burns.",
+		Orbit = "Orbiting embers sweep wider and keep nearby enemies burning.",
+		Nova = "The blast expands and leaves a fiercer burn at the center.",
+		Zone = "The fire zone spreads farther, lasts longer, and cooks trapped foes.",
+		Beam = "The beam reaches farther, widens out, and sears targets harder.",
+	},
+	Electricity = {
+		Projectile = "Needles fire faster, punch harder, and ramp into extra shots.",
+		Orbit = "The halo spins faster, circles wider, and keeps enemies shocked.",
+		Nova = "The burst hits a larger ring and delivers a nastier shock.",
+		Zone = "The storm zone covers more ground and stuns enemies caught inside.",
+		Beam = "The ray stretches farther, grows wider, and shocks through crowds.",
+	},
+	Air = {
+		Projectile = "Knives fly faster, hit harder, and cut through more targets.",
+		Orbit = "The ring spins faster, sweeps wider, and batters enemies back.",
+		Nova = "The gust expands into a stronger knockback burst around you.",
+		Zone = "The tornado grows wider, lasts longer, and drags foes deeper in.",
+		Beam = "The jetstream reaches farther, widens out, and shoves harder.",
+	},
+	Water = {
+		Projectile = "Shards hit harder, travel faster, and deepen their slow.",
+		Orbit = "The tide ring circles wider and keeps nearby enemies slowed.",
+		Nova = "The splash expands and leaves enemies slowed for longer.",
+		Zone = "The pool spreads wider, lingers longer, and bogs enemies down.",
+		Beam = "The beam reaches farther, grows wider, and strengthens its slow.",
+	},
+	Earth = {
+		Projectile = "Stone spikes hit harder, fly faster, and land with heavier stagger.",
+		Orbit = "The orbit swings wider and hammers nearby foes with stronger stagger.",
+		Nova = "The quake erupts wider and smashes enemies with heavier force.",
+		Zone = "The patch spreads wider, lasts longer, and punishes anything stuck inside.",
+		Beam = "The fault line stretches farther, widens, and batters enemies harder.",
+	},
+	Void = {
+		Projectile = "Shards hit harder, pierce cleaner, and pull enemies into follow-ups.",
+		Orbit = "The halo widens, spins faster, and keeps nearby enemies off balance.",
+		Nova = "The burst expands and leaves enemies more exposed to damage.",
+		Zone = "The singularity grows wider, lasts longer, and drags whole packs inward.",
+		Beam = "The ray reaches farther, widens out, and tears open bigger damage windows.",
+	},
+	Light = {
+		Projectile = "Bolts fly faster, pierce deeper, and mark enemies for more damage.",
+		Orbit = "The halo sweeps wider and keeps nearby enemies marked.",
+		Nova = "The burst expands and brands a wider crowd for follow-up damage.",
+		Zone = "The ground effect spreads wider, lasts longer, and amplifies all damage dealt.",
+		Beam = "The beam reaches farther, grows wider, and marks enemies for longer.",
+	},
+	Physical = {
+		Projectile = "Axes hit harder, spin faster, and ramp into extra throws.",
+		Orbit = "Hammers sweep a wider ring and keep melee threats bleeding.",
+		Nova = "The slam expands and crushes enemies in a heavier shockwave.",
+		Zone = "The field spreads wider, lasts longer, and shreds anything crossing it.",
+		Beam = "The whirlwind reaches wider, lasts longer, and carves through packs harder.",
+	},
+}
+
+local UPGRADE_COPY_BY_SPELL = {
+	FireTornado = "The inferno widens, pulls harder, and roasts everything trapped in the funnel.",
+	StormSurge = "The surge spreads farther, lasts longer, and keeps whole lanes stunned and slowed.",
+	MagmaCrash = "The impact radius grows and the eruption leaves a brutal burning stagger.",
+	RadiantTempest = "The tempest covers more ground and keeps enemies marked while they are tossed around.",
+	VoidFlood = "The flood widens, pulls harder, and leaves whole packs vulnerable in the current.",
+	ThunderQuake = "The shockwave expands and slams enemies with heavier stun and stagger.",
+	SolarFlare = "The flare reaches farther, burns brighter, and leaves enemies exposed to follow-up damage.",
+}
+
 local function copyTable(src)
 	local out = {}
 	for key, value in pairs(src or {}) do
@@ -90,6 +159,23 @@ end
 local function makeDescription(def)
 	local effect = EFFECTS[def.element] or EFFECTS.Physical
 	return string.format("%s %s", ATTACK_NOTES[def.attackType] or "Basic spell effect.", effect.note or "")
+end
+
+local function makeUpgradeDescription(def)
+	if not def then
+		return "Improves damage, coverage, and the spell's signature effect."
+	end
+
+	if UPGRADE_COPY_BY_SPELL[def.id] then
+		return UPGRADE_COPY_BY_SPELL[def.id]
+	end
+
+	local byElement = UPGRADE_COPY_BY_ELEMENT_AND_ATTACK[def.element]
+	if byElement and byElement[def.attackType] then
+		return byElement[def.attackType]
+	end
+
+	return "Improves damage, coverage, and the spell's signature effect."
 end
 
 local function addProduct(def, variantId, variant)
@@ -354,7 +440,7 @@ function SpellDefs.DescribeUpgradeOffer(spellIdOrDef, qualityId, currentLevel)
 	if not def then return "" end
 	local quality = SpellDefs.UPGRADE_QUALITIES[qualityId] or SpellDefs.UPGRADE_QUALITIES.Common
 	local nextLevel = math.clamp((currentLevel or 0) + 1, 1, def.maxLevel or 6)
-	return string.format("%s\n%s\nUpgrade to Lv.%d. +%.2f upgrade power improves damage, size and effect scaling.", def.category, quality.bonusText, nextLevel, quality.power)
+	return string.format("%s\n%s (+%.2f power)\nLv.%d: %s", def.category, quality.bonusText, quality.power, nextLevel, makeUpgradeDescription(def))
 end
 
 function SpellDefs.ComputeRuntimeStats(spellIdOrDef, state)

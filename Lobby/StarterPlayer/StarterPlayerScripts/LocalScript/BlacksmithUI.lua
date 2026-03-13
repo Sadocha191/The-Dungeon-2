@@ -11,6 +11,26 @@ local OpenBlacksmithUI = remoteEvents:WaitForChild("OpenBlacksmithUI")
 local BlacksmithSync = remoteEvents:WaitForChild("BlacksmithSync")
 local BlacksmithAction = remoteEvents:WaitForChild("BlacksmithAction")
 
+local rarityColors = {
+	Common = Color3.fromRGB(176, 184, 198),
+	Rare = Color3.fromRGB(100, 165, 255),
+	Epic = Color3.fromRGB(190, 120, 255),
+	Legendary = Color3.fromRGB(255, 196, 96),
+	Mythical = Color3.fromRGB(255, 110, 118),
+}
+
+local function blendColor(fromColor, toColor, alpha)
+	return Color3.new(
+		fromColor.R + (toColor.R - fromColor.R) * alpha,
+		fromColor.G + (toColor.G - fromColor.G) * alpha,
+		fromColor.B + (toColor.B - fromColor.B) * alpha
+	)
+end
+
+local function getRarityColor(rarity)
+	return rarityColors[tostring(rarity or "")] or rarityColors.Common
+end
+
 local gui = Instance.new("ScreenGui")
 gui.Name = "BlacksmithGui"
 gui.ResetOnSpawn = false
@@ -33,6 +53,9 @@ panel.BackgroundColor3 = Color3.fromRGB(16, 18, 24)
 panel.BorderSizePixel = 0
 panel.Parent = overlay
 Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 18)
+local panelStroke = Instance.new("UIStroke", panel)
+panelStroke.Color = Color3.fromRGB(46, 54, 70)
+panelStroke.Thickness = 1
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1
@@ -76,6 +99,9 @@ summary.BackgroundColor3 = Color3.fromRGB(24, 26, 34)
 summary.BorderSizePixel = 0
 summary.Parent = panel
 Instance.new("UICorner", summary).CornerRadius = UDim.new(0, 14)
+local summaryStroke = Instance.new("UIStroke", summary)
+summaryStroke.Color = Color3.fromRGB(46, 54, 70)
+summaryStroke.Thickness = 1
 
 local topInfo = Instance.new("TextLabel")
 topInfo.BackgroundTransparency = 1
@@ -166,6 +192,9 @@ listFrame.BorderSizePixel = 0
 listFrame.ScrollBarThickness = 6
 listFrame.Parent = panel
 Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 14)
+local listStroke = Instance.new("UIStroke", listFrame)
+listStroke.Color = Color3.fromRGB(46, 54, 70)
+listStroke.Thickness = 1
 
 local listLayout = Instance.new("UIListLayout")
 listLayout.Padding = UDim.new(0, 8)
@@ -190,6 +219,15 @@ details.BackgroundColor3 = Color3.fromRGB(24, 26, 34)
 details.BorderSizePixel = 0
 details.Parent = panel
 Instance.new("UICorner", details).CornerRadius = UDim.new(0, 14)
+local detailsStroke = Instance.new("UIStroke", details)
+detailsStroke.Color = Color3.fromRGB(46, 54, 70)
+detailsStroke.Thickness = 1
+local detailAccent = Instance.new("Frame")
+detailAccent.Size = UDim2.new(1, 0, 0, 4)
+detailAccent.BackgroundColor3 = Color3.fromRGB(96, 165, 250)
+detailAccent.BorderSizePixel = 0
+detailAccent.Parent = details
+Instance.new("UICorner", detailAccent).CornerRadius = UDim.new(0, 10)
 
 local detailTitle = Instance.new("TextLabel")
 detailTitle.BackgroundTransparency = 1
@@ -232,12 +270,17 @@ local function createActionButton(text, x)
 	button.Size = UDim2.fromOffset(180, 38)
 	button.BackgroundColor3 = Color3.fromRGB(42, 44, 54)
 	button.BorderSizePixel = 0
+	button.AutoButtonColor = false
 	button.Font = Enum.Font.GothamBold
 	button.TextSize = 13
 	button.TextColor3 = Color3.fromRGB(240, 240, 240)
 	button.Text = text
 	button.Parent = details
 	Instance.new("UICorner", button).CornerRadius = UDim.new(0, 12)
+	local stroke = Instance.new("UIStroke", button)
+	stroke.Name = "ButtonStroke"
+	stroke.Color = Color3.fromRGB(56, 64, 82)
+	stroke.Thickness = 1
 	return button
 end
 
@@ -265,12 +308,33 @@ local selectedKeys = {
 	Sell = nil,
 }
 
-local function setButtonState(button, enabled, text)
+local function getEntryRarity(entry)
+	if typeof(entry) ~= "table" then
+		return "Common"
+	end
+	return tostring(entry.rarity or "Common")
+end
+
+local function applyEntryTheme(entry)
+	local accent = entry and getRarityColor(getEntryRarity(entry)) or Color3.fromRGB(96, 165, 250)
+	detailAccent.BackgroundColor3 = accent
+	detailsStroke.Color = blendColor(Color3.fromRGB(46, 54, 70), accent, 0.45)
+	listStroke.Color = blendColor(Color3.fromRGB(46, 54, 70), accent, 0.28)
+	summaryStroke.Color = blendColor(Color3.fromRGB(46, 54, 70), accent, 0.22)
+	detailTitle.TextColor3 = entry and accent or Color3.fromRGB(245, 245, 245)
+end
+
+local function setButtonState(button, enabled, text, accent)
+	local color = accent or Color3.fromRGB(96, 165, 250)
 	button.Active = enabled
-	button.AutoButtonColor = enabled
-	button.BackgroundColor3 = enabled and Color3.fromRGB(66, 92, 148) or Color3.fromRGB(42, 44, 54)
+	button.AutoButtonColor = false
+	button.BackgroundColor3 = enabled and blendColor(Color3.fromRGB(42, 44, 54), color, 0.45) or Color3.fromRGB(42, 44, 54)
 	button.TextColor3 = enabled and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 150, 150)
 	button.Text = text
+	local stroke = button:FindFirstChild("ButtonStroke")
+	if stroke and stroke:IsA("UIStroke") then
+		stroke.Color = enabled and blendColor(Color3.fromRGB(56, 64, 82), color, 0.7) or Color3.fromRGB(56, 64, 82)
+	end
 end
 
 local function formatResourceLines(label, list)
@@ -322,9 +386,10 @@ local function getSelectedEntry()
 end
 
 local function setTabVisuals()
+	local accent = getRarityColor(getEntryRarity(getSelectedEntry()))
 	for tabName, button in pairs(tabButtons) do
 		local isActive = tabName == activeTab
-		button.BackgroundColor3 = isActive and Color3.fromRGB(66, 92, 148) or Color3.fromRGB(32, 34, 42)
+		button.BackgroundColor3 = isActive and blendColor(Color3.fromRGB(32, 34, 42), accent, 0.45) or Color3.fromRGB(32, 34, 42)
 		button.TextColor3 = isActive and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(226, 226, 226)
 	end
 end
@@ -332,17 +397,20 @@ end
 local function updateDetailPanel()
 	local entry = getSelectedEntry()
 	if not entry then
+		applyEntryTheme(nil)
 		detailTitle.Text = "Select an entry"
 		detailBody.Text = "Select an entry from the list."
 		statusLabel.Text = lastActionMessage or ""
 		statusLabel.TextColor3 = lastActionOk == false and Color3.fromRGB(232, 144, 144) or Color3.fromRGB(170, 170, 170)
-		setButtonState(primaryButton, false, "Action")
-		setButtonState(secondaryButton, false, "Action")
+		setButtonState(primaryButton, false, "Action", nil)
+		setButtonState(secondaryButton, false, "Action", nil)
 		secondaryButton.Visible = false
 		return
 	end
 
 	selectedKeys[activeTab] = getEntryKey(entry)
+	local accent = getRarityColor(getEntryRarity(entry))
+	applyEntryTheme(entry)
 
 	if activeTab == "Craft" then
 		detailTitle.Text = string.format("%s [%s]", tostring(entry.name), tostring(entry.status))
@@ -366,11 +434,11 @@ local function updateDetailPanel()
 		}, "\n")
 		statusLabel.Text = entry.unlocked and "Recipe unlocked." or "Recipe found. Unlock it at the blacksmith first."
 		if not entry.unlocked then
-			setButtonState(primaryButton, entry.canUnlock == true, string.format("Buy Recipe (%d)", tonumber(entry.unlockSilverCost) or 0))
+			setButtonState(primaryButton, entry.canUnlock == true, string.format("Buy Recipe (%d)", tonumber(entry.unlockSilverCost) or 0), accent)
 		else
-			setButtonState(primaryButton, entry.canCraft == true, string.format("Craft (%d)", tonumber(entry.craftSilverCost) or 0))
+			setButtonState(primaryButton, entry.canCraft == true, string.format("Craft (%d)", tonumber(entry.craftSilverCost) or 0), accent)
 		end
-		setButtonState(secondaryButton, false, "")
+		setButtonState(secondaryButton, false, "", accent)
 		secondaryButton.Visible = false
 	elseif activeTab == "Upgrade" then
 		local cost = entry.upgradeCost
@@ -402,8 +470,8 @@ local function updateDetailPanel()
 		detailTitle.Text = tostring(entry.name)
 		detailBody.Text = table.concat(upgradeLines, "\n")
 		statusLabel.Text = entry.canUpgrade and ((entry.canAfford and "Ready to upgrade.") or "Missing Silver or upgrade materials.") or "Weapon already maxed."
-		setButtonState(primaryButton, entry.canUpgrade == true and entry.canAfford == true, "Upgrade +1")
-		setButtonState(secondaryButton, entry.canUpgrade == true and entry.canAfford == true, "Upgrade +10")
+		setButtonState(primaryButton, entry.canUpgrade == true and entry.canAfford == true, "Upgrade +1", accent)
+		setButtonState(secondaryButton, entry.canUpgrade == true and entry.canAfford == true, "Upgrade +10", accent)
 		secondaryButton.Visible = true
 	else
 		detailTitle.Text = tostring(entry.name)
@@ -421,8 +489,8 @@ local function updateDetailPanel()
 			formatResourceLines("", entry.mobMaterials),
 		}, "\n")
 		statusLabel.Text = "Selling returns Silver and part of the crafting materials."
-		setButtonState(primaryButton, true, "Sell Weapon")
-		setButtonState(secondaryButton, false, "")
+		setButtonState(primaryButton, true, "Sell Weapon", accent)
+		setButtonState(secondaryButton, false, "", accent)
 		secondaryButton.Visible = false
 	end
 
@@ -430,7 +498,7 @@ local function updateDetailPanel()
 		statusLabel.Text = lastActionMessage .. " | " .. statusLabel.Text
 		statusLabel.TextColor3 = lastActionOk == true and Color3.fromRGB(156, 220, 170) or Color3.fromRGB(232, 144, 144)
 	else
-		statusLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
+		statusLabel.TextColor3 = blendColor(Color3.fromRGB(170, 170, 170), accent, 0.3)
 	end
 end
 
@@ -445,24 +513,27 @@ end
 local function rebuildList()
 	clearList()
 	local entries = getEntriesForTab()
+	local currentKey = selectedKeys[activeTab] or (entries[1] and getEntryKey(entries[1]))
 	emptyLabel.Visible = #entries == 0
 
 	for _, entry in ipairs(entries) do
+		local key = getEntryKey(entry)
+		local accent = getRarityColor(getEntryRarity(entry))
+		local selected = currentKey == key
+		local baseColor = blendColor(Color3.fromRGB(30, 34, 44), accent, selected and 0.2 or 0.1)
 		local button = Instance.new("TextButton")
 		button.Size = UDim2.new(1, -16, 0, 62)
 		button.Position = UDim2.fromOffset(8, 0)
-		button.BackgroundColor3 = Color3.fromRGB(34, 36, 44)
+		button.BackgroundColor3 = baseColor
 		button.BorderSizePixel = 0
-		button.Font = Enum.Font.Gotham
-		button.TextXAlignment = Enum.TextXAlignment.Left
-		button.TextYAlignment = Enum.TextYAlignment.Top
-		button.TextWrapped = true
-		button.TextSize = 12
-		button.TextColor3 = Color3.fromRGB(234, 234, 234)
+		button.AutoButtonColor = false
+		button.Text = ""
 		button.Parent = listFrame
 		Instance.new("UICorner", button).CornerRadius = UDim.new(0, 12)
+		local stroke = Instance.new("UIStroke", button)
+		stroke.Color = selected and accent or blendColor(Color3.fromRGB(56, 64, 82), accent, 0.4)
+		stroke.Thickness = selected and 2 or 1
 
-		local key = getEntryKey(entry)
 		local line1 = ""
 		local line2 = ""
 
@@ -481,10 +552,39 @@ local function rebuildList()
 			line2 = string.format("Refund: %d Silver", tonumber(entry.silverRefund) or 0)
 		end
 
-		button.Text = "  " .. line1 .. "\n  " .. line2
+		local accentBar = Instance.new("Frame")
+		accentBar.Size = UDim2.fromOffset(4, 46)
+		accentBar.Position = UDim2.fromOffset(10, 8)
+		accentBar.BackgroundColor3 = accent
+		accentBar.BorderSizePixel = 0
+		accentBar.Parent = button
+		Instance.new("UICorner", accentBar).CornerRadius = UDim.new(0, 10)
+
+		local titleLabel = Instance.new("TextLabel")
+		titleLabel.BackgroundTransparency = 1
+		titleLabel.Position = UDim2.fromOffset(24, 10)
+		titleLabel.Size = UDim2.new(1, -32, 0, 20)
+		titleLabel.Font = Enum.Font.GothamBold
+		titleLabel.TextSize = 13
+		titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+		titleLabel.TextColor3 = accent
+		titleLabel.Text = line1
+		titleLabel.Parent = button
+
+		local metaLabel = Instance.new("TextLabel")
+		metaLabel.BackgroundTransparency = 1
+		metaLabel.Position = UDim2.fromOffset(24, 31)
+		metaLabel.Size = UDim2.new(1, -32, 0, 16)
+		metaLabel.Font = Enum.Font.Gotham
+		metaLabel.TextSize = 11
+		metaLabel.TextXAlignment = Enum.TextXAlignment.Left
+		metaLabel.TextColor3 = Color3.fromRGB(214, 220, 232)
+		metaLabel.Text = line2
+		metaLabel.Parent = button
+
 		button.MouseButton1Click:Connect(function()
 			selectedKeys[activeTab] = key
-			updateDetailPanel()
+			rebuildList()
 		end)
 	end
 
@@ -492,6 +592,7 @@ local function rebuildList()
 		listFrame.CanvasSize = UDim2.fromOffset(0, listLayout.AbsoluteContentSize.Y + 16)
 	end)
 	updateDetailPanel()
+	setTabVisuals()
 end
 
 local function renderSummary()

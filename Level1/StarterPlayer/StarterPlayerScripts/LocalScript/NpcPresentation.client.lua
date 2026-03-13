@@ -41,6 +41,7 @@ local presentations = {}
 local pendingTrackBuilds = {}
 local currentSyncRequestId = 0
 local syncOverlayToken = nil
+local SCREEN_VISIBILITY_PADDING = 96
 
 local function flatDir(v: Vector3?): Vector3
 	if typeof(v) ~= "Vector3" then
@@ -73,6 +74,27 @@ local function computeRootToPivot(model: Model, root: BasePart): CFrame?
 		return nil
 	end
 	return root.CFrame:ToObjectSpace(pivot)
+end
+
+local function isWorldPositionVisible(worldPos: Vector3): boolean
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return true
+	end
+
+	local viewportPoint, onScreen = camera:WorldToViewportPoint(worldPos)
+	if viewportPoint.Z <= 0 then
+		return false
+	end
+	if onScreen then
+		return true
+	end
+
+	local viewportSize = camera.ViewportSize
+	return viewportPoint.X >= -SCREEN_VISIBILITY_PADDING
+		and viewportPoint.X <= (viewportSize.X + SCREEN_VISIBILITY_PADDING)
+		and viewportPoint.Y >= -SCREEN_VISIBILITY_PADDING
+		and viewportPoint.Y <= (viewportSize.Y + SCREEN_VISIBILITY_PADDING)
 end
 
 local function refreshRigBinding(entry)
@@ -213,6 +235,16 @@ local function chooseTrack(entry, stateName: string)
 	return variants[#variants].track
 end
 
+local function stopAnimation(entry, fadeTime: number?)
+	if entry.currentTrack then
+		pcall(function()
+			entry.currentTrack:Stop(fadeTime or 0.1)
+		end)
+	end
+	entry.currentTrack = nil
+	entry.currentAnimState = nil
+end
+
 local function playAnimation(entry)
 	if not entry.animBuilt then
 		queueTrackBuild(entry)
@@ -315,11 +347,7 @@ local function cleanupEntry(id: string)
 	if not entry then
 		return
 	end
-	if entry.currentTrack then
-		pcall(function()
-			entry.currentTrack:Stop(0)
-		end)
-	end
+	stopAnimation(entry, 0)
 	if entry.healthbar then
 		pcall(function()
 			entry.healthbar:Destroy()
@@ -531,7 +559,11 @@ RunService.RenderStepped:Connect(function(dt)
 			model:PivotTo(rootFrame)
 		end
 		updateHealthbar(entry)
-		playAnimation(entry)
+		if isWorldPositionVisible(entry.renderPos) then
+			playAnimation(entry)
+		else
+			stopAnimation(entry, 0.12)
+		end
 	end
 end)
 

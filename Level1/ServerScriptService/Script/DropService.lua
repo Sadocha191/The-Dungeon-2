@@ -2,7 +2,32 @@
 -- Animated drops with idle bobbing, magnet motion and a short pickup spiral into the player.
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+
+local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+if not remotes then
+	remotes = Instance.new("Folder")
+	remotes.Name = "Remotes"
+	remotes.Parent = ReplicatedStorage
+end
+
+local function ensureRemoteEvent(name: string): RemoteEvent
+	local ev = remotes:FindFirstChild(name)
+	if ev and ev:IsA("RemoteEvent") then
+		return ev
+	end
+	if ev then
+		ev:Destroy()
+	end
+
+	ev = Instance.new("RemoteEvent")
+	ev.Name = name
+	ev.Parent = remotes
+	return ev
+end
+
+local pickupIndicatorEvent = ensureRemoteEvent("PickupIndicatorEvent")
 
 local dropsFolder = workspace:FindFirstChild("Drops")
 if not dropsFolder then
@@ -28,6 +53,7 @@ local ORB_IDLE_BOB = 0.28
 local ORB_IDLE_BOB_SPEED = 4.8
 local ORB_IDLE_WOBBLE = 0.12
 local PICKUP_ANIM_DURATION = 0.24
+local ORB_ANIMATION_DISTANCE = 95
 
 local GROUND_RAY_PARAMS = RaycastParams.new()
 GROUND_RAY_PARAMS.FilterType = Enum.RaycastFilterType.Blacklist
@@ -49,6 +75,22 @@ end
 
 local function brightenColor(color, alpha)
 	return blendColor(color, Color3.new(1, 1, 1), alpha or 0.28)
+end
+
+local function firePickupIndicator(plr: Player, kind: string, amount: number)
+	if not plr or plr.Parent ~= Players then
+		return
+	end
+
+	amount = math.max(0, math.floor(tonumber(amount) or 0))
+	if amount <= 0 then
+		return
+	end
+
+	pickupIndicatorEvent:FireClient(plr, {
+		kind = kind,
+		amount = amount,
+	})
 end
 
 local function getPickupRangeMult(plr)
@@ -184,6 +226,7 @@ local function createDropSparkles(part: BasePart, color: Color3)
 	emitter.Lifetime = NumberRange.new(0.35, 0.75)
 	emitter.Speed = NumberRange.new(0.12, 0.55)
 	emitter.Rate = 8
+	emitter.Enabled = true
 	emitter.SpreadAngle = Vector2.new(40, 40)
 	emitter.Rotation = NumberRange.new(0, 360)
 	emitter.RotSpeed = NumberRange.new(-90, 90)
@@ -199,6 +242,12 @@ local function createDropSparkles(part: BasePart, color: Color3)
 	emitter.Parent = attachment
 
 	return emitter
+end
+
+local function setSparklesEnabled(meta, enabled: boolean)
+	if meta.sparkles then
+		meta.sparkles.Enabled = enabled
+	end
 end
 
 local function awardDrop(plr: Player, meta)
@@ -220,6 +269,8 @@ local function awardDrop(plr: Player, meta)
 			_G.AwardSouls(plr, meta.amount)
 		end
 	end
+
+	firePickupIndicator(plr, tostring(meta.type), meta.amount)
 end
 
 local function removeDrop(orb, meta, plr)
@@ -235,6 +286,7 @@ local function startPickupAnimation(orb, meta, plr, now)
 		return
 	end
 
+	setSparklesEnabled(meta, false)
 	meta.collecting = {
 		player = plr,
 		startedAt = now,
@@ -297,12 +349,28 @@ local function updateIdleVisual(orb, meta, now)
 	local bob = math.sin(((now - meta.spawnAt) * ORB_IDLE_BOB_SPEED) + meta.phase) * ORB_IDLE_BOB
 	local wobble = math.sin(((now - meta.spawnAt) * 2.4) + meta.phase) * ORB_IDLE_WOBBLE
 	local spin = meta.spinBase + ((now - meta.spawnAt) * meta.spinSpeed)
+	meta.staticVisual = false
 	orb.Size = ORB_SIZE
 	orb.Transparency = 0.05
 	orb.CFrame = CFrame.new(meta.corePos + Vector3.new(0, bob, 0)) * CFrame.Angles(wobble * 0.35, spin, -wobble * 0.35)
 	if meta.light then
 		meta.light.Brightness = meta.baseLightBrightness + (math.sin(((now - meta.spawnAt) * 5) + meta.phase) * 0.25)
 		meta.light.Range = meta.baseLightRange + (math.cos(((now - meta.spawnAt) * 3.2) + meta.phase) * 0.15)
+	end
+end
+
+local function setStaticIdleVisual(orb, meta)
+	if meta.staticVisual and meta.lastStaticPos and (meta.lastStaticPos - meta.corePos).Magnitude <= 1e-3 then
+		return
+	end
+	meta.staticVisual = true
+	meta.lastStaticPos = meta.corePos
+	orb.Size = ORB_SIZE
+	orb.Transparency = 0.05
+	orb.CFrame = CFrame.new(meta.corePos) * CFrame.Angles(0, meta.spinBase, 0)
+	if meta.light then
+		meta.light.Brightness = meta.baseLightBrightness
+		meta.light.Range = meta.baseLightRange
 	end
 end
 
@@ -412,7 +480,8 @@ RunService.Heartbeat:Connect(function(dt)
 			if meta.trail then
 				meta.trail.Enabled = false
 			end
-			updateIdleVisual(orb, meta, now)
+			setSparklesEnabled(meta, false)
+			setStaticIdleVisual(orb, meta)
 			continue
 		end
 
@@ -423,13 +492,15 @@ RunService.Heartbeat:Connect(function(dt)
 			if meta.trail then
 				meta.trail.Enabled = false
 			end
-			updateIdleVisual(orb, meta, now)
+			setSparklesEnabled(meta, false)
+			setStaticIdleVisual(orb, meta)
 			continue
 		end
 
 		local pickupMult = getPickupRangeMult(plr)
 		local pickupDist = PICKUP_DIST * pickupMult
 		local attractRadius = ATTRACT_RADIUS * pickupMult
+		local shouldAnimateIdle = dist <= ORB_ANIMATION_DISTANCE
 
 		if dist <= pickupDist then
 			startPickupAnimation(orb, meta, plr, now)
@@ -442,8 +513,10 @@ RunService.Heartbeat:Connect(function(dt)
 			local toTarget = target - meta.corePos
 			local toTargetDist = toTarget.Magnitude
 			if meta.trail then
-				meta.trail.Enabled = true
-				meta.trail.Lifetime = usingGlobalMagnet and 0.18 or 0.12
+				meta.trail.Enabled = shouldAnimateIdle
+				if shouldAnimateIdle then
+					meta.trail.Lifetime = usingGlobalMagnet and 0.18 or 0.12
+				end
 			end
 			if toTargetDist > 0 then
 				local walkSpeed = hum.WalkSpeed or 16
@@ -462,6 +535,12 @@ RunService.Heartbeat:Connect(function(dt)
 			end
 		end
 
-		updateIdleVisual(orb, meta, now)
+		if shouldAnimateIdle then
+			setSparklesEnabled(meta, true)
+			updateIdleVisual(orb, meta, now)
+		else
+			setSparklesEnabled(meta, false)
+			setStaticIdleVisual(orb, meta)
+		end
 	end
 end)
