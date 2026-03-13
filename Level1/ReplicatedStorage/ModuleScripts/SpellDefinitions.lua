@@ -9,10 +9,10 @@ SpellDefs.COLOR_BASE = Color3.fromRGB(120, 190, 255)
 SpellDefs.COLOR_SHOP = Color3.fromRGB(190, 120, 255)
 
 SpellDefs.UPGRADE_QUALITIES = {
-	Common = { id = "Common", label = "Common Upgrade", power = 1.00, cardColor = Color3.fromRGB(220, 220, 220), bonusText = "Reliable scaling bump" },
-	Uncommon = { id = "Uncommon", label = "Uncommon Upgrade", power = 1.40, cardColor = Color3.fromRGB(120, 255, 175), bonusText = "Sharper growth and utility" },
-	Rare = { id = "Rare", label = "Rare Upgrade", power = 1.85, cardColor = Color3.fromRGB(120, 175, 255), bonusText = "Heavy spike to core stats" },
-	Epic = { id = "Epic", label = "Epic Upgrade", power = 2.35, cardColor = Color3.fromRGB(255, 170, 120), bonusText = "Run-defining power jump" },
+	Common = { id = "Common", label = "Common Upgrade", power = 0.85, cardColor = Color3.fromRGB(220, 220, 220), bonusText = "Reliable scaling bump" },
+	Uncommon = { id = "Uncommon", label = "Uncommon Upgrade", power = 1.15, cardColor = Color3.fromRGB(120, 255, 175), bonusText = "Sharper growth and utility" },
+	Rare = { id = "Rare", label = "Rare Upgrade", power = 1.50, cardColor = Color3.fromRGB(120, 175, 255), bonusText = "Heavy spike to core stats" },
+	Epic = { id = "Epic", label = "Epic Upgrade", power = 1.90, cardColor = Color3.fromRGB(255, 170, 120), bonusText = "Run-defining power jump" },
 }
 
 SpellDefs.BASE_VARIANT_QUALITIES = {
@@ -451,25 +451,25 @@ function SpellDefs.ComputeRuntimeStats(spellIdOrDef, state)
 	local baseMultiplier = math.max(0.5, tonumber(state and state.baseMultiplier) or 1)
 	local basePower = math.max(0, tonumber(state and state.basePower) or 0)
 	local upgradePower = math.max(0, tonumber(state and state.upgradePower) or 0)
-	local levelFactor = 1 + ((level - 1) * 0.18)
-	local powerFactor = 1 + (basePower * 0.10) + (upgradePower * 0.08)
-	local areaFactor = 1 + ((level - 1) * 0.05) + (basePower * 0.03) + (upgradePower * 0.02)
-	local cooldownFactor = math.max(0.55, 1 - ((level - 1) * 0.025) - (upgradePower * 0.012) - (basePower * 0.01))
+	local levelFactor = 1 + ((level - 1) * 0.14)
+	local powerFactor = 1 + (basePower * 0.08) + (upgradePower * 0.055)
+	local areaFactor = 1 + ((level - 1) * 0.04) + (basePower * 0.025) + (upgradePower * 0.015)
+	local cooldownFactor = math.max(0.68, 1 - ((level - 1) * 0.018) - (upgradePower * 0.008) - (basePower * 0.008))
 	runtime.damage = (runtime.baseDamage or 10) * baseMultiplier * levelFactor * powerFactor
 	runtime.cooldown = (runtime.cooldown or 1) * cooldownFactor
 	runtime.radius = (runtime.baseRadius or 0) * areaFactor
-	runtime.duration = (runtime.duration or 0) * (1 + ((level - 1) * 0.06) + (upgradePower * 0.02))
+	runtime.duration = (runtime.duration or 0) * (1 + ((level - 1) * 0.05) + (upgradePower * 0.015))
 	runtime.width = (runtime.width or 0) * areaFactor
-	runtime.range = (runtime.range or 0) * (1 + ((level - 1) * 0.03) + (upgradePower * 0.01))
-	runtime.projectileSpeed = (runtime.projectileSpeed or 0) * (1 + ((level - 1) * 0.02) + (upgradePower * 0.01))
-	runtime.orbitSpeed = (runtime.orbitSpeed or 0) * (1 + ((level - 1) * 0.03) + (upgradePower * 0.01))
-	runtime.count = math.max(1, math.floor((runtime.baseCount or 1) + math.floor((level - 1) / 3) * (runtime.countPerThreeLevels or 0) + math.floor(upgradePower / 4)))
-	runtime.pierce = math.max(0, math.floor((runtime.pierce or 0) + (basePower >= 0.8 and 1 or 0) + math.floor(upgradePower / 6)))
+	runtime.range = (runtime.range or 0) * (1 + ((level - 1) * 0.025) + (upgradePower * 0.008))
+	runtime.projectileSpeed = (runtime.projectileSpeed or 0) * (1 + ((level - 1) * 0.015) + (upgradePower * 0.008))
+	runtime.orbitSpeed = (runtime.orbitSpeed or 0) * (1 + ((level - 1) * 0.025) + (upgradePower * 0.008))
+	runtime.count = math.max(1, math.floor((runtime.baseCount or 1) + math.floor((level - 1) / 4) * (runtime.countPerThreeLevels or 0) + math.floor(upgradePower / 5)))
+	runtime.pierce = math.max(0, math.floor((runtime.pierce or 0) + (basePower >= 0.8 and 1 or 0) + math.floor(upgradePower / 7)))
 	runtime.level = level
 	runtime.baseMultiplier = baseMultiplier
 	runtime.basePower = basePower
 	runtime.upgradePower = upgradePower
-	runtime.effectPower = 1 + ((level - 1) * 0.08) + (upgradePower * 0.06) + (basePower * 0.03)
+	runtime.effectPower = 1 + ((level - 1) * 0.06) + (upgradePower * 0.045) + (basePower * 0.02)
 	runtime.spellId = def.id
 	runtime.spellName = def.name
 	runtime.element = def.element

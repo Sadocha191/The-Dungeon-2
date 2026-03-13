@@ -414,39 +414,69 @@ local ENEMY_CONFIGS = {
 
 local RUN_TIME_LIMIT = 15 * 60 -- 15:00 (portal/boss threshold)
 local ENEMY_HP_MULTIPLIER = 1.5
-local BOSS_BASE_HP = math.floor(1200 * ENEMY_HP_MULTIPLIER)
-local BOSS_HP_MULT_EARLY = 20
-local BOSS_HP_MULT_LATE = 4
+local BOSS_BASE_HP = math.floor(1600 * ENEMY_HP_MULTIPLIER)
+local BOSS_HP_MULT_EARLY = 22
+local BOSS_HP_MULT_LATE = 6
 local BOSS_LEVEL_TARGET = 10
-local ELITE_SOUL_DROP_MIN = 12
-local ELITE_SOUL_DROP_MAX = 18
+local ELITE_SOUL_DROP_MIN = 18
+local ELITE_SOUL_DROP_MAX = 28
+local BOSS_SOUL_DROP_MIN = 45
+local BOSS_SOUL_DROP_MAX = 65
 local ELITE_INTERVAL_SECONDS = 5 * 60
+local BOSS_REINFORCEMENT_INTERVAL = 10
 local materialRng = Random.new()
 
+local function getAverageRunLevel(): number
+	if type(_G.GetAverageRunLevel) ~= "function" then
+		return 0
+	end
+
+	local ok, value = pcall(function()
+		return _G.GetAverageRunLevel()
+	end)
+	if not ok then
+		return 0
+	end
+
+	return math.max(0, tonumber(value) or 0)
+end
+
+local function getRunPressure(elapsedSeconds: number)
+	local minutes = math.floor(math.max(0, elapsedSeconds) / 60)
+	local avgRunLevel = getAverageRunLevel()
+	local levelPressure = math.max(0, avgRunLevel - 2)
+	return minutes, avgRunLevel, levelPressure
+end
+
 local function timeScaleMult(elapsed: number)
-	-- Per minute: HP +5%, Damage +3%
-    local minutes = math.floor(math.max(0, elapsed) / 60)
-    local hpMult = (1.05) ^ minutes
-    local dmgMult = (1.03) ^ minutes
-    return hpMult, dmgMult
+	local minutes, _, levelPressure = getRunPressure(elapsed)
+	local hpMult = (1.07) ^ minutes * (1.14 ^ levelPressure)
+	local dmgMult = (1.045) ^ minutes * (1.09 ^ levelPressure)
+	local speedMult = math.min(1.35, 1 + (minutes * 0.015) + (levelPressure * 0.035))
+	local cooldownMult = math.max(0.78, 1 - (minutes * 0.01) - (levelPressure * 0.025))
+	return hpMult, dmgMult, speedMult, cooldownMult
 end
 
 local function getPool(elapsed: number)
     -- returns weighted pool (normal mobs)
-    if elapsed < 120 then
+    if elapsed < 75 then
         return { {"Slime", 100} }
+    elseif elapsed < 180 then
+        return { {"Slime", 65}, {"Zombie", 35} }
     elseif elapsed < 300 then
-        return { {"Slime", 70}, {"Zombie", 30} }
-    elseif elapsed < 480 then
-        return { {"Slime", 50}, {"Zombie", 30}, {"Skeleton", 20} }
+        return { {"Slime", 35}, {"Zombie", 40}, {"Skeleton", 25} }
+    elseif elapsed < 450 then
+        return { {"Zombie", 30}, {"Skeleton", 30}, {"Goblin", 25}, {"Slime", 15} }
     elseif elapsed < 600 then
-        return { {"Slime", 35}, {"Zombie", 25}, {"Skeleton", 20}, {"Goblin", 20} }
-    elseif elapsed < 900 then
-        return { {"Zombie", 30}, {"Skeleton", 25}, {"Goblin", 25}, {"Warewolf", 20} }
+        return { {"Zombie", 22}, {"Skeleton", 28}, {"Goblin", 28}, {"Warewolf", 22} }
+    elseif elapsed < 780 then
+        return { {"Skeleton", 20}, {"Goblin", 24}, {"Warewolf", 24}, {"Harp", 18}, {"Demon", 14} }
+    elseif elapsed < 960 then
+        return { {"Goblin", 22}, {"Warewolf", 24}, {"Harp", 18}, {"Demon", 18}, {"LandShark", 18} }
     elseif elapsed < 1200 then
-        return { {"Skeleton", 22}, {"Goblin", 22}, {"Warewolf", 22}, {"Harp", 18}, {"LandShark", 16} }
+        return { {"Warewolf", 20}, {"Harp", 18}, {"Demon", 18}, {"LandShark", 18}, {"Golem", 13}, {"Knight", 13} }
     else
-        return { {"Goblin", 18}, {"Warewolf", 20}, {"Harp", 18}, {"LandShark", 16}, {"Golem", 14}, {"Ent", 14} }
+        return { {"Goblin", 12}, {"Warewolf", 18}, {"Harp", 16}, {"Demon", 18}, {"LandShark", 14}, {"Golem", 11}, {"Knight", 11}, {"Ent", 10} }
     end
 end
 
@@ -553,6 +583,8 @@ end
 local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, isBoss: boolean, _ctx)
 	local pos = (_ctx and _ctx.position) or NpcService.GetPosition(mob) or mob:GetPivot().Position
 	local killer = _ctx and _ctx.player
+	local runSeconds = (_G.GetRunSeconds and _G.GetRunSeconds()) or 0
+	local minutes, _, levelPressure = getRunPressure(runSeconds)
 
 	if _G.RegisterEnemyKill then
         pcall(function() _G.RegisterEnemyKill(pos, killer) end)
@@ -565,11 +597,23 @@ local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, isBoss: b
     local xpDrop = rewardCfg.xp or 5
     local coinDrop = rewardCfg.coins or 1
     local soulsDrop = 0
-	if isElite then
-		xpDrop = math.floor(xpDrop * 10)
-		coinDrop = math.floor(coinDrop * 8)
+
+	local xpScale = 1 + (minutes * 0.04) + (levelPressure * 0.06)
+	local coinScale = 1.45 + (minutes * 0.08) + (levelPressure * 0.10)
+
+	xpDrop = math.max(1, math.floor(xpDrop * xpScale))
+	coinDrop = math.max(1, math.floor(coinDrop * coinScale))
+
+	if isBoss then
+		xpDrop = math.floor(xpDrop * 6)
+		coinDrop = math.floor(coinDrop * 6)
+		soulsDrop = math.random(BOSS_SOUL_DROP_MIN, BOSS_SOUL_DROP_MAX)
+	elseif isElite then
+		xpDrop = math.floor(xpDrop * 7)
+		coinDrop = math.floor(coinDrop * 7)
 		soulsDrop = math.random(ELITE_SOUL_DROP_MIN, ELITE_SOUL_DROP_MAX)
 	end
+
 	awardPersistentMobDrops(tostring(mob:GetAttribute("MobType") or mob.Name), isElite, isBoss)
 	if _G.SpawnDropsAt then
 		pcall(function() _G.SpawnDropsAt(pos, xpDrop, coinDrop, soulsDrop) end)
@@ -638,20 +682,24 @@ local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vecto
     mob.Parent = ENEMIES_FOLDER
     mob:PivotTo(cf)
 
-    local hpMult, dmgMult = timeScaleMult(_G.GetRunSeconds and _G.GetRunSeconds() or 0)
+    local hpMult, dmgMult, speedMult, cooldownMult = timeScaleMult(_G.GetRunSeconds and _G.GetRunSeconds() or 0)
     local hp = math.floor(cfg.hp * ENEMY_HP_MULTIPLIER * hpMult)
     local dmg = math.floor(cfg.dmg * dmgMult)
+    local speed = cfg.speed * speedMult
+    local cd = math.max(0.7, cfg.cd * cooldownMult)
 
     if isElite then
-        hp = math.floor(hp * 4)
-        dmg = math.floor(dmg * 2)
+        hp = math.floor(hp * 6)
+        dmg = math.floor(dmg * 2.8)
+        speed = speed * 1.12
+        cd = math.max(0.55, cd * 0.88)
     end
 
     return registerMobModel(mob, mobName, {
         hp = hp,
-        speed = cfg.speed,
+        speed = speed,
         range = cfg.range,
-        cd = cfg.cd,
+        cd = cd,
         dmg = dmg,
         isRanged = cfg.isRanged == true,
     }, cfg, isElite, false, nil)
@@ -766,26 +814,27 @@ local function isSwarmActiveAt(t: number): boolean
 end
 
 local function desiredMaxAlive(t: number)
-    -- Starts low for fast leveling, grows steadily.
-    local base = 25
-    local add = math.floor(t / 60) * 5
-	local v = math.clamp(base + add, 25, 140)
+	local _, _, levelPressure = getRunPressure(t)
+    local base = 28
+    local add = math.floor(t / 60) * 6
+	local v = math.clamp(base + add + math.floor(levelPressure * 8), 28, 170)
 	-- After 15 minutes: big pressure increase
 	if t >= RUN_TIME_LIMIT then
-		v = math.clamp(v + 80 + math.floor((t - RUN_TIME_LIMIT) / 15) * 6, 120, 260)
+		v = math.clamp(v + 90 + math.floor((t - RUN_TIME_LIMIT) / 12) * 7, 140, 300)
 	end
 	return v
 end
 
 local function spawnInterval(t: number)
-    -- Slightly faster over time, but not insane.
-    local minI = 0.28
-    local maxI = 0.60
-    local p = math.clamp(t / 1800, 0, 1)
+	local _, _, levelPressure = getRunPressure(t)
+    local minI = 0.24
+    local maxI = 0.56
+    local p = math.clamp(t / 1500, 0, 1)
 	local i = maxI - (maxI - minI) * p
+	i = i / (1 + (levelPressure * 0.08))
 	if t >= RUN_TIME_LIMIT then
 		-- After 15 minutes: noticeably faster
-		i = math.max(0.10, i * 0.45)
+		i = math.max(0.09, i * 0.42)
 	end
     if isSwarmActiveAt(t) then
         i = math.max(0.08, i / 3)
@@ -830,6 +879,7 @@ local portalModel: Model? = nil
 local portalActivated = false
 local bossModel: Model? = nil
 local bossDefeated = false
+local nextBossReinforcementAt = math.huge
 local refreshPortalPromptState = nil
 
 -- Stats for InfoUI
@@ -843,20 +893,28 @@ local function getBossHealthForCurrentRun(): number
 	local elapsedSeconds = math.max(0, elapsed())
 	local timeProgress = math.clamp(elapsedSeconds / RUN_TIME_LIMIT, 0, 1)
 
-	local avgRunLevel = 0
-	if type(_G.GetAverageRunLevel) == "function" then
-		local ok, value = pcall(function()
-			return _G.GetAverageRunLevel()
-		end)
-		if ok then
-			avgRunLevel = math.max(0, tonumber(value) or 0)
-		end
-	end
+	local _, avgRunLevel, levelPressure = getRunPressure(elapsedSeconds)
 	local levelProgress = math.clamp(avgRunLevel / BOSS_LEVEL_TARGET, 0, 1)
 
 	local readiness = math.max(timeProgress, levelProgress)
-	local hpMultiplier = BOSS_HP_MULT_EARLY + ((BOSS_HP_MULT_LATE - BOSS_HP_MULT_EARLY) * readiness)
+	local hpMultiplier = BOSS_HP_MULT_EARLY + ((BOSS_HP_MULT_LATE - BOSS_HP_MULT_EARLY) * readiness) + (levelPressure * 0.85)
 	return math.max(BOSS_BASE_HP, math.floor(BOSS_BASE_HP * hpMultiplier))
+end
+
+local function getBossCombatStatsForCurrentRun()
+	local elapsedSeconds = math.max(0, elapsed())
+	local timeProgress = math.clamp(elapsedSeconds / RUN_TIME_LIMIT, 0, 1)
+	local _, avgRunLevel, levelPressure = getRunPressure(elapsedSeconds)
+	local levelProgress = math.clamp(avgRunLevel / BOSS_LEVEL_TARGET, 0, 1)
+	local readiness = math.max(timeProgress, levelProgress)
+
+	return {
+		hp = getBossHealthForCurrentRun(),
+		speed = 10.5 + math.min(4, (levelPressure * 0.4) + (readiness * 1.6)),
+		range = 8,
+		cd = math.max(0.85, 1.25 - (readiness * 0.18)),
+		dmg = math.max(28, math.floor(28 * (1 + (timeProgress * 0.55) + (levelPressure * 0.12)))),
+	}
 end
 
 local function endRun(reason: string)
@@ -979,16 +1037,17 @@ local function ensurePortal()
 			mob:PivotTo(base.CFrame * CFrame.new(0, 0, -18))
 		end)
 
-		local bossHp = getBossHealthForCurrentRun()
+		local bossStats = getBossCombatStatsForCurrentRun()
 		local registered = registerMobModel(mob, bossName, {
-			hp = bossHp,
-			speed = 10,
-			range = 7,
-			cd = 1.4,
-			dmg = 24,
+			hp = bossStats.hp,
+			speed = bossStats.speed,
+			range = bossStats.range,
+			cd = bossStats.cd,
+			dmg = bossStats.dmg,
 			isRanged = false,
 		}, { xp = 120, coins = 60 }, true, true, function()
 			bossDefeated = true
+			nextBossReinforcementAt = math.huge
 			broadcast({ type = "portalBossDefeated" })
 			setPromptState()
 		end)
@@ -997,6 +1056,7 @@ local function ensurePortal()
 		end
 
 		bossModel = registered
+		nextBossReinforcementAt = elapsed() + BOSS_REINFORCEMENT_INTERVAL
 		if type(_G.NotifyBossSpawn) == "function" then
 			pcall(function()
 				_G.NotifyBossSpawn()
@@ -1132,6 +1192,17 @@ RunService.Heartbeat:Connect(function()
         swarmActiveUntil = 0
         broadcast({ type = "swarmEnd" })
     end
+
+	if bossModel and bossModel.Parent and not bossDefeated and NpcService.IsAlive(bossModel) and t >= nextBossReinforcementAt then
+		local bossPos = NpcService.GetPosition(bossModel)
+		if bossPos then
+			local reinforcementCount = math.clamp(3 + math.floor(math.max(0, t - RUN_TIME_LIMIT) / 45), 3, 6)
+			spawnBurst(reinforcementCount, bossPos, math.max(t, RUN_TIME_LIMIT))
+			nextBossReinforcementAt = t + math.max(7, BOSS_REINFORCEMENT_INTERVAL - math.floor(math.max(0, t - RUN_TIME_LIMIT) / 90))
+		else
+			nextBossReinforcementAt = t + 2
+		end
+	end
 
     -- Normal spawns
     local interval = spawnInterval(t)

@@ -191,7 +191,8 @@ local function startPartyLevelUp(partyId: string)
 end
 
 local function rollNextRunXp(level: number): number
-	return 70 + (level * 35)
+	level = math.max(0, math.floor(tonumber(level) or 0))
+	return 90 + (level * 48) + math.floor((level * level) * 3)
 end
 
 local function getRun(plr: Player)
@@ -839,9 +840,9 @@ end)
 
 
 -- === Run stat growth (per level) ===
-local STAT_HP_PER_LEVEL = 8
-local STAT_SPEED_PER_LEVEL = 0.35
-local STAT_ATK_PCT_PER_LEVEL = 0.04 -- 4% per level (applies to weapon base ATK & spells where supported)
+local STAT_HP_PER_LEVEL = 6
+local STAT_SPEED_PER_LEVEL = 0.20
+local STAT_ATK_PCT_PER_LEVEL = 0.025 -- keep per-level growth meaningful without letting runs snowball too early
 
 local function applyRunStatsNow(plr: Player)
 	local char = plr.Character
@@ -1130,10 +1131,10 @@ local function endRunForPlayer(plr: Player, reason: string)
 
 	local seconds = runSeconds(plr)
 	local accountXp = math.max(0, math.floor(seconds * TIME_RATE + (r.kills or 0) * KILL_RATE))
-	-- Gold coins are run-only. Convert to lobby silver at 1/3.
+	-- Gold coins are run-only. Convert a larger share into lobby silver so hard runs feel more rewarding.
 	local goldSilver = math.max(0, math.floor(r.runSilver or 0))
 	local runCoinsEarned = math.max(0, math.floor(r.coinsEarned or 0))
-	local coinsGained = math.max(0, math.floor(goldSilver / 3))
+	local coinsGained = math.max(0, math.floor(goldSilver * 0.6))
 
 	local d = PlayerData.Get(plr)
 	d.xp = (tonumber(d.xp) or 0) + accountXp
