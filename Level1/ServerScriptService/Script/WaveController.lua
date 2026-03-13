@@ -101,20 +101,9 @@ if not WaveStatusEvent then
 	WaveStatusEvent.Parent = RemotesFolder
 end
 
--- Legacy compatibility: some old LocalScripts may still look in ReplicatedStorage root
-local WaveStatusEvent_Legacy = ReplicatedStorage:FindFirstChild("WaveStatusEvent")
-if not WaveStatusEvent_Legacy then
-	WaveStatusEvent_Legacy = Instance.new("RemoteEvent")
-	WaveStatusEvent_Legacy.Name = "WaveStatusEvent"
-	WaveStatusEvent_Legacy.Parent = ReplicatedStorage
-end
-
 local function broadcast(payload)
 	for _, plr in ipairs(Players:GetPlayers()) do
 		WaveStatusEvent:FireClient(plr, payload)
-		if WaveStatusEvent_Legacy ~= WaveStatusEvent then
-			WaveStatusEvent_Legacy:FireClient(plr, payload)
-		end
 	end
 end
 
