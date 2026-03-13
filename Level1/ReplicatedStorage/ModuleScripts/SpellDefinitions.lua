@@ -384,7 +384,14 @@ function SpellDefs.ComputeRuntimeStats(spellIdOrDef, state)
 	runtime.basePower = basePower
 	runtime.upgradePower = upgradePower
 	runtime.effectPower = 1 + ((level - 1) * 0.08) + (upgradePower * 0.06) + (basePower * 0.03)
+	runtime.spellId = def.id
+	runtime.spellName = def.name
+	runtime.element = def.element
+	runtime.secondaryElement = def.secondaryElement
+	runtime.attackType = def.attackType
+	runtime.spellType = def.spellType
 	runtime.visualColor = SpellDefs.GetSpellColor(def)
+	runtime.visualSecondaryColor = def.secondaryElement and SpellDefs.GetElementColor(def.secondaryElement) or blend(runtime.visualColor, Color3.new(1, 1, 1), def.spellType == "Physical" and 0.18 or 0.34)
 	local effects = copyTable(EFFECTS[def.element] or {})
 	if def.secondaryElement then
 		for key, value in pairs(EFFECTS[def.secondaryElement] or {}) do

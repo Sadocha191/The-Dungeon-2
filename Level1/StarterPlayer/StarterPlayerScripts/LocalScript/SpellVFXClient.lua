@@ -1,5 +1,5 @@
 -- SpellVFXClient.lua
--- Renders spell VFX locally (client-side) so orbiting effects stay perfectly attached to the player.
+-- Renders orbit spell VFX on the client so they stay locked to the player with smooth motion.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -17,57 +17,226 @@ if not vfxRoot then
 	vfxRoot.Parent = workspace
 end
 
-local active = {} -- id -> {params..., parts={}, t=0}
+local active = {}
 
 local function getHRP()
 	local char = player.Character
-	if not char then return nil end
+	if not char then
+		return nil
+	end
 	return char:FindFirstChild("HumanoidRootPart")
 end
 
-local function applyPartDefaults(p: BasePart)
-	p.Anchored = true
-	p.CanCollide = false
-	p.CanTouch = false
-	p.CanQuery = false
-	p.CastShadow = false
-	p.Material = Enum.Material.Neon
-	p.TopSurface = Enum.SurfaceType.Smooth
-	p.BottomSurface = Enum.SurfaceType.Smooth
+local function blendColor(a, b, alpha)
+	return Color3.new(
+		a.R + ((b.R - a.R) * alpha),
+		a.G + ((b.G - a.G) * alpha),
+		a.B + ((b.B - a.B) * alpha)
+	)
 end
 
-local function ensureParts(id: string, cfg)
-	cfg.parts = cfg.parts or {}
-	while #cfg.parts < (cfg.count or 0) do
-		local p = Instance.new("Part")
-		p.Name = id .. "_Orb"
-		p.Shape = Enum.PartType.Ball
-		applyPartDefaults(p)
-		p.Parent = vfxRoot
-		table.insert(cfg.parts, p)
-	end
-	while #cfg.parts > (cfg.count or 0) do
-		local p = table.remove(cfg.parts)
-		pcall(function() p:Destroy() end)
-	end
+local function brightenColor(color, alpha)
+	return blendColor(color, Color3.new(1, 1, 1), alpha or 0.3)
+end
 
-	local size = tonumber(cfg.size) or 1.2
-	local transparency = tonumber(cfg.transparency) or 0.25
-	local color = typeof(cfg.color) == "Color3" and cfg.color or Color3.fromRGB(255, 255, 255)
-	for _, p in ipairs(cfg.parts) do
-		p.Size = Vector3.new(size, size, size)
-		p.Transparency = transparency
-		p.Color = color
+local function applyPartDefaults(part)
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.CastShadow = false
+	part.Material = Enum.Material.Neon
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+end
+
+local function ensurePart(parent, name, size, color, transparency, material, shape)
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Size = size
+	part.Color = color
+	part.Transparency = transparency or 0
+	part.Material = material or Enum.Material.Neon
+	if shape then
+		part.Shape = shape
+	end
+	applyPartDefaults(part)
+	part.Parent = parent
+	return part
+end
+
+local function addPointLight(parent, color, brightness, range)
+	local light = Instance.new("PointLight")
+	light.Color = color
+	light.Brightness = brightness or 2
+	light.Range = range or 10
+	light.Shadows = false
+	light.Parent = parent
+	return light
+end
+
+local function addTrail(part, colorA, colorB, width, lifetime)
+	local z = math.max(0.18, part.Size.Z * 0.5)
+	local front = Instance.new("Attachment")
+	front.Name = "TrailFront"
+	front.Position = Vector3.new(0, 0, -z)
+	front.Parent = part
+
+	local back = Instance.new("Attachment")
+	back.Name = "TrailBack"
+	back.Position = Vector3.new(0, 0, z)
+	back.Parent = part
+
+	local trail = Instance.new("Trail")
+	trail.Attachment0 = front
+	trail.Attachment1 = back
+	trail.Color = ColorSequence.new(colorA, colorB)
+	trail.LightEmission = 1
+	trail.FaceCamera = true
+	trail.Lifetime = lifetime or 0.12
+	trail.MinLength = 0.02
+	trail.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.08),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	local startWidth = math.max(0.06, width or 0.3)
+	trail.WidthScale = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, startWidth),
+		NumberSequenceKeypoint.new(1, math.max(0.02, startWidth * 0.2)),
+	})
+	trail.Parent = part
+	return trail
+end
+
+local function destroyOrb(orb)
+	if orb and orb.model then
+		pcall(function()
+			orb.model:Destroy()
+		end)
 	end
 end
 
-SpellVFXEvent.OnClientEvent:Connect(function(id: string, enabled: boolean, params)
+local function clearOrbs(cfg)
+	if not cfg or not cfg.orbs then
+		return
+	end
+	for _, orb in ipairs(cfg.orbs) do
+		destroyOrb(orb)
+	end
+	cfg.orbs = {}
+end
+
+local function createOrbModel(id, cfg, index)
+	local primary = typeof(cfg.color) == "Color3" and cfg.color or Color3.fromRGB(255, 255, 255)
+	local secondary = typeof(cfg.secondaryColor) == "Color3" and cfg.secondaryColor or brightenColor(primary, 0.32)
+	local scale = math.max(0.75, tonumber(cfg.size) or 1.1)
+	local baseTransparency = tonumber(cfg.transparency) or 0.18
+	local function alpha(extra)
+		return math.clamp(baseTransparency + (extra or 0), 0, 0.95)
+	end
+
+	local model = Instance.new("Model")
+	model.Name = string.format("%s_Orb_%d", id, index)
+	model.Parent = vfxRoot
+
+	local guide = ensurePart(model, "Guide", Vector3.new(0.22, 0.22, 1.1) * scale, primary, 1, Enum.Material.SmoothPlastic)
+	addPointLight(guide, primary, tonumber(cfg.lightBrightness) or 1.7, tonumber(cfg.lightRange) or 9)
+	addTrail(guide, primary, secondary, scale * 0.36, tonumber(cfg.trailLifetime) or 0.12)
+
+	local spinSpeed = 6
+	local element = cfg.element
+
+	if element == "Fire" then
+		local core = ensurePart(model, "Core", Vector3.new(0.62, 0.62, 0.62) * scale, primary, alpha(-0.1), Enum.Material.Neon, Enum.PartType.Ball)
+		core.CFrame = CFrame.new()
+		local shell = ensurePart(model, "Shell", Vector3.new(0.92, 0.92, 0.92) * scale, secondary, alpha(0.3), Enum.Material.Glass, Enum.PartType.Ball)
+		shell.CFrame = CFrame.new()
+		local ember = ensurePart(model, "Ember", Vector3.new(0.14, 0.14, 0.62) * scale, brightenColor(primary, 0.2), alpha(-0.04), Enum.Material.Neon)
+		ember.CFrame = CFrame.new(0, 0, -0.34 * scale)
+		spinSpeed = 7
+	elseif element == "Electricity" then
+		local needle = ensurePart(model, "Needle", Vector3.new(0.16, 0.38, 1.18) * scale, primary, alpha(-0.08), Enum.Material.Neon)
+		needle.CFrame = CFrame.new()
+		local crossA = ensurePart(model, "CrossA", Vector3.new(0.7, 0.1, 0.24) * scale, secondary, alpha(0.02), Enum.Material.Neon)
+		crossA.CFrame = CFrame.Angles(0, 0, math.rad(35))
+		local crossB = ensurePart(model, "CrossB", Vector3.new(0.7, 0.1, 0.24) * scale, secondary, alpha(0.02), Enum.Material.Neon)
+		crossB.CFrame = CFrame.Angles(0, 0, math.rad(-35))
+		local tail = ensurePart(model, "Tail", Vector3.new(0.34, 0.34, 0.34) * scale, brightenColor(primary, 0.22), alpha(0.1), Enum.Material.Glass, Enum.PartType.Ball)
+		tail.CFrame = CFrame.new(0, 0, 0.28 * scale)
+		spinSpeed = 10
+	elseif element == "Air" then
+		local blade = ensurePart(model, "Blade", Vector3.new(0.12, 0.54, 1.05) * scale, primary, alpha(-0.06), Enum.Material.Neon)
+		blade.CFrame = CFrame.new()
+		local wingA = ensurePart(model, "WingA", Vector3.new(0.6, 0.1, 0.34) * scale, secondary, alpha(0.08), Enum.Material.Glass)
+		wingA.CFrame = CFrame.Angles(0, 0, math.rad(28))
+		local wingB = ensurePart(model, "WingB", Vector3.new(0.6, 0.1, 0.34) * scale, secondary, alpha(0.08), Enum.Material.Glass)
+		wingB.CFrame = CFrame.Angles(0, 0, math.rad(-28))
+		spinSpeed = 8
+	elseif element == "Water" then
+		local core = ensurePart(model, "Core", Vector3.new(0.58, 0.58, 0.58) * scale, primary, alpha(-0.04), Enum.Material.Neon, Enum.PartType.Ball)
+		core.CFrame = CFrame.new()
+		local shell = ensurePart(model, "Shell", Vector3.new(0.88, 0.88, 0.88) * scale, secondary, alpha(0.28), Enum.Material.Glass, Enum.PartType.Ball)
+		shell.CFrame = CFrame.new()
+		local crest = ensurePart(model, "Crest", Vector3.new(0.12, 0.36, 0.76) * scale, brightenColor(primary, 0.18), alpha(0), Enum.Material.Neon)
+		crest.CFrame = CFrame.new(0, 0, -0.14 * scale)
+		spinSpeed = 5
+	elseif element == "Earth" then
+		local rock = ensurePart(model, "Rock", Vector3.new(0.62, 0.62, 0.92) * scale, blendColor(primary, Color3.new(0, 0, 0), 0.22), alpha(-0.08), Enum.Material.Slate)
+		rock.CFrame = CFrame.new()
+		local crystal = ensurePart(model, "Crystal", Vector3.new(0.18, 0.42, 1.12) * scale, primary, alpha(0.02), Enum.Material.Neon)
+		crystal.CFrame = CFrame.new()
+		spinSpeed = 4.5
+	elseif element == "Void" then
+		local core = ensurePart(model, "Core", Vector3.new(0.56, 0.56, 0.56) * scale, blendColor(primary, Color3.new(0, 0, 0), 0.2), alpha(-0.06), Enum.Material.Neon, Enum.PartType.Ball)
+		core.CFrame = CFrame.new()
+		local shell = ensurePart(model, "Shell", Vector3.new(0.94, 0.94, 0.94) * scale, secondary, alpha(0.34), Enum.Material.Glass, Enum.PartType.Ball)
+		shell.CFrame = CFrame.new()
+		local band = ensurePart(model, "Band", Vector3.new(0.78, 0.1, 0.28) * scale, brightenColor(secondary, 0.14), alpha(0.06), Enum.Material.Neon)
+		band.CFrame = CFrame.Angles(0, 0, math.rad(45))
+		spinSpeed = 6.5
+	elseif element == "Light" then
+		local core = ensurePart(model, "Core", Vector3.new(0.54, 0.54, 0.54) * scale, primary, alpha(-0.08), Enum.Material.Neon, Enum.PartType.Ball)
+		core.CFrame = CFrame.new()
+		local shell = ensurePart(model, "Shell", Vector3.new(0.84, 0.84, 0.84) * scale, secondary, alpha(0.34), Enum.Material.Glass, Enum.PartType.Ball)
+		shell.CFrame = CFrame.new()
+		local spine = ensurePart(model, "Spine", Vector3.new(0.14, 0.46, 1.05) * scale, brightenColor(primary, 0.2), alpha(-0.02), Enum.Material.Neon)
+		spine.CFrame = CFrame.new()
+		spinSpeed = 5.5
+	elseif element == "Physical" then
+		local handle = ensurePart(model, "Handle", Vector3.new(0.12, 0.12, 0.9) * scale, blendColor(primary, Color3.new(0, 0, 0), 0.28), 0, Enum.Material.Metal)
+		handle.CFrame = CFrame.new()
+		local headA = ensurePart(model, "HeadA", Vector3.new(0.54, 0.16, 0.24) * scale, brightenColor(primary, 0.12), 0, Enum.Material.Metal)
+		headA.CFrame = CFrame.new(0.22 * scale, 0, -0.08 * scale)
+		local headB = ensurePart(model, "HeadB", Vector3.new(0.54, 0.16, 0.24) * scale, brightenColor(primary, 0.12), 0, Enum.Material.Metal)
+		headB.CFrame = CFrame.new(-0.22 * scale, 0, -0.08 * scale)
+		spinSpeed = 9
+	else
+		local core = ensurePart(model, "Core", Vector3.new(0.58, 0.58, 0.58) * scale, primary, alpha(-0.06), Enum.Material.Neon, Enum.PartType.Ball)
+		core.CFrame = CFrame.new()
+		local shell = ensurePart(model, "Shell", Vector3.new(0.86, 0.86, 0.86) * scale, secondary, alpha(0.28), Enum.Material.Glass, Enum.PartType.Ball)
+		shell.CFrame = CFrame.new()
+	end
+
+	return {
+		model = model,
+		spin = (index - 1) * 0.35,
+		spinSpeed = spinSpeed,
+	}
+end
+
+local function rebuildOrbs(id, cfg)
+	clearOrbs(cfg)
+	cfg.orbs = {}
+	for index = 1, math.max(0, cfg.count or 0) do
+		table.insert(cfg.orbs, createOrbModel(id, cfg, index))
+	end
+end
+
+SpellVFXEvent.OnClientEvent:Connect(function(id, enabled, params)
 	if not enabled then
 		local cfg = active[id]
-		if cfg and cfg.parts then
-			for _, p in ipairs(cfg.parts) do
-				pcall(function() p:Destroy() end)
-			end
+		if cfg then
+			clearOrbs(cfg)
 		end
 		active[id] = nil
 		return
@@ -76,49 +245,52 @@ SpellVFXEvent.OnClientEvent:Connect(function(id: string, enabled: boolean, param
 	params = params or {}
 	local cfg = active[id]
 	if not cfg then
-		cfg = { parts = {}, t = 0 }
+		cfg = { orbs = {}, t = 0 }
 		active[id] = cfg
 	end
 
-	cfg.count = tonumber(params.count) or cfg.count or 0
-	cfg.radius = tonumber(params.radius) or cfg.radius or 5
-	cfg.orbitSpeed = tonumber(params.orbitSpeed) or cfg.orbitSpeed or 2
-	cfg.height = tonumber(params.height) or cfg.height or 1.5
-	cfg.size = tonumber(params.size) or cfg.size or 1.2
-	cfg.transparency = tonumber(params.transparency) or cfg.transparency or 0.25
-	cfg.color = typeof(params.color) == "Color3" and params.color or cfg.color
+	cfg.count = tonumber(params.count) or 0
+	cfg.radius = tonumber(params.radius) or 5
+	cfg.orbitSpeed = tonumber(params.orbitSpeed) or 2
+	cfg.height = tonumber(params.height) or 1.5
+	cfg.size = tonumber(params.size) or 1.2
+	cfg.transparency = tonumber(params.transparency) or 0.2
+	cfg.color = typeof(params.color) == "Color3" and params.color or Color3.fromRGB(255, 255, 255)
+	cfg.secondaryColor = typeof(params.secondaryColor) == "Color3" and params.secondaryColor or brightenColor(cfg.color, 0.32)
+	cfg.element = params.element
+	cfg.spellType = params.spellType
+	cfg.lightRange = tonumber(params.lightRange) or 9
+	cfg.lightBrightness = tonumber(params.lightBrightness) or 1.7
+	cfg.trailLifetime = tonumber(params.trailLifetime) or 0.12
 
-	ensureParts(id, cfg)
+	rebuildOrbs(id, cfg)
 end)
 
 RunService.RenderStepped:Connect(function(dt)
 	local hrp = getHRP()
-	if not hrp then return end
+	if not hrp then
+		return
+	end
 
-	-- IMPORTANT:
-	-- Orbit must be independent from character rotation.
-	-- Use world-space offsets from HRP position, not HRP.CFrame (which would add rotation).
 	local basePos = hrp.Position
 	for id, cfg in pairs(active) do
 		local count = cfg.count or 0
 		if count <= 0 then
-			-- safety: cleanup
-			if cfg.parts then
-				for _, p in ipairs(cfg.parts) do pcall(function() p:Destroy() end) end
-			end
+			clearOrbs(cfg)
 			active[id] = nil
 		else
 			cfg.t = (cfg.t or 0) + (cfg.orbitSpeed or 2) * dt
-			local t0 = cfg.t
 			local radius = cfg.radius or 5
 			local height = cfg.height or 1.5
 
-			for i = 1, count do
-				local p = cfg.parts[i]
-				if p then
-					local ang = t0 + (i / math.max(1, count)) * math.pi * 2
-					local offset = Vector3.new(math.cos(ang) * radius, height, math.sin(ang) * radius)
-					p.CFrame = CFrame.new(basePos + offset)
+			for i = 1, math.min(count, #cfg.orbs) do
+				local orb = cfg.orbs[i]
+				if orb and orb.model then
+					local ang = cfg.t + (i / math.max(1, count)) * math.pi * 2
+					local worldPos = basePos + Vector3.new(math.cos(ang) * radius, height, math.sin(ang) * radius)
+					local tangent = Vector3.new(-math.sin(ang), 0, math.cos(ang))
+					orb.spin = (orb.spin or 0) + (orb.spinSpeed or 0) * dt
+					orb.model:PivotTo(CFrame.lookAt(worldPos, worldPos + tangent) * CFrame.Angles(0, 0, orb.spin))
 				end
 			end
 		end

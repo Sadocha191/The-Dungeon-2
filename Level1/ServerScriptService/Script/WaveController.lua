@@ -425,6 +425,10 @@ local ENEMY_CONFIGS = {
 
 local RUN_TIME_LIMIT = 15 * 60 -- 15:00 (portal/boss threshold)
 local ENEMY_HP_MULTIPLIER = 1.5
+local BOSS_BASE_HP = math.floor(1200 * ENEMY_HP_MULTIPLIER)
+local BOSS_HP_MULT_EARLY = 20
+local BOSS_HP_MULT_LATE = 4
+local BOSS_LEVEL_TARGET = 10
 local ELITE_SOUL_DROP_MIN = 12
 local ELITE_SOUL_DROP_MAX = 18
 local ELITE_INTERVAL_SECONDS = 5 * 60
@@ -846,6 +850,26 @@ local function fmtTimePayload(tSeconds: number)
 	return left, over
 end
 
+local function getBossHealthForCurrentRun(): number
+	local elapsedSeconds = math.max(0, elapsed())
+	local timeProgress = math.clamp(elapsedSeconds / RUN_TIME_LIMIT, 0, 1)
+
+	local avgRunLevel = 0
+	if type(_G.GetAverageRunLevel) == "function" then
+		local ok, value = pcall(function()
+			return _G.GetAverageRunLevel()
+		end)
+		if ok then
+			avgRunLevel = math.max(0, tonumber(value) or 0)
+		end
+	end
+	local levelProgress = math.clamp(avgRunLevel / BOSS_LEVEL_TARGET, 0, 1)
+
+	local readiness = math.max(timeProgress, levelProgress)
+	local hpMultiplier = BOSS_HP_MULT_EARLY + ((BOSS_HP_MULT_LATE - BOSS_HP_MULT_EARLY) * readiness)
+	return math.max(BOSS_BASE_HP, math.floor(BOSS_BASE_HP * hpMultiplier))
+end
+
 local function endRun(reason: string)
 	reason = tostring(reason or "Victory")
 	broadcast({
@@ -920,7 +944,7 @@ local function ensurePortal()
 
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "PortalPrompt"
-	prompt.ActionText = "Portal Locked"
+	prompt.ActionText = "Awaken Boss"
 	prompt.ObjectText = "Portal"
 	prompt.HoldDuration = 1
 	prompt.MaxActivationDistance = 10
@@ -929,16 +953,11 @@ local function ensurePortal()
 
 	local function setPromptState()
 		if not portalActivated then
-			if elapsed() < RUN_TIME_LIMIT then
-				prompt.ActionText = "Portal Locked"
-				prompt.ObjectText = "Boss Phase"
-			else
-				prompt.ActionText = "Awaken Boss"
-				prompt.ObjectText = "Portal"
-			end
+			prompt.ActionText = "Awaken Boss"
+			prompt.ObjectText = "Portal"
 			prompt.Enabled = true
 		elseif not bossDefeated then
-			prompt.ActionText = "Defeat the Boss"
+			prompt.ActionText = "Boss Active"
 			prompt.ObjectText = "Portal"
 			prompt.Enabled = false
 		else
@@ -971,8 +990,9 @@ local function ensurePortal()
 			mob:PivotTo(base.CFrame * CFrame.new(0, 0, -18))
 		end)
 
+		local bossHp = getBossHealthForCurrentRun()
 		local registered = registerMobModel(mob, bossName, {
-			hp = math.floor(1200 * ENEMY_HP_MULTIPLIER),
+			hp = bossHp,
 			speed = 10,
 			range = 7,
 			cd = 1.4,
@@ -1001,15 +1021,6 @@ local function ensurePortal()
 		if plr:GetAttribute("RunEnded") == true then return end
 
 		if not portalActivated then
-			local remaining = math.max(0, math.ceil(RUN_TIME_LIMIT - elapsed()))
-			if remaining > 0 then
-				WaveStatusEvent:FireClient(plr, {
-					type = "portalLocked",
-					secondsLeft = remaining,
-				})
-				setPromptState()
-				return
-			end
 			portalActivated = true
 			broadcast({ type = "portalActivated" })
 			spawnBossNearPortal()

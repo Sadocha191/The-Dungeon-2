@@ -144,7 +144,7 @@ function MissionProgress.OnKill(plr: Player, mobModel: Model?)
 end
 
 -- extraStats (optional table) can include:
---  coinsGained, runLevel, rerollsUsed, skipsUsed, damageTaken, healAmount,
+--  coinsGained, runCoinsEarned, runLevel, rerollsUsed, skipsUsed, damageTaken, healAmount,
 --  lowHpSeconds, maxNoDamageStreak, minHpRatio,
 --  bossNoHit20, bossClutch, burst90, burst120,
 --  noRerollWin, max1RerollWin, max1SkipWin, level10,
@@ -187,9 +187,9 @@ function MissionProgress.OnRunComplete(plr: Player, waves: number, seconds: numb
 
 	-- Optional per-run derived stats
 	if typeof(extraStats) == "table" then
-		local coinsGained = math.floor(tonumber(extraStats.coinsGained) or 0)
-		if coinsGained > 0 then
-			MissionProgress.SetMax(plr, "COINS_RUN_MAX", coinsGained)
+		local runCoinsEarned = math.floor(tonumber(extraStats.runCoinsEarned) or tonumber(extraStats.coinsGained) or 0)
+		if runCoinsEarned > 0 then
+			MissionProgress.SetMax(plr, "COINS_RUN_MAX", runCoinsEarned)
 		end
 
 		local lowHp = math.floor(tonumber(extraStats.lowHpSeconds) or 0)

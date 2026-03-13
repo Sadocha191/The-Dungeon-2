@@ -77,7 +77,7 @@ if not PauseState then
 end
 
 -- Run state
-local run = {} -- [uid] = {startT, pausedTotal, pauseStart, runLevel, runXp, nextXp, runSilver, kills, ended, banished, pendingLevelUps}
+local run = {} -- [uid] = {startT, pausedTotal, pauseStart, runLevel, runXp, nextXp, runSilver, coinsEarned, kills, ended, banished, pendingLevelUps}
 local pending = {} -- [uid] = {token, offers}
 
 -- extra per-run stats used by missions
@@ -207,6 +207,7 @@ local function getRun(plr: Player)
 			runXp = 0,
 			nextXp = rollNextRunXp(0),
 			runSilver = 0,
+			coinsEarned = 0,
 			kills = 0,
 			rerollsUsed = 0,
 			skipsUsed = 0,
@@ -903,6 +904,21 @@ local function grantLevelStatGains(plr: Player, levelsGained: number)
 	applyRunStatsNow(plr)
 end
 
+local function addRunCoins(plr: Player, amount: number)
+	amount = math.max(0, math.floor(tonumber(amount) or 0))
+	if amount <= 0 then
+		return
+	end
+
+	local r = getRun(plr)
+	if r.ended then
+		return
+	end
+
+	r.runSilver += amount
+	r.coinsEarned = math.max(0, math.floor(tonumber(r.coinsEarned) or 0)) + amount
+end
+
 -- Public API for orbs (DropService calls _G.AwardPlayer)
 function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	if not plr or not plr.Parent then return end
@@ -920,7 +936,7 @@ function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 		-- coins nadal per gracz (jak było)
 		local r = getRun(plr)
 		if r.ended then return end
-		r.runSilver += coins
+		addRunCoins(plr, coins)
 
 		p.xp += xp
 
@@ -954,7 +970,7 @@ function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	if r.ended then return end
 
 	r.runXp += xp
-	r.runSilver += coins
+	addRunCoins(plr, coins)
 
 	local leveledCount = 0
 	while r.runXp >= r.nextXp do
@@ -1079,6 +1095,27 @@ function _G.NotifyBossSpawn()
 	end
 end
 
+function _G.GetAverageRunLevel(): number
+	local total = 0
+	local count = 0
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr.Parent and plr:GetAttribute("RunEnded") ~= true then
+			local r = getRun(plr)
+			if not r.ended then
+				total += math.max(0, math.floor(tonumber(r.runLevel) or 0))
+				count += 1
+			end
+		end
+	end
+
+	if count <= 0 then
+		return 0
+	end
+
+	return total / count
+end
+
 -- GameOver / account XP
 local TIME_RATE = 0.35
 local KILL_RATE = 5
@@ -1095,6 +1132,7 @@ local function endRunForPlayer(plr: Player, reason: string)
 	local accountXp = math.max(0, math.floor(seconds * TIME_RATE + (r.kills or 0) * KILL_RATE))
 	-- Gold coins are run-only. Convert to lobby silver at 1/3.
 	local goldSilver = math.max(0, math.floor(r.runSilver or 0))
+	local runCoinsEarned = math.max(0, math.floor(r.coinsEarned or 0))
 	local coinsGained = math.max(0, math.floor(goldSilver / 3))
 
 	local d = PlayerData.Get(plr)
@@ -1154,6 +1192,7 @@ local function endRunForPlayer(plr: Player, reason: string)
 		local bossSpawned = bossSpawnAt ~= nil and bossSpawnAt >= 0
 		local extra = {
 			coinsGained = coinsGained,
+			runCoinsEarned = runCoinsEarned,
 			runLevel = r.runLevel or 0,
 			rerollsUsed = r.rerollsUsed or 0,
 			skipsUsed = r.skipsUsed or 0,
@@ -1178,7 +1217,7 @@ local function endRunForPlayer(plr: Player, reason: string)
 		}
 
 		pcall(function() MissionProgress.OnRunComplete(plr, 0, seconds, diedThisRun, extra) end)
-		pcall(function() MissionProgress.OnReward(plr, accountXp, coinsGained) end)
+		pcall(function() MissionProgress.OnReward(plr, accountXp, runCoinsEarned) end)
 	end
 end
 
@@ -1199,6 +1238,7 @@ Players.PlayerAdded:Connect(function(plr: Player)
 	r.runXp = 0
 	r.nextXp = rollNextRunXp(0)
 	r.runSilver = 0
+	r.coinsEarned = 0
 	r.kills = 0
 	r.rerollsUsed = 0
 	r.skipsUsed = 0
