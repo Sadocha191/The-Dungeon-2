@@ -7,20 +7,40 @@ local TweenService = game:GetService("TweenService")
 
 -- Support both layouts:
 -- 1) ReplicatedStorage/Remotes/WaveStatusEvent (preferred)
--- 2) ReplicatedStorage/WaveStatusEvent (legacy)
-local function getWaveStatusEvent()
+-- 2) ReplicatedStorage/WaveStatusEvent (legacy mirror used by older clients)
+local function getWaveStatusEvents()
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local preferred = nil
 	if remotes then
 		local ev = remotes:FindFirstChild("WaveStatusEvent")
-		if ev and ev:IsA("RemoteEvent") then return ev end
+		if ev and ev:IsA("RemoteEvent") then
+			preferred = ev
+		end
 	end
-	local ev = ReplicatedStorage:FindFirstChild("WaveStatusEvent")
-	if ev and ev:IsA("RemoteEvent") then return ev end
-	-- last resort: don't infinite-yield on the wrong path
-	return ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("WaveStatusEvent")
+	local legacy = ReplicatedStorage:FindFirstChild("WaveStatusEvent")
+	if not (legacy and legacy:IsA("RemoteEvent")) then
+		legacy = nil
+	end
+
+	if not preferred then
+		preferred = legacy or ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("WaveStatusEvent")
+		legacy = nil
+	end
+
+	if legacy == preferred then
+		legacy = nil
+	end
+
+	return preferred, legacy
 end
 
-local WaveStatusEvent = getWaveStatusEvent()
+local WaveStatusEvent, LegacyWaveStatusEvent = getWaveStatusEvents()
+
+if LegacyWaveStatusEvent then
+	LegacyWaveStatusEvent.OnClientEvent:Connect(function()
+		-- Drain the legacy mirror event so the server-side compatibility fire does not exhaust the queue.
+	end)
+end
 
 local plr = game.Players.LocalPlayer
 local gui = Instance.new("ScreenGui")
@@ -132,7 +152,7 @@ local function fmtTime(sec)
 	return string.format("%02d:%02d", m, s)
 end
 
-WaveStatusEvent.OnClientEvent:Connect(function(p)
+local function handleWaveStatus(p)
 	if typeof(p) ~= "table" then return end
 
 	if p.type == "timeUpdate" then
@@ -274,5 +294,7 @@ WaveStatusEvent.OnClientEvent:Connect(function(p)
 		elites.Text = ("Elites: %d/%d"):format(defeated, total)
 		setBar(total > 0 and (defeated / total) or 1)
 	end
-end)
+end
+
+WaveStatusEvent.OnClientEvent:Connect(handleWaveStatus)
 
