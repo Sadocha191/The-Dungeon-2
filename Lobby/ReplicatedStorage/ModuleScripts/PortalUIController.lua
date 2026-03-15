@@ -89,6 +89,27 @@ local function setPortalVisible(currentRefs: PortalRefs, isVisible: boolean)
 	currentRefs.gui.Enabled = true
 	currentRefs.gui:SetAttribute("Modal", isVisible)
 	currentRefs.root.Visible = isVisible
+	currentRefs.background.Visible = isVisible
+
+	if currentRefs.root:IsA("CanvasGroup") then
+		currentRefs.root.GroupTransparency = isVisible and 0 or 1
+	end
+
+	if currentRefs.background:IsA("CanvasGroup") then
+		currentRefs.background.GroupTransparency = isVisible and 0 or 1
+	end
+
+	print(string.format(
+		"[PortalUI] setPortalVisible(%s) gui.Enabled=%s root.Visible=%s background.Visible=%s root.AbsPos=(%d,%d) root.AbsSize=(%d,%d)",
+		tostring(isVisible),
+		tostring(currentRefs.gui.Enabled),
+		tostring(currentRefs.root.Visible),
+		tostring(currentRefs.background.Visible),
+		currentRefs.root.AbsolutePosition.X,
+		currentRefs.root.AbsolutePosition.Y,
+		currentRefs.root.AbsoluteSize.X,
+		currentRefs.root.AbsoluteSize.Y
+	))
 end
 
 local function normalize(value: string?): string
@@ -715,9 +736,19 @@ local function bindFixedControls()
 end
 
 local function openUI()
-	if not resolveRefs() then
+	local initialRefs = resolveRefs()
+	if not initialRefs then
 		return
 	end
+
+	print(string.format(
+		"[PortalUI] openUI refs gui=%s root=%s background=%s rootClass=%s backgroundClass=%s",
+		initialRefs.gui:GetFullName(),
+		initialRefs.root:GetFullName(),
+		initialRefs.background:GetFullName(),
+		initialRefs.root.ClassName,
+		initialRefs.background.ClassName
+	))
 
 	bindFixedControls()
 	if PlayerProgressEvent and PlayerProgressEvent:IsA("RemoteEvent") then
