@@ -223,8 +223,8 @@ function GachaService.Roll(player: Player, bannerId: string, count: number)
 		return false, "InvalidCost"
 	end
 
-	local balances = CurrencyService.GetBalances(player)
-	if (balances.Tickets or 0) < totalCost then
+	local balancesBefore = CurrencyService.GetBalances(player)
+	if (balancesBefore.Tickets or 0) < totalCost then
 		return false, "NotEnoughTickets"
 	end
 
@@ -263,7 +263,7 @@ function GachaService.Roll(player: Player, bannerId: string, count: number)
 	return true, {
 		Results = results,
 		Pity = data.Pity,
-		Currencies = balances,
+		Currencies = CurrencyService.GetBalances(player),
 	}
 end
 
