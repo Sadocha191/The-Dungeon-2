@@ -79,6 +79,7 @@ local function defaultProfile()
 
 		-- Loadout (weapon entries: { id, level, rarity, stats })
 		Loadout = {},
+		levelRecords = {},
 
 		crafting = defaultCraftingData(),
 	}
@@ -176,6 +177,35 @@ local function sanitizeMiningSession(raw)
 		durationSec = durationSec,
 		priority = sanitizeStringList(raw.priority or raw.Priority),
 	}
+end
+
+local function sanitizeLevelRecords(raw)
+	local out = {}
+	if typeof(raw) ~= "table" then
+		return out
+	end
+
+	for levelKey, record in pairs(raw) do
+		if typeof(levelKey) == "string" and levelKey ~= "" and typeof(record) == "table" then
+			local highscore = math.max(0, clampInt(record.highscore or record.kills or record.killHighscore))
+			local speedrun = tonumber(record.speedrun or record.bestTime or record.bestSeconds or record.fastestClear)
+			if speedrun ~= nil then
+				speedrun = math.max(0, speedrun)
+				if speedrun <= 0 then
+					speedrun = nil
+				end
+			end
+
+			if highscore > 0 or speedrun ~= nil then
+				out[levelKey] = {
+					highscore = highscore,
+					speedrun = speedrun,
+				}
+			end
+		end
+	end
+
+	return out
 end
 
 function PlayerData.Get(plr)
@@ -276,6 +306,7 @@ function PlayerData.Get(plr)
 	if typeof(data.Loadout) ~= "table" then
 		data.Loadout = {}
 	end
+	data.levelRecords = sanitizeLevelRecords(data.levelRecords)
 	if typeof(data.crafting) ~= "table" then
 		data.crafting = defaultCraftingData()
 	end
@@ -296,6 +327,69 @@ end
 
 function PlayerData.MarkDirty(plr)
 	PlayerData._dirty[plr.UserId] = true
+end
+
+function PlayerData.GetLevelRecordsSnapshot(plr): {[string]: any}
+	local data = PlayerData.Get(plr)
+	local snapshot = {}
+	local raw = data.levelRecords
+	if typeof(raw) ~= "table" then
+		return snapshot
+	end
+
+	for levelKey, record in pairs(raw) do
+		if typeof(levelKey) == "string" and levelKey ~= "" and typeof(record) == "table" then
+			local entry = {
+				highscore = math.max(0, clampInt(record.highscore)),
+			}
+			local speedrun = tonumber(record.speedrun)
+			if speedrun and speedrun > 0 then
+				entry.speedrun = speedrun
+			end
+			snapshot[levelKey] = entry
+		end
+	end
+
+	return snapshot
+end
+
+function PlayerData.UpdateLevelRecord(plr, levelKey: string, kills: number?, completionSeconds: number?, completed: boolean?): (any, boolean)
+	local data = PlayerData.Get(plr)
+	if typeof(levelKey) ~= "string" or levelKey == "" then
+		return nil, false
+	end
+
+	data.levelRecords = sanitizeLevelRecords(data.levelRecords)
+	local current = data.levelRecords[levelKey]
+	if typeof(current) ~= "table" then
+		current = {
+			highscore = 0,
+			speedrun = nil,
+		}
+		data.levelRecords[levelKey] = current
+	end
+
+	local changed = false
+	local killCount = math.max(0, clampInt(kills))
+	if killCount > math.max(0, clampInt(current.highscore)) then
+		current.highscore = killCount
+		changed = true
+	end
+
+	local clearTime = tonumber(completionSeconds)
+	if completed == true and clearTime and clearTime > 0 then
+		local bestTime = tonumber(current.speedrun)
+		if bestTime == nil or clearTime < bestTime then
+			current.speedrun = clearTime
+			changed = true
+		end
+	end
+
+	if changed then
+		PlayerData.MarkDirty(plr)
+	end
+
+	return current, changed
 end
 
 function PlayerData.Save(plr, force: boolean)

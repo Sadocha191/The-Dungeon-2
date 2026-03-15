@@ -14,6 +14,7 @@ local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local OpenLevelSelect = remoteEvents:WaitForChild("OpenLevelSelect")
 local RequestLevelTeleport = remoteEvents:WaitForChild("RequestLevelTeleport")
 local TeleportStatus = remoteEvents:FindFirstChild("TeleportStatus")
+local PlayerProgressEvent = remoteEvents:FindFirstChild("PlayerProgressEvent") or remoteEvents:WaitForChild("PlayerProgressEvent", 5)
 
 local moduleFolder = (
 	ReplicatedStorage:FindFirstChild("ModuleScripts")
@@ -58,8 +59,10 @@ local buttonStates: { [GuiButton]: ButtonState } = {}
 local buttonEntries: { [GuiButton]: any } = {}
 local buttonConnections: { [GuiButton]: boolean } = {}
 local entryLookup: { [string]: any } = {}
+local playerLevelRecords: { [string]: any } = {}
 local selectedEntry = nil
 local selectedButton: GuiButton? = nil
+local activeStatusMessage: string? = nil
 
 local function normalize(value: string?): string
 	if typeof(value) ~= "string" then
@@ -74,6 +77,60 @@ local function registerLookup(lookup: { [string]: any }, rawValue: string?, entr
 	if key ~= "" then
 		lookup[key] = entry
 	end
+end
+
+local function cacheLevelRecords(raw: any)
+	table.clear(playerLevelRecords)
+	if typeof(raw) ~= "table" then
+		return
+	end
+
+	for levelKey, record in pairs(raw) do
+		if typeof(levelKey) == "string" and levelKey ~= "" and typeof(record) == "table" then
+			local highscore = math.max(0, math.floor(tonumber(record.highscore) or 0))
+			local speedrun = tonumber(record.speedrun)
+			playerLevelRecords[levelKey] = {
+				highscore = highscore,
+				speedrun = (speedrun and speedrun > 0) and speedrun or nil,
+			}
+			playerLevelRecords[normalize(levelKey)] = playerLevelRecords[levelKey]
+		end
+	end
+end
+
+local function getLevelRecordForEntry(entry: any): any
+	if typeof(entry) ~= "table" then
+		return nil
+	end
+
+	local candidates = {
+		entry.key,
+		entry.instanceName,
+		entry.name,
+	}
+
+	local aliases = entry.aliases
+	if typeof(aliases) == "table" then
+		for _, alias in ipairs(aliases) do
+			table.insert(candidates, alias)
+		end
+	end
+
+	for _, candidate in ipairs(candidates) do
+		if typeof(candidate) == "string" and candidate ~= "" then
+			local direct = playerLevelRecords[candidate]
+			if direct then
+				return direct
+			end
+
+			local normalized = playerLevelRecords[normalize(candidate)]
+			if normalized then
+				return normalized
+			end
+		end
+	end
+
+	return nil
 end
 
 local function buildEntryLookup()
@@ -401,9 +458,10 @@ local function renderSelectedEntry(statusMessage: string?)
 		return
 	end
 
+	local record = getLevelRecordForEntry(selectedEntry)
 	currentRefs.levelName.Text = tostring(selectedEntry.name or selectedEntry.key or "Level")
-	currentRefs.highscoreCounter.Text = formatHighscore(selectedEntry)
-	currentRefs.speedrunCounter.Text = formatSpeedrun(selectedEntry)
+	currentRefs.highscoreCounter.Text = formatHighscore((record and record.highscore ~= nil) and record or selectedEntry)
+	currentRefs.speedrunCounter.Text = formatSpeedrun((record and record.speedrun ~= nil) and record or selectedEntry)
 	currentRefs.descriptionLabel.Text = getDescription(selectedEntry, statusMessage)
 	updateDescriptionCanvas()
 end
@@ -429,6 +487,7 @@ end
 local function selectEntry(entry: any, button: GuiButton?)
 	selectedEntry = entry
 	selectedButton = button
+	activeStatusMessage = nil
 	applySelectionVisuals()
 	renderSelectedEntry(nil)
 end
@@ -519,15 +578,18 @@ end
 
 local function requestTeleport(mode: string)
 	if typeof(selectedEntry) ~= "table" then
-		renderSelectedEntry("Select a level first.")
+		activeStatusMessage = "Select a level first."
+		renderSelectedEntry(activeStatusMessage)
 		return
 	end
 
 	if typeof(selectedEntry.placeId) ~= "number" then
-		renderSelectedEntry(ERROR_PREFIX .. "This level is not available yet.")
+		activeStatusMessage = ERROR_PREFIX .. "This level is not available yet."
+		renderSelectedEntry(activeStatusMessage)
 		return
 	end
 
+	activeStatusMessage = nil
 	RequestLevelTeleport:FireServer(selectedEntry.key, mode)
 	closeUI()
 end
@@ -558,6 +620,10 @@ local function openUI()
 	end
 
 	bindFixedControls()
+	if PlayerProgressEvent and PlayerProgressEvent:IsA("RemoteEvent") then
+		PlayerProgressEvent:FireServer({ type = "requestSync" })
+	end
+	activeStatusMessage = nil
 	refreshLevelButtons()
 
 	local currentRefs = resolveRefs()
@@ -588,6 +654,19 @@ buildEntryLookup()
 
 OpenLevelSelect.OnClientEvent:Connect(openUI)
 
+if PlayerProgressEvent and PlayerProgressEvent:IsA("RemoteEvent") then
+	PlayerProgressEvent.OnClientEvent:Connect(function(payload)
+		if typeof(payload) ~= "table" or payload.type ~= "progress" then
+			return
+		end
+
+		cacheLevelRecords(payload.levelRecords)
+		if selectedEntry ~= nil then
+			renderSelectedEntry(activeStatusMessage)
+		end
+	end)
+end
+
 if TeleportStatus and TeleportStatus:IsA("RemoteEvent") then
 	TeleportStatus.OnClientEvent:Connect(function(payload)
 		if typeof(payload) ~= "table" or payload.type ~= "failed" then
@@ -600,7 +679,8 @@ if TeleportStatus and TeleportStatus:IsA("RemoteEvent") then
 		end
 
 		currentRefs.gui.Enabled = true
-		renderSelectedEntry(messageForFailure(tostring(payload.reason or "")))
+		activeStatusMessage = messageForFailure(tostring(payload.reason or ""))
+		renderSelectedEntry(activeStatusMessage)
 	end)
 end
 

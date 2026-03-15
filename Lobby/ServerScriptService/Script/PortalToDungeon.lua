@@ -395,6 +395,7 @@ RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: an
 	end
 
 	local tpData = buildTeleportDataForLeader(player, runMode, partyId, leaderUserId)
+	tpData.LevelKey = entry.key
 	tryTeleport(group, entry.placeId, tpData)
 end)
 

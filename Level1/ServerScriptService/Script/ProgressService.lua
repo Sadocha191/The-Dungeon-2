@@ -293,14 +293,18 @@ local function hookHealthForMissions(plr: Player)
 	plr.CharacterAdded:Connect(attach)
 end
 
-local function runSeconds(plr: Player): number
+local function runSecondsPrecise(plr: Player): number
 	local r = getRun(plr)
 	local t = time() - (r.startT or time())
 	if r.pauseStart then
 		t -= (time() - r.pauseStart)
 	end
 	t -= (r.pausedTotal or 0)
-	return math.max(0, math.floor(t))
+	return math.max(0, t)
+end
+
+local function runSeconds(plr: Player): number
+	return math.floor(runSecondsPrecise(plr))
 end
 
 local function syncHud(plr: Player)
@@ -1121,6 +1125,15 @@ end
 local TIME_RATE = 0.35
 local KILL_RATE = 5
 
+local function getLevelKey(plr: Player): string
+	local levelKey = plr:GetAttribute("LevelKey")
+	if typeof(levelKey) == "string" and levelKey ~= "" then
+		return levelKey
+	end
+
+	return "AshenWastes"
+end
+
 local function endRunForPlayer(plr: Player, reason: string)
 	local r = getRun(plr)
 	if r.ended then return end
@@ -1129,7 +1142,8 @@ local function endRunForPlayer(plr: Player, reason: string)
 
 	pauseEnd(plr)
 
-	local seconds = runSeconds(plr)
+	local preciseSeconds = runSecondsPrecise(plr)
+	local seconds = math.floor(preciseSeconds)
 	local accountXp = math.max(0, math.floor(seconds * TIME_RATE + (r.kills or 0) * KILL_RATE))
 	-- Gold coins are run-only. Convert a larger share into lobby silver so hard runs feel more rewarding.
 	local goldSilver = math.max(0, math.floor(r.runSilver or 0))
@@ -1146,6 +1160,18 @@ local function endRunForPlayer(plr: Player, reason: string)
 			d.level += 1
 			d.nextXp = PlayerData.RollNextXp(d.level)
 		end
+	end
+
+	if PlayerData.UpdateLevelRecord then
+		pcall(function()
+			PlayerData.UpdateLevelRecord(
+				plr,
+				getLevelKey(plr),
+				r.kills or 0,
+				preciseSeconds,
+				reason == "Victory"
+			)
+		end)
 	end
 
 	if PlayerData.MarkDirty then PlayerData.MarkDirty(plr) end

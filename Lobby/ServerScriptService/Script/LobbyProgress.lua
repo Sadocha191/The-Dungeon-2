@@ -26,6 +26,7 @@ end
 
 local function send(plr: Player)
 	local d = PlayerData.Get(plr)
+	local levelRecords = PlayerData.GetLevelRecordsSnapshot and PlayerData.GetLevelRecordsSnapshot(plr) or {}
 	PlayerProgressEvent:FireClient(plr, {
 		type = "progress",
 		level = d.level,
@@ -33,8 +34,29 @@ local function send(plr: Player)
 		nextXp = d.nextXp,
 		silver = d.silver,
 		coins = d.silver,
+		levelRecords = levelRecords,
 	})
 end
+
+PlayerProgressEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
+	if not plr or not plr.Parent then
+		return
+	end
+
+	if payload == nil then
+		send(plr)
+		return
+	end
+
+	if typeof(payload) ~= "table" then
+		return
+	end
+
+	local requestType = tostring(payload.type or "")
+	if requestType == "request" or requestType == "requestSync" or requestType == "sync" then
+		send(plr)
+	end
+end)
 
 Players.PlayerAdded:Connect(function(plr)
 	task.defer(function()

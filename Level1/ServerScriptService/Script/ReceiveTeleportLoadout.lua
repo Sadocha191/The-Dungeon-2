@@ -242,7 +242,7 @@ local function processPlayer(plr: Player)
 
 	local tdata = getTeleportData(plr)
 	local weaponName, weaponEntry, unlocked = nil, nil, nil
-	local runMode, partyId, partyLeader = nil, nil, nil
+	local runMode, partyId, partyLeader, levelKey = nil, nil, nil, nil
 
 	if typeof(tdata) == "table" then
 		weaponName, weaponEntry = resolveTeleportWeapon(tdata, plr.UserId)
@@ -250,6 +250,7 @@ local function processPlayer(plr: Player)
 		runMode = tdata.RunMode
 		partyId = tdata.PartyId
 		partyLeader = tdata.PartyLeaderUserId
+		levelKey = tdata.LevelKey or tdata.levelKey
 	else
 		print("[ReceiveTeleportLoadout] Missing TeleportData for", plr.Name, "- using saved/default loadout")
 	end
@@ -266,6 +267,11 @@ local function processPlayer(plr: Player)
 	end
 	if typeof(partyLeader) == "number" then
 		plr:SetAttribute("PartyLeaderUserId", partyLeader)
+	end
+	if typeof(levelKey) == "string" and levelKey ~= "" then
+		plr:SetAttribute("LevelKey", levelKey)
+	else
+		plr:SetAttribute("LevelKey", "AshenWastes")
 	end
 
 	applyWeapon(plr, weaponName, weaponEntry)
