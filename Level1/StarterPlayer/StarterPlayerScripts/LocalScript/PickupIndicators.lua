@@ -22,19 +22,19 @@ local INDICATOR_CONFIG = {
 		label = "XP",
 		color = Color3.fromRGB(96, 165, 250),
 		strokeColor = Color3.fromRGB(17, 32, 71),
-		offset = Vector3.new(2.75, 1.75, 0),
+		offset = Vector3.new(5, 1.75, 0),
 	},
 	coins = {
 		label = "Coins",
 		color = Color3.fromRGB(255, 210, 80),
 		strokeColor = Color3.fromRGB(102, 62, 10),
-		offset = Vector3.new(2.75, 1.2, 0),
+		offset = Vector3.new(5, 1.2, 0),
 	},
 	souls = {
 		label = "Souls",
 		color = Color3.fromRGB(190, 150, 255),
 		strokeColor = Color3.fromRGB(38, 22, 85),
-		offset = Vector3.new(2.75, 0.65, 0),
+		offset = Vector3.new(5, 0.65, 0),
 		gradient = ColorSequence.new({
 			ColorSequenceKeypoint.new(0, Color3.fromRGB(194, 115, 255)),
 			ColorSequenceKeypoint.new(1, Color3.fromRGB(100, 170, 255)),
