@@ -184,21 +184,26 @@ local function clearShrines()
 	table.clear(shrines)
 end
 
-local function getWorldBoundsXZ()
-	return WorldBounds.GetXZ(20, Vector2.new(-180, -180), Vector2.new(180, 180))
-end
-
-local rayParams = RaycastParams.new()
-rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-rayParams.IgnoreWater = false
-
-local function buildRaycastBlacklist()
+local function buildRaycastIgnore()
 	local list = {
 		shrinesFolder,
 		workspace:FindFirstChild("Enemies"),
 		workspace:FindFirstChild("Drops"),
 		workspace:FindFirstChild("Chests"),
 		workspace:FindFirstChild("Statues"),
+	}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr.Character then
+			table.insert(list, plr.Character)
+		end
+	end
+	return list
+end
+
+local function buildOverlapIgnore()
+	local list = {
+		workspace:FindFirstChild("Enemies"),
+		workspace:FindFirstChild("Drops"),
 	}
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr.Character then
@@ -218,22 +223,21 @@ local function farEnoughFromOthers(pos, used)
 end
 
 local function randomGroundPoint(existing)
-	local pMin, pMax = getWorldBoundsXZ()
-	rayParams.FilterDescendantsInstances = buildRaycastBlacklist()
-
-	for _ = 1, SHRINE_RAYCAST_TRIES do
-		local x = pMin.X + math.random() * (pMax.X - pMin.X)
-		local z = pMin.Y + math.random() * (pMax.Y - pMin.Y)
-		local origin = Vector3.new(x, 420, z)
-		local result = workspace:Raycast(origin, Vector3.new(0, -900, 0), rayParams)
-		if result then
-			local pos = result.Position + Vector3.new(0, SHRINE_HEIGHT, 0)
-			if farEnoughFromOthers(pos, existing) then
-				return pos
-			end
-		end
-	end
-	return nil
+	return WorldBounds.FindRandomTerrainPoint({
+		pad = 20,
+		tries = SHRINE_RAYCAST_TRIES,
+		heightOffset = SHRINE_HEIGHT,
+		raycastIgnoreInstances = buildRaycastIgnore(),
+		overlapIgnoreInstances = buildOverlapIgnore(),
+		clearanceRadius = 7,
+		clearanceHeight = 9,
+		maxSlopeDeg = 35,
+		fallbackMin = Vector2.new(-180, -180),
+		fallbackMax = Vector2.new(180, 180),
+		isValid = function(pos)
+			return farEnoughFromOthers(pos, existing)
+		end,
+	})
 end
 
 local function newPart(parent, name, size, color, material)

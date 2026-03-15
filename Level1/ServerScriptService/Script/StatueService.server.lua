@@ -81,10 +81,6 @@ local statues = {}
 local monuments = {}
 local activeChallenge = nil
 
-local rayParams = RaycastParams.new()
-rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-rayParams.IgnoreWater = false
-
 local function getRarityColor(rarity)
 	return RARITY_COLORS[tostring(rarity or "")] or Color3.fromRGB(255, 192, 92)
 end
@@ -129,17 +125,26 @@ local function clearStructures()
 	destroyEntries(monuments)
 end
 
-local function getWorldBoundsXZ()
-	return WorldBounds.GetXZ(28, Vector2.new(-180, -180), Vector2.new(180, 180))
-end
-
-local function buildRaycastBlacklist()
+local function buildRaycastIgnore()
 	local list = {
 		statuesFolder,
 		workspace:FindFirstChild("Enemies"),
 		workspace:FindFirstChild("Drops"),
 		workspace:FindFirstChild("Shrines"),
 		workspace:FindFirstChild("Chests"),
+	}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr.Character then
+			table.insert(list, plr.Character)
+		end
+	end
+	return list
+end
+
+local function buildOverlapIgnore()
+	local list = {
+		workspace:FindFirstChild("Enemies"),
+		workspace:FindFirstChild("Drops"),
 	}
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr.Character then
@@ -161,22 +166,22 @@ local function farEnoughFromOthers(pos, used, minGap)
 end
 
 local function randomGroundPoint(existing, minGap, heightOffset)
-	local pMin, pMax = getWorldBoundsXZ()
-	rayParams.FilterDescendantsInstances = buildRaycastBlacklist()
-
-	for _ = 1, STATUE_RAYCAST_TRIES do
-		local x = pMin.X + math.random() * (pMax.X - pMin.X)
-		local z = pMin.Y + math.random() * (pMax.Y - pMin.Y)
-		local origin = Vector3.new(x, 420, z)
-		local result = workspace:Raycast(origin, Vector3.new(0, -900, 0), rayParams)
-		if result then
-			local pos = result.Position + Vector3.new(0, heightOffset, 0)
-			if farEnoughFromOthers(pos, existing, minGap) then
-				return pos
-			end
-		end
-	end
-	return nil
+	local clearanceRadius = minGap >= MIN_MONUMENT_GAP and 8.5 or 6.5
+	return WorldBounds.FindRandomTerrainPoint({
+		pad = 28,
+		tries = STATUE_RAYCAST_TRIES,
+		heightOffset = heightOffset,
+		raycastIgnoreInstances = buildRaycastIgnore(),
+		overlapIgnoreInstances = buildOverlapIgnore(),
+		clearanceRadius = clearanceRadius,
+		clearanceHeight = 10,
+		maxSlopeDeg = 35,
+		fallbackMin = Vector2.new(-180, -180),
+		fallbackMax = Vector2.new(180, 180),
+		isValid = function(pos)
+			return farEnoughFromOthers(pos, existing, minGap)
+		end,
+	})
 end
 
 local function rememberPosition(used, pos, gap)

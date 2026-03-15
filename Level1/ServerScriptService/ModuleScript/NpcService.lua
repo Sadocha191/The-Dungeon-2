@@ -2,6 +2,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
+local WorldBounds = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WorldBounds"))
 
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
@@ -172,11 +173,7 @@ local function stripLegacyNpcScripts(model: Model)
 	end
 end
 
-local function buildGroundRaycastParams(model: Model): RaycastParams
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.IgnoreWater = true
-
+local function buildTerrainRaycastIgnore(model: Model): { Instance }
 	local ignore = { model }
 	local enemyRoot = enemiesFolder()
 	if enemyRoot then
@@ -186,23 +183,42 @@ local function buildGroundRaycastParams(model: Model): RaycastParams
 	if drops then
 		table.insert(ignore, drops)
 	end
+	local chests = workspace:FindFirstChild("Chests")
+	if chests then
+		table.insert(ignore, chests)
+	end
+	local shrines = workspace:FindFirstChild("Shrines")
+	if shrines then
+		table.insert(ignore, shrines)
+	end
+	local statues = workspace:FindFirstChild("Statues")
+	if statues then
+		table.insert(ignore, statues)
+	end
 	local spellVfx = workspace:FindFirstChild("SpellVFX")
 	if spellVfx then
 		table.insert(ignore, spellVfx)
+	end
+	local portal = workspace:FindFirstChild("RunPortal")
+	if portal then
+		table.insert(ignore, portal)
 	end
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr.Character then
 			table.insert(ignore, plr.Character)
 		end
 	end
-
-	params.FilterDescendantsInstances = ignore
-	return params
+	return ignore
 end
 
 local function sampleGroundY(model: Model, pos: Vector3): number?
-	local origin = pos + Vector3.new(0, 18, 0)
-	local result = workspace:Raycast(origin, Vector3.new(0, -96, 0), buildGroundRaycastParams(model))
+	local originY = math.max(96, pos.Y + 24)
+	local result = WorldBounds.RaycastTerrainAtXZ(pos.X, pos.Z, {
+		originY = originY,
+		distance = originY + 128,
+		ignoreWater = true,
+		raycastIgnoreInstances = buildTerrainRaycastIgnore(model),
+	})
 	if result then
 		return result.Position.Y
 	end
@@ -249,6 +265,76 @@ local function safeUnit(v: Vector3, fallback: Vector3?): Vector3
 		return fallback or Vector3.new(0, 0, -1)
 	end
 	return v.Unit
+end
+
+local function rotateFlat(v: Vector3, angle: number): Vector3
+	local cosAngle = math.cos(angle)
+	local sinAngle = math.sin(angle)
+	return Vector3.new(
+		(v.X * cosAngle) - (v.Z * sinAngle),
+		0,
+		(v.X * sinAngle) + (v.Z * cosAngle)
+	)
+end
+
+local function isBlockingObstacle(inst: Instance?): boolean
+	return inst
+		and inst:IsA("BasePart")
+		and inst.CanCollide
+		and inst.Transparency < 0.98
+end
+
+local function buildObstacleRaycastIgnore(model: Model): { Instance }
+	local ignore = { model }
+	local enemyRoot = enemiesFolder()
+	if enemyRoot then
+		table.insert(ignore, enemyRoot)
+	end
+	local drops = workspace:FindFirstChild("Drops")
+	if drops then
+		table.insert(ignore, drops)
+	end
+	local spellVfx = workspace:FindFirstChild("SpellVFX")
+	if spellVfx then
+		table.insert(ignore, spellVfx)
+	end
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr.Character then
+			table.insert(ignore, plr.Character)
+		end
+	end
+	local terrain = WorldBounds.GetTerrain()
+	if terrain then
+		table.insert(ignore, terrain)
+	end
+	return ignore
+end
+
+local function raycastObstacle(origin: Vector3, direction: Vector3, ignoreInstances: { Instance }?): RaycastResult?
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.IgnoreWater = true
+
+	local ignore = {}
+	for _, inst in ipairs(ignoreInstances or {}) do
+		if typeof(inst) == "Instance" then
+			table.insert(ignore, inst)
+		end
+	end
+
+	for _ = 1, 8 do
+		params.FilterDescendantsInstances = ignore
+		local hit = workspace:Raycast(origin, direction, params)
+		if not hit then
+			return nil
+		end
+		if isBlockingObstacle(hit.Instance) then
+			return hit
+		end
+		table.insert(ignore, hit.Instance)
+	end
+
+	return nil
 end
 
 local function getAlivePlayers(): {AlivePlayerInfo}
@@ -477,6 +563,54 @@ local function computeOrbitTarget(npc: NpcRecord, targetPos: Vector3, stopDistan
 	return targetPos + (baseDir * stopDistance) + orbitOffset
 end
 
+local function steerAroundObstacles(npc: NpcRecord, desiredMove: Vector3, targetPos: Vector3): Vector3
+	local flatMove = flat(desiredMove)
+	if flatMove.Magnitude <= 0.05 then
+		return desiredMove
+	end
+
+	local desiredDir = safeUnit(flatMove, npc.look)
+	local probeDistance = math.max(3.5, flatMove.Magnitude + 2.5)
+	local probeOrigin = npc.position + Vector3.new(0, math.max(2.5, npc.groundOffset * 0.65), 0)
+	local ignore = buildObstacleRaycastIgnore(npc.model)
+	local forwardHit = raycastObstacle(probeOrigin, desiredDir * probeDistance, ignore)
+	if not forwardHit then
+		return desiredMove
+	end
+
+	local toTarget = safeUnit(flat(targetPos - npc.position), desiredDir)
+	local bestDir = nil
+	local bestScore = -math.huge
+	for _, angle in ipairs({ math.rad(35), -math.rad(35), math.rad(70), -math.rad(70), math.rad(105), -math.rad(105) }) do
+		local candidateDir = safeUnit(rotateFlat(desiredDir, angle), desiredDir)
+		if not raycastObstacle(probeOrigin, candidateDir * probeDistance, ignore) then
+			local score = (candidateDir:Dot(toTarget) * 1.2) + candidateDir:Dot(desiredDir)
+			if score > bestScore then
+				bestScore = score
+				bestDir = candidateDir
+			end
+		end
+	end
+
+	if bestDir then
+		return bestDir * flatMove.Magnitude
+	end
+
+	local obstacleNormal = flat(forwardHit.Normal)
+	if obstacleNormal.Magnitude > 0.05 then
+		local normalDir = obstacleNormal.Unit
+		local slideDir = flat(desiredDir - (normalDir * desiredDir:Dot(normalDir)))
+		if slideDir.Magnitude > 0.05 then
+			slideDir = safeUnit(slideDir, desiredDir)
+			if not raycastObstacle(probeOrigin, slideDir * probeDistance, ignore) then
+				return slideDir * flatMove.Magnitude
+			end
+		end
+	end
+
+	return Vector3.zero
+end
+
 local function updateNpc(npc: NpcRecord, dt: number, alivePlayers: {AlivePlayerInfo}, now: number)
 	if npc.dead then
 		return
@@ -530,8 +664,14 @@ local function updateNpc(npc: NpcRecord, dt: number, alivePlayers: {AlivePlayerI
 		local speed = getCurrentSpeed(npc, now)
 		if speed > 0 and desiredMove.Magnitude > 0.05 then
 			baseMove = clampMagnitude(desiredMove, speed * dt)
-			npc.look = safeUnit(baseMove, safeUnit(toTarget, npc.look))
-			setState(npc, STATE.Chasing)
+			baseMove = steerAroundObstacles(npc, baseMove, targetPos)
+			if baseMove.Magnitude > 0.05 then
+				npc.look = safeUnit(baseMove, safeUnit(toTarget, npc.look))
+				setState(npc, STATE.Chasing)
+			else
+				npc.look = safeUnit(toTarget, npc.look)
+				setState(npc, STATE.Idle)
+			end
 		else
 			npc.look = safeUnit(toTarget, npc.look)
 			setState(npc, STATE.Idle)

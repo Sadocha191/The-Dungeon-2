@@ -4,6 +4,10 @@ local WorldBounds = {}
 
 local DEFAULT_MIN = Vector2.new(-180, -180)
 local DEFAULT_MAX = Vector2.new(180, 180)
+local DEFAULT_RANDOM_TRIES = 40
+local DEFAULT_RAY_ORIGIN_Y = 420
+local DEFAULT_RAY_DISTANCE = 900
+local DEFAULT_NEARBY_RADII = { 0, 4, 8, 12 }
 
 local function mergeBounds(bounds, minX, maxX, minZ, maxZ)
 	if minX == nil or maxX == nil or minZ == nil or maxZ == nil then
@@ -36,8 +40,12 @@ local function partExtents(part)
 	return part.Position.X - halfX, part.Position.X + halfX, part.Position.Z - halfZ, part.Position.Z + halfZ
 end
 
+local function getTerrain()
+	return Workspace:FindFirstChildOfClass("Terrain")
+end
+
 local function terrainExtents()
-	local terrain = Workspace:FindFirstChildOfClass("Terrain")
+	local terrain = getTerrain()
 	if not terrain then
 		return nil
 	end
@@ -97,13 +105,61 @@ local function mapExtents()
 	return bounds
 end
 
+local function buildInstanceList(values)
+	local list = {}
+	if type(values) ~= "table" then
+		return list
+	end
+
+	for _, inst in ipairs(values) do
+		if typeof(inst) == "Instance" then
+			table.insert(list, inst)
+		end
+	end
+
+	return list
+end
+
+local function buildRaycastParams(ignoreInstances, ignoreWater)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = buildInstanceList(ignoreInstances)
+	params.IgnoreWater = ignoreWater == true
+	return params
+end
+
+local function buildOverlapParams(ignoreInstances)
+	local params = OverlapParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = buildInstanceList(ignoreInstances)
+	return params
+end
+
+local function isBlockingPart(inst)
+	return inst
+		and inst:IsA("BasePart")
+		and inst.CanCollide
+		and inst.Transparency < 0.98
+end
+
+local function slopeDeg(normal: Vector3): number
+	local dot = math.clamp(normal:Dot(Vector3.new(0, 1, 0)), -1, 1)
+	return math.deg(math.acos(dot))
+end
+
+function WorldBounds.GetTerrain()
+	return getTerrain()
+end
+
 function WorldBounds.GetXZ(pad: number?, fallbackMin: Vector2?, fallbackMax: Vector2?)
 	local bounds = nil
 	bounds = mergeBounds(bounds, terrainExtents())
 
-	local mapBounds = mapExtents()
-	if mapBounds then
-		bounds = mergeBounds(bounds, mapBounds.minX, mapBounds.maxX, mapBounds.minZ, mapBounds.maxZ)
+	if not bounds then
+		local mapBounds = mapExtents()
+		if mapBounds then
+			bounds = mergeBounds(bounds, mapBounds.minX, mapBounds.maxX, mapBounds.minZ, mapBounds.maxZ)
+		end
 	end
 
 	if not bounds then
@@ -120,6 +176,158 @@ function WorldBounds.GetXZ(pad: number?, fallbackMin: Vector2?, fallbackMax: Vec
 	safePad = math.min(safePad, width * 0.25, depth * 0.25)
 
 	return Vector2.new(bounds.minX + safePad, bounds.minZ + safePad), Vector2.new(bounds.maxX - safePad, bounds.maxZ - safePad)
+end
+
+function WorldBounds.RaycastTerrain(origin: Vector3, direction: Vector3, ignoreInstances: { Instance }?, ignoreWater: boolean?)
+	local terrain = getTerrain()
+	if not terrain then
+		return nil
+	end
+
+	local ignore = buildInstanceList(ignoreInstances)
+	for _ = 1, 8 do
+		local hit = Workspace:Raycast(origin, direction, buildRaycastParams(ignore, ignoreWater))
+		if not hit then
+			return nil
+		end
+		if hit.Instance == terrain then
+			return hit
+		end
+		table.insert(ignore, hit.Instance)
+	end
+
+	return nil
+end
+
+function WorldBounds.RaycastTerrainAtXZ(x: number, z: number, options)
+	options = options or {}
+
+	local originY = tonumber(options.originY) or DEFAULT_RAY_ORIGIN_Y
+	local distance = math.max(0, tonumber(options.distance) or DEFAULT_RAY_DISTANCE)
+	if distance <= 0 then
+		return nil
+	end
+
+	local origin = Vector3.new(x, originY, z)
+	return WorldBounds.RaycastTerrain(origin, Vector3.new(0, -distance, 0), options.raycastIgnoreInstances, options.ignoreWater)
+end
+
+function WorldBounds.IsAreaClear(pos: Vector3, radius: number, height: number?, ignoreInstances: { Instance }?)
+	if typeof(pos) ~= "Vector3" then
+		return false
+	end
+
+	local safeRadius = math.max(0, tonumber(radius) or 0)
+	if safeRadius <= 0 then
+		return true
+	end
+
+	local safeHeight = math.max(4, tonumber(height) or 8)
+	local box = Vector3.new(safeRadius * 2, safeHeight, safeRadius * 2)
+	local center = pos + Vector3.new(0, safeHeight * 0.5, 0)
+	local hits = Workspace:GetPartBoundsInBox(CFrame.new(center), box, buildOverlapParams(ignoreInstances))
+
+	for _, hit in ipairs(hits) do
+		if isBlockingPart(hit) then
+			return false, hit
+		end
+	end
+
+	return true
+end
+
+local function pointMatchesRules(pos: Vector3, hit, options)
+	local maxSlope = tonumber(options.maxSlopeDeg)
+	if maxSlope and slopeDeg(hit.Normal) > maxSlope then
+		return false
+	end
+
+	local radius = tonumber(options.clearanceRadius)
+	if radius and radius > 0 then
+		local clear = WorldBounds.IsAreaClear(pos, radius, options.clearanceHeight, options.overlapIgnoreInstances)
+		if clear ~= true then
+			return false
+		end
+	end
+
+	local validator = options.isValid
+	if type(validator) == "function" then
+		return validator(pos, hit) == true
+	end
+
+	return true
+end
+
+function WorldBounds.FindRandomTerrainPoint(options)
+	options = options or {}
+
+	local boundsMin = options.boundsMin
+	local boundsMax = options.boundsMax
+	if typeof(boundsMin) ~= "Vector2" or typeof(boundsMax) ~= "Vector2" then
+		boundsMin, boundsMax = WorldBounds.GetXZ(options.pad, options.fallbackMin, options.fallbackMax)
+	end
+	if typeof(boundsMin) ~= "Vector2" or typeof(boundsMax) ~= "Vector2" then
+		return nil
+	end
+
+	local tries = math.max(1, math.floor(tonumber(options.tries) or DEFAULT_RANDOM_TRIES))
+	local heightOffset = tonumber(options.heightOffset) or 0
+
+	for _ = 1, tries do
+		local x = boundsMin.X + math.random() * (boundsMax.X - boundsMin.X)
+		local z = boundsMin.Y + math.random() * (boundsMax.Y - boundsMin.Y)
+		local hit = WorldBounds.RaycastTerrainAtXZ(x, z, options)
+		if hit then
+			local pos = hit.Position + Vector3.new(0, heightOffset, 0)
+			if pointMatchesRules(pos, hit, options) then
+				return pos, hit
+			end
+		end
+	end
+
+	return nil
+end
+
+function WorldBounds.FindNearbyTerrainPoint(center: Vector3, options)
+	options = options or {}
+	if typeof(center) ~= "Vector3" then
+		return nil
+	end
+
+	local radii = options.searchRadii
+	if type(radii) ~= "table" or #radii == 0 then
+		radii = DEFAULT_NEARBY_RADII
+	end
+
+	local samplesPerRing = math.max(1, math.floor(tonumber(options.samplesPerRing) or 8))
+	local heightOffset = tonumber(options.heightOffset) or 0
+	local distance = tonumber(options.distance) or DEFAULT_RAY_DISTANCE
+
+	for _, ringRadius in ipairs(radii) do
+		local radius = math.max(0, tonumber(ringRadius) or 0)
+		local sampleCount = radius <= 0 and 1 or samplesPerRing
+		local angleOffset = math.random() * math.pi * 2
+
+		for sampleIndex = 1, sampleCount do
+			local angle = sampleCount == 1 and 0 or angleOffset + (((sampleIndex - 1) / sampleCount) * math.pi * 2)
+			local x = center.X + math.cos(angle) * radius
+			local z = center.Z + math.sin(angle) * radius
+
+			local castOptions = table.clone(options)
+			castOptions.originY = math.max(tonumber(options.originY) or DEFAULT_RAY_ORIGIN_Y, center.Y + 64)
+			castOptions.distance = math.max(distance, castOptions.originY + 64)
+
+			local hit = WorldBounds.RaycastTerrainAtXZ(x, z, castOptions)
+			if hit then
+				local pos = hit.Position + Vector3.new(0, heightOffset, 0)
+				if pointMatchesRules(pos, hit, options) then
+					return pos, hit
+				end
+			end
+		end
+	end
+
+	return nil
 end
 
 return WorldBounds

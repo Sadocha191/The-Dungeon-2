@@ -236,71 +236,37 @@ local function getClosestLivingHRP(fromPos: Vector3): BasePart?
     return best
 end
 
-local function getTerrainAndSpawnable()
-    local terrain = workspace:FindFirstChildOfClass("Terrain")
-    local spawnable = nil
-    if terrain then
-        spawnable = terrain:FindFirstChild("Spawnable")
-    end
-    if not spawnable then
-        spawnable = workspace:FindFirstChild("Spawnable")
-    end
-    return terrain, spawnable
+local function buildSpawnRaycastIgnore()
+	local blacklist = {
+		ENEMIES_FOLDER,
+		workspace:FindFirstChild("Drops"),
+		workspace:FindFirstChild("Chests"),
+		workspace:FindFirstChild("Shrines"),
+		workspace:FindFirstChild("Statues"),
+		workspace:FindFirstChild("RunPortal"),
+	}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr.Character then
+			table.insert(blacklist, plr.Character)
+		end
+	end
+	return blacklist
 end
 
-local function resolveMapPart(spawnable): BasePart?
-    local mapInst = spawnable and spawnable:FindFirstChild("Map")
-    if mapInst and mapInst:IsA("BasePart") then
-        return mapInst
-    end
-    if mapInst then
-        local nested = mapInst:FindFirstChildWhichIsA("BasePart", true)
-        if nested then
-            return nested
-        end
-    end
-
-    local workspaceMap = workspace:FindFirstChild("Map", true)
-    if workspaceMap and workspaceMap:IsA("BasePart") then
-        return workspaceMap
-    end
-    if workspaceMap then
-        return workspaceMap:FindFirstChildWhichIsA("BasePart", true)
-    end
-    return nil
+local function buildSpawnOverlapIgnore()
+	local ignore = {
+		workspace:FindFirstChild("Drops"),
+	}
+	return ignore
 end
 
 local function raycastGround(pos: Vector3)
-    local params = RaycastParams.new()
-    params.IgnoreWater = true
-
-    local terrain, spawnable = getTerrainAndSpawnable()
-
-    params.FilterType = Enum.RaycastFilterType.Blacklist
-    local blacklist = { ENEMIES_FOLDER }
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr.Character then
-            table.insert(blacklist, plr.Character)
-        end
-    end
-    params.FilterDescendantsInstances = blacklist
-
-    local origin = Vector3.new(pos.X, SPAWN_RAY_START_Y, pos.Z)
-    local hit = workspace:Raycast(origin, Vector3.new(0, -GROUND_RAY_DIST, 0), params)
-    if not hit then
-        return nil
-    end
-
-    if spawnable then
-        local inst = hit.Instance
-        local isSpawnablePart = inst and inst:IsDescendantOf(spawnable)
-        local isTerrainVoxel = terrain and inst == terrain
-        if not isSpawnablePart and not isTerrainVoxel then
-            return nil
-        end
-    end
-
-    return hit
+	return WorldBounds.RaycastTerrainAtXZ(pos.X, pos.Z, {
+		originY = SPAWN_RAY_START_Y,
+		distance = GROUND_RAY_DIST,
+		ignoreWater = true,
+		raycastIgnoreInstances = buildSpawnRaycastIgnore(),
+	})
 end
 
 local function slopeDeg(normal: Vector3): number
@@ -316,19 +282,7 @@ local _boundsCacheT = 0
 local BOUNDS_REFRESH_SEC = 2
 
 local function computeSpawnBounds()
-    local _, spawnable = getTerrainAndSpawnable()
-    local mapPart = resolveMapPart(spawnable)
-    if mapPart then
-        local halfX, halfZ = mapPart.Size.X * 0.5, mapPart.Size.Z * 0.5
-        return {
-            minX = mapPart.Position.X - halfX,
-            maxX = mapPart.Position.X + halfX,
-            minZ = mapPart.Position.Z - halfZ,
-            maxZ = mapPart.Position.Z + halfZ,
-        }
-    end
-
-	local pMin, pMax = WorldBounds.GetXZ(6)
+	local pMin, pMax = WorldBounds.GetXZ(6, Vector2.new(-200, -200), Vector2.new(200, 200))
 	return {
 		minX = pMin.X,
 		maxX = pMax.X,
@@ -376,23 +330,31 @@ local function pickSpawnCFrame(anchorPos: Vector3?): CFrame?
             z = math.clamp(z, bounds.minZ + BOUNDS_MARGIN, bounds.maxZ - BOUNDS_MARGIN)
         end
 
-        local hit = raycastGround(Vector3.new(x, 0, z))
-        if hit and hit.Position and slopeDeg(hit.Normal) <= MAX_GROUND_SLOPE_DEG then
-            return CFrame.new(hit.Position + Vector3.new(0, 0.05, 0))
-        end
-    end
+		local hit = raycastGround(Vector3.new(x, 0, z))
+		if hit and hit.Position and slopeDeg(hit.Normal) <= MAX_GROUND_SLOPE_DEG then
+			local spawnPos = hit.Position + Vector3.new(0, 0.05, 0)
+			local clear = WorldBounds.IsAreaClear(spawnPos, 3.5, 7, buildSpawnOverlapIgnore())
+			if clear == true then
+				return CFrame.new(spawnPos)
+			end
+		end
+	end
 
     -- Fallback: random point inside Map bounds.
     if bounds then
         for _ = 1, MAX_SPAWN_TRIES do
-            local x = (bounds.minX + BOUNDS_MARGIN) + math.random() * ((bounds.maxX - BOUNDS_MARGIN) - (bounds.minX + BOUNDS_MARGIN))
-            local z = (bounds.minZ + BOUNDS_MARGIN) + math.random() * ((bounds.maxZ - BOUNDS_MARGIN) - (bounds.minZ + BOUNDS_MARGIN))
-            local hit = raycastGround(Vector3.new(x, 0, z))
-            if hit and hit.Position and slopeDeg(hit.Normal) <= MAX_GROUND_SLOPE_DEG then
-                return CFrame.new(hit.Position + Vector3.new(0, 0.05, 0))
-            end
-        end
-    end
+			local x = (bounds.minX + BOUNDS_MARGIN) + math.random() * ((bounds.maxX - BOUNDS_MARGIN) - (bounds.minX + BOUNDS_MARGIN))
+			local z = (bounds.minZ + BOUNDS_MARGIN) + math.random() * ((bounds.maxZ - BOUNDS_MARGIN) - (bounds.minZ + BOUNDS_MARGIN))
+			local hit = raycastGround(Vector3.new(x, 0, z))
+			if hit and hit.Position and slopeDeg(hit.Normal) <= MAX_GROUND_SLOPE_DEG then
+				local spawnPos = hit.Position + Vector3.new(0, 0.05, 0)
+				local clear = WorldBounds.IsAreaClear(spawnPos, 3.5, 7, buildSpawnOverlapIgnore())
+				if clear == true then
+					return CFrame.new(spawnPos)
+				end
+			end
+		end
+	end
 
     return CFrame.new(anchor + Vector3.new(0, 0.05, 0))
 end
@@ -948,29 +910,20 @@ local function getWorldBoundsXZ()
 	return WorldBounds.GetXZ(18, Vector2.new(-200, -200), Vector2.new(200, 200))
 end
 
-local portalRayParams = RaycastParams.new()
-portalRayParams.FilterType = Enum.RaycastFilterType.Blacklist
-portalRayParams.IgnoreWater = false
-
 local function randomGroundPoint()
-	local pMin, pMax = getWorldBoundsXZ()
-	local ignore = { ENEMIES_FOLDER, workspace:FindFirstChild("Drops") }
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr.Character then table.insert(ignore, plr.Character) end
-	end
-	portalRayParams.FilterDescendantsInstances = ignore
-
-	for _ = 1, 40 do
-		local x = pMin.X + math.random() * (pMax.X - pMin.X)
-		local z = pMin.Y + math.random() * (pMax.Y - pMin.Y)
-		local origin = Vector3.new(x, 400, z)
-		local res = workspace:Raycast(origin, Vector3.new(0, -900, 0), portalRayParams)
-		if res then
-			return res.Position + Vector3.new(0, 2.2, 0)
-		end
-	end
-
-	return Vector3.new(0, 5, 0)
+	local point = WorldBounds.FindRandomTerrainPoint({
+		pad = 18,
+		tries = 40,
+		heightOffset = 2.2,
+		raycastIgnoreInstances = buildSpawnRaycastIgnore(),
+		overlapIgnoreInstances = buildSpawnOverlapIgnore(),
+		clearanceRadius = 7.5,
+		clearanceHeight = 12,
+		maxSlopeDeg = 30,
+		fallbackMin = Vector2.new(-200, -200),
+		fallbackMax = Vector2.new(200, 200),
+	})
+	return point or Vector3.new(0, 5, 0)
 end
 
 local function ensurePortal()

@@ -174,21 +174,26 @@ local function clearChests()
 	table.clear(chests)
 end
 
-local function getWorldBoundsXZ()
-	return WorldBounds.GetXZ(20, Vector2.new(-180, -180), Vector2.new(180, 180))
-end
-
-local rayParams = RaycastParams.new()
-rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-rayParams.IgnoreWater = false
-
-local function buildRaycastBlacklist()
+local function buildRaycastIgnore()
 	local list = {
 		chestsFolder,
 		workspace:FindFirstChild("Enemies"),
 		workspace:FindFirstChild("Drops"),
 		workspace:FindFirstChild("Shrines"),
 		workspace:FindFirstChild("Statues"),
+	}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr.Character then
+			table.insert(list, plr.Character)
+		end
+	end
+	return list
+end
+
+local function buildOverlapIgnore()
+	local list = {
+		workspace:FindFirstChild("Enemies"),
+		workspace:FindFirstChild("Drops"),
 	}
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr.Character then
@@ -208,32 +213,36 @@ local function farEnoughFromOthers(pos, used)
 end
 
 local function randomGroundPoint(existing)
-	local pMin, pMax = getWorldBoundsXZ()
-	rayParams.FilterDescendantsInstances = buildRaycastBlacklist()
-
-	for _ = 1, CHEST_RAYCAST_TRIES do
-		local x = pMin.X + math.random() * (pMax.X - pMin.X)
-		local z = pMin.Y + math.random() * (pMax.Y - pMin.Y)
-		local origin = Vector3.new(x, 420, z)
-		local result = workspace:Raycast(origin, Vector3.new(0, -900, 0), rayParams)
-		if result then
-			local pos = result.Position + Vector3.new(0, CHEST_HEIGHT, 0)
-			if farEnoughFromOthers(pos, existing) then
-				return pos
-			end
-		end
-	end
-	return nil
+	return WorldBounds.FindRandomTerrainPoint({
+		pad = 20,
+		tries = CHEST_RAYCAST_TRIES,
+		heightOffset = CHEST_HEIGHT,
+		raycastIgnoreInstances = buildRaycastIgnore(),
+		overlapIgnoreInstances = buildOverlapIgnore(),
+		clearanceRadius = 4.5,
+		clearanceHeight = 7,
+		maxSlopeDeg = 35,
+		fallbackMin = Vector2.new(-180, -180),
+		fallbackMax = Vector2.new(180, 180),
+		isValid = function(pos)
+			return farEnoughFromOthers(pos, existing)
+		end,
+	})
 end
 
 local function groundPointFromXZ(pos: Vector3)
-	rayParams.FilterDescendantsInstances = buildRaycastBlacklist()
-
-	local originY = math.max(420, pos.Y + 80)
-	local origin = Vector3.new(pos.X, originY, pos.Z)
-	local result = workspace:Raycast(origin, Vector3.new(0, -1000, 0), rayParams)
-	if result then
-		return result.Position + Vector3.new(0, CHEST_HEIGHT, 0)
+	local grounded = WorldBounds.FindNearbyTerrainPoint(pos, {
+		heightOffset = CHEST_HEIGHT,
+		raycastIgnoreInstances = buildRaycastIgnore(),
+		overlapIgnoreInstances = buildOverlapIgnore(),
+		clearanceRadius = 4.5,
+		clearanceHeight = 7,
+		maxSlopeDeg = 35,
+		samplesPerRing = 10,
+		searchRadii = { 0, 5, 10, 15 },
+	})
+	if grounded then
+		return grounded
 	end
 	return pos
 end
