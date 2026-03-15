@@ -19,6 +19,31 @@ print("[PortalUIClient] Boot")
 local player = Players.LocalPlayer
 local screenGui = script:FindFirstAncestorOfClass("ScreenGui")
 
+local function resetScreenGuiState()
+	if not screenGui then
+		return
+	end
+
+	screenGui.Enabled = true
+	screenGui:SetAttribute("Modal", false)
+
+	local root = screenGui:FindFirstChild("UI")
+	if root and root:IsA("GuiObject") then
+		root.Visible = false
+		if root:IsA("CanvasGroup") then
+			root.GroupTransparency = 1
+		end
+
+		local background = root:FindFirstChild("Background")
+		if background and background:IsA("GuiObject") then
+			background.Visible = false
+			if background:IsA("CanvasGroup") then
+				background.GroupTransparency = 1
+			end
+		end
+	end
+end
+
 local function showScreenGuiLocally()
 	if not screenGui then
 		warn("[PortalUIClient] ScreenGui ancestor not found.")
@@ -67,6 +92,8 @@ if not ok then
 	return
 end
 
+resetScreenGuiState()
+
 PortalUIController.Start({
 	gui = screenGui,
 })
@@ -83,4 +110,20 @@ ProximityPromptService.PromptTriggered:Connect(function(prompt, triggeredPlayer)
 	print("[PortalUIClient] Opening from local portal prompt:", prompt:GetFullName())
 	showScreenGuiLocally()
 	PortalUIController.Open()
+end)
+
+ProximityPromptService.PromptShown:Connect(function(prompt)
+	if not PortalUIController.MatchesPortalPrompt(prompt, nil) then
+		return
+	end
+
+	print("[PortalUIClient] Portal prompt shown:", prompt:GetFullName())
+end)
+
+ProximityPromptService.PromptHidden:Connect(function(prompt)
+	if not PortalUIController.MatchesPortalPrompt(prompt, nil) then
+		return
+	end
+
+	print("[PortalUIClient] Portal prompt hidden:", prompt:GetFullName())
 end)

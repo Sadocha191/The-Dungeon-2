@@ -76,13 +76,29 @@ end
 local prompt = portalPart:FindFirstChildOfClass("ProximityPrompt")
 if not prompt then
 	prompt = Instance.new("ProximityPrompt")
-	prompt.ObjectText = "Portal"
-	prompt.HoldDuration = 0
-	prompt.MaxActivationDistance = 10
-	prompt.RequiresLineOfSight = false
 	prompt.Parent = portalPart
 end
+prompt.Name = "PortalPrompt"
+prompt.ObjectText = "Portal"
 prompt.ActionText = "Select level"
+prompt.HoldDuration = 0
+prompt.MaxActivationDistance = 12
+prompt.RequiresLineOfSight = false
+prompt.KeyboardKeyCode = Enum.KeyCode.E
+prompt.GamepadKeyCode = Enum.KeyCode.ButtonX
+prompt.Style = Enum.ProximityPromptStyle.Default
+prompt.Enabled = true
+
+print(string.format(
+	"[PortalToDungeon] Prompt ready part=%s prompt=%s enabled=%s action=%s object=%s maxDistance=%.1f hold=%.1f",
+	portalPart:GetFullName(),
+	prompt:GetFullName(),
+	tostring(prompt.Enabled),
+	tostring(prompt.ActionText),
+	tostring(prompt.ObjectText),
+	prompt.MaxActivationDistance,
+	prompt.HoldDuration
+))
 
 local lastOpen: {[number]: number} = {}
 local lastTp: {[number]: number} = {}
