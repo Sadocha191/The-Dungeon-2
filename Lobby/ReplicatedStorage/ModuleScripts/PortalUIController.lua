@@ -3,19 +3,30 @@
 
 local PortalUIController = {}
 local started = false
+local preferredGui: ScreenGui? = nil
+local cachedPortalPart: BasePart? = nil
 
-function PortalUIController.Start()
+function PortalUIController.Start(options)
+	if typeof(options) == "Instance" and options:IsA("ScreenGui") then
+		preferredGui = options
+	elseif typeof(options) == "table" then
+		local gui = options.gui
+		if gui and gui:IsA("ScreenGui") then
+			preferredGui = gui
+		end
+	end
+
 	if started then
 		return
 	end
 	started = true
 
 local Players = game:GetService("Players")
-local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TextService = game:GetService("TextService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -167,6 +178,10 @@ local function buildEntryLookup()
 end
 
 local function getPortalGui(): ScreenGui?
+	if preferredGui and preferredGui.Parent == playerGui then
+		return preferredGui
+	end
+
 	local ancestorGui = script:FindFirstAncestorOfClass("ScreenGui")
 	if ancestorGui and ancestorGui.Name == "PortalUI" then
 		return ancestorGui
@@ -185,7 +200,7 @@ local function isPortalPrompt(prompt: ProximityPrompt, localPlayer: Player?): bo
 		return false
 	end
 
-	if localPlayer and localPlayer ~= player then
+	if typeof(localPlayer) == "Instance" and localPlayer:IsA("Player") and localPlayer ~= player then
 		return false
 	end
 
@@ -208,6 +223,43 @@ local function isPortalPrompt(prompt: ProximityPrompt, localPlayer: Player?): bo
 	end
 
 	return false
+end
+
+local function resolvePortalPart(): BasePart?
+	if cachedPortalPart and cachedPortalPart:IsDescendantOf(Workspace) then
+		return cachedPortalPart
+	end
+
+	local portalModel = Workspace:FindFirstChild("Portal") or Workspace:FindFirstChild("PortalModel")
+	if portalModel and portalModel:IsA("Model") then
+		local portalPart = portalModel:FindFirstChild("PortalTeleport", true)
+		if portalPart and portalPart:IsA("BasePart") then
+			cachedPortalPart = portalPart
+			return portalPart
+		end
+	end
+
+	for _, descendant in ipairs(Workspace:GetDescendants()) do
+		if descendant:IsA("BasePart") and descendant.Name == "PortalTeleport" then
+			cachedPortalPart = descendant
+			return descendant
+		end
+	end
+
+	return nil
+end
+
+function PortalUIController.MatchesPortalPrompt(prompt: ProximityPrompt, localPlayer: Player?): boolean
+	if not prompt or not prompt:IsA("ProximityPrompt") then
+		return false
+	end
+
+	local portalPart = resolvePortalPart()
+	if portalPart and prompt:IsDescendantOf(portalPart) then
+		return true
+	end
+
+	return isPortalPrompt(prompt, localPlayer)
 end
 
 local function waitForGuiObject(parent: Instance, name: string, timeout: number?): GuiObject?
@@ -680,6 +732,14 @@ local function openUI()
 	end
 end
 
+function PortalUIController.Open()
+	openUI()
+end
+
+function PortalUIController.Close()
+	closeUI()
+end
+
 local function messageForFailure(reason: string): string
 	if reason == "no_party" then
 		return "Party mode requires an active party."
@@ -700,12 +760,9 @@ end
 
 buildEntryLookup()
 
-OpenLevelSelect.OnClientEvent:Connect(openUI)
-
-ProximityPromptService.PromptTriggered:Connect(function(prompt, localPlayer)
-	if isPortalPrompt(prompt, localPlayer) then
-		openUI()
-	end
+OpenLevelSelect.OnClientEvent:Connect(function()
+	print("[PortalUI] Opening from OpenLevelSelect")
+	openUI()
 end)
 
 if PlayerProgressEvent and PlayerProgressEvent:IsA("RemoteEvent") then
