@@ -679,15 +679,6 @@ local function spawnStructuresForRun()
 
 	updateMonumentPromptStates()
 
-	broadcast({
-		type = "heroMonumentsSpawned",
-		count = #monuments,
-	})
-
-	broadcast({
-		type = "statuesSpawned",
-		count = #statues,
-	})
 end
 
 _G.PrepareRunStructures = function()

@@ -614,11 +614,6 @@ local function spawnChestsForRun()
 		end
 	end
 
-	broadcast({
-		type = "chestsSpawned",
-		count = #chests,
-		baseCost = BASE_CHEST_COST,
-	})
 end
 
 _G.PrepareRunChests = function()

@@ -490,11 +490,6 @@ local function spawnShrinesForRun()
 		end
 	end
 
-	broadcast({
-		type = "shrinesSpawned",
-		count = #shrines,
-		chargeSeconds = CHARGE_SECONDS,
-	})
 end
 
 _G.PrepareRunShrines = function()
