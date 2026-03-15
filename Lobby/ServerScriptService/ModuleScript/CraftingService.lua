@@ -211,6 +211,33 @@ local function getUpgradeResourceOrder()
 	}
 end
 
+local function getMaterialResourceMap(progress, materialId)
+	local bucket = CraftingConfig.GetMaterialBucket(materialId)
+	if bucket == "mineResources" then
+		return progress.mineResources, bucket
+	end
+	if bucket == "mobMaterials" then
+		return progress.mobMaterials, bucket
+	end
+	return nil, nil
+end
+
+local function buildMaterialSnapshotFromProgress(progress)
+	local materials = {}
+	for _, def in ipairs(CraftingConfig.GetAllMaterials() or {}) do
+		local resourceMap, bucket = getMaterialResourceMap(progress, def.id)
+		table.insert(materials, {
+			id = def.id,
+			name = def.name or def.id,
+			bucket = bucket,
+			source = def.source or "",
+			rarity = def.rarity,
+			owned = clampInt(resourceMap and resourceMap[def.id], 0),
+		})
+	end
+	return materials
+end
+
 local function getRecipeState(progress, recipeId)
 	local state = progress.recipes[recipeId]
 	if typeof(state) ~= "table" then
@@ -500,6 +527,52 @@ function CraftingService.AddMineResources(player, resourceMap)
 		addCount(progress.mineResources, resourceId, amount)
 	end
 	markPlayerDataDirty(player)
+end
+
+function CraftingService.AddMaterial(player, materialId, amount)
+	local _, progress = getPlayerProgress(player)
+	local resourceMap = select(1, getMaterialResourceMap(progress, materialId))
+	if not resourceMap then
+		return false, "UnknownMaterial"
+	end
+	addCount(resourceMap, materialId, amount)
+	markPlayerDataDirty(player)
+	return true
+end
+
+function CraftingService.GetMaterialCount(player, materialId)
+	finalizeCompletedMining(player, os.time())
+	local _, progress = getPlayerProgress(player)
+	local resourceMap, bucket = getMaterialResourceMap(progress, materialId)
+	if not resourceMap then
+		return 0, nil
+	end
+	return clampInt(resourceMap[materialId], 0), bucket
+end
+
+function CraftingService.TrySpendMaterial(player, materialId, amount)
+	finalizeCompletedMining(player, os.time())
+	local _, progress = getPlayerProgress(player)
+	local resourceMap, bucket = getMaterialResourceMap(progress, materialId)
+	if not resourceMap then
+		return false, "UnknownMaterial"
+	end
+	if not spendCount(resourceMap, materialId, amount) then
+		return false, "NotEnoughMaterial"
+	end
+	markPlayerDataDirty(player)
+	return true, bucket
+end
+
+function CraftingService.BuildMaterialInventorySnapshot(player)
+	finalizeCompletedMining(player, os.time())
+	local _, progress = getPlayerProgress(player)
+	return {
+		silver = clampInt(CurrencyService.GetSilver(player), 0),
+		mineResources = getResourceDisplayOrder(progress.mineResources, getMineResourceOrder()),
+		mobMaterials = getResourceDisplayOrder(progress.mobMaterials, getMobResourceOrder()),
+		materials = buildMaterialSnapshotFromProgress(progress),
+	}
 end
 
 function CraftingService.StartMining(player, durationSec, priority)

@@ -303,14 +303,35 @@ local recipeList = {
 
 local recipesById = {}
 local mobMaterialsByMobType = {}
+local mobMaterialsById = {}
 local mineResourcesById = {}
+local materialDefsById = {}
+local materialList = {}
 
 for _, def in ipairs(CraftingConfig.MOB_MATERIAL_DEFS) do
 	mobMaterialsByMobType[def.mobType] = def.id
+	mobMaterialsById[def.id] = def
+	materialDefsById[def.id] = {
+		id = def.id,
+		name = def.id,
+		bucket = "mobMaterials",
+		source = "Mob Drop",
+		mobType = def.mobType,
+		rarity = def.rarity,
+	}
+	table.insert(materialList, materialDefsById[def.id])
 end
 
 for _, def in ipairs(CraftingConfig.MINE_RESOURCE_DEFS) do
 	mineResourcesById[def.id] = def
+	materialDefsById[def.id] = {
+		id = def.id,
+		name = def.id,
+		bucket = "mineResources",
+		source = "Mining",
+		rarity = def.rarity,
+	}
+	table.insert(materialList, materialDefsById[def.id])
 end
 
 for _, recipe in ipairs(recipeList) do
@@ -362,6 +383,23 @@ end
 
 function CraftingConfig.GetMineResource(resourceId)
 	return mineResourcesById[resourceId]
+end
+
+function CraftingConfig.GetMobMaterial(materialId)
+	return mobMaterialsById[materialId]
+end
+
+function CraftingConfig.GetMaterialDef(materialId)
+	return materialDefsById[materialId]
+end
+
+function CraftingConfig.GetMaterialBucket(materialId)
+	local def = materialDefsById[materialId]
+	return def and def.bucket or nil
+end
+
+function CraftingConfig.GetAllMaterials()
+	return materialList
 end
 
 function CraftingConfig.GetRecipeTierFromCopies(copies)
@@ -468,5 +506,8 @@ end
 CraftingConfig.Recipes = recipeList
 CraftingConfig.RecipesById = recipesById
 CraftingConfig.MobMaterialsByMobType = mobMaterialsByMobType
+CraftingConfig.MobMaterialsById = mobMaterialsById
+CraftingConfig.MineResourcesById = mineResourcesById
+CraftingConfig.MaterialDefsById = materialDefsById
 
 return CraftingConfig
