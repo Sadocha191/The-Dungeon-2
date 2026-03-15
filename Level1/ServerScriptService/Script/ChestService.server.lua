@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerData = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerData"))
+local PickupToastService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PickupToastService"))
 local WorldBounds = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WorldBounds"))
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:FindFirstChild("ModuleScript")
@@ -572,6 +573,8 @@ handleOpen = function(chest, plr)
 
 	if foundRecipeId then
 		local recipeDef = CraftingConfig.GetRecipe(foundRecipeId)
+		local tier = recipeState and recipeState.tier or 1
+		PickupToastService.PushRecipe(plr, foundRecipeId, string.format("Weapon Schematic • Tier %d", tier), 1)
 		WaveStatusEvent:FireClient(plr, {
 			type = "recipeFound",
 			recipeId = foundRecipeId,

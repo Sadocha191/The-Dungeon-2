@@ -10,6 +10,7 @@ local replicatedModules = (ReplicatedStorage:FindFirstChild("ModuleScripts") or 
 local PlayerData = require(moduleFolder:WaitForChild("PlayerData"))
 local PlayerStateStore = require(moduleFolder:WaitForChild("PlayerStateStore"))
 local CurrencyService = require(moduleFolder:WaitForChild("CurrencyService"))
+local PickupToastService = require(moduleFolder:WaitForChild("PickupToastService"))
 
 local bannerConfigsModule = replicatedModules:WaitForChild("BannerConfigs")
 local BannerConfigs = require(bannerConfigsModule)
@@ -249,6 +250,7 @@ function GachaService.Roll(player: Player, bannerId: string, count: number)
 		if weaponId then
 			table.insert(weapons, weaponId)
 			PlayerStateStore.EnsureOwnedWeapon(player, weaponId)
+			PickupToastService.PushWeapon(player, weaponId, "Banner Pull", 1, rarity)
 		end
 
 		table.insert(results, {

@@ -61,6 +61,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local NpcService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("NpcService"))
 local PlayerData = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerData"))
+local PickupToastService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PickupToastService"))
 local WorldBounds = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WorldBounds"))
 local CraftingConfig = require((ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5)):WaitForChild("CraftingConfig"))
 
@@ -530,14 +531,18 @@ local function awardPersistentMobDrops(mobType: string, isElite: boolean, isBoss
 		if materialId then
 			local materialCount = isBoss and 3 or (isElite and 2 or 1)
 			addPersistentCount(plr, "mobMaterials", materialId, materialCount)
+			PickupToastService.PushMaterial(plr, materialId, materialCount, "Mob Drop", "mobMaterials")
 		end
 		if crystalAward > 0 then
 			addPersistentCount(plr, "upgradeMaterials", CraftingConfig.UPGRADE_CRYSTAL_ID, crystalAward)
+			PickupToastService.PushMaterial(plr, CraftingConfig.UPGRADE_CRYSTAL_ID, crystalAward, "Mob Drop", "upgradeMaterials")
 		end
 		if isBoss then
 			addPersistentCount(plr, "upgradeMaterials", CraftingConfig.BOSS_SPECIAL_ID, 1)
+			PickupToastService.PushMaterial(plr, CraftingConfig.BOSS_SPECIAL_ID, 1, "Boss Drop", "upgradeMaterials")
 		elseif isElite then
 			addPersistentCount(plr, "upgradeMaterials", CraftingConfig.ELITE_SPECIAL_ID, 1)
+			PickupToastService.PushMaterial(plr, CraftingConfig.ELITE_SPECIAL_ID, 1, "Elite Drop", "upgradeMaterials")
 		end
 	end
 end

@@ -7,6 +7,11 @@ local playerDataModule = (ServerScriptService:FindFirstChild("ModuleScript") and
 	or ServerScriptService:FindFirstChild("PlayerData")
 assert(playerDataModule, "Missing PlayerData module")
 local PlayerData = require(playerDataModule)
+local pickupToastModule = (ServerScriptService:FindFirstChild("ModuleScript") and ServerScriptService.ModuleScript:FindFirstChild("PickupToastService"))
+	or (ServerScriptService:FindFirstChild("ModuleScripts") and ServerScriptService.ModuleScripts:FindFirstChild("PickupToastService"))
+	or ServerScriptService:FindFirstChild("PickupToastService")
+assert(pickupToastModule, "Missing PickupToastService module")
+local PickupToastService = require(pickupToastModule)
 
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:FindFirstChild("ModuleScript")
@@ -87,7 +92,11 @@ local function grantStarterSpellbook(plr)
 	data.spellsUnlocked = data.spellsUnlocked or {}
 
 	for _, productId in ipairs(SpellDefs.BASE_STARTER or {}) do
+		local wasUnlocked = data.spellsUnlocked[productId] == true
 		data.spellsUnlocked[productId] = true
+		if not wasUnlocked then
+			PickupToastService.PushSpell(plr, productId, "Starter Spell", 1)
+		end
 	end
 
 	PlayerData.MarkDirty(plr)
@@ -157,6 +166,7 @@ WitchShopEvent.OnServerEvent:Connect(function(plr, payload)
 	data.spellsUnlocked[productId] = true
 	PlayerData.MarkDirty(plr)
 	PlayerData.Save(plr, false)
+	PickupToastService.PushSpell(plr, productId, "Spell Unlocked", 1)
 
 	WitchShopEvent:FireClient(plr, {
 		type = "BOUGHT",

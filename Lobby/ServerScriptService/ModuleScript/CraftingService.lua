@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local PlayerStateStore = require(script.Parent:WaitForChild("PlayerStateStore"))
 local CurrencyService = require(script.Parent:WaitForChild("CurrencyService"))
+local PickupToastService = require(script.Parent:WaitForChild("PickupToastService"))
 
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:FindFirstChild("ModuleScript")
@@ -98,6 +99,20 @@ local function markWeaponStateDirty(player, reason)
 		PlayerStateStore.MarkDirty(player, reason or "crafting")
 	elseif PlayerStateStore.Save then
 		PlayerStateStore.Save(player, true)
+	end
+end
+
+local function pushMaterialToast(player, materialId, amount, note, bucketOverride)
+	amount = math.floor(tonumber(amount) or 0)
+	if amount <= 0 then
+		return
+	end
+	PickupToastService.PushMaterial(player, materialId, amount, note, bucketOverride)
+end
+
+local function pushCountMapToasts(player, countMap, note, bucketOverride)
+	for materialId, amount in pairs(countMap or {}) do
+		pushMaterialToast(player, materialId, amount, note, bucketOverride)
 	end
 end
 
@@ -403,6 +418,7 @@ local function finalizeCompletedMining(player, nowTimestamp)
 	end
 	progress.miningSession = nil
 	markPlayerDataDirty(player)
+	pushCountMapToasts(player, yieldMap, "Mining Claim", "mineResources")
 	return yieldMap
 end
 
@@ -489,7 +505,8 @@ local function getSellPreview(inst, def)
 	}
 end
 
-function CraftingService.AddRecipeDiscovery(player, recipeId)
+function CraftingService.AddRecipeDiscovery(player, recipeId, options)
+	options = typeof(options) == "table" and options or nil
 	local recipe = CraftingConfig.GetRecipe(recipeId)
 	if not recipe then
 		return false, "UnknownRecipe"
@@ -506,30 +523,46 @@ function CraftingService.AddRecipeDiscovery(player, recipeId)
 	state.lastFoundAt = os.time()
 	state.tier = CraftingConfig.GetRecipeTierFromCopies(state.copies)
 	markPlayerDataDirty(player)
+	if not (options and options.silentToast == true) then
+		PickupToastService.PushRecipe(player, recipeId, tostring((options and options.toastNote) or "Weapon Schematic"), 1)
+	end
 	return true, state
 end
 
-function CraftingService.AddMobMaterial(player, materialId, amount)
+function CraftingService.AddMobMaterial(player, materialId, amount, options)
+	options = typeof(options) == "table" and options or nil
 	local _, progress = getPlayerProgress(player)
 	addCount(progress.mobMaterials, materialId, amount)
 	markPlayerDataDirty(player)
+	if not (options and options.silentToast == true) then
+		pushMaterialToast(player, materialId, amount, tostring((options and options.toastNote) or "Material Acquired"), "mobMaterials")
+	end
 end
 
-function CraftingService.AddUpgradeMaterial(player, materialId, amount)
+function CraftingService.AddUpgradeMaterial(player, materialId, amount, options)
+	options = typeof(options) == "table" and options or nil
 	local _, progress = getPlayerProgress(player)
 	addCount(progress.upgradeMaterials, materialId, amount)
 	markPlayerDataDirty(player)
+	if not (options and options.silentToast == true) then
+		pushMaterialToast(player, materialId, amount, tostring((options and options.toastNote) or "Upgrade Material"), "upgradeMaterials")
+	end
 end
 
-function CraftingService.AddMineResources(player, resourceMap)
+function CraftingService.AddMineResources(player, resourceMap, options)
+	options = typeof(options) == "table" and options or nil
 	local _, progress = getPlayerProgress(player)
 	for resourceId, amount in pairs(resourceMap or {}) do
 		addCount(progress.mineResources, resourceId, amount)
 	end
 	markPlayerDataDirty(player)
+	if not (options and options.silentToast == true) then
+		pushCountMapToasts(player, resourceMap, tostring((options and options.toastNote) or "Mining Claim"), "mineResources")
+	end
 end
 
-function CraftingService.AddMaterial(player, materialId, amount)
+function CraftingService.AddMaterial(player, materialId, amount, options)
+	options = typeof(options) == "table" and options or nil
 	local _, progress = getPlayerProgress(player)
 	local resourceMap = select(1, getMaterialResourceMap(progress, materialId))
 	if not resourceMap then
@@ -537,6 +570,9 @@ function CraftingService.AddMaterial(player, materialId, amount)
 	end
 	addCount(resourceMap, materialId, amount)
 	markPlayerDataDirty(player)
+	if not (options and options.silentToast == true) then
+		pushMaterialToast(player, materialId, amount, tostring((options and options.toastNote) or "Material Acquired"))
+	end
 	return true
 end
 
@@ -621,6 +657,7 @@ function CraftingService.StopMining(player)
 	end
 	progress.miningSession = nil
 	markPlayerDataDirty(player)
+	pushCountMapToasts(player, yieldMap, "Mining Claim", "mineResources")
 	return true, {
 		yield = getResourceDisplayOrder(yieldMap, getMineResourceOrder()),
 	}
@@ -729,6 +766,7 @@ function CraftingService.CraftRecipe(player, recipeId)
 	created.upgradeSilverSpent = clampInt(created.upgradeSilverSpent, 0)
 	created.upgradeMaterialsSpent = copyCountMap(created.upgradeMaterialsSpent)
 	markWeaponStateDirty(player, "weapon_crafted")
+	PickupToastService.PushWeapon(player, recipe.weaponId, "Crafted Weapon", 1, created.rarity or def.rarity)
 
 	return true, created
 end
@@ -819,6 +857,9 @@ function CraftingService.SellWeaponInstance(player, instanceId)
 	end
 	markPlayerDataDirty(player)
 	markWeaponStateDirty(player, "weapon_sell")
+	PickupToastService.PushSilver(player, preview.silver, "Weapon Sale")
+	pushCountMapToasts(player, preview.mineResources, "Weapon Sale Refund", "mineResources")
+	pushCountMapToasts(player, preview.mobMaterials, "Weapon Sale Refund", "mobMaterials")
 	return true, preview
 end
 

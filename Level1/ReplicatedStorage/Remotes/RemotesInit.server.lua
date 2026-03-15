@@ -27,6 +27,7 @@ ensureRemoteEvent("PartyXPUpdate")       -- server -> all clients (xp/level upda
 -- Floating damage numbers
 ensureRemoteEvent("DamageIndicatorEvent")  -- server -> all clients (pos, amount, crit)
 ensureRemoteEvent("PickupIndicatorEvent")  -- server -> client (kind, amount)
+ensureRemoteEvent("PickupToastEvent")      -- server -> client (bottom-left item toasts)
 -- Loading gate (client preload handshake)
 ensureRemoteEvent("ClientReady")          -- client -> server (loaded/preloaded)
 ensureRemoteEvent("ClientWorldLoaded")    -- client -> server (world streamed + textures preloaded)

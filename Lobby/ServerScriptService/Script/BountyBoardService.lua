@@ -5,6 +5,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 local CraftingService = require(serverModules:WaitForChild("CraftingService"))
 local CurrencyService = require(serverModules:WaitForChild("CurrencyService"))
+local PickupToastService = require(serverModules:WaitForChild("PickupToastService"))
 
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:FindFirstChild("ModuleScript")
@@ -275,6 +276,7 @@ local function cancelBounty(player, bountyId)
 
 	activeBounties[bountyId] = nil
 	CurrencyService.AddSilver(player, bounty.totalReward)
+	PickupToastService.PushSilver(player, bounty.totalReward, "Bounty Refund")
 	return true, bounty
 end
 
@@ -298,13 +300,18 @@ local function fulfillBounty(player, bountyId)
 		return false, reason
 	end
 
-	local delivered, deliverReason = CraftingService.AddMaterial(poster, bounty.materialId, bounty.amount)
+	local delivered, deliverReason = CraftingService.AddMaterial(poster, bounty.materialId, bounty.amount, {
+		toastNote = "Bounty Delivery",
+	})
 	if not delivered then
-		CraftingService.AddMaterial(player, bounty.materialId, bounty.amount)
+		CraftingService.AddMaterial(player, bounty.materialId, bounty.amount, {
+			silentToast = true,
+		})
 		return false, deliverReason or "DeliveryFailed"
 	end
 
 	CurrencyService.AddSilver(player, bounty.totalReward)
+	PickupToastService.PushSilver(player, bounty.totalReward, "Bounty Reward")
 	activeBounties[bountyId] = nil
 
 	return true, {

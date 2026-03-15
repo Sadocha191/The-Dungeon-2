@@ -10,6 +10,7 @@ local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 
 local MissionConfigs = require(replicatedModules:WaitForChild("MissionConfigs"))
 local CurrencyService = require(serverModules:WaitForChild("CurrencyService"))
+local PickupToastService = require(serverModules:WaitForChild("PickupToastService"))
 local PlayerData = require(serverModules:WaitForChild("PlayerData"))
 
 local MissionService = {}
@@ -270,6 +271,8 @@ function MissionService.ClaimMission(player: Player, missionId: string)
 
 	if coins > 0 then CurrencyService.AddSilver(player, coins) end
 	if weaponPoints > 0 then CurrencyService.AddWeaponPoints(player, weaponPoints) end
+	if coins > 0 then PickupToastService.PushSilver(player, coins, "Mission Reward") end
+	if weaponPoints > 0 then PickupToastService.PushWeaponPoints(player, weaponPoints, "Mission Reward") end
 
 	state.ClaimCounts[missionId] = (tonumber(state.ClaimCounts[missionId]) or 0) + 1
 
