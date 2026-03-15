@@ -77,6 +77,20 @@ local function isEliteEnemy(enemyModel: Model): boolean
 	return string.sub(enemyModel.Name, 1, 5) == "Boss_"
 end
 
+local function getEntryStat(entry, keys: {string}): number
+	local statMap = entry and (entry.rollStats or entry.RollStats or entry.stats or entry.Stats)
+	if typeof(statMap) ~= "table" then
+		return 0
+	end
+	for _, key in ipairs(keys) do
+		local value = statMap[key]
+		if typeof(value) == "number" then
+			return value
+		end
+	end
+	return 0
+end
+
 local function calcAttackStats(plr: Player, entry)
 	local level = tonumber(entry and (entry.level or entry.Level)) or 1
 	level = math.max(1, math.floor(level))
@@ -90,6 +104,8 @@ local function calcAttackStats(plr: Player, entry)
 		base = tonumber(combat.baseAtk or def.baseDamage) or base
 		perLvl = tonumber(combat.atkPerLevel) or perLvl
 	end
+	base += getEntryStat(entry, { "BaseATK", "baseAtk" })
+	perLvl += getEntryStat(entry, { "ATKPerLevel", "atkPerLevel" })
 
 	local pdata = PlayerData.Get(plr) or {}
 	local damageMult = getAttrNum(plr, "ShrineDamageMult", 1)
@@ -111,6 +127,9 @@ local function calcAttackStats(plr: Player, entry)
 		critMult += tonumber(combat.bonusCritDmg) or 0
 		lifesteal += tonumber(combat.bonusLifesteal) or 0
 	end
+	critChance += getEntryStat(entry, { "BonusCritRate", "bonusCritRate" })
+	critMult += getEntryStat(entry, { "BonusCritDmg", "bonusCritDmg" })
+	lifesteal += getEntryStat(entry, { "BonusLifesteal", "bonusLifesteal" })
 
 	critChance = math.clamp(critChance, 0, 0.95)
 	critMult = math.max(1.1, critMult + critDamageBonus)

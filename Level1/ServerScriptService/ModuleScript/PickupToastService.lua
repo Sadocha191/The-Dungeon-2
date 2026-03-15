@@ -29,6 +29,51 @@ local CraftingConfig = require(moduleFolder:WaitForChild("CraftingConfig"))
 local pickupToastEvent = ensureRemote("PickupToastEvent")
 
 local PickupToastService = {}
+local materialDefsById = {}
+
+for _, def in ipairs(CraftingConfig.MINE_RESOURCE_DEFS or {}) do
+	if typeof(def) == "table" and typeof(def.id) == "string" and def.id ~= "" then
+		materialDefsById[def.id] = {
+			name = def.id,
+			bucket = "mineResources",
+			rarity = def.rarity,
+		}
+	end
+end
+
+for _, def in ipairs(CraftingConfig.MOB_MATERIAL_DEFS or {}) do
+	if typeof(def) == "table" and typeof(def.id) == "string" and def.id ~= "" then
+		materialDefsById[def.id] = {
+			name = def.id,
+			bucket = "mobMaterials",
+			rarity = def.rarity,
+		}
+	end
+end
+
+if typeof(CraftingConfig.UPGRADE_CRYSTAL_ID) == "string" and CraftingConfig.UPGRADE_CRYSTAL_ID ~= "" then
+	materialDefsById[CraftingConfig.UPGRADE_CRYSTAL_ID] = {
+		name = CraftingConfig.UPGRADE_CRYSTAL_ID,
+		bucket = "upgradeMaterials",
+		rarity = "Rare",
+	}
+end
+
+if typeof(CraftingConfig.ELITE_SPECIAL_ID) == "string" and CraftingConfig.ELITE_SPECIAL_ID ~= "" then
+	materialDefsById[CraftingConfig.ELITE_SPECIAL_ID] = {
+		name = CraftingConfig.ELITE_SPECIAL_ID,
+		bucket = "upgradeMaterials",
+		rarity = "Epic",
+	}
+end
+
+if typeof(CraftingConfig.BOSS_SPECIAL_ID) == "string" and CraftingConfig.BOSS_SPECIAL_ID ~= "" then
+	materialDefsById[CraftingConfig.BOSS_SPECIAL_ID] = {
+		name = CraftingConfig.BOSS_SPECIAL_ID,
+		bucket = "upgradeMaterials",
+		rarity = "Legendary",
+	}
+end
 
 local function sanitizeAmount(amount)
 	return math.max(1, math.floor(tonumber(amount) or 1))
@@ -83,7 +128,16 @@ function PickupToastService.Push(player, payload)
 end
 
 local function resolveMaterialInfo(materialId, bucketOverride)
-	local def = CraftingConfig.GetMaterialDef(materialId)
+	local def = nil
+	if typeof(CraftingConfig.GetMaterialDef) == "function" then
+		local ok, result = pcall(CraftingConfig.GetMaterialDef, materialId)
+		if ok and typeof(result) == "table" then
+			def = result
+		end
+	end
+	if not def then
+		def = materialDefsById[materialId]
+	end
 	local label = materialId
 	local bucket = bucketOverride
 	local rarity = nil

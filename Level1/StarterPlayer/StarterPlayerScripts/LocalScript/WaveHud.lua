@@ -35,6 +35,7 @@ local function getWaveStatusEvents()
 end
 
 local WaveStatusEvent, LegacyWaveStatusEvent = getWaveStatusEvents()
+local SHOW_TRACKER_PANEL = false
 
 if LegacyWaveStatusEvent then
 	LegacyWaveStatusEvent.OnClientEvent:Connect(function()
@@ -55,6 +56,7 @@ panel.BackgroundColor3 = Color3.fromRGB(14,14,16)
 panel.BackgroundTransparency = 0.12
 panel.BorderSizePixel = 0
 panel.Parent = gui
+panel.Visible = SHOW_TRACKER_PANEL
 Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 16)
 
 local pad = Instance.new("UIPadding", panel)
@@ -152,15 +154,22 @@ local function fmtTime(sec)
 	return string.format("%02d:%02d", m, s)
 end
 
+local function isLocalPlayerName(name)
+	name = tostring(name or "")
+	return name ~= "" and (name == plr.Name or name == plr.DisplayName)
+end
+
 local function handleWaveStatus(p)
 	if typeof(p) ~= "table" then return end
 
 	if p.type == "timeUpdate" then
 		local defeated, total = sanitizeEliteProgress(p.elitesDefeated, p.elitesTotal)
-		title.Text = ("Time: %s"):format(fmtTime(p.seconds))
-		sub.Text = ("Next Elite: %s"):format(fmtTime(p.nextEliteIn))
-		elites.Text = ("Elites: %d/%d"):format(defeated, total)
-		setBar(defeated / math.max(1, total))
+		if SHOW_TRACKER_PANEL then
+			title.Text = ("Time: %s"):format(fmtTime(p.seconds))
+			sub.Text = ("Next Elite: %s"):format(fmtTime(p.nextEliteIn))
+			elites.Text = ("Elites: %d/%d"):format(defeated, total)
+			setBar(defeated / math.max(1, total))
+		end
 
 	elseif p.type == "eliteSpawn" then
 		local name = tostring(p.name or "Elite")
@@ -197,6 +206,9 @@ local function handleWaveStatus(p)
 
 	elseif p.type == "chestOpened" then
 		local playerName = tostring(p.playerName or "Player")
+		if isLocalPlayerName(playerName) then
+			return
+		end
 		local rewardName = tostring(p.rewardName or "Reward")
 		local rarity = tostring(p.rarity or "Common")
 		local openedForFree = (p.free == true)
@@ -212,11 +224,7 @@ local function handleWaveStatus(p)
 		task.delay(2, function() center.Visible = false end)
 
 	elseif p.type == "recipeFound" then
-		local recipeName = tostring(p.recipeName or p.recipeId or "Recipe")
-		local rarity = tostring(p.rarity or "Common")
-		center.Visible = true
-		center.Text = ("RECIPE [%s]: %s"):format(rarity, recipeName)
-		task.delay(3, function() center.Visible = false end)
+		return
 
 	elseif p.type == "heroMonumentsSpawned" then
 		local count = math.max(0, math.floor(tonumber(p.count) or 0))
@@ -254,6 +262,9 @@ local function handleWaveStatus(p)
 	elseif p.type == "statueActivated" then
 		local statueType = tostring(p.statueType or "statue")
 		local playerName = tostring(p.playerName or "Player")
+		if isLocalPlayerName(playerName) then
+			return
+		end
 		center.Visible = true
 		if statueType == "battle" then
 			local spawnCount = math.max(0, math.floor(tonumber(p.spawnCount) or 0))
@@ -286,14 +297,16 @@ local function handleWaveStatus(p)
 		center.Text = ("PORTAL LOCKED: %s"):format(fmtTime(p.secondsLeft))
 		task.delay(2, function() center.Visible = false end)
 
-	elseif p.type == "complete" then
-		local defeated, total = sanitizeEliteProgress(p.elitesDefeated, p.elitesTotal)
-		center.Visible = true
-		center.Text = "LEVEL COMPLETE"
-		task.delay(5, function() center.Visible = false end)
-		elites.Text = ("Elites: %d/%d"):format(defeated, total)
-		setBar(total > 0 and (defeated / total) or 1)
-	end
+		elseif p.type == "complete" then
+			local defeated, total = sanitizeEliteProgress(p.elitesDefeated, p.elitesTotal)
+			center.Visible = true
+			center.Text = "LEVEL COMPLETE"
+			task.delay(5, function() center.Visible = false end)
+			if SHOW_TRACKER_PANEL then
+				elites.Text = ("Elites: %d/%d"):format(defeated, total)
+				setBar(total > 0 and (defeated / total) or 1)
+			end
+		end
 end
 
 WaveStatusEvent.OnClientEvent:Connect(handleWaveStatus)

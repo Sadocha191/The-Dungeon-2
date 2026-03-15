@@ -46,6 +46,15 @@ local function render()
 	coinsText.Text = ("Silver: %d"):format(coins)
 end
 
+local function applyCoreGuiState(hideModal: boolean)
+	pcall(function()
+		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+	end)
+	pcall(function()
+		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, not hideModal)
+	end)
+end
+
 PlayerProgressEvent.OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" or payload.type ~= "progress" then
 		return
@@ -78,15 +87,11 @@ RunService.RenderStepped:Connect(function()
 	local hide = anyModalOpen()
 	if hide ~= lastHidden then
 		gui.Enabled = not hide
-		pcall(function()
-			StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, not hide)
-		end)
-		pcall(function()
-			StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, not hide)
-		end)
+		applyCoreGuiState(hide)
 		lastHidden = hide
 	end
 end)
 
+applyCoreGuiState(false)
 render()
-print("[PlayerHudLobby] Ready (coins only, auto-hide on Modal)")
+print("[PlayerHudLobby] Ready (coins only, lobby backpack hidden)")

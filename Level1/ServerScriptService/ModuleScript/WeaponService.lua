@@ -121,7 +121,7 @@ local function applyWeaponStats(tool: Tool, weaponId: string, entry: any)
 	level = math.max(1, math.floor(level))
 
 	local rarity = tostring(entry and (entry.rarity or entry.Rarity) or def.rarity or "")
-	local stats = entry and (entry.stats or entry.Stats) or {}
+	local stats = entry and (entry.rollStats or entry.RollStats or entry.stats or entry.Stats) or {}
 	local combat = def.combat or {}
 
 	tool:SetAttribute("WeaponId", weaponId)

@@ -68,6 +68,7 @@ local chests = {}
 local spawnedForRun = false
 local nextChestId = 0
 local recipeRng = Random.new()
+local revealRng = Random.new()
 
 local RARITY_COLORS = {
 	Common = Color3.fromRGB(206, 206, 206),
@@ -117,6 +118,23 @@ local REWARDS = {
 	{ rarity = "Rare", id = "luck_8", label = "Clover (+8% Luck)", value = 0.08 },
 	{ rarity = "Rare", id = "powerup_15", label = "Anvil (+15% Powerup Mult)", value = 0.15 },
 	{ rarity = "Legendary", id = "damage_25", label = "Big Bonk (+25% Damage)", value = 0.25 },
+}
+
+local REWARD_REVEAL_DESCRIPTIONS = {
+	damage_10 = "Your weapons hit harder for the rest of the run.",
+	damage_25 = "A massive damage boost is locked in for this expedition.",
+	shield_5 = "Gain extra shield immediately.",
+	pickup_20 = "Drops snap in from farther away.",
+	crit_dmg_10 = "Critical hits now deal more damage.",
+	move_15 = "Movement speed increases for the rest of the run.",
+	regen_35 = "Health regeneration gets a strong boost.",
+	key_1 = "Future chests are more likely to open for free.",
+	projectile_1 = "Projectile spells fire one extra projectile.",
+	atkspd_8 = "Attack speed rises and your swings come out faster.",
+	elite_15 = "Elites and bosses take extra damage from you.",
+	lifesteal_10 = "A slice of your damage now returns as health.",
+	luck_8 = "Future reward rolls lean toward better rarities.",
+	powerup_15 = "All later shrine and chest bonuses become stronger.",
 }
 
 local REWARDS_BY_RARITY = {
@@ -278,6 +296,86 @@ end
 
 local function getRarityColor(rarity)
 	return RARITY_COLORS[tostring(rarity or "")] or Color3.fromRGB(255, 209, 83)
+end
+
+local function shuffleInPlace(list, rng)
+	for index = #list, 2, -1 do
+		local swapIndex = rng:NextInteger(1, index)
+		list[index], list[swapIndex] = list[swapIndex], list[index]
+	end
+	return list
+end
+
+local function buildRewardRevealCandidates(finalReward)
+	local entries = {}
+	for _, reward in ipairs(REWARDS) do
+		if reward.id ~= finalReward.id then
+			table.insert(entries, {
+				label = reward.label,
+				rarity = reward.rarity,
+			})
+		end
+	end
+
+	shuffleInPlace(entries, revealRng)
+
+	local candidates = {}
+	for index = 1, math.min(4, #entries) do
+		table.insert(candidates, entries[index])
+	end
+	table.insert(candidates, {
+		label = finalReward.label,
+		rarity = finalReward.rarity,
+	})
+	return candidates
+end
+
+local function buildRecipeRevealCandidates(finalRecipeId)
+	local entries = {}
+	local allRecipes = (typeof(CraftingConfig.GetAllRecipes) == "function" and CraftingConfig.GetAllRecipes()) or CraftingConfig.Recipes or {}
+	for _, recipe in ipairs(allRecipes) do
+		if recipe.recipeId ~= finalRecipeId then
+			table.insert(entries, {
+				label = recipe.weaponId or recipe.recipeId,
+				rarity = recipe.rarity or "Common",
+			})
+		end
+	end
+
+	shuffleInPlace(entries, revealRng)
+
+	local candidates = {}
+	for index = 1, math.min(4, #entries) do
+		table.insert(candidates, entries[index])
+	end
+	return candidates
+end
+
+local function getChestSourceName(chest)
+	if chest.specialRewardOnly == true then
+		return "Hero Reward Chest"
+	end
+	if chest.forceFree == true then
+		return "Reward Chest"
+	end
+	return "Treasure Chest"
+end
+
+local function getRewardDetailText(chest, openedForFree, cost)
+	if chest.specialRewardOnly == true then
+		return "Hero Reward"
+	end
+	if openedForFree then
+		return "Free Open"
+	end
+	return string.format("-%d Coins", math.max(0, math.floor(tonumber(cost) or 0)))
+end
+
+local function getChestRewardDescription(reward)
+	if not reward then
+		return "A powerful run bonus has been locked in."
+	end
+	return REWARD_REVEAL_DESCRIPTIONS[reward.id] or "A powerful run bonus has been locked in."
 end
 
 local function pickRewardRarity(plr)
@@ -545,6 +643,7 @@ handleOpen = function(chest, plr)
 	local rewardName = nil
 	local rarity = "Common"
 	local foundRecipeId, recipeState = nil, nil
+	local reward = nil
 
 	if chest.recipeId then
 		foundRecipeId, recipeState = awardRecipeDiscovery(plr, chest.recipeId)
@@ -552,7 +651,6 @@ handleOpen = function(chest, plr)
 		rarity = chest.recipeRarity or (recipeDef and recipeDef.rarity) or "Common"
 		rewardName = chest.rewardLabel or ((recipeDef and recipeDef.weaponId) or foundRecipeId or "Recipe")
 	else
-		local reward
 		reward, rarity = pickReward(plr)
 		applyReward(plr, reward)
 		rewardName = reward.label
@@ -574,14 +672,42 @@ handleOpen = function(chest, plr)
 	if foundRecipeId then
 		local recipeDef = CraftingConfig.GetRecipe(foundRecipeId)
 		local tier = recipeState and recipeState.tier or 1
-		PickupToastService.PushRecipe(plr, foundRecipeId, string.format("Weapon Schematic • Tier %d", tier), 1)
+		local recipeCopies = recipeState and recipeState.copies or 1
+		PickupToastService.PushRecipe(plr, foundRecipeId, string.format("Weapon Schematic - Tier %d", tier), 1)
+		WaveStatusEvent:FireClient(plr, {
+			type = "rewardReveal",
+			revealKind = "chest",
+			headerText = "Chest Draw",
+			sourceName = getChestSourceName(chest),
+			itemName = rewardName,
+			rarity = rarity,
+			description = string.format("Weapon schematic secured. Copies: %d. Current tier: %d.", recipeCopies, tier),
+			detailText = getRewardDetailText(chest, openedForFree, chest.forceFree == true and 0 or cost),
+			rollDuration = 1.05,
+			holdDuration = 1.9,
+			candidates = buildRecipeRevealCandidates(foundRecipeId),
+		})
 		WaveStatusEvent:FireClient(plr, {
 			type = "recipeFound",
 			recipeId = foundRecipeId,
 			recipeName = recipeDef and recipeDef.weaponId or foundRecipeId,
-			copies = recipeState and recipeState.copies or 1,
-			tier = recipeState and recipeState.tier or 1,
+			copies = recipeCopies,
+			tier = tier,
 			rarity = recipeDef and recipeDef.rarity or chest.recipeRarity,
+		})
+	elseif reward then
+		WaveStatusEvent:FireClient(plr, {
+			type = "rewardReveal",
+			revealKind = "chest",
+			headerText = "Chest Draw",
+			sourceName = getChestSourceName(chest),
+			itemName = rewardName,
+			rarity = rarity,
+			description = getChestRewardDescription(reward),
+			detailText = getRewardDetailText(chest, openedForFree, chest.forceFree == true and 0 or cost),
+			rollDuration = 0.95,
+			holdDuration = 1.75,
+			candidates = buildRewardRevealCandidates(reward),
 		})
 	end
 
@@ -685,3 +811,4 @@ if RunStarted.Value == true then
 end
 
 print("[ChestService] Ready")
+

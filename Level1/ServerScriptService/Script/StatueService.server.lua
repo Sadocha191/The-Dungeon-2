@@ -85,6 +85,53 @@ local function getRarityColor(rarity)
 	return RARITY_COLORS[tostring(rarity or "")] or Color3.fromRGB(255, 192, 92)
 end
 
+local function fireRewardReveal(plr: Player, payload)
+	if not isAlive(plr) then
+		return
+	end
+	WaveStatusEvent:FireClient(plr, payload)
+end
+
+local function buildStatueRevealPayload(statueType: string)
+	if statueType == "battle" then
+		return {
+			type = "rewardReveal",
+			revealKind = "statue",
+			headerText = "Statue Draw",
+			sourceName = "War Statue",
+			itemName = "War Decree",
+			rarity = "Rare",
+			description = string.format("Summons %d enemies. Clear the wave to spawn a reward chest.", BATTLE_SPAWN_COUNT),
+			detailText = "Challenge Event",
+			rollDuration = 0.9,
+			holdDuration = 1.7,
+			candidates = {
+				{ label = "Reading Sigils", rarity = "Common" },
+				{ label = "Forging Oath", rarity = "Uncommon" },
+				{ label = "Binding Trial", rarity = "Rare" },
+			},
+		}
+	end
+
+	return {
+		type = "rewardReveal",
+		revealKind = "statue",
+		headerText = "Statue Draw",
+		sourceName = "Magnet Statue",
+		itemName = "Magnet Blessing",
+		rarity = "Epic",
+		description = string.format("XP and coin drops rush to you for %d seconds.", MAGNET_DURATION),
+		detailText = string.format("%ds Buff", MAGNET_DURATION),
+		rollDuration = 0.9,
+		holdDuration = 1.7,
+		candidates = {
+			{ label = "Charging Core", rarity = "Common" },
+			{ label = "Tracing Leylines", rarity = "Rare" },
+			{ label = "Stabilizing Field", rarity = "Epic" },
+		},
+	}
+end
+
 local function broadcast(payload)
 	for _, plr in ipairs(Players:GetPlayers()) do
 		WaveStatusEvent:FireClient(plr, payload)
@@ -521,6 +568,8 @@ local function activateBattleStatue(statue, plr: Player)
 		return
 	end
 
+	fireRewardReveal(plr, buildStatueRevealPayload("battle"))
+
 	for _, mob in ipairs(spawned) do
 		NpcService.BindDeath(mob, function()
 			if statue.resolved then
@@ -558,6 +607,7 @@ local function activateMagnetStatue(statue, plr: Player)
 		return
 	end
 	activateGlobalMagnet(plr, MAGNET_DURATION)
+	fireRewardReveal(plr, buildStatueRevealPayload("magnet"))
 
 	broadcast({
 		type = "statueActivated",

@@ -581,7 +581,12 @@ local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, isBoss: b
 		soulsDrop = math.random(ELITE_SOUL_DROP_MIN, ELITE_SOUL_DROP_MAX)
 	end
 
-	awardPersistentMobDrops(tostring(mob:GetAttribute("MobType") or mob.Name), isElite, isBoss)
+	local dropsOk, dropsErr = pcall(function()
+		awardPersistentMobDrops(tostring(mob:GetAttribute("MobType") or mob.Name), isElite, isBoss)
+	end)
+	if not dropsOk then
+		warn("[WaveController] Persistent mob drops failed:", dropsErr)
+	end
 	if _G.SpawnDropsAt then
 		pcall(function() _G.SpawnDropsAt(pos, xpDrop, coinDrop, soulsDrop) end)
 	end
