@@ -97,21 +97,19 @@ local function buildChancesForClass(className: string)
 end
 
 -- ===== UI =====
-local gui = Instance.new("ScreenGui")
-gui.Name = "CharacterCreationUI"
+local gui = pg:WaitForChild("CharacterCreationUI")
 gui.ResetOnSpawn = false
 gui.Enabled = false
 gui:SetAttribute("Modal", true)
-gui.Parent = pg
 
-local dim = Instance.new("Frame")
+local dim = gui:WaitForChild("dim")
 dim.Size = UDim2.fromScale(1,1)
 dim.BackgroundColor3 = Color3.fromRGB(0,0,0)
 dim.BackgroundTransparency = 0.45
 dim.BorderSizePixel = 0
 dim.Parent = gui
 
-local root = Instance.new("Frame")
+local root = gui:WaitForChild("root")
 root.AnchorPoint = Vector2.new(0.5, 0.5)
 root.Position = UDim2.fromScale(0.5, 0.5)
 root.Size = UDim2.fromScale(0.9, 0.82)

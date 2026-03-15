@@ -14,21 +14,18 @@ if not TeleportStatus then
 	return
 end
 
--- Overlay GUI (no assets required)
-local gui = Instance.new("ScreenGui")
-gui.Name = "TeleportOverlayGui"
+local gui = plr:WaitForChild("PlayerGui"):WaitForChild("TeleportOverlayGui")
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.Enabled = false
-gui.Parent = plr:WaitForChild("PlayerGui")
 
-local dim = Instance.new("Frame")
+local dim = gui:WaitForChild("dim")
 dim.Size = UDim2.fromScale(1,1)
 dim.BackgroundColor3 = Color3.new(0,0,0)
 dim.BackgroundTransparency = 0.35
 dim.Parent = gui
 
-local label = Instance.new("TextLabel")
+local label = gui:WaitForChild("label")
 label.Size = UDim2.new(0, 520, 0, 70)
 label.Position = UDim2.new(0.5, -260, 0.5, -35)
 label.BackgroundTransparency = 1

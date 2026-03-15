@@ -138,32 +138,20 @@ local function addHover(frame, normalColor, hoverColor)
 	end)
 end
 
-local inventoryTemplate = StarterGui:FindFirstChild("InventoryGui")
-if not inventoryTemplate then
-	inventoryTemplate = Instance.new("ScreenGui")
-	inventoryTemplate.Name = "InventoryGui"
-	inventoryTemplate.ResetOnSpawn = false
-	inventoryTemplate.IgnoreGuiInset = true
-	inventoryTemplate.Enabled = false
-	inventoryTemplate:SetAttribute("Modal", true)
-	inventoryTemplate.Parent = StarterGui
-end
-
-local inventoryGui = inventoryTemplate:Clone()
+local inventoryGui = pg:WaitForChild("InventoryGui")
 inventoryGui.Enabled = false
 inventoryGui.ResetOnSpawn = false
 inventoryGui.IgnoreGuiInset = true
 inventoryGui:SetAttribute("Modal", true)
-inventoryGui.Parent = pg
 
-local overlay = Instance.new("Frame")
+local overlay = inventoryGui:WaitForChild("overlay")
 overlay.Size = UDim2.fromScale(1, 1)
 overlay.BackgroundColor3 = Color3.fromRGB(8, 8, 10)
 overlay.BackgroundTransparency = 0.35
 overlay.BorderSizePixel = 0
 overlay.Parent = inventoryGui
 
-local panel = Instance.new("Frame")
+local panel = overlay:WaitForChild("panel")
 panel.AnchorPoint = Vector2.new(0.5, 0.5)
 panel.Position = UDim2.fromScale(0.5, 0.5)
 panel.Size = UDim2.fromScale(0.9, 0.9)

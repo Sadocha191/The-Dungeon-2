@@ -160,15 +160,13 @@ local function tweenAndWait(instance, info, props)
 	return handle
 end
 
-local gui = Instance.new("ScreenGui")
-gui.Name = "BannerUI"
+local gui = playerGui:WaitForChild("BannerUI")
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.Enabled = false
 gui:SetAttribute("Modal", true)
-gui.Parent = playerGui
 
-local overlay = Instance.new("Frame")
+local overlay = gui:WaitForChild("Overlay")
 overlay.Name = "Overlay"
 overlay.Size = UDim2.fromScale(1, 1)
 overlay.BackgroundColor3 = Color3.fromRGB(6, 8, 12)
@@ -176,7 +174,7 @@ overlay.BackgroundTransparency = 0.18
 overlay.BorderSizePixel = 0
 overlay.Parent = gui
 
-local panel = Instance.new("Frame")
+local panel = overlay:WaitForChild("Panel")
 panel.Name = "Panel"
 panel.AnchorPoint = Vector2.new(0.5, 0.5)
 panel.Position = UDim2.fromScale(0.5, 0.5)
@@ -536,7 +534,7 @@ featuredEmpty.TextColor3 = Color3.fromRGB(150, 155, 170)
 featuredEmpty.Text = "No featured weapons configured."
 featuredEmpty.Parent = featuredStrip
 
-local rollOverlay = Instance.new("Frame")
+local rollOverlay = gui:WaitForChild("RollOverlay")
 rollOverlay.Name = "RollOverlay"
 rollOverlay.Visible = false
 rollOverlay.Size = UDim2.fromScale(1, 1)
@@ -545,7 +543,7 @@ rollOverlay.BackgroundTransparency = 0.15
 rollOverlay.BorderSizePixel = 0
 rollOverlay.Parent = gui
 
-local rollPanel = Instance.new("Frame")
+local rollPanel = rollOverlay:WaitForChild("RollPanel")
 rollPanel.Name = "RollPanel"
 rollPanel.AnchorPoint = Vector2.new(0.5, 0.5)
 rollPanel.Position = UDim2.fromScale(0.5, 0.5)

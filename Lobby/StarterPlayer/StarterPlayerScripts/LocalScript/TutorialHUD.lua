@@ -10,13 +10,11 @@ local player = Players.LocalPlayer
 local remotesFolder = ReplicatedStorage:WaitForChild("RemoteEvents")
 local TutorialTargetEvent = remotesFolder:WaitForChild("TutorialTargetEvent")
 
-local gui = Instance.new("ScreenGui")
-gui.Name = "TutorialHUD"
+local gui = player:WaitForChild("PlayerGui"):WaitForChild("TutorialHUD")
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
-gui.Parent = player:WaitForChild("PlayerGui")
 
-local frame = Instance.new("Frame")
+local frame = gui:WaitForChild("frame")
 frame.Size = UDim2.new(0, 320, 0, 90)
 frame.Position = UDim2.new(0, 20, 1, -110)
 frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
@@ -24,7 +22,7 @@ frame.BackgroundTransparency = 0.2
 frame.Parent = gui
 frame.Visible = false
 
-local objectiveLabel = Instance.new("TextLabel")
+local objectiveLabel = frame:WaitForChild("objectiveLabel")
 objectiveLabel.Size = UDim2.new(1, -20, 0, 40)
 objectiveLabel.Position = UDim2.new(0, 10, 0, 8)
 objectiveLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -36,7 +34,7 @@ objectiveLabel.TextSize = 16
 objectiveLabel.BackgroundTransparency = 1
 objectiveLabel.Parent = frame
 
-local showPathButton = Instance.new("TextButton")
+local showPathButton = frame:WaitForChild("showPathButton")
 showPathButton.Size = UDim2.new(0, 120, 0, 28)
 showPathButton.Position = UDim2.new(0, 10, 1, -36)
 showPathButton.Text = "Show Path"

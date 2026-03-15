@@ -28,15 +28,13 @@ local function getDialogueLines(dialogueKey: string): {string}
 	return { ("[Dialogue missing: %s]"):format(dialogueKey) }
 end
 
-local gui = Instance.new("ScreenGui")
-gui.Name = "DialogueUI"
+local gui = player:WaitForChild("PlayerGui"):WaitForChild("DialogueUI")
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.Enabled = false
-gui.Parent = player:WaitForChild("PlayerGui")
 
 -- ===== Main frame =====
-local frame = Instance.new("Frame")
+local frame = gui:WaitForChild("frame")
 frame.AnchorPoint = Vector2.new(0.5, 1)
 frame.Position = UDim2.new(0.5, 0, 0.93, 0) -- przy dole
 frame.Size = UDim2.new(0.62, 0, 0, 220) -- Y liczone dynamicznie
@@ -55,7 +53,7 @@ stroke.Color = Color3.fromRGB(60, 60, 70)
 stroke.Transparency = 0.2
 stroke.Parent = frame
 
-local closeButton = Instance.new("TextButton")
+local closeButton = frame:WaitForChild("closeButton")
 closeButton.AnchorPoint = Vector2.new(1, 0)
 closeButton.Position = UDim2.new(1, -12, 0, 12)
 closeButton.Size = UDim2.fromOffset(34, 34)
@@ -81,7 +79,7 @@ local MIN_H = 140
 local MAX_H = 420
 
 -- ===== Text =====
-local textLabel = Instance.new("TextLabel")
+local textLabel = frame:WaitForChild("textLabel")
 textLabel.BackgroundTransparency = 1
 textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 textLabel.TextWrapped = true
@@ -93,7 +91,7 @@ textLabel.RichText = true
 textLabel.Parent = frame
 
 -- ===== Button =====
-local nextButton = Instance.new("TextButton")
+local nextButton = frame:WaitForChild("nextButton")
 nextButton.BackgroundColor3 = Color3.fromRGB(80, 80, 120)
 nextButton.BorderSizePixel = 0
 nextButton.TextColor3 = Color3.fromRGB(255, 255, 255)

@@ -72,22 +72,20 @@ local function formatProgress(mission: any): string
 end
 
 -- ===== UI =====
-local gui = Instance.new("ScreenGui")
-gui.Name = "MissionsGui"
+local gui = playerGui:WaitForChild("MissionsGui")
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.Enabled = false
 gui:SetAttribute("Modal", true)
-gui.Parent = playerGui
 
-local overlay = Instance.new("Frame")
+local overlay = gui:WaitForChild("overlay")
 overlay.Size = UDim2.fromScale(1, 1)
 overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 overlay.BackgroundTransparency = 0.35
 overlay.BorderSizePixel = 0
 overlay.Parent = gui
 
-local panel = Instance.new("Frame")
+local panel = overlay:WaitForChild("panel")
 panel.AnchorPoint = Vector2.new(0.5, 0.5)
 panel.Position = UDim2.fromScale(0.5, 0.5)
 panel.Size = UDim2.fromScale(0.88, 0.88)

@@ -11,21 +11,19 @@ local SpellEvent = remotes:WaitForChild("SpellEvent")
 
 local PauseState = ReplicatedStorage:WaitForChild("PauseState")
 
-local gui = Instance.new("ScreenGui")
-gui.Name = "SpellMenu"
+local gui = pg:WaitForChild("SpellMenu")
 gui.ResetOnSpawn = false
 gui.Enabled = false
 gui:SetAttribute("Modal", true)
-gui.Parent = pg
 
-local dim = Instance.new("Frame")
+local dim = gui:WaitForChild("dim")
 dim.Size = UDim2.fromScale(1,1)
 dim.BackgroundColor3 = Color3.fromRGB(0,0,0)
 dim.BackgroundTransparency = 0.35
 dim.BorderSizePixel = 0
 dim.Parent = gui
 
-local card = Instance.new("Frame")
+local card = dim:WaitForChild("card")
 card.AnchorPoint = Vector2.new(0.5,0.5)
 card.Position = UDim2.fromScale(0.5,0.5)
 card.Size = UDim2.fromScale(0.72, 0.62)

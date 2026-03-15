@@ -12,13 +12,11 @@ local pg = plr:WaitForChild("PlayerGui")
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local PlayerProgressEvent = remoteEvents:WaitForChild("PlayerProgressEvent")
 
-local gui = Instance.new("ScreenGui")
-gui.Name = "PlayerHudGui_Lobby"
+local gui = pg:WaitForChild("PlayerHudGui_Lobby")
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = false
-gui.Parent = pg
 
-local coinsBox = Instance.new("Frame")
+local coinsBox = gui:WaitForChild("coinsBox")
 coinsBox.Position = UDim2.fromOffset(18, 150)
 coinsBox.Size = UDim2.fromOffset(200, 36)
 coinsBox.BackgroundColor3 = Color3.fromRGB(14, 14, 16)
@@ -30,7 +28,7 @@ Instance.new("UICorner", coinsBox).CornerRadius = UDim.new(0, 14)
 local padL = Instance.new("UIPadding", coinsBox)
 padL.PaddingLeft = UDim.new(0, 12)
 
-local coinsText = Instance.new("TextLabel")
+local coinsText = coinsBox:WaitForChild("coinsText")
 coinsText.BackgroundTransparency = 1
 coinsText.Size = UDim2.new(1, 0, 1, 0)
 coinsText.Font = Enum.Font.GothamBold
