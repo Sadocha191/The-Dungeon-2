@@ -28,12 +28,17 @@ dim.Parent = gui
 local card = Instance.new("Frame")
 card.AnchorPoint = Vector2.new(0.5,0.5)
 card.Position = UDim2.fromScale(0.5,0.5)
-card.Size = UDim2.fromOffset(640, 340)
+card.Size = UDim2.fromScale(0.72, 0.62)
 card.BackgroundColor3 = Color3.fromRGB(14,14,16)
 card.BackgroundTransparency = 0.05
 card.BorderSizePixel = 0
 card.Parent = dim
 Instance.new("UICorner", card).CornerRadius = UDim.new(0, 18)
+local cardSizeConstraint = Instance.new("UISizeConstraint", card)
+cardSizeConstraint.MaxSize = Vector2.new(640, 340)
+local cardAspect = Instance.new("UIAspectRatioConstraint", card)
+cardAspect.AspectRatio = 640 / 340
+cardAspect.DominantAxis = Enum.DominantAxis.Height
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1
@@ -45,6 +50,19 @@ title.TextXAlignment = Enum.TextXAlignment.Left
 title.TextColor3 = Color3.fromRGB(245,245,245)
 title.Text = "Choose a spell"
 title.Parent = card
+
+local closeButton = Instance.new("TextButton")
+closeButton.AnchorPoint = Vector2.new(1, 0)
+closeButton.Position = UDim2.new(1, -16, 0, 16)
+closeButton.Size = UDim2.fromOffset(32, 32)
+closeButton.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+closeButton.BorderSizePixel = 0
+closeButton.Font = Enum.Font.GothamBold
+closeButton.TextSize = 14
+closeButton.TextColor3 = Color3.fromRGB(235, 235, 235)
+closeButton.Text = "X"
+closeButton.Parent = card
+Instance.new("UICorner", closeButton).CornerRadius = UDim.new(0, 10)
 
 local container = Instance.new("Frame")
 container.BackgroundTransparency = 1
@@ -144,6 +162,11 @@ Instance.new("UICorner", confirmBtn).CornerRadius = UDim.new(0, 14)
 confirmBtn.MouseButton1Click:Connect(function()
 	if not currentToken or not selectedId then return end
 	SpellEvent:FireServer({ type="PICK", token=currentToken, id=selectedId })
+	gui.Enabled = false
+	PauseState.Value = false
+end)
+
+closeButton.MouseButton1Click:Connect(function()
 	gui.Enabled = false
 	PauseState.Value = false
 end)

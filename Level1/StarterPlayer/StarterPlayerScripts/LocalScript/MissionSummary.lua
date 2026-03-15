@@ -31,12 +31,17 @@ dim.Parent = gui
 local card = Instance.new("Frame")
 card.AnchorPoint = Vector2.new(0.5,0.5)
 card.Position = UDim2.fromScale(0.5,0.5)
-card.Size = UDim2.fromOffset(560, 320)
+card.Size = UDim2.fromScale(0.62, 0.52)
 card.BackgroundColor3 = Color3.fromRGB(14,14,16)
 card.BackgroundTransparency = 0.06
 card.BorderSizePixel = 0
 card.Parent = dim
 Instance.new("UICorner", card).CornerRadius = UDim.new(0, 18)
+local cardSizeConstraint = Instance.new("UISizeConstraint", card)
+cardSizeConstraint.MaxSize = Vector2.new(560, 320)
+local cardAspect = Instance.new("UIAspectRatioConstraint", card)
+cardAspect.AspectRatio = 560 / 320
+cardAspect.DominantAxis = Enum.DominantAxis.Height
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1
@@ -48,6 +53,19 @@ title.TextColor3 = Color3.fromRGB(245,245,245)
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Text = "Game Over"
 title.Parent = card
+
+local closeButton = Instance.new("TextButton")
+closeButton.AnchorPoint = Vector2.new(1, 0)
+closeButton.Position = UDim2.new(1, -16, 0, 16)
+closeButton.Size = UDim2.fromOffset(32, 32)
+closeButton.BackgroundColor3 = Color3.fromRGB(30, 30, 34)
+closeButton.BorderSizePixel = 0
+closeButton.Font = Enum.Font.GothamBold
+closeButton.TextSize = 14
+closeButton.TextColor3 = Color3.fromRGB(245, 245, 245)
+closeButton.Text = "X"
+closeButton.Parent = card
+Instance.new("UICorner", closeButton).CornerRadius = UDim.new(0, 10)
 
 local body = Instance.new("TextLabel")
 body.BackgroundTransparency = 1
@@ -76,6 +94,14 @@ btn.Parent = card
 Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 12)
 
 btn.MouseButton1Click:Connect(function()
+	if ReturnToLobby and ReturnToLobby:IsA("RemoteEvent") then
+		ReturnToLobby:FireServer()
+	else
+		gui.Enabled = false
+	end
+end)
+
+closeButton.MouseButton1Click:Connect(function()
 	if ReturnToLobby and ReturnToLobby:IsA("RemoteEvent") then
 		ReturnToLobby:FireServer()
 	else

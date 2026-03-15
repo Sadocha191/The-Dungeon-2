@@ -114,9 +114,14 @@ dim.Parent = gui
 local root = Instance.new("Frame")
 root.AnchorPoint = Vector2.new(0.5, 0.5)
 root.Position = UDim2.fromScale(0.5, 0.5)
-root.Size = UDim2.fromOffset(1040, 460)
+root.Size = UDim2.fromScale(0.9, 0.82)
 root.BackgroundTransparency = 1
 root.Parent = gui
+local rootSizeConstraint = Instance.new("UISizeConstraint", root)
+rootSizeConstraint.MaxSize = Vector2.new(1040, 460)
+local rootAspect = Instance.new("UIAspectRatioConstraint", root)
+rootAspect.AspectRatio = 1040 / 460
+rootAspect.DominantAxis = Enum.DominantAxis.Height
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1
@@ -203,7 +208,7 @@ buffsText.Visible = false
 buffsText.Parent = infoPanel
 
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.fromOffset(140, 40)
+closeBtn.Size = UDim2.fromOffset(40, 40)
 closeBtn.AnchorPoint = Vector2.new(1, 0)
 closeBtn.Position = UDim2.new(1, -10, 0, 10)
 closeBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 44)
@@ -211,7 +216,7 @@ closeBtn.BorderSizePixel = 0
 closeBtn.Font = Enum.Font.GothamBold
 closeBtn.TextSize = 18
 closeBtn.TextColor3 = Color3.fromRGB(245,245,245)
-closeBtn.Text = "Close"
+closeBtn.Text = "X"
 closeBtn.Parent = root
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 14)
 

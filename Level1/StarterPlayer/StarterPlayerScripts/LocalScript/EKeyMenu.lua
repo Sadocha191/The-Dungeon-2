@@ -25,12 +25,17 @@ overlay.Parent = gui
 local panel = Instance.new("Frame")
 panel.AnchorPoint = Vector2.new(0.5,0.5)
 panel.Position = UDim2.fromScale(0.5,0.5)
-panel.Size = UDim2.fromOffset(420, 220)
+panel.Size = UDim2.fromScale(0.56, 0.38)
 panel.BackgroundColor3 = Color3.fromRGB(14,14,16)
 panel.BackgroundTransparency = 0.06
 panel.BorderSizePixel = 0
 panel.Parent = overlay
 Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 18)
+local panelSizeConstraint = Instance.new("UISizeConstraint", panel)
+panelSizeConstraint.MaxSize = Vector2.new(420, 220)
+local panelAspect = Instance.new("UIAspectRatioConstraint", panel)
+panelAspect.AspectRatio = 420 / 220
+panelAspect.DominantAxis = Enum.DominantAxis.Height
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1
@@ -56,14 +61,15 @@ btnLobby.Parent = panel
 Instance.new("UICorner", btnLobby).CornerRadius = UDim.new(0, 14)
 
 local btnClose = Instance.new("TextButton")
-btnClose.Position = UDim2.fromOffset(18, 130)
-btnClose.Size = UDim2.new(1,-36,0,46)
+btnClose.AnchorPoint = Vector2.new(1, 0)
+btnClose.Position = UDim2.new(1, -16, 0, 16)
+btnClose.Size = UDim2.fromOffset(34, 34)
 btnClose.BackgroundColor3 = Color3.fromRGB(30,30,34)
 btnClose.BorderSizePixel = 0
 btnClose.Font = Enum.Font.GothamBold
 btnClose.TextSize = 16
 btnClose.TextColor3 = Color3.fromRGB(255,255,255)
-btnClose.Text = "Close"
+btnClose.Text = "X"
 btnClose.Parent = panel
 Instance.new("UICorner", btnClose).CornerRadius = UDim.new(0, 14)
 

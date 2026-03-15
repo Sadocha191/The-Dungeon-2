@@ -98,11 +98,16 @@ overlay.Parent = gui
 local panel = Instance.new("Frame")
 panel.AnchorPoint = Vector2.new(0.5, 0.5)
 panel.Position = UDim2.fromScale(0.5, 0.5)
-panel.Size = UDim2.fromOffset(980, 560)
+panel.Size = UDim2.fromScale(0.88, 0.88)
 panel.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
 panel.BorderSizePixel = 0
 panel.Parent = overlay
 addCorner(panel, 16)
+local panelSizeConstraint = Instance.new("UISizeConstraint", panel)
+panelSizeConstraint.MaxSize = Vector2.new(980, 560)
+local panelAspect = Instance.new("UIAspectRatioConstraint", panel)
+panelAspect.AspectRatio = 980 / 560
+panelAspect.DominantAxis = Enum.DominantAxis.Height
 addStroke(panel, Color3.fromRGB(40, 40, 48))
 
 local title = Instance.new("TextLabel")
@@ -565,11 +570,16 @@ local function showInviteModal(fromName: string, fromUserId: number, expiresIn: 
 	local modalPanel = Instance.new("Frame")
 	modalPanel.AnchorPoint = Vector2.new(0.5, 0.5)
 	modalPanel.Position = UDim2.fromScale(0.5, 0.5)
-	modalPanel.Size = UDim2.fromOffset(420, 220)
+	modalPanel.Size = UDim2.fromScale(0.46, 0.34)
 	modalPanel.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
 	modalPanel.BorderSizePixel = 0
 	modalPanel.Parent = modalOverlay
 	addCorner(modalPanel, 16)
+	local modalPanelSizeConstraint = Instance.new("UISizeConstraint", modalPanel)
+	modalPanelSizeConstraint.MaxSize = Vector2.new(420, 220)
+	local modalPanelAspect = Instance.new("UIAspectRatioConstraint", modalPanel)
+	modalPanelAspect.AspectRatio = 420 / 220
+	modalPanelAspect.DominantAxis = Enum.DominantAxis.Height
 	addStroke(modalPanel, Color3.fromRGB(40, 40, 48))
 
 	local modalTitle = Instance.new("TextLabel")

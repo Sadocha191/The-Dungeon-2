@@ -28,11 +28,16 @@ overlay.Parent = gui
 local panel = Instance.new("Frame")
 panel.AnchorPoint = Vector2.new(0.5, 0.5)
 panel.Position = UDim2.fromScale(0.5, 0.5)
-panel.Size = UDim2.fromOffset(860, 560)
+panel.Size = UDim2.fromScale(0.86, 0.86)
 panel.BackgroundColor3 = Color3.fromRGB(18, 20, 24)
 panel.BorderSizePixel = 0
 panel.Parent = overlay
 Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 18)
+local panelSizeConstraint = Instance.new("UISizeConstraint", panel)
+panelSizeConstraint.MaxSize = Vector2.new(860, 560)
+local panelAspect = Instance.new("UIAspectRatioConstraint", panel)
+panelAspect.AspectRatio = 860 / 560
+panelAspect.DominantAxis = Enum.DominantAxis.Height
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1

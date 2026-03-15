@@ -180,11 +180,16 @@ local panel = Instance.new("Frame")
 panel.Name = "Panel"
 panel.AnchorPoint = Vector2.new(0.5, 0.5)
 panel.Position = UDim2.fromScale(0.5, 0.5)
-panel.Size = UDim2.fromOffset(1120, 680)
+panel.Size = UDim2.fromScale(0.9, 0.9)
 panel.BackgroundColor3 = panelColor
 panel.BorderSizePixel = 0
 panel.Parent = overlay
 Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 20)
+local panelSizeConstraint = Instance.new("UISizeConstraint", panel)
+panelSizeConstraint.MaxSize = Vector2.new(1120, 680)
+local panelAspect = Instance.new("UIAspectRatioConstraint", panel)
+panelAspect.AspectRatio = 1120 / 680
+panelAspect.DominantAxis = Enum.DominantAxis.Height
 local panelStroke = Instance.new("UIStroke", panel)
 panelStroke.Color = Color3.fromRGB(48, 58, 78)
 panelStroke.Thickness = 1
@@ -334,7 +339,7 @@ content.Parent = panel
 
 local heroFrame = Instance.new("Frame")
 heroFrame.Name = "HeroFrame"
-heroFrame.Size = UDim2.new(1, 0, 0, 292)
+heroFrame.Size = UDim2.new(1, 0, 1, 0)
 heroFrame.BackgroundColor3 = surfaceColor
 heroFrame.BorderSizePixel = 0
 heroFrame.Parent = content
@@ -531,63 +536,6 @@ featuredEmpty.TextColor3 = Color3.fromRGB(150, 155, 170)
 featuredEmpty.Text = "No featured weapons configured."
 featuredEmpty.Parent = featuredStrip
 
-local resultsSection = Instance.new("Frame")
-resultsSection.Name = "ResultsSection"
-resultsSection.Position = UDim2.fromOffset(0, 308)
-resultsSection.Size = UDim2.new(1, 0, 0, 178)
-resultsSection.BackgroundColor3 = surfaceColor
-resultsSection.BorderSizePixel = 0
-resultsSection.Parent = content
-Instance.new("UICorner", resultsSection).CornerRadius = UDim.new(0, 16)
-local resultsStroke = Instance.new("UIStroke", resultsSection)
-resultsStroke.Color = Color3.fromRGB(42, 52, 72)
-resultsStroke.Thickness = 1
-
-local resultsTitle = Instance.new("TextLabel")
-resultsTitle.BackgroundTransparency = 1
-resultsTitle.Position = UDim2.fromOffset(16, 14)
-resultsTitle.Size = UDim2.new(1, -32, 0, 18)
-resultsTitle.Font = Enum.Font.GothamBold
-resultsTitle.TextSize = 14
-resultsTitle.TextXAlignment = Enum.TextXAlignment.Left
-resultsTitle.TextColor3 = Color3.fromRGB(240, 241, 245)
-resultsTitle.Text = "Recent Pull"
-resultsTitle.Parent = resultsSection
-
-local resultsSummary = Instance.new("TextLabel")
-resultsSummary.BackgroundTransparency = 1
-resultsSummary.Position = UDim2.fromOffset(16, 36)
-resultsSummary.Size = UDim2.new(1, -32, 0, 18)
-resultsSummary.Font = Enum.Font.Gotham
-resultsSummary.TextSize = 12
-resultsSummary.TextXAlignment = Enum.TextXAlignment.Left
-resultsSummary.TextColor3 = Color3.fromRGB(170, 176, 190)
-resultsSummary.Text = "No pulls yet in this session."
-resultsSummary.Parent = resultsSection
-
-local recentGrid = Instance.new("Frame")
-recentGrid.Name = "RecentGrid"
-recentGrid.Position = UDim2.fromOffset(14, 64)
-recentGrid.Size = UDim2.new(1, -28, 0, 100)
-recentGrid.BackgroundTransparency = 1
-recentGrid.Parent = resultsSection
-
-local recentLayout = Instance.new("UIGridLayout", recentGrid)
-recentLayout.CellPadding = UDim2.fromOffset(10, 10)
-recentLayout.CellSize = UDim2.fromOffset(145, 102)
-recentLayout.FillDirectionMaxCells = 5
-recentLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-local recentEmpty = Instance.new("TextLabel")
-recentEmpty.BackgroundTransparency = 1
-recentEmpty.Size = UDim2.fromScale(1, 1)
-recentEmpty.Font = Enum.Font.Gotham
-recentEmpty.TextSize = 13
-recentEmpty.TextColor3 = Color3.fromRGB(152, 159, 173)
-recentEmpty.TextWrapped = true
-recentEmpty.Text = "Make your first pull to see the animated reveal history here."
-recentEmpty.Parent = recentGrid
-
 local rollOverlay = Instance.new("Frame")
 rollOverlay.Name = "RollOverlay"
 rollOverlay.Visible = false
@@ -601,11 +549,16 @@ local rollPanel = Instance.new("Frame")
 rollPanel.Name = "RollPanel"
 rollPanel.AnchorPoint = Vector2.new(0.5, 0.5)
 rollPanel.Position = UDim2.fromScale(0.5, 0.5)
-rollPanel.Size = UDim2.fromOffset(980, 560)
+rollPanel.Size = UDim2.fromScale(0.84, 0.84)
 rollPanel.BackgroundColor3 = Color3.fromRGB(16, 20, 30)
 rollPanel.BorderSizePixel = 0
 rollPanel.Parent = rollOverlay
 Instance.new("UICorner", rollPanel).CornerRadius = UDim.new(0, 22)
+local rollPanelSizeConstraint = Instance.new("UISizeConstraint", rollPanel)
+rollPanelSizeConstraint.MaxSize = Vector2.new(980, 560)
+local rollPanelAspect = Instance.new("UIAspectRatioConstraint", rollPanel)
+rollPanelAspect.AspectRatio = 980 / 560
+rollPanelAspect.DominantAxis = Enum.DominantAxis.Height
 local rollPanelStroke = Instance.new("UIStroke", rollPanel)
 rollPanelStroke.Color = Color3.fromRGB(68, 86, 120)
 rollPanelStroke.Thickness = 1
@@ -990,20 +943,6 @@ local function renderRates(rates)
 end
 
 local function renderRecentResults()
-	clearContainer(recentGrid, {
-		[recentLayout] = true,
-		[recentEmpty] = true,
-	})
-	recentEmpty.Visible = #recentResults == 0
-	if recentEmpty.Visible then
-		resultsSummary.Text = "No pulls yet in this session."
-		return
-	end
-	resultsSummary.Text = buildRollSummary(recentResults)
-	for _, result in ipairs(recentResults) do
-		local card = createWeaponCard(recentGrid, 145, 102)
-		setCardResult(card, result)
-	end
 end
 
 local function updateWallet()

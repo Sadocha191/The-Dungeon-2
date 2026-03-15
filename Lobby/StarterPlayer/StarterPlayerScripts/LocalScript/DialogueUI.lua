@@ -55,6 +55,21 @@ stroke.Color = Color3.fromRGB(60, 60, 70)
 stroke.Transparency = 0.2
 stroke.Parent = frame
 
+local closeButton = Instance.new("TextButton")
+closeButton.AnchorPoint = Vector2.new(1, 0)
+closeButton.Position = UDim2.new(1, -12, 0, 12)
+closeButton.Size = UDim2.fromOffset(34, 34)
+closeButton.BackgroundColor3 = Color3.fromRGB(34, 36, 44)
+closeButton.BorderSizePixel = 0
+closeButton.Font = Enum.Font.GothamBold
+closeButton.TextSize = 14
+closeButton.TextColor3 = Color3.fromRGB(245, 245, 245)
+closeButton.Text = "X"
+closeButton.Parent = frame
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 10)
+closeCorner.Parent = closeButton
+
 -- ===== Layout constants =====
 local PAD = 14
 local BTN_H = 36
@@ -187,6 +202,8 @@ local function finishDialogue()
 	lines = {}
 	lineIndex = 1
 end
+
+closeButton.MouseButton1Click:Connect(finishDialogue)
 
 nextButton.MouseButton1Click:Connect(function()
 	if lineIndex < #lines then
