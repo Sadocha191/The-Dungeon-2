@@ -355,8 +355,14 @@ RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: an
 	local runMode = (typeof(mode) == "string" and (mode == "Multi" or mode == "Single")) and mode or "Single"
 
 	local entry = Levels.GetByKey(levelKey)
-	if not entry or typeof(entry.placeId) ~= "number" then
+	if not entry then
 		warn("[PortalToDungeon] Unknown level key:", levelKey)
+		TeleportStatus:FireClient(player, { type = "failed", reason = "unknown_level" })
+		return
+	end
+
+	if typeof(entry.placeId) ~= "number" then
+		TeleportStatus:FireClient(player, { type = "failed", reason = "level_unavailable" })
 		return
 	end
 

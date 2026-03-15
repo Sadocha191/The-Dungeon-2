@@ -1,14 +1,14 @@
--- LOCALSCRIPT: LevelSelectUI.client.lua
--- GDZIE: StarterPlayer/StarterPlayerScripts/LevelSelectUI (LocalScript)
--- CO: centralne okno wyboru poziomu w stylu lobby party UI
+-- Portal level select client.
+-- Drives the PortalUI built in StarterGui instead of generating the window in code.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TextService = game:GetService("TextService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
-local plr = Players.LocalPlayer
-local pg = plr:WaitForChild("PlayerGui")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local OpenLevelSelect = remoteEvents:WaitForChild("OpenLevelSelect")
@@ -23,408 +23,508 @@ local moduleFolder = (
 )
 local Levels = require(moduleFolder:WaitForChild("Levels"))
 
-local function addCorner(inst: Instance, radius: number)
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, radius)
-	corner.Parent = inst
-end
+local SELECTED_STROKE = Color3.fromRGB(240, 240, 240)
+local HOVER_STROKE = Color3.fromRGB(170, 170, 170)
+local IDLE_STROKE = Color3.fromRGB(92, 92, 92)
+local ERROR_PREFIX = "[Unavailable] "
 
-local function addStroke(inst: Instance, color: Color3, thickness: number?)
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = color
-	stroke.Thickness = thickness or 1
-	stroke.Parent = inst
-	return stroke
-end
+type PortalRefs = {
+	gui: ScreenGui,
+	root: GuiObject,
+	background: GuiObject,
+	levelList: ScrollingFrame,
+	infoFrame: GuiObject,
+	descriptionFrame: ScrollingFrame,
+	descriptionLabel: TextLabel,
+	levelName: TextLabel,
+	highscoreCounter: TextLabel,
+	speedrunCounter: TextLabel,
+	singleButton: GuiButton,
+	partyButton: GuiButton,
+	closeButton: GuiButton,
+}
 
-local function addHover(button: GuiObject, normalColor: Color3, hoverColor: Color3)
-	button.MouseEnter:Connect(function()
-		TweenService:Create(button, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			BackgroundColor3 = hoverColor,
-		}):Play()
-	end)
+type ButtonState = {
+	stroke: UIStroke,
+	scale: UIScale,
+	baseBackgroundTransparency: number,
+	baseImageTransparency: number?,
+	baseImageColor3: Color3?,
+}
 
-	button.MouseLeave:Connect(function()
-		TweenService:Create(button, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			BackgroundColor3 = normalColor,
-		}):Play()
-	end)
-end
-
-local function styleCard(frame: Frame)
-	frame.BorderSizePixel = 0
-	addCorner(frame, 12)
-	addStroke(frame, Color3.fromRGB(40, 40, 48))
-end
-
-local function makeActionButton(
-	parent: Instance,
-	text: string,
-	size: UDim2,
-	position: UDim2,
-	backgroundColor: Color3,
-	hoverColor: Color3
-)
-	local button = Instance.new("TextButton")
-	button.Size = size
-	button.Position = position
-	button.BorderSizePixel = 0
-	button.BackgroundColor3 = backgroundColor
-	button.Font = Enum.Font.GothamBold
-	button.TextSize = 13
-	button.TextColor3 = Color3.fromRGB(255, 255, 255)
-	button.Text = text
-	button.Parent = parent
-	addCorner(button, 12)
-	addHover(button, backgroundColor, hoverColor)
-	return button
-end
-
-local gui = Instance.new("ScreenGui")
-gui.Name = "LevelSelectUI"
-gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true
-gui.Enabled = false
-gui:SetAttribute("Modal", true)
-gui.Parent = pg
-
-local overlay = Instance.new("Frame")
-overlay.Size = UDim2.fromScale(1, 1)
-overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-overlay.BackgroundTransparency = 0.35
-overlay.BorderSizePixel = 0
-overlay.Active = true
-overlay.Parent = gui
-
-local panel = Instance.new("Frame")
-panel.AnchorPoint = Vector2.new(0.5, 0.5)
-panel.Position = UDim2.fromScale(0.5, 0.5)
-panel.Size = UDim2.fromOffset(980, 560)
-panel.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
-panel.BorderSizePixel = 0
-panel.Parent = overlay
-addCorner(panel, 16)
-addStroke(panel, Color3.fromRGB(40, 40, 48))
-
-local title = Instance.new("TextLabel")
-title.BackgroundTransparency = 1
-title.Position = UDim2.fromOffset(24, 16)
-title.Size = UDim2.new(1, -160, 0, 28)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 20
-title.TextColor3 = Color3.fromRGB(245, 245, 245)
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.Text = "Select Level"
-title.Parent = panel
-
-local subtitle = Instance.new("TextLabel")
-subtitle.BackgroundTransparency = 1
-subtitle.Position = UDim2.fromOffset(24, 44)
-subtitle.Size = UDim2.new(1, -180, 0, 18)
-subtitle.Font = Enum.Font.Gotham
-subtitle.TextSize = 12
-subtitle.TextColor3 = Color3.fromRGB(190, 190, 190)
-subtitle.TextXAlignment = Enum.TextXAlignment.Left
-subtitle.Text = "Choose a dungeon and decide whether you want to play solo or with your party."
-subtitle.Parent = panel
-
-local closeBtn = Instance.new("TextButton")
-closeBtn.AnchorPoint = Vector2.new(1, 0)
-closeBtn.Position = UDim2.new(1, -16, 0, 16)
-closeBtn.Size = UDim2.fromOffset(28, 28)
-closeBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
-closeBtn.BorderSizePixel = 0
-closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 14
-closeBtn.TextColor3 = Color3.fromRGB(210, 210, 210)
-closeBtn.Text = "X"
-closeBtn.Parent = panel
-addCorner(closeBtn, 10)
-addHover(closeBtn, closeBtn.BackgroundColor3, Color3.fromRGB(38, 38, 48))
-
-local body = Instance.new("Frame")
-body.Position = UDim2.fromOffset(20, 76)
-body.Size = UDim2.new(1, -40, 1, -96)
-body.BackgroundTransparency = 1
-body.Parent = panel
-
-local bodyLayout = Instance.new("UIListLayout")
-bodyLayout.FillDirection = Enum.FillDirection.Horizontal
-bodyLayout.Padding = UDim.new(0, 16)
-bodyLayout.Parent = body
-
-local listPanel = Instance.new("Frame")
-listPanel.Size = UDim2.new(0.52, -8, 1, 0)
-listPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
-listPanel.BackgroundTransparency = 0.08
-listPanel.Parent = body
-styleCard(listPanel)
-
-local listTitle = Instance.new("TextLabel")
-listTitle.BackgroundTransparency = 1
-listTitle.Position = UDim2.fromOffset(16, 16)
-listTitle.Size = UDim2.new(1, -32, 0, 20)
-listTitle.Font = Enum.Font.GothamBold
-listTitle.TextSize = 16
-listTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
-listTitle.TextXAlignment = Enum.TextXAlignment.Left
-listTitle.Text = "Available Levels"
-listTitle.Parent = listPanel
-
-local listHint = Instance.new("TextLabel")
-listHint.BackgroundTransparency = 1
-listHint.Position = UDim2.fromOffset(16, 38)
-listHint.Size = UDim2.new(1, -32, 0, 16)
-listHint.Font = Enum.Font.Gotham
-listHint.TextSize = 12
-listHint.TextColor3 = Color3.fromRGB(190, 190, 190)
-listHint.TextXAlignment = Enum.TextXAlignment.Left
-listHint.Text = "Select the dungeon you want to enter."
-listHint.Parent = listPanel
-
-local levelList = Instance.new("ScrollingFrame")
-levelList.Position = UDim2.fromOffset(16, 66)
-levelList.Size = UDim2.new(1, -32, 1, -82)
-levelList.BackgroundTransparency = 1
-levelList.BorderSizePixel = 0
-levelList.ScrollBarThickness = 6
-levelList.AutomaticCanvasSize = Enum.AutomaticSize.Y
-levelList.CanvasSize = UDim2.fromOffset(0, 0)
-levelList.Parent = listPanel
-
-local levelLayout = Instance.new("UIListLayout")
-levelLayout.Padding = UDim.new(0, 10)
-levelLayout.Parent = levelList
-
-local detailsPanel = Instance.new("Frame")
-detailsPanel.Size = UDim2.new(0.48, -8, 1, 0)
-detailsPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
-detailsPanel.BackgroundTransparency = 0.08
-detailsPanel.Parent = body
-styleCard(detailsPanel)
-
-local detailsTitle = Instance.new("TextLabel")
-detailsTitle.BackgroundTransparency = 1
-detailsTitle.Position = UDim2.fromOffset(16, 16)
-detailsTitle.Size = UDim2.new(1, -32, 0, 20)
-detailsTitle.Font = Enum.Font.GothamBold
-detailsTitle.TextSize = 16
-detailsTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
-detailsTitle.TextXAlignment = Enum.TextXAlignment.Left
-detailsTitle.Text = "Level Details"
-detailsTitle.Parent = detailsPanel
-
-local selectedName = Instance.new("TextLabel")
-selectedName.BackgroundTransparency = 1
-selectedName.Position = UDim2.fromOffset(16, 48)
-selectedName.Size = UDim2.new(1, -32, 0, 24)
-selectedName.Font = Enum.Font.GothamBold
-selectedName.TextSize = 18
-selectedName.TextColor3 = Color3.fromRGB(245, 245, 245)
-selectedName.TextXAlignment = Enum.TextXAlignment.Left
-selectedName.Text = "No level selected"
-selectedName.Parent = detailsPanel
-
-local selectedMeta = Instance.new("TextLabel")
-selectedMeta.BackgroundTransparency = 1
-selectedMeta.Position = UDim2.fromOffset(16, 76)
-selectedMeta.Size = UDim2.new(1, -32, 0, 16)
-selectedMeta.Font = Enum.Font.Gotham
-selectedMeta.TextSize = 12
-selectedMeta.TextColor3 = Color3.fromRGB(190, 190, 190)
-selectedMeta.TextXAlignment = Enum.TextXAlignment.Left
-selectedMeta.Text = "Level key: -"
-selectedMeta.Parent = detailsPanel
-
-local selectedDesc = Instance.new("TextLabel")
-selectedDesc.BackgroundTransparency = 1
-selectedDesc.Position = UDim2.fromOffset(16, 108)
-selectedDesc.Size = UDim2.new(1, -32, 0, 72)
-selectedDesc.Font = Enum.Font.Gotham
-selectedDesc.TextSize = 13
-selectedDesc.TextColor3 = Color3.fromRGB(210, 210, 210)
-selectedDesc.TextWrapped = true
-selectedDesc.TextXAlignment = Enum.TextXAlignment.Left
-selectedDesc.TextYAlignment = Enum.TextYAlignment.Top
-selectedDesc.Text = "Choose a level on the left, then launch it in singleplayer or multiplayer mode."
-selectedDesc.Parent = detailsPanel
-
-local status = Instance.new("TextLabel")
-status.BackgroundTransparency = 1
-status.Position = UDim2.fromOffset(16, 194)
-status.Size = UDim2.new(1, -32, 0, 48)
-status.Font = Enum.Font.Gotham
-status.TextSize = 12
-status.TextColor3 = Color3.fromRGB(190, 190, 190)
-status.TextWrapped = true
-status.TextXAlignment = Enum.TextXAlignment.Left
-status.TextYAlignment = Enum.TextYAlignment.Top
-status.Text = "Single starts a solo run. Multiplayer requires you to be the party leader."
-status.Parent = detailsPanel
-
-local footer = Instance.new("Frame")
-footer.Position = UDim2.new(0, 16, 1, -52)
-footer.Size = UDim2.new(1, -32, 0, 36)
-footer.BackgroundTransparency = 1
-footer.Parent = detailsPanel
-
-local singleBtn = makeActionButton(
-	footer,
-	"Single",
-	UDim2.new(0.5, -8, 1, 0),
-	UDim2.new(0, 0, 0, 0),
-	Color3.fromRGB(60, 140, 255),
-	Color3.fromRGB(82, 157, 255)
-)
-
-local multiBtn = makeActionButton(
-	footer,
-	"Multiplayer",
-	UDim2.new(0.5, -8, 1, 0),
-	UDim2.new(0.5, 8, 0, 0),
-	Color3.fromRGB(28, 28, 36),
-	Color3.fromRGB(38, 38, 48)
-)
-
+local refs: PortalRefs? = nil
+local fixedControlsBound = false
+local buttonStates: { [GuiButton]: ButtonState } = {}
+local buttonEntries: { [GuiButton]: any } = {}
+local buttonConnections: { [GuiButton]: boolean } = {}
+local entryLookup: { [string]: any } = {}
 local selectedEntry = nil
-local selectedButton: TextButton? = nil
-local levelButtons = {}
+local selectedButton: GuiButton? = nil
 
-local function clearList()
-	for _, child in ipairs(levelList:GetChildren()) do
-		if child:IsA("Frame") or child:IsA("TextButton") then
-			child:Destroy()
+local function normalize(value: string?): string
+	if typeof(value) ~= "string" then
+		return ""
+	end
+
+	return string.lower((value:gsub("[%s%p_]+", "")))
+end
+
+local function registerLookup(lookup: { [string]: any }, rawValue: string?, entry: any)
+	local key = normalize(rawValue)
+	if key ~= "" then
+		lookup[key] = entry
+	end
+end
+
+local function buildEntryLookup()
+	table.clear(entryLookup)
+
+	for _, entry in ipairs(Levels.GetAll()) do
+		registerLookup(entryLookup, entry.key, entry)
+		registerLookup(entryLookup, entry.instanceName, entry)
+		registerLookup(entryLookup, entry.name, entry)
+
+		local aliases = entry.aliases
+		if typeof(aliases) == "table" then
+			for _, alias in ipairs(aliases) do
+				registerLookup(entryLookup, alias, entry)
+			end
 		end
 	end
-	levelButtons = {}
-	selectedButton = nil
 end
 
-local function setStatus(message: string, color: Color3?)
-	status.Text = message
-	status.TextColor3 = color or Color3.fromRGB(190, 190, 190)
-end
-
-local function applySelectedState()
-	for button, stroke in pairs(levelButtons) do
-		local isSelected = button == selectedButton
-		stroke.Color = isSelected and Color3.fromRGB(96, 165, 250) or Color3.fromRGB(40, 40, 48)
-		stroke.Thickness = isSelected and 2 or 1
+local function getPortalGui(): ScreenGui?
+	local ancestorGui = script:FindFirstAncestorOfClass("ScreenGui")
+	if ancestorGui and ancestorGui.Name == "PortalUI" then
+		return ancestorGui
 	end
+
+	local gui = playerGui:FindFirstChild("PortalUI") or playerGui:WaitForChild("PortalUI", 5)
+	if gui and gui:IsA("ScreenGui") then
+		return gui
+	end
+
+	return nil
 end
 
-local function selectEntry(entry, button)
-	selectedEntry = entry
-	selectedButton = button
-	selectedName.Text = tostring(entry.name or entry.key or "Level")
-	selectedMeta.Text = ("Level key: %s"):format(tostring(entry.key or "-"))
-	selectedDesc.Text = "Choose how you want to enter this dungeon. Single teleports only you. Multiplayer teleports your whole online party."
-	setStatus("Single starts a solo run. Multiplayer requires you to be the party leader.")
-	applySelectedState()
+local function waitForGuiObject(parent: Instance, name: string, timeout: number?): GuiObject?
+	local child = parent:FindFirstChild(name) or parent:WaitForChild(name, timeout or 5)
+	if child and child:IsA("GuiObject") then
+		return child
+	end
+	return nil
 end
 
-local function makeEmptyState(titleText: string, descText: string)
-	local row = Instance.new("Frame")
-	row.Size = UDim2.new(1, 0, 0, 96)
-	row.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
-	row.BackgroundTransparency = 0.08
-	row.Parent = levelList
-	styleCard(row)
-
-	local titleLabel = Instance.new("TextLabel")
-	titleLabel.BackgroundTransparency = 1
-	titleLabel.Position = UDim2.fromOffset(16, 16)
-	titleLabel.Size = UDim2.new(1, -32, 0, 20)
-	titleLabel.Font = Enum.Font.GothamBold
-	titleLabel.TextSize = 14
-	titleLabel.TextColor3 = Color3.fromRGB(230, 230, 230)
-	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-	titleLabel.Text = titleText
-	titleLabel.Parent = row
-
-	local descLabel = Instance.new("TextLabel")
-	descLabel.BackgroundTransparency = 1
-	descLabel.Position = UDim2.fromOffset(16, 40)
-	descLabel.Size = UDim2.new(1, -32, 0, 40)
-	descLabel.Font = Enum.Font.Gotham
-	descLabel.TextSize = 12
-	descLabel.TextColor3 = Color3.fromRGB(190, 190, 190)
-	descLabel.TextWrapped = true
-	descLabel.TextXAlignment = Enum.TextXAlignment.Left
-	descLabel.TextYAlignment = Enum.TextYAlignment.Top
-	descLabel.Text = descText
-	descLabel.Parent = row
+local function waitForScrollingFrame(parent: Instance, name: string, timeout: number?): ScrollingFrame?
+	local child = parent:FindFirstChild(name) or parent:WaitForChild(name, timeout or 5)
+	if child and child:IsA("ScrollingFrame") then
+		return child
+	end
+	return nil
 end
 
-local function rebuildList()
-	clearList()
-	selectedEntry = nil
-	selectedName.Text = "No level selected"
-	selectedMeta.Text = "Level key: -"
-	selectedDesc.Text = "Choose a level on the left, then launch it in singleplayer or multiplayer mode."
+local function waitForTextLabel(parent: Instance, name: string, timeout: number?): TextLabel?
+	local child = parent:FindFirstChild(name) or parent:WaitForChild(name, timeout or 5)
+	if child and child:IsA("TextLabel") then
+		return child
+	end
+	return nil
+end
 
-	local entries = Levels.GetAll()
-	if #entries == 0 then
-		makeEmptyState("No levels available.", "Add entries in ReplicatedStorage.ModuleScripts.Levels to populate this menu.")
-		setStatus("No levels are available right now.", Color3.fromRGB(220, 180, 120))
+local function waitForGuiButton(parent: Instance, name: string, timeout: number?): GuiButton?
+	local child = parent:FindFirstChild(name) or parent:WaitForChild(name, timeout or 5)
+	if child and child:IsA("GuiButton") then
+		return child
+	end
+	return nil
+end
+
+local function resolveRefs(): PortalRefs?
+	if refs and refs.gui.Parent == playerGui then
+		return refs
+	end
+
+	local gui = getPortalGui()
+	if not gui then
+		warn("[LevelSelectUI] PortalUI ScreenGui not found in PlayerGui.")
+		return nil
+	end
+
+	local root = waitForGuiObject(gui, "UI")
+	if not root then
+		warn("[LevelSelectUI] PortalUI.UI is missing.")
+		return nil
+	end
+
+	local background = waitForGuiObject(root, "Background")
+	if not background then
+		warn("[LevelSelectUI] PortalUI.UI.Background is missing.")
+		return nil
+	end
+
+	local levelSelection = waitForGuiObject(background, "LevelSelection")
+	local levelList = levelSelection and waitForScrollingFrame(levelSelection, "ScrollingFrame") or nil
+	local infoFrame = waitForGuiObject(background, "LevelInfo")
+	local descriptionFrame = infoFrame and waitForScrollingFrame(infoFrame, "ScrollingFrame") or nil
+	local descriptionLabel = descriptionFrame and waitForTextLabel(descriptionFrame, "LevelDescription") or nil
+
+	local levelName = waitForTextLabel(background, "LevelName")
+	local highscoreCounter = waitForTextLabel(background, "HighscoreCounter")
+	local speedrunCounter = waitForTextLabel(background, "SpeedrunCounter")
+	local singleButton = waitForGuiButton(background, "Single")
+	local partyButton = waitForGuiButton(background, "Party")
+	local closeButton = waitForGuiButton(background, "CloseButton")
+
+	if not (levelList and infoFrame and descriptionFrame and descriptionLabel and levelName and highscoreCounter and speedrunCounter and singleButton and partyButton and closeButton) then
+		warn("[LevelSelectUI] PortalUI hierarchy is incomplete.")
+		return nil
+	end
+
+	descriptionLabel.TextWrapped = true
+	descriptionLabel.TextYAlignment = Enum.TextYAlignment.Top
+	gui.Enabled = false
+
+	refs = {
+		gui = gui,
+		root = root,
+		background = background,
+		levelList = levelList,
+		infoFrame = infoFrame,
+		descriptionFrame = descriptionFrame,
+		descriptionLabel = descriptionLabel,
+		levelName = levelName,
+		highscoreCounter = highscoreCounter,
+		speedrunCounter = speedrunCounter,
+		singleButton = singleButton,
+		partyButton = partyButton,
+		closeButton = closeButton,
+	}
+
+	return refs
+end
+
+local function formatHighscore(entry: any): string
+	if typeof(entry) ~= "table" then
+		return "0"
+	end
+
+	local value = entry.highscore
+	if typeof(value) == "number" then
+		return tostring(math.floor(value))
+	end
+	if typeof(value) == "string" and value ~= "" then
+		return value
+	end
+
+	return "0"
+end
+
+local function formatSpeedrun(entry: any): string
+	if typeof(entry) ~= "table" then
+		return "00:00.00"
+	end
+
+	local value = entry.speedrun
+	if typeof(value) == "number" then
+		local total = math.max(0, value)
+		local whole = math.floor(total)
+		local minutes = math.floor(whole / 60)
+		local seconds = whole % 60
+		local hundredths = math.floor((total - whole) * 100 + 0.5)
+		if hundredths >= 100 then
+			hundredths = 0
+			seconds += 1
+		end
+		if seconds >= 60 then
+			seconds -= 60
+			minutes += 1
+		end
+		return string.format("%02d:%02d.%02d", minutes, seconds, hundredths)
+	end
+	if typeof(value) == "string" and value ~= "" then
+		return value
+	end
+
+	return "00:00.00"
+end
+
+local function getDescription(entry: any, statusMessage: string?): string
+	local description = "Select a level to see its details."
+	if typeof(entry) == "table" and typeof(entry.description) == "string" and entry.description ~= "" then
+		description = entry.description
+	end
+
+	if typeof(statusMessage) == "string" and statusMessage ~= "" then
+		return string.format("%s\n\n%s", statusMessage, description)
+	end
+
+	if typeof(entry) == "table" and typeof(entry.placeId) ~= "number" then
+		return string.format("%s%s\n\n%s", ERROR_PREFIX, "This level is not available yet.", description)
+	end
+
+	return description
+end
+
+local function updateDescriptionCanvas()
+	local currentRefs = resolveRefs()
+	if not currentRefs then
 		return
 	end
 
-	for _, entry in ipairs(entries) do
-		local button = Instance.new("TextButton")
-		button.Size = UDim2.new(1, 0, 0, 64)
-		button.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
-		button.BackgroundTransparency = 0.08
-		button.BorderSizePixel = 0
-		button.Text = ""
-		button.AutoButtonColor = false
-		button.Parent = levelList
-		addCorner(button, 12)
+	local descriptionLabel = currentRefs.descriptionLabel
+	local descriptionFrame = currentRefs.descriptionFrame
+	local horizontalPadding = math.max(8, descriptionLabel.Position.X.Offset * 2)
+	local availableWidth = math.max(120, descriptionFrame.AbsoluteSize.X - horizontalPadding)
 
-		local stroke = addStroke(button, Color3.fromRGB(40, 40, 48))
-		levelButtons[button] = stroke
+	local textBounds = TextService:GetTextSize(
+		descriptionLabel.Text or "",
+		descriptionLabel.TextSize,
+		descriptionLabel.Font,
+		Vector2.new(availableWidth, 10000)
+	)
 
-		local nameLabel = Instance.new("TextLabel")
-		nameLabel.BackgroundTransparency = 1
-		nameLabel.Position = UDim2.fromOffset(16, 12)
-		nameLabel.Size = UDim2.new(1, -32, 0, 20)
-		nameLabel.Font = Enum.Font.GothamBold
-		nameLabel.TextSize = 14
-		nameLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
-		nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-		nameLabel.Text = tostring(entry.name or entry.key or "Level")
-		nameLabel.Parent = button
+	descriptionLabel.Size = UDim2.new(1, -horizontalPadding, 0, math.max(textBounds.Y, descriptionFrame.AbsoluteSize.Y - 8))
+	descriptionFrame.CanvasSize = UDim2.fromOffset(0, math.max(textBounds.Y + 8, descriptionFrame.AbsoluteSize.Y))
+end
 
-		local keyLabel = Instance.new("TextLabel")
-		keyLabel.BackgroundTransparency = 1
-		keyLabel.Position = UDim2.fromOffset(16, 34)
-		keyLabel.Size = UDim2.new(1, -32, 0, 14)
-		keyLabel.Font = Enum.Font.Gotham
-		keyLabel.TextSize = 12
-		keyLabel.TextColor3 = Color3.fromRGB(190, 190, 190)
-		keyLabel.TextXAlignment = Enum.TextXAlignment.Left
-		keyLabel.Text = ("Key: %s"):format(tostring(entry.key or "-"))
-		keyLabel.Parent = button
-
-		addHover(button, button.BackgroundColor3, Color3.fromRGB(28, 28, 36))
-		button.MouseButton1Click:Connect(function()
-			selectEntry(entry, button)
-		end)
+local function getButtonState(button: GuiButton): ButtonState
+	local existing = buttonStates[button]
+	if existing then
+		return existing
 	end
 
-	local firstButton = next(levelButtons)
-	if firstButton then
-		selectEntry(entries[1], firstButton)
+	local stroke = button:FindFirstChild("PortalSelectionStroke")
+	if not (stroke and stroke:IsA("UIStroke")) then
+		stroke = Instance.new("UIStroke")
+		stroke.Name = "PortalSelectionStroke"
+		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		stroke.Color = IDLE_STROKE
+		stroke.Thickness = 2
+		stroke.Transparency = 0.1
+		stroke.Parent = button
+	end
+
+	local scale = button:FindFirstChild("PortalSelectionScale")
+	if not (scale and scale:IsA("UIScale")) then
+		scale = Instance.new("UIScale")
+		scale.Name = "PortalSelectionScale"
+		scale.Scale = 1
+		scale.Parent = button
+	end
+
+	local state: ButtonState = {
+		stroke = stroke,
+		scale = scale,
+		baseBackgroundTransparency = button.BackgroundTransparency,
+		baseImageTransparency = nil,
+		baseImageColor3 = nil,
+	}
+
+	if button:IsA("ImageButton") then
+		state.baseImageTransparency = button.ImageTransparency
+		state.baseImageColor3 = button.ImageColor3
+	end
+
+	buttonStates[button] = state
+	return state
+end
+
+local function tweenInstance(instance: Instance, properties: { [string]: any })
+	TweenService:Create(instance, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), properties):Play()
+end
+
+local function updateLevelButtonVisual(button: GuiButton, isHovering: boolean)
+	local state = getButtonState(button)
+	local isSelected = button == selectedButton
+
+	state.stroke.Color = if isSelected then SELECTED_STROKE else if isHovering then HOVER_STROKE else IDLE_STROKE
+	state.stroke.Thickness = if isSelected then 4 else if isHovering then 3 else 2
+
+	local targetScale = 1
+	if isSelected then
+		targetScale = 1.025
+	elseif isHovering then
+		targetScale = 1.01
+	end
+	tweenInstance(state.scale, { Scale = targetScale })
+
+	if button:IsA("ImageButton") then
+		local targetImageTransparency = state.baseImageTransparency or 0
+		if isSelected then
+			targetImageTransparency = math.max(0, targetImageTransparency - 0.08)
+		elseif isHovering then
+			targetImageTransparency = math.max(0, targetImageTransparency - 0.04)
+		end
+
+		tweenInstance(button, {
+			BackgroundTransparency = if isSelected then math.max(0, state.baseBackgroundTransparency - 0.06) else state.baseBackgroundTransparency,
+			ImageTransparency = targetImageTransparency,
+		})
+
+		if state.baseImageColor3 then
+			button.ImageColor3 = state.baseImageColor3
+		end
+	else
+		local targetBackgroundTransparency = state.baseBackgroundTransparency
+		if isSelected then
+			targetBackgroundTransparency = math.max(0, state.baseBackgroundTransparency - 0.06)
+		elseif isHovering then
+			targetBackgroundTransparency = math.max(0, state.baseBackgroundTransparency - 0.03)
+		end
+
+		tweenInstance(button, {
+			BackgroundTransparency = targetBackgroundTransparency,
+		})
+	end
+end
+
+local function applySelectionVisuals()
+	for button in pairs(buttonEntries) do
+		if button.Parent then
+			updateLevelButtonVisual(button, false)
+		end
+	end
+end
+
+local function renderSelectedEntry(statusMessage: string?)
+	local currentRefs = resolveRefs()
+	if not currentRefs then
+		return
+	end
+
+	if typeof(selectedEntry) ~= "table" then
+		currentRefs.levelName.Text = "Level Name"
+		currentRefs.highscoreCounter.Text = "0"
+		currentRefs.speedrunCounter.Text = "00:00.00"
+		currentRefs.descriptionLabel.Text = "Select a level to see its details."
+		updateDescriptionCanvas()
+		return
+	end
+
+	currentRefs.levelName.Text = tostring(selectedEntry.name or selectedEntry.key or "Level")
+	currentRefs.highscoreCounter.Text = formatHighscore(selectedEntry)
+	currentRefs.speedrunCounter.Text = formatSpeedrun(selectedEntry)
+	currentRefs.descriptionLabel.Text = getDescription(selectedEntry, statusMessage)
+	updateDescriptionCanvas()
+end
+
+local function resolveEntryForButton(button: GuiButton): any
+	local byName = entryLookup[normalize(button.Name)]
+	if byName then
+		return byName
+	end
+
+	local textLabel = button:FindFirstChild("LevelName")
+	if textLabel and textLabel:IsA("TextLabel") then
+		return entryLookup[normalize(textLabel.Text)]
+	end
+
+	if button:IsA("TextButton") then
+		return entryLookup[normalize(button.Text)]
+	end
+
+	return nil
+end
+
+local function selectEntry(entry: any, button: GuiButton?)
+	selectedEntry = entry
+	selectedButton = button
+	applySelectionVisuals()
+	renderSelectedEntry(nil)
+end
+
+local function bindLevelButton(button: GuiButton, entry: any)
+	buttonEntries[button] = entry
+
+	local childLabel = button:FindFirstChild("LevelName")
+	if childLabel and childLabel:IsA("TextLabel") and typeof(entry.name) == "string" then
+		childLabel.Text = entry.name
+	elseif button:IsA("TextButton") and typeof(entry.name) == "string" and button.Text ~= "" then
+		button.Text = entry.name
+	end
+
+	if buttonConnections[button] then
+		return
+	end
+	buttonConnections[button] = true
+
+	getButtonState(button)
+	button.AutoButtonColor = false
+
+	button.MouseEnter:Connect(function()
+		updateLevelButtonVisual(button, true)
+	end)
+
+	button.MouseLeave:Connect(function()
+		updateLevelButtonVisual(button, false)
+	end)
+
+	button.MouseButton1Click:Connect(function()
+		selectEntry(entry, button)
+	end)
+end
+
+local function refreshLevelButtons()
+	local currentRefs = resolveRefs()
+	if not currentRefs then
+		return
+	end
+
+	table.clear(buttonEntries)
+
+	local fallbackEntry = nil
+	local fallbackButton = nil
+
+	for _, child in ipairs(currentRefs.levelList:GetChildren()) do
+		if not child:IsA("GuiButton") then
+			continue
+		end
+
+		local entry = resolveEntryForButton(child)
+		if not entry then
+			warn(string.format("[LevelSelectUI] No level entry found for button '%s'.", child.Name))
+			continue
+		end
+
+		if not fallbackEntry then
+			fallbackEntry = entry
+			fallbackButton = child
+		end
+
+		bindLevelButton(child, entry)
+
+		if selectedEntry == entry then
+			fallbackEntry = entry
+			fallbackButton = child
+		end
+	end
+
+	if fallbackEntry and fallbackButton then
+		selectEntry(fallbackEntry, fallbackButton)
+	else
+		selectedEntry = nil
+		selectedButton = nil
+		renderSelectedEntry(nil)
 	end
 end
 
 local function closeUI()
-	gui.Enabled = false
+	local currentRefs = resolveRefs()
+	if not currentRefs then
+		return
+	end
+
+	currentRefs.gui.Enabled = false
 end
 
 local function requestTeleport(mode: string)
-	if not selectedEntry or typeof(selectedEntry.key) ~= "string" then
-		setStatus("Select a level first.", Color3.fromRGB(220, 180, 120))
+	if typeof(selectedEntry) ~= "table" then
+		renderSelectedEntry("Select a level first.")
+		return
+	end
+
+	if typeof(selectedEntry.placeId) ~= "number" then
+		renderSelectedEntry(ERROR_PREFIX .. "This level is not available yet.")
 		return
 	end
 
@@ -432,55 +532,87 @@ local function requestTeleport(mode: string)
 	closeUI()
 end
 
-local function openUI()
-	rebuildList()
-	gui.Enabled = true
+local function bindFixedControls()
+	local currentRefs = resolveRefs()
+	if not currentRefs or fixedControlsBound then
+		return
+	end
+
+	fixedControlsBound = true
+
+	currentRefs.closeButton.MouseButton1Click:Connect(closeUI)
+	currentRefs.singleButton.MouseButton1Click:Connect(function()
+		requestTeleport("Single")
+	end)
+	currentRefs.partyButton.MouseButton1Click:Connect(function()
+		requestTeleport("Multi")
+	end)
+
+	currentRefs.descriptionFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateDescriptionCanvas)
+	currentRefs.descriptionLabel:GetPropertyChangedSignal("Text"):Connect(updateDescriptionCanvas)
 end
 
-closeBtn.MouseButton1Click:Connect(closeUI)
-singleBtn.MouseButton1Click:Connect(function()
-	requestTeleport("Single")
-end)
-multiBtn.MouseButton1Click:Connect(function()
-	requestTeleport("Multi")
-end)
+local function openUI()
+	if not resolveRefs() then
+		return
+	end
+
+	bindFixedControls()
+	refreshLevelButtons()
+
+	local currentRefs = resolveRefs()
+	if currentRefs then
+		currentRefs.gui.Enabled = true
+	end
+end
+
+local function messageForFailure(reason: string): string
+	if reason == "no_party" then
+		return "Party mode requires an active party."
+	elseif reason == "not_leader" then
+		return "Only the party leader can start a party run."
+	elseif reason == "party_too_small" then
+		return "Your party needs at least two online players."
+	elseif reason == "party_missing" then
+		return "Party service is unavailable right now."
+	elseif reason == "level_unavailable" then
+		return ERROR_PREFIX .. "This level does not have a placeId yet."
+	elseif reason == "unknown_level" then
+		return "The selected level could not be found."
+	end
+
+	return "Teleport failed. Try again."
+end
+
+buildEntryLookup()
 
 OpenLevelSelect.OnClientEvent:Connect(openUI)
 
 if TeleportStatus and TeleportStatus:IsA("RemoteEvent") then
 	TeleportStatus.OnClientEvent:Connect(function(payload)
-		if typeof(payload) ~= "table" then
+		if typeof(payload) ~= "table" or payload.type ~= "failed" then
 			return
 		end
 
-		if payload.type == "failed" then
-			gui.Enabled = true
-
-			local reason = tostring(payload.reason or "")
-			local message = "Teleport failed. Try again."
-			if reason == "no_party" then
-				message = "Teleport failed: you need a party for multiplayer."
-			elseif reason == "not_leader" then
-				message = "Teleport failed: only the party leader can start multiplayer."
-			elseif reason == "party_too_small" then
-				message = "Teleport failed: your party needs at least 2 online players."
-			elseif reason == "party_missing" then
-				message = "Teleport failed: party service is unavailable."
-			end
-
-			setStatus(message, Color3.fromRGB(220, 140, 140))
+		local currentRefs = resolveRefs()
+		if not currentRefs then
+			return
 		end
+
+		currentRefs.gui.Enabled = true
+		renderSelectedEntry(messageForFailure(tostring(payload.reason or "")))
 	end)
 end
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then
+	if gameProcessed or input.KeyCode ~= Enum.KeyCode.Escape then
 		return
 	end
 
-	if input.KeyCode == Enum.KeyCode.Escape and gui.Enabled then
+	local currentRefs = resolveRefs()
+	if currentRefs and currentRefs.gui.Enabled then
 		closeUI()
 	end
 end)
 
-print("[LevelSelectUI] Ready")
+print("[LevelSelectUI] Ready for PortalUI")
