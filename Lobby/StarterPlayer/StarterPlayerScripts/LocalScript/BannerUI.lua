@@ -13,6 +13,7 @@ local moduleRoot = ReplicatedStorage:FindFirstChild("ModuleScripts")
 
 local WeaponConfigs = require(moduleRoot:WaitForChild("WeaponConfigs"))
 local BannerConfigs = require(moduleRoot:WaitForChild("BannerConfigs"))
+local UiResponsive = require(moduleRoot:WaitForChild("UiResponsive"))
 
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local remoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions")
@@ -162,7 +163,7 @@ end
 
 local gui = playerGui:WaitForChild("BannerUI")
 gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true
+gui.IgnoreGuiInset = false
 gui.Enabled = false
 gui:SetAttribute("Modal", true)
 
@@ -197,6 +198,7 @@ panelGradient.Color = ColorSequence.new({
 	ColorSequenceKeypoint.new(1, Color3.fromRGB(12, 15, 24)),
 })
 panelGradient.Rotation = 90
+UiResponsive.attachCenteredPanel(panel, Vector2.new(1120, 680))
 
 local closeButton = Instance.new("TextButton")
 closeButton.Name = "CloseButton"
@@ -560,6 +562,7 @@ rollPanelAspect.DominantAxis = Enum.DominantAxis.Height
 local rollPanelStroke = Instance.new("UIStroke", rollPanel)
 rollPanelStroke.Color = Color3.fromRGB(68, 86, 120)
 rollPanelStroke.Thickness = 1
+UiResponsive.attachCenteredPanel(rollPanel, Vector2.new(980, 560))
 
 local rollTitle = Instance.new("TextLabel")
 rollTitle.BackgroundTransparency = 1

@@ -4,6 +4,11 @@ local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local moduleRoot = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
+local UiResponsive = require(moduleRoot:WaitForChild("UiResponsive"))
 
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local BountyBoardEvent = remoteEvents:WaitForChild("BountyBoardEvent")
@@ -106,7 +111,7 @@ end
 local gui = playerGui:WaitForChild("BountyBoardGui")
 gui.ResetOnSpawn = false
 gui.Enabled = false
-gui.IgnoreGuiInset = true
+gui.IgnoreGuiInset = false
 gui:SetAttribute("Modal", true)
 
 local overlay = gui:WaitForChild("overlay")
@@ -132,6 +137,7 @@ panelAspect.DominantAxis = Enum.DominantAxis.Height
 local panelStroke = Instance.new("UIStroke", panel)
 panelStroke.Color = Color3.fromRGB(46, 54, 70)
 panelStroke.Thickness = 1
+UiResponsive.attachCenteredPanel(panel, Vector2.new(1160, 660))
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1

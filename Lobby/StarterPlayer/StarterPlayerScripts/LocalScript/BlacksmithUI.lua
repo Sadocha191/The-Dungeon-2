@@ -5,6 +5,11 @@ local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local moduleRoot = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
+local UiResponsive = require(moduleRoot:WaitForChild("UiResponsive"))
 
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local OpenBlacksmithUI = remoteEvents:WaitForChild("OpenBlacksmithUI")
@@ -59,6 +64,7 @@ panelAspect.DominantAxis = Enum.DominantAxis.Height
 local panelStroke = Instance.new("UIStroke", panel)
 panelStroke.Color = Color3.fromRGB(46, 54, 70)
 panelStroke.Thickness = 1
+UiResponsive.attachCenteredPanel(panel, Vector2.new(1100, 640))
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1

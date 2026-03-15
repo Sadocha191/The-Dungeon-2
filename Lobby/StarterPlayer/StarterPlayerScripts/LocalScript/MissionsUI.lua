@@ -9,6 +9,11 @@ local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local moduleRoot = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
+local UiResponsive = require(moduleRoot:WaitForChild("UiResponsive"))
 
 local remoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions")
 local RF_GetMissions = remoteFunctions:WaitForChild("RF_GetMissions")
@@ -74,7 +79,7 @@ end
 -- ===== UI =====
 local gui = playerGui:WaitForChild("MissionsGui")
 gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true
+gui.IgnoreGuiInset = false
 gui.Enabled = false
 gui:SetAttribute("Modal", true)
 
@@ -99,6 +104,7 @@ local panelAspect = Instance.new("UIAspectRatioConstraint", panel)
 panelAspect.AspectRatio = 980 / 560
 panelAspect.DominantAxis = Enum.DominantAxis.Height
 addStroke(panel, Color3.fromRGB(40, 40, 48))
+UiResponsive.attachCenteredPanel(panel, Vector2.new(980, 560))
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1

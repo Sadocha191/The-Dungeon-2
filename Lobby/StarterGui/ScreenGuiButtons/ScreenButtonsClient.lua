@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
@@ -65,10 +66,30 @@ local function isGuiOpen(guiName)
 	end
 
 	if guiName == "PartyGui" then
-		return targetGui:GetAttribute("Modal") == true
+		local overlay = targetGui:FindFirstChild("overlay")
+		return overlay and overlay:IsA("GuiObject") and overlay.Visible or false
 	end
 
 	return targetGui.Enabled
+end
+
+local function shouldHideButtons()
+	for _, inst in ipairs(playerGui:GetChildren()) do
+		if inst ~= screenGui and inst:IsA("ScreenGui") and inst.Enabled then
+			if inst:GetAttribute("Modal") == true then
+				return true
+			end
+
+			if inst.Name == "PartyGui" then
+				local overlay = inst:FindFirstChild("overlay")
+				if overlay and overlay:IsA("GuiObject") and overlay.Visible then
+					return true
+				end
+			end
+		end
+	end
+
+	return false
 end
 
 local function openExclusive(guiName)
@@ -230,3 +251,12 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 end)
 
 applyProfileIcon()
+
+local lastHidden = false
+RunService.RenderStepped:Connect(function()
+	local hide = shouldHideButtons()
+	if hide ~= lastHidden then
+		frame.Visible = not hide
+		lastHidden = hide
+	end
+end)

@@ -5,6 +5,11 @@ local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local moduleRoot = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
+local UiResponsive = require(moduleRoot:WaitForChild("UiResponsive"))
 
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local OpenMineUI = remoteEvents:WaitForChild("OpenMineUI")
@@ -36,6 +41,7 @@ panelSizeConstraint.MaxSize = Vector2.new(860, 560)
 local panelAspect = Instance.new("UIAspectRatioConstraint", panel)
 panelAspect.AspectRatio = 860 / 560
 panelAspect.DominantAxis = Enum.DominantAxis.Height
+UiResponsive.attachCenteredPanel(panel, Vector2.new(860, 560))
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1

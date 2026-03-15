@@ -7,6 +7,11 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local plr = Players.LocalPlayer
+local moduleRoot = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
+local UiResponsive = require(moduleRoot:WaitForChild("UiResponsive"))
 
 local folder = ReplicatedStorage:WaitForChild("RemoteEvents")
 local PartyAction = folder:WaitForChild("PartyAction")
@@ -81,7 +86,7 @@ end
 
 local gui = plr:WaitForChild("PlayerGui"):WaitForChild("PartyGui")
 gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true
+gui.IgnoreGuiInset = false
 gui:SetAttribute("Modal", false)
 
 local overlay = gui:WaitForChild("overlay")
@@ -107,6 +112,7 @@ local panelAspect = Instance.new("UIAspectRatioConstraint", panel)
 panelAspect.AspectRatio = 980 / 560
 panelAspect.DominantAxis = Enum.DominantAxis.Height
 addStroke(panel, Color3.fromRGB(40, 40, 48))
+UiResponsive.attachCenteredPanel(panel, Vector2.new(980, 560))
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1

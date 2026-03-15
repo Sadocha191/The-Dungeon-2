@@ -5,6 +5,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local StarterGui = game:GetService("StarterGui")
 
 local plr = Players.LocalPlayer
 local pg = plr:WaitForChild("PlayerGui")
@@ -60,6 +61,13 @@ local function anyModalOpen(): boolean
 			if inst:GetAttribute("Modal") == true then
 				return true
 			end
+
+			if inst.Name == "PartyGui" then
+				local overlay = inst:FindFirstChild("overlay")
+				if overlay and overlay:IsA("GuiObject") and overlay.Visible then
+					return true
+				end
+			end
 		end
 	end
 	return false
@@ -70,6 +78,12 @@ RunService.RenderStepped:Connect(function()
 	local hide = anyModalOpen()
 	if hide ~= lastHidden then
 		gui.Enabled = not hide
+		pcall(function()
+			StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, not hide)
+		end)
+		pcall(function()
+			StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, not hide)
+		end)
 		lastHidden = hide
 	end
 end)

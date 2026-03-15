@@ -4,12 +4,16 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local plr = Players.LocalPlayer
 local pg = plr:WaitForChild("PlayerGui")
+local moduleRoot = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
+local UiResponsive = require(moduleRoot:WaitForChild("UiResponsive"))
 
 local function waitForChild(parent, name, timeout)
 	local found = parent:FindFirstChild(name)
@@ -141,7 +145,7 @@ end
 local inventoryGui = pg:WaitForChild("InventoryGui")
 inventoryGui.Enabled = false
 inventoryGui.ResetOnSpawn = false
-inventoryGui.IgnoreGuiInset = true
+inventoryGui.IgnoreGuiInset = false
 inventoryGui:SetAttribute("Modal", true)
 
 local overlay = inventoryGui:WaitForChild("overlay")
@@ -168,6 +172,7 @@ panelAspect.DominantAxis = Enum.DominantAxis.Height
 local panelStroke = Instance.new("UIStroke", panel)
 panelStroke.Color = Color3.fromRGB(40, 40, 48)
 panelStroke.Thickness = 1
+UiResponsive.attachCenteredPanel(panel, Vector2.new(1120, 620))
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1

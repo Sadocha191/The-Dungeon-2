@@ -19,6 +19,7 @@ local CreateProfileResponse = remoteEvents:FindFirstChild("CreateProfileResponse
 
 local moduleFolder = (ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5))
 local Races = require(moduleFolder:WaitForChild("Races"))
+local UiResponsive = require(moduleFolder:WaitForChild("UiResponsive"))
 
 -- ===== Colors =====
 local rarityColor = {
@@ -120,6 +121,9 @@ rootSizeConstraint.MaxSize = Vector2.new(1040, 460)
 local rootAspect = Instance.new("UIAspectRatioConstraint", root)
 rootAspect.AspectRatio = 1040 / 460
 rootAspect.DominantAxis = Enum.DominantAxis.Height
+UiResponsive.attachCenteredPanel(root, Vector2.new(1040, 460), {
+	topOverflow = 56,
+})
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1
