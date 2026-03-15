@@ -8,16 +8,18 @@ local moduleFolder = (
 )
 
 if not moduleFolder then
-	warn("[LevelSelectUI] ModuleScripts folder not found in ReplicatedStorage.")
+	warn("[PortalUIClient] ModuleScripts folder not found in ReplicatedStorage.")
 	return
 end
+
+print("[PortalUIClient] Boot")
 
 local ok, PortalUIController = pcall(function()
 	return require(moduleFolder:WaitForChild("PortalUIController"))
 end)
 
 if not ok then
-	warn("[LevelSelectUI] Failed to load PortalUIController:", PortalUIController)
+	warn("[PortalUIClient] Failed to load PortalUIController:", PortalUIController)
 	return
 end
 
