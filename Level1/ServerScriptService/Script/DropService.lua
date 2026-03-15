@@ -54,6 +54,19 @@ local ORB_IDLE_BOB_SPEED = 4.8
 local ORB_IDLE_WOBBLE = 0.12
 local PICKUP_ANIM_DURATION = 0.24
 local ORB_ANIMATION_DISTANCE = 95
+local ORB_BASE_TRANSPARENCY = 0.16
+local ORB_TRAIL_LIGHT_EMISSION = 0.35
+local ORB_SPARKLE_LIGHT_EMISSION = 0.4
+local ORB_LIGHT_BRIGHTNESS = {
+	xp = 0.7,
+	coins = 0.9,
+	souls = 0.8,
+}
+local ORB_LIGHT_RANGE = {
+	xp = 4.75,
+	coins = 5.25,
+	souls = 5.75,
+}
 
 local GROUND_RAY_PARAMS = RaycastParams.new()
 GROUND_RAY_PARAMS.FilterType = Enum.RaycastFilterType.Blacklist
@@ -195,14 +208,14 @@ local function createDropTrail(part: BasePart, color: Color3)
 	local trail = Instance.new("Trail")
 	trail.Attachment0 = top
 	trail.Attachment1 = bottom
-	trail.Color = ColorSequence.new(color, brightenColor(color, 0.32))
-	trail.LightEmission = 1
+	trail.Color = ColorSequence.new(color, brightenColor(color, 0.18))
+	trail.LightEmission = ORB_TRAIL_LIGHT_EMISSION
 	trail.FaceCamera = true
 	trail.Lifetime = 0.12
 	trail.MinLength = 0.02
 	trail.Enabled = false
 	trail.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.08),
+		NumberSequenceKeypoint.new(0, 0.32),
 		NumberSequenceKeypoint.new(1, 1),
 	})
 	trail.WidthScale = NumberSequence.new({
@@ -221,8 +234,8 @@ local function createDropSparkles(part: BasePart, color: Color3)
 
 	local emitter = Instance.new("ParticleEmitter")
 	emitter.Name = "Sparkles"
-	emitter.Color = ColorSequence.new(color, brightenColor(color, 0.34))
-	emitter.LightEmission = 1
+	emitter.Color = ColorSequence.new(color, brightenColor(color, 0.18))
+	emitter.LightEmission = ORB_SPARKLE_LIGHT_EMISSION
 	emitter.Lifetime = NumberRange.new(0.35, 0.75)
 	emitter.Speed = NumberRange.new(0.12, 0.55)
 	emitter.Rate = 8
@@ -236,7 +249,7 @@ local function createDropSparkles(part: BasePart, color: Color3)
 		NumberSequenceKeypoint.new(1, 0),
 	})
 	emitter.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.25),
+		NumberSequenceKeypoint.new(0, 0.48),
 		NumberSequenceKeypoint.new(1, 1),
 	})
 	emitter.Parent = attachment
@@ -299,8 +312,8 @@ local function startPickupAnimation(orb, meta, plr, now)
 		meta.trail.Lifetime = 0.18
 	end
 	if meta.light then
-		meta.light.Brightness = meta.baseLightBrightness * 1.8
-		meta.light.Range = meta.baseLightRange * 1.35
+		meta.light.Brightness = meta.baseLightBrightness * 1.3
+		meta.light.Range = meta.baseLightRange * 1.12
 	end
 end
 
@@ -331,10 +344,10 @@ local function updateCollectingDrop(orb, meta, now)
 	)
 
 	orb.Size = ORB_SIZE:Lerp(ORB_SIZE * 0.28, eased)
-	orb.Transparency = 0.05 + (eased * 0.88)
+	orb.Transparency = ORB_BASE_TRANSPARENCY + (eased * 0.8)
 	orb.CFrame = CFrame.new(travelPos + swirlOffset) * CFrame.Angles(alpha * 12, alpha * 18, alpha * 10)
 	if meta.light then
-		meta.light.Brightness = meta.baseLightBrightness + ((1 - alpha) * 2.2)
+		meta.light.Brightness = meta.baseLightBrightness + ((1 - alpha) * 0.65)
 	end
 
 	if alpha >= 1 then
@@ -351,11 +364,11 @@ local function updateIdleVisual(orb, meta, now)
 	local spin = meta.spinBase + ((now - meta.spawnAt) * meta.spinSpeed)
 	meta.staticVisual = false
 	orb.Size = ORB_SIZE
-	orb.Transparency = 0.05
+	orb.Transparency = ORB_BASE_TRANSPARENCY
 	orb.CFrame = CFrame.new(meta.corePos + Vector3.new(0, bob, 0)) * CFrame.Angles(wobble * 0.35, spin, -wobble * 0.35)
 	if meta.light then
-		meta.light.Brightness = meta.baseLightBrightness + (math.sin(((now - meta.spawnAt) * 5) + meta.phase) * 0.25)
-		meta.light.Range = meta.baseLightRange + (math.cos(((now - meta.spawnAt) * 3.2) + meta.phase) * 0.15)
+		meta.light.Brightness = meta.baseLightBrightness + (math.sin(((now - meta.spawnAt) * 5) + meta.phase) * 0.1)
+		meta.light.Range = meta.baseLightRange + (math.cos(((now - meta.spawnAt) * 3.2) + meta.phase) * 0.08)
 	end
 end
 
@@ -366,7 +379,7 @@ local function setStaticIdleVisual(orb, meta)
 	meta.staticVisual = true
 	meta.lastStaticPos = meta.corePos
 	orb.Size = ORB_SIZE
-	orb.Transparency = 0.05
+	orb.Transparency = ORB_BASE_TRANSPARENCY
 	orb.CFrame = CFrame.new(meta.corePos) * CFrame.Angles(0, meta.spinBase, 0)
 	if meta.light then
 		meta.light.Brightness = meta.baseLightBrightness
@@ -389,7 +402,7 @@ local function makeOrb(kind: "xp" | "coins" | "souls", amount: number, pos: Vect
 	p.Material = Enum.Material.Neon
 	p.Color = color
 	p.Size = ORB_SIZE
-	p.Transparency = 0.05
+	p.Transparency = ORB_BASE_TRANSPARENCY
 	p.CanCollide = false
 	p.CanQuery = false
 	p.Anchored = true
@@ -398,8 +411,8 @@ local function makeOrb(kind: "xp" | "coins" | "souls", amount: number, pos: Vect
 
 	local light = Instance.new("PointLight")
 	light.Color = color
-	light.Brightness = kind == "coins" and 2.2 or 1.8
-	light.Range = kind == "souls" and 8.5 or 7.5
+	light.Brightness = ORB_LIGHT_BRIGHTNESS[kind] or 0.75
+	light.Range = ORB_LIGHT_RANGE[kind] or 5
 	light.Shadows = false
 	light.Parent = p
 
