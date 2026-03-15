@@ -307,6 +307,47 @@ local function waitForTextLabel(parent: Instance, name: string, timeout: number?
 	return nil
 end
 
+local function resolveDescriptionLabel(descriptionFrame: ScrollingFrame): TextLabel?
+	local existing = descriptionFrame:FindFirstChild("LevelDescription")
+	if existing and existing:IsA("TextLabel") then
+		return existing
+	end
+
+	local fallback = descriptionFrame:FindFirstChild("LevelDescriptionText")
+	if fallback and fallback:IsA("TextLabel") then
+		return fallback
+	end
+
+	local placeholder = existing
+	local label = Instance.new("TextLabel")
+	label.Name = "LevelDescriptionText"
+	label.BackgroundTransparency = 1
+	label.BorderSizePixel = 0
+	label.RichText = false
+	label.TextWrapped = true
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextYAlignment = Enum.TextYAlignment.Top
+	label.TextColor3 = Color3.fromRGB(255, 255, 255)
+	label.Font = Enum.Font.Arcade
+	label.TextSize = 24
+	label.ZIndex = 10
+
+	if placeholder and placeholder:IsA("GuiObject") then
+		label.AnchorPoint = placeholder.AnchorPoint
+		label.Position = placeholder.Position
+		label.Size = placeholder.Size
+		label.Rotation = placeholder.Rotation
+		label.Visible = placeholder.Visible
+		label.LayoutOrder = placeholder.LayoutOrder
+	else
+		label.Position = UDim2.fromOffset(8, 8)
+		label.Size = UDim2.new(1, -16, 1, -16)
+	end
+
+	label.Parent = descriptionFrame
+	return label
+end
+
 local function waitForGuiButton(parent: Instance, name: string, timeout: number?): GuiButton?
 	local child = parent:FindFirstChild(name) or parent:WaitForChild(name, timeout or 5)
 	if child and child:IsA("GuiButton") then
@@ -342,13 +383,13 @@ local function resolveRefs(): PortalRefs?
 	local levelList = levelSelection and waitForScrollingFrame(levelSelection, "ScrollingFrame") or nil
 	local infoFrame = waitForGuiObject(background, "LevelInfo")
 	local descriptionFrame = infoFrame and waitForScrollingFrame(infoFrame, "ScrollingFrame") or nil
-	local descriptionLabel = descriptionFrame and waitForTextLabel(descriptionFrame, "LevelDescription") or nil
+	local descriptionLabel = descriptionFrame and resolveDescriptionLabel(descriptionFrame) or nil
 
-	local levelName = waitForTextLabel(background, "LevelName")
-	local highscoreCounter = waitForTextLabel(background, "HighscoreCounter")
-	local speedrunCounter = waitForTextLabel(background, "SpeedrunCounter")
-	local singleButton = waitForGuiButton(background, "Single")
-	local partyButton = waitForGuiButton(background, "Party")
+	local levelName = infoFrame and waitForTextLabel(infoFrame, "LevelName") or nil
+	local highscoreCounter = infoFrame and waitForTextLabel(infoFrame, "HighscoreCounter") or nil
+	local speedrunCounter = infoFrame and waitForTextLabel(infoFrame, "SpeedrunCounter") or nil
+	local singleButton = infoFrame and waitForGuiButton(infoFrame, "Single") or nil
+	local partyButton = infoFrame and waitForGuiButton(infoFrame, "Party") or nil
 	local closeButton = waitForGuiButton(background, "CloseButton")
 
 	if not (levelList and infoFrame and descriptionFrame and descriptionLabel and levelName and highscoreCounter and speedrunCounter and singleButton and partyButton and closeButton) then
