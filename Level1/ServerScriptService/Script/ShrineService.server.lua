@@ -493,6 +493,11 @@ local function spawnShrinesForRun()
 	})
 end
 
+_G.PrepareRunShrines = function()
+	spawnShrinesForRun()
+	return #shrines
+end
+
 _G.ApplyDamageToPlayer = function(plr, amount)
 	if not plr or not plr.Parent then
 		return 0

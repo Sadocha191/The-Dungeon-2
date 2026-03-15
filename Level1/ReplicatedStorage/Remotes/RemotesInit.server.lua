@@ -29,6 +29,7 @@ ensureRemoteEvent("DamageIndicatorEvent")  -- server -> all clients (pos, amount
 ensureRemoteEvent("PickupIndicatorEvent")  -- server -> client (kind, amount)
 -- Loading gate (client preload handshake)
 ensureRemoteEvent("ClientReady")          -- client -> server (loaded/preloaded)
+ensureRemoteEvent("ClientWorldLoaded")    -- client -> server (world streamed + textures preloaded)
 
 -- Weapon VFX swing (server -> client)
 ensureRemoteEvent("WeaponSwingVFX")

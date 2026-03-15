@@ -612,6 +612,11 @@ local function spawnChestsForRun()
 	})
 end
 
+_G.PrepareRunChests = function()
+	spawnChestsForRun()
+	return #chests
+end
+
 function _G.SpawnRewardChestForPlayer(plr: Player, pos: Vector3, config)
 	if not plr or not plr.Parent then
 		return nil

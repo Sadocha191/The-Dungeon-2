@@ -685,6 +685,14 @@ local function spawnStructuresForRun()
 	})
 end
 
+_G.PrepareRunStructures = function()
+	spawnStructuresForRun()
+	return {
+		monuments = #monuments,
+		statues = #statues,
+	}
+end
+
 RunStarted.Changed:Connect(function(v)
 	if v == true then
 		spawnStructuresForRun()
