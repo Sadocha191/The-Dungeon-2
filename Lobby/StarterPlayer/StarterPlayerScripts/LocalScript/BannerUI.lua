@@ -339,7 +339,7 @@ content.Parent = panel
 
 local heroFrame = Instance.new("Frame")
 heroFrame.Name = "HeroFrame"
-heroFrame.Size = UDim2.new(1, 0, 1, 0)
+heroFrame.Size = UDim2.new(1, 0, 0, 250)
 heroFrame.BackgroundColor3 = surfaceColor
 heroFrame.BorderSizePixel = 0
 heroFrame.Parent = content
@@ -356,8 +356,8 @@ heroGradient.Rotation = 45
 
 local bannerName = Instance.new("TextLabel")
 bannerName.BackgroundTransparency = 1
-bannerName.Position = UDim2.fromOffset(16, 16)
-bannerName.Size = UDim2.new(1, -284, 0, 28)
+bannerName.Position = UDim2.fromOffset(20, 18)
+bannerName.Size = UDim2.new(1, -252, 0, 30)
 bannerName.Font = Enum.Font.GothamBlack
 bannerName.TextSize = 24
 bannerName.TextXAlignment = Enum.TextXAlignment.Left
@@ -367,8 +367,8 @@ bannerName.Parent = heroFrame
 
 local costBadge = Instance.new("TextLabel")
 costBadge.AnchorPoint = Vector2.new(1, 0)
-costBadge.Position = UDim2.new(1, -16, 0, 16)
-costBadge.Size = UDim2.fromOffset(240, 32)
+costBadge.Position = UDim2.new(1, -20, 0, 18)
+costBadge.Size = UDim2.fromOffset(216, 30)
 costBadge.BackgroundColor3 = Color3.fromRGB(31, 38, 52)
 costBadge.BorderSizePixel = 0
 costBadge.Font = Enum.Font.GothamBold
@@ -380,8 +380,8 @@ Instance.new("UICorner", costBadge).CornerRadius = UDim.new(0, 12)
 
 local bannerDesc = Instance.new("TextLabel")
 bannerDesc.BackgroundTransparency = 1
-bannerDesc.Position = UDim2.fromOffset(16, 52)
-bannerDesc.Size = UDim2.new(1, -284, 0, 42)
+bannerDesc.Position = UDim2.fromOffset(20, 58)
+bannerDesc.Size = UDim2.new(1, -40, 0, 44)
 bannerDesc.Font = Enum.Font.Gotham
 bannerDesc.TextSize = 13
 bannerDesc.TextWrapped = true
@@ -391,34 +391,59 @@ bannerDesc.TextColor3 = Color3.fromRGB(196, 201, 213)
 bannerDesc.Text = "-"
 bannerDesc.Parent = heroFrame
 
+local summaryCards = Instance.new("Frame")
+summaryCards.Name = "SummaryCards"
+summaryCards.Position = UDim2.fromOffset(18, 122)
+summaryCards.Size = UDim2.new(1, -36, 0, 112)
+summaryCards.BackgroundTransparency = 1
+summaryCards.Parent = heroFrame
+
+local summaryLayout = Instance.new("UIListLayout", summaryCards)
+summaryLayout.FillDirection = Enum.FillDirection.Horizontal
+summaryLayout.Padding = UDim.new(0, 12)
+
+local pityCard = Instance.new("Frame")
+pityCard.Name = "PityCard"
+pityCard.LayoutOrder = 1
+pityCard.Size = UDim2.new(0.34, 0, 1, 0)
+pityCard.BackgroundColor3 = Color3.fromRGB(21, 26, 37)
+pityCard.BorderSizePixel = 0
+pityCard.Parent = summaryCards
+Instance.new("UICorner", pityCard).CornerRadius = UDim.new(0, 14)
+local pityCardStroke = Instance.new("UIStroke", pityCard)
+pityCardStroke.Color = Color3.fromRGB(48, 61, 86)
+pityCardStroke.Thickness = 1
+
 local pityTitle = Instance.new("TextLabel")
 pityTitle.BackgroundTransparency = 1
-pityTitle.Position = UDim2.fromOffset(16, 110)
-pityTitle.Size = UDim2.new(1, -284, 0, 18)
+pityTitle.Position = UDim2.fromOffset(14, 12)
+pityTitle.Size = UDim2.new(1, -28, 0, 18)
 pityTitle.Font = Enum.Font.GothamBold
 pityTitle.TextSize = 12
 pityTitle.TextXAlignment = Enum.TextXAlignment.Left
 pityTitle.TextColor3 = Color3.fromRGB(234, 234, 240)
 pityTitle.Text = "Pity"
-pityTitle.Parent = heroFrame
+pityTitle.Parent = pityCard
 
 local pityText = Instance.new("TextLabel")
 pityText.BackgroundTransparency = 1
-pityText.Position = UDim2.fromOffset(16, 130)
-pityText.Size = UDim2.new(1, -284, 0, 18)
+pityText.Position = UDim2.fromOffset(14, 34)
+pityText.Size = UDim2.new(1, -28, 0, 30)
 pityText.Font = Enum.Font.Gotham
 pityText.TextSize = 12
+pityText.TextWrapped = true
 pityText.TextXAlignment = Enum.TextXAlignment.Left
+pityText.TextYAlignment = Enum.TextYAlignment.Top
 pityText.TextColor3 = Color3.fromRGB(172, 179, 194)
 pityText.Text = "-"
-pityText.Parent = heroFrame
+pityText.Parent = pityCard
 
 local pityBarBack = Instance.new("Frame")
-pityBarBack.Position = UDim2.fromOffset(16, 156)
-pityBarBack.Size = UDim2.new(1, -284, 0, 12)
+pityBarBack.Position = UDim2.fromOffset(14, 76)
+pityBarBack.Size = UDim2.new(1, -28, 0, 12)
 pityBarBack.BackgroundColor3 = Color3.fromRGB(31, 36, 49)
 pityBarBack.BorderSizePixel = 0
-pityBarBack.Parent = heroFrame
+pityBarBack.Parent = pityCard
 Instance.new("UICorner", pityBarBack).CornerRadius = UDim.new(0, 999)
 
 local pityBarFill = Instance.new("Frame")
@@ -428,61 +453,134 @@ pityBarFill.BorderSizePixel = 0
 pityBarFill.Parent = pityBarBack
 Instance.new("UICorner", pityBarFill).CornerRadius = UDim.new(0, 999)
 
+local pityHint = Instance.new("TextLabel")
+pityHint.BackgroundTransparency = 1
+pityHint.Position = UDim2.fromOffset(14, 92)
+pityHint.Size = UDim2.new(1, -28, 0, 16)
+pityHint.Font = Enum.Font.Gotham
+pityHint.TextSize = 11
+pityHint.TextXAlignment = Enum.TextXAlignment.Left
+pityHint.TextColor3 = Color3.fromRGB(143, 149, 165)
+pityHint.Text = "Legendary and featured guarantee tracking."
+pityHint.Parent = pityCard
+
+local ratesFrame = Instance.new("Frame")
+ratesFrame.Name = "RatesFrame"
+ratesFrame.LayoutOrder = 2
+ratesFrame.Size = UDim2.new(0.30, 0, 1, 0)
+ratesFrame.BackgroundColor3 = Color3.fromRGB(21, 26, 37)
+ratesFrame.BorderSizePixel = 0
+ratesFrame.Parent = summaryCards
+Instance.new("UICorner", ratesFrame).CornerRadius = UDim.new(0, 14)
+local ratesStroke = Instance.new("UIStroke", ratesFrame)
+ratesStroke.Color = Color3.fromRGB(48, 61, 86)
+ratesStroke.Thickness = 1
+
 local ratesTitle = Instance.new("TextLabel")
 ratesTitle.BackgroundTransparency = 1
-ratesTitle.Position = UDim2.fromOffset(16, 184)
-ratesTitle.Size = UDim2.new(1, -284, 0, 18)
+ratesTitle.Position = UDim2.fromOffset(14, 12)
+ratesTitle.Size = UDim2.new(1, -28, 0, 18)
 ratesTitle.Font = Enum.Font.GothamBold
 ratesTitle.TextSize = 12
 ratesTitle.TextXAlignment = Enum.TextXAlignment.Left
 ratesTitle.TextColor3 = Color3.fromRGB(234, 234, 240)
 ratesTitle.Text = "Drop Rates"
-ratesTitle.Parent = heroFrame
+ratesTitle.Parent = ratesFrame
 
 local ratesWrap = Instance.new("Frame")
-ratesWrap.Position = UDim2.fromOffset(16, 208)
-ratesWrap.Size = UDim2.new(1, -284, 0, 34)
+ratesWrap.Position = UDim2.fromOffset(12, 34)
+ratesWrap.Size = UDim2.new(1, -24, 1, -42)
 ratesWrap.BackgroundTransparency = 1
-ratesWrap.Parent = heroFrame
+ratesWrap.Parent = ratesFrame
 
-local ratesLayout = Instance.new("UIListLayout", ratesWrap)
-ratesLayout.FillDirection = Enum.FillDirection.Horizontal
-ratesLayout.Padding = UDim.new(0, 8)
+local ratesLayout = Instance.new("UIGridLayout", ratesWrap)
+ratesLayout.CellPadding = UDim2.fromOffset(6, 4)
+ratesLayout.CellSize = UDim2.fromOffset(90, 24)
+ratesLayout.FillDirectionMaxCells = 2
+ratesLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+ratesLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+
+local ratesEmpty = Instance.new("TextLabel")
+ratesEmpty.BackgroundTransparency = 1
+ratesEmpty.Position = UDim2.fromOffset(14, 40)
+ratesEmpty.Size = UDim2.new(1, -28, 1, -50)
+ratesEmpty.Font = Enum.Font.Gotham
+ratesEmpty.TextSize = 11
+ratesEmpty.TextWrapped = true
+ratesEmpty.TextXAlignment = Enum.TextXAlignment.Center
+ratesEmpty.TextYAlignment = Enum.TextYAlignment.Center
+ratesEmpty.TextColor3 = Color3.fromRGB(143, 149, 165)
+ratesEmpty.Text = "Select a banner to see its rarity rates."
+ratesEmpty.Parent = ratesFrame
+
+local actionFrame = Instance.new("Frame")
+actionFrame.Name = "ActionFrame"
+actionFrame.LayoutOrder = 3
+actionFrame.Size = UDim2.new(0.28, 0, 1, 0)
+actionFrame.BackgroundColor3 = Color3.fromRGB(21, 26, 37)
+actionFrame.BorderSizePixel = 0
+actionFrame.Parent = summaryCards
+Instance.new("UICorner", actionFrame).CornerRadius = UDim.new(0, 14)
+local actionStroke = Instance.new("UIStroke", actionFrame)
+actionStroke.Color = Color3.fromRGB(48, 61, 86)
+actionStroke.Thickness = 1
+
+local actionTitle = Instance.new("TextLabel")
+actionTitle.BackgroundTransparency = 1
+actionTitle.Position = UDim2.fromOffset(14, 12)
+actionTitle.Size = UDim2.new(1, -28, 0, 18)
+actionTitle.Font = Enum.Font.GothamBold
+actionTitle.TextSize = 12
+actionTitle.TextXAlignment = Enum.TextXAlignment.Left
+actionTitle.TextColor3 = Color3.fromRGB(234, 234, 240)
+actionTitle.Text = "Pull Controls"
+actionTitle.Parent = actionFrame
+
+local actionHint = Instance.new("TextLabel")
+actionHint.BackgroundTransparency = 1
+actionHint.Position = UDim2.fromOffset(14, 32)
+actionHint.Size = UDim2.new(1, -28, 0, 16)
+actionHint.Font = Enum.Font.Gotham
+actionHint.TextSize = 11
+actionHint.TextXAlignment = Enum.TextXAlignment.Left
+actionHint.TextColor3 = Color3.fromRGB(143, 149, 165)
+actionHint.Text = "Spend tickets on the selected banner."
+actionHint.Parent = actionFrame
 
 local rollOne = Instance.new("TextButton")
 rollOne.Name = "RollOneButton"
-rollOne.Position = UDim2.fromOffset(16, 248)
-rollOne.Size = UDim2.fromOffset(150, 44)
+rollOne.Position = UDim2.fromOffset(14, 58)
+rollOne.Size = UDim2.new(0.5, -20, 0, 38)
 rollOne.BackgroundColor3 = Color3.fromRGB(58, 109, 190)
 rollOne.BorderSizePixel = 0
 rollOne.Font = Enum.Font.GothamBold
 rollOne.TextSize = 13
 rollOne.TextColor3 = Color3.fromRGB(245, 245, 245)
 rollOne.Text = "Pull x1"
-rollOne.Parent = heroFrame
+rollOne.Parent = actionFrame
 Instance.new("UICorner", rollOne).CornerRadius = UDim.new(0, 14)
 
 local rollTen = Instance.new("TextButton")
 rollTen.Name = "RollTenButton"
-rollTen.Position = UDim2.fromOffset(178, 248)
-rollTen.Size = UDim2.fromOffset(150, 44)
+rollTen.AnchorPoint = Vector2.new(1, 0)
+rollTen.Position = UDim2.new(1, -14, 0, 58)
+rollTen.Size = UDim2.new(0.5, -20, 0, 38)
 rollTen.BackgroundColor3 = Color3.fromRGB(88, 80, 200)
 rollTen.BorderSizePixel = 0
 rollTen.Font = Enum.Font.GothamBold
 rollTen.TextSize = 13
 rollTen.TextColor3 = Color3.fromRGB(245, 245, 245)
 rollTen.Text = "Pull x10"
-rollTen.Parent = heroFrame
+rollTen.Parent = actionFrame
 Instance.new("UICorner", rollTen).CornerRadius = UDim.new(0, 14)
 
 local featuredFrame = Instance.new("Frame")
 featuredFrame.Name = "FeaturedFrame"
-featuredFrame.AnchorPoint = Vector2.new(1, 0)
-featuredFrame.Position = UDim2.new(1, -16, 0, 16)
-featuredFrame.Size = UDim2.fromOffset(244, 260)
+featuredFrame.Position = UDim2.fromOffset(0, 266)
+featuredFrame.Size = UDim2.new(1, 0, 1, -266)
 featuredFrame.BackgroundColor3 = Color3.fromRGB(22, 27, 38)
 featuredFrame.BorderSizePixel = 0
-featuredFrame.Parent = heroFrame
+featuredFrame.Parent = content
 Instance.new("UICorner", featuredFrame).CornerRadius = UDim.new(0, 16)
 local featuredStroke = Instance.new("UIStroke", featuredFrame)
 featuredStroke.Color = Color3.fromRGB(52, 70, 98)
@@ -512,29 +610,56 @@ featuredHint.Parent = featuredFrame
 
 local featuredStrip = Instance.new("ScrollingFrame")
 featuredStrip.Name = "FeaturedStrip"
-featuredStrip.Position = UDim2.fromOffset(10, 56)
-featuredStrip.Size = UDim2.new(1, -20, 1, -66)
+featuredStrip.Position = UDim2.fromOffset(12, 56)
+featuredStrip.Size = UDim2.new(1, -24, 1, -68)
 featuredStrip.BackgroundTransparency = 1
 featuredStrip.BorderSizePixel = 0
-featuredStrip.ScrollBarThickness = 4
-featuredStrip.AutomaticCanvasSize = Enum.AutomaticSize.X
-featuredStrip.ScrollingDirection = Enum.ScrollingDirection.X
+featuredStrip.ScrollBarThickness = 6
+featuredStrip.AutomaticCanvasSize = Enum.AutomaticSize.Y
+featuredStrip.ScrollingDirection = Enum.ScrollingDirection.Y
 featuredStrip.CanvasSize = UDim2.new(0, 0, 0, 0)
 featuredStrip.Parent = featuredFrame
 
-local featuredLayout = Instance.new("UIListLayout", featuredStrip)
-featuredLayout.FillDirection = Enum.FillDirection.Horizontal
-featuredLayout.Padding = UDim.new(0, 10)
+local featuredLayout = Instance.new("UIGridLayout", featuredStrip)
+featuredLayout.CellPadding = UDim2.fromOffset(12, 12)
+featuredLayout.CellSize = UDim2.fromOffset(170, 176)
+featuredLayout.FillDirectionMaxCells = 4
+featuredLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+featuredLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 
 local featuredEmpty = Instance.new("TextLabel")
 featuredEmpty.BackgroundTransparency = 1
-featuredEmpty.Size = UDim2.new(1, 0, 1, 0)
+featuredEmpty.Position = UDim2.fromOffset(14, 66)
+featuredEmpty.Size = UDim2.new(1, -28, 1, -78)
 featuredEmpty.Font = Enum.Font.Gotham
 featuredEmpty.TextSize = 12
 featuredEmpty.TextWrapped = true
+featuredEmpty.TextXAlignment = Enum.TextXAlignment.Center
+featuredEmpty.TextYAlignment = Enum.TextYAlignment.Center
 featuredEmpty.TextColor3 = Color3.fromRGB(150, 155, 170)
 featuredEmpty.Text = "No featured weapons configured."
-featuredEmpty.Parent = featuredStrip
+featuredEmpty.Parent = featuredFrame
+
+local function updateFeaturedGrid()
+	local width = featuredStrip.AbsoluteSize.X
+	local cellWidth = 170
+	local cellHeight = 176
+	if width < 540 then
+		cellWidth = 140
+		cellHeight = 164
+	elseif width < 680 then
+		cellWidth = 154
+		cellHeight = 170
+	end
+
+	featuredLayout.CellSize = UDim2.fromOffset(cellWidth, cellHeight)
+	local padding = featuredLayout.CellPadding.X.Offset
+	local maxCells = math.max(1, math.floor((width + padding) / (cellWidth + padding)))
+	featuredLayout.FillDirectionMaxCells = math.min(4, maxCells)
+end
+
+featuredStrip:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateFeaturedGrid)
+task.defer(updateFeaturedGrid)
 
 local rollOverlay = gui:WaitForChild("RollOverlay")
 rollOverlay.Name = "RollOverlay"
@@ -885,7 +1010,7 @@ end
 
 local function createPill(parent, text, color)
 	local pill = Instance.new("Frame")
-	pill.Size = UDim2.fromOffset(96, 28)
+	pill.Size = UDim2.fromOffset(90, 24)
 	pill.BackgroundColor3 = blendColor(Color3.fromRGB(30, 36, 50), color, 0.24)
 	pill.BorderSizePixel = 0
 	pill.Parent = parent
@@ -899,7 +1024,7 @@ local function createPill(parent, text, color)
 	label.BackgroundTransparency = 1
 	label.Size = UDim2.fromScale(1, 1)
 	label.Font = Enum.Font.GothamBold
-	label.TextSize = 11
+	label.TextSize = 9
 	label.TextColor3 = Color3.fromRGB(244, 244, 246)
 	label.Text = text
 	label.Parent = pill
@@ -910,14 +1035,15 @@ local refreshSelectedBanner
 local function renderFeaturedCards(featuredWeaponIds)
 	clearContainer(featuredStrip, {
 		[featuredLayout] = true,
-		[featuredEmpty] = true,
 	})
+	featuredStrip.CanvasPosition = Vector2.zero
 	featuredEmpty.Visible = not featuredWeaponIds or #featuredWeaponIds == 0
 	if featuredEmpty.Visible then
 		return
 	end
+	local cellSize = featuredLayout.CellSize
 	for _, weaponId in ipairs(featuredWeaponIds or {}) do
-		local card = createWeaponCard(featuredStrip, 150, 188)
+		local card = createWeaponCard(featuredStrip, cellSize.X.Offset, cellSize.Y.Offset)
 		setCardResult(card, {
 			WeaponId = weaponId,
 			Rarity = (getWeaponDef(weaponId) and getWeaponDef(weaponId).rarity) or "Common",
@@ -933,6 +1059,10 @@ local function renderRates(rates)
 	local order = {}
 	for rarity in pairs(rates or {}) do
 		table.insert(order, rarity)
+	end
+	ratesEmpty.Visible = #order == 0
+	if ratesEmpty.Visible then
+		return
 	end
 	table.sort(order, function(a, b)
 		return tostring(a) < tostring(b)
