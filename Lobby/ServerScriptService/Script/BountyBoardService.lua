@@ -191,14 +191,32 @@ local function findAnyBasePart(model)
 	return nil
 end
 
+local function findBoardModel()
+	local directMatch = workspace:FindFirstChild("BountyBoard")
+	if directMatch and directMatch:IsA("Model") then
+		return directMatch
+	end
+
+	for _, descendant in ipairs(workspace:GetDescendants()) do
+		if descendant.Name == "BountyBoard" and descendant:IsA("Model") then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
 local function setupPrompt()
-	local boardModel = workspace:FindFirstChild("BountyBoard")
-	if not (boardModel and boardModel:IsA("Model")) then
-		warn("[BountyBoardService] Missing workspace.BountyBoard")
+	local boardModel = findBoardModel()
+	if not boardModel then
+		warn("[BountyBoardService] Missing BountyBoard model in Workspace")
 		return
 	end
 
 	local boardPart = boardModel:FindFirstChild("Board")
+	if not (boardPart and boardPart:IsA("BasePart")) then
+		boardPart = boardModel:FindFirstChild("Board", true)
+	end
 	if not (boardPart and boardPart:IsA("BasePart")) then
 		boardPart = findAnyBasePart(boardModel)
 	end
