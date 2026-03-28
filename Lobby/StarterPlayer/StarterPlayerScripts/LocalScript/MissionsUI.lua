@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local TextService = game:GetService("TextService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -26,6 +27,32 @@ local WEEKLY_MAX = 12
 local dailyResetAt: number? = nil
 local weeklyResetAt: number? = nil
 
+local THEME = table.freeze({
+	overlay = Color3.fromRGB(4, 6, 11),
+	panel = Color3.fromRGB(10, 14, 22),
+	panelEdge = Color3.fromRGB(78, 90, 108),
+	panelAlt = Color3.fromRGB(18, 23, 35),
+	panelAltSoft = Color3.fromRGB(26, 33, 47),
+	card = Color3.fromRGB(17, 22, 33),
+	cardSoft = Color3.fromRGB(25, 30, 44),
+	cardBorder = Color3.fromRGB(60, 73, 95),
+	text = Color3.fromRGB(245, 247, 250),
+	textSoft = Color3.fromRGB(198, 205, 216),
+	textMuted = Color3.fromRGB(145, 156, 173),
+	daily = Color3.fromRGB(220, 169, 91),
+	dailySoft = Color3.fromRGB(120, 85, 38),
+	weekly = Color3.fromRGB(111, 157, 255),
+	weeklySoft = Color3.fromRGB(45, 72, 120),
+	claim = Color3.fromRGB(105, 194, 129),
+	claimSoft = Color3.fromRGB(33, 73, 43),
+	completed = Color3.fromRGB(92, 179, 120),
+	completedSoft = Color3.fromRGB(29, 62, 40),
+	tabBg = Color3.fromRGB(22, 28, 40),
+	tabBorder = Color3.fromRGB(54, 66, 85),
+	buttonDark = Color3.fromRGB(34, 41, 58),
+	buttonDarkBorder = Color3.fromRGB(67, 78, 98),
+})
+
 local function formatCountdown(seconds: number): string
 	seconds = math.max(0, math.floor(seconds))
 	local h = math.floor(seconds / 3600)
@@ -44,36 +71,153 @@ local function tutorialComplete(): boolean
 	return t.Complete == true
 end
 
-local function addCorner(inst: Instance, r: number)
-	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, r)
-	c.Parent = inst
+local function addCorner(inst: Instance, radius: number)
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, radius)
+	corner.Parent = inst
+	return corner
 end
 
-local function addStroke(inst: Instance, color: Color3)
-	local s = Instance.new("UIStroke")
-	s.Thickness = 1
-	s.Color = color
-	s.Parent = inst
+local function addStroke(inst: Instance, color: Color3, thickness: number?, transparency: number?)
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = thickness or 1
+	stroke.Color = color
+	stroke.Transparency = transparency or 0
+	stroke.Parent = inst
+	return stroke
 end
 
-local function formatReward(reward: any): string
-	if typeof(reward) ~= "table" then return "" end
-	local coins = tonumber(reward.Silver) or 0
-	local wp = tonumber(reward.WeaponPoints) or 0
-	local parts = {}
-	if coins > 0 then table.insert(parts, ("Silver +%d"):format(coins)) end
-	if wp > 0 then table.insert(parts, ("WP +%d"):format(wp)) end
-	return table.concat(parts, " | ")
+local function colorSequence(colors)
+	if #colors == 2 then
+		return ColorSequence.new(colors[1], colors[2])
+	end
+
+	local points = {}
+	local denom = math.max(1, #colors - 1)
+	for index, color in ipairs(colors) do
+		points[#points + 1] = ColorSequenceKeypoint.new((index - 1) / denom, color)
+	end
+	return ColorSequence.new(points)
+end
+
+local function numberSequence(values)
+	if #values == 2 then
+		return NumberSequence.new(values[1], values[2])
+	end
+
+	local points = {}
+	local denom = math.max(1, #values - 1)
+	for index, value in ipairs(values) do
+		points[#points + 1] = NumberSequenceKeypoint.new((index - 1) / denom, value)
+	end
+	return NumberSequence.new(points)
+end
+
+local function addGradient(inst: Instance, rotation: number, colors, transparencies)
+	local gradient = Instance.new("UIGradient")
+	gradient.Rotation = rotation
+	gradient.Color = colorSequence(colors)
+	if transparencies then
+		gradient.Transparency = numberSequence(transparencies)
+	end
+	gradient.Parent = inst
+	return gradient
+end
+
+local function getProgressInfo(mission: any)
+	local prog = (typeof(mission) == "table") and mission.Progress
+	if typeof(prog) ~= "table" then
+		return 0, 0, 0
+	end
+
+	local current = math.max(0, math.floor(tonumber(prog.Current) or 0))
+	local target = math.max(0, math.floor(tonumber(prog.Target) or 0))
+	if target <= 0 then
+		return current, target, 0
+	end
+	return current, target, math.clamp(current / target, 0, 1)
 end
 
 local function formatProgress(mission: any): string
-	local prog = (typeof(mission) == "table") and mission.Progress
-	if typeof(prog) ~= "table" then return "" end
-	local cur = tonumber(prog.Current) or 0
-	local tgt = tonumber(prog.Target) or 0
-	if tgt <= 0 then return "" end
-	return ("Progress: %d/%d"):format(cur, tgt)
+	local current, target = getProgressInfo(mission)
+	if target <= 0 then
+		return "No tracked progress"
+	end
+	return ("%d / %d complete"):format(current, target)
+end
+
+local function getMissionState(mission: any)
+	local claimCount = tonumber(mission.ClaimCount) or 0
+	local repeatable = mission.Repeatable == true
+	local completed = claimCount > 0 and not repeatable
+	local claimable = mission.Claimable == true and not completed
+	local current, target, fraction = getProgressInfo(mission)
+	if completed and target > 0 then
+		current = target
+		fraction = 1
+	end
+	return {
+		claimable = claimable,
+		completed = completed,
+		current = current,
+		target = target,
+		fraction = fraction,
+	}
+end
+
+local function buildRewardParts(reward: any)
+	local parts = {}
+	if typeof(reward) ~= "table" then
+		return parts
+	end
+
+	local silver = tonumber(reward.Silver) or 0
+	local wp = tonumber(reward.WeaponPoints) or 0
+
+	if silver > 0 then
+		parts[#parts + 1] = {
+			text = ("Silver +%d"):format(silver),
+			fill = Color3.fromRGB(89, 66, 26),
+			stroke = Color3.fromRGB(178, 134, 62),
+			textColor = Color3.fromRGB(255, 234, 186),
+		}
+	end
+	if wp > 0 then
+		parts[#parts + 1] = {
+			text = ("WP +%d"):format(wp),
+			fill = Color3.fromRGB(41, 59, 96),
+			stroke = Color3.fromRGB(94, 130, 210),
+			textColor = Color3.fromRGB(214, 228, 255),
+		}
+	end
+
+	return parts
+end
+
+local function summarizeMissions(missions)
+	local summary = {
+		total = #missions,
+		claimable = 0,
+		completed = 0,
+	}
+
+	for _, mission in ipairs(missions) do
+		local state = getMissionState(mission)
+		if state.claimable then
+			summary.claimable += 1
+		end
+		if state.completed then
+			summary.completed += 1
+		end
+	end
+
+	return summary
+end
+
+local function setButtonInteractable(button: TextButton, enabled: boolean)
+	button.Active = enabled
+	button.AutoButtonColor = enabled
+	button.Selectable = enabled
 end
 
 -- ===== UI =====
@@ -85,266 +229,558 @@ gui:SetAttribute("Modal", true)
 
 local overlay = gui:WaitForChild("overlay")
 overlay.Size = UDim2.fromScale(1, 1)
-overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-overlay.BackgroundTransparency = 0.35
+overlay.BackgroundColor3 = THEME.overlay
+overlay.BackgroundTransparency = 0.24
 overlay.BorderSizePixel = 0
 overlay.Parent = gui
+addGradient(overlay, 90, {
+	Color3.fromRGB(6, 8, 13),
+	Color3.fromRGB(3, 5, 9),
+})
 
 local panel = overlay:WaitForChild("panel")
 panel.AnchorPoint = Vector2.new(0.5, 0.5)
 panel.Position = UDim2.fromScale(0.5, 0.5)
-panel.Size = UDim2.fromScale(0.88, 0.88)
-panel.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+panel.Size = UDim2.fromScale(0.9, 0.9)
+panel.BackgroundColor3 = THEME.panel
 panel.BorderSizePixel = 0
+panel.ClipsDescendants = true
 panel.Parent = overlay
-addCorner(panel, 16)
+addCorner(panel, 24)
 local panelSizeConstraint = Instance.new("UISizeConstraint", panel)
-panelSizeConstraint.MaxSize = Vector2.new(980, 560)
+panelSizeConstraint.MaxSize = Vector2.new(1080, 620)
 local panelAspect = Instance.new("UIAspectRatioConstraint", panel)
-panelAspect.AspectRatio = 980 / 560
+panelAspect.AspectRatio = 1080 / 620
 panelAspect.DominantAxis = Enum.DominantAxis.Height
-addStroke(panel, Color3.fromRGB(40, 40, 48))
-UiResponsive.attachCenteredPanel(panel, Vector2.new(980, 560))
+addStroke(panel, THEME.panelEdge, 1, 0.15)
+addGradient(panel, 90, {
+	Color3.fromRGB(15, 20, 31),
+	Color3.fromRGB(9, 12, 18),
+})
+UiResponsive.attachCenteredPanel(panel, Vector2.new(1080, 620))
+
+local headerCard = Instance.new("Frame")
+headerCard.Position = UDim2.fromOffset(20, 20)
+headerCard.Size = UDim2.new(1, -40, 0, 110)
+headerCard.BackgroundColor3 = THEME.panelAlt
+headerCard.BorderSizePixel = 0
+headerCard.Parent = panel
+addCorner(headerCard, 20)
+addStroke(headerCard, THEME.cardBorder, 1, 0.22)
+addGradient(headerCard, 0, {
+	Color3.fromRGB(31, 24, 17),
+	Color3.fromRGB(18, 24, 39),
+	Color3.fromRGB(14, 18, 29),
+})
+
+local headerAccent = Instance.new("Frame")
+headerAccent.Size = UDim2.new(1, 0, 0, 4)
+headerAccent.BackgroundColor3 = THEME.daily
+headerAccent.BorderSizePixel = 0
+headerAccent.Parent = headerCard
+addCorner(headerAccent, 12)
+
+local eyebrow = Instance.new("TextLabel")
+eyebrow.BackgroundTransparency = 1
+eyebrow.Position = UDim2.fromOffset(20, 14)
+eyebrow.Size = UDim2.fromOffset(200, 16)
+eyebrow.Font = Enum.Font.GothamBold
+eyebrow.TextSize = 11
+eyebrow.TextColor3 = Color3.fromRGB(255, 216, 153)
+eyebrow.TextXAlignment = Enum.TextXAlignment.Left
+eyebrow.Text = "KNIGHT'S BOARD"
+eyebrow.Parent = headerCard
 
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1
-title.Position = UDim2.fromOffset(24, 16)
-title.Size = UDim2.new(1, -140, 0, 28)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 20
-title.TextColor3 = Color3.fromRGB(245, 245, 245)
+title.Position = UDim2.fromOffset(20, 28)
+title.Size = UDim2.new(1, -280, 0, 34)
+title.Font = Enum.Font.GothamBlack
+title.TextSize = 28
+title.TextColor3 = THEME.text
 title.TextXAlignment = Enum.TextXAlignment.Left
-title.Text = "Missions"
-title.Parent = panel
+title.Text = "Daily Dispatch"
+title.Parent = headerCard
 
-local resetInfo = Instance.new("TextLabel")
-resetInfo.BackgroundTransparency = 1
+local subtitle = Instance.new("TextLabel")
+subtitle.BackgroundTransparency = 1
+subtitle.Position = UDim2.fromOffset(20, 64)
+subtitle.Size = UDim2.new(1, -300, 0, 32)
+subtitle.Font = Enum.Font.Gotham
+subtitle.TextSize = 13
+subtitle.TextColor3 = THEME.textSoft
+subtitle.TextWrapped = true
+subtitle.TextXAlignment = Enum.TextXAlignment.Left
+subtitle.TextYAlignment = Enum.TextYAlignment.Top
+subtitle.Text = "Track rotating contracts, finish runs, and cash out mission rewards straight from the lobby."
+subtitle.Parent = headerCard
+
+local resetInfo = Instance.new("Frame")
 resetInfo.AnchorPoint = Vector2.new(1, 0)
-resetInfo.Position = UDim2.new(1, -56, 0, 18)
-resetInfo.Size = UDim2.fromOffset(360, 20)
-resetInfo.Font = Enum.Font.Gotham
-resetInfo.TextSize = 12
-resetInfo.TextColor3 = Color3.fromRGB(190, 190, 190)
-resetInfo.TextXAlignment = Enum.TextXAlignment.Right
-resetInfo.Text = ""
-resetInfo.Parent = panel
+resetInfo.Position = UDim2.new(1, -64, 0, 18)
+resetInfo.Size = UDim2.fromOffset(250, 34)
+resetInfo.BackgroundColor3 = Color3.fromRGB(20, 25, 36)
+resetInfo.BorderSizePixel = 0
+resetInfo.Parent = headerCard
+addCorner(resetInfo, 17)
+addStroke(resetInfo, THEME.cardBorder, 1, 0.22)
+
+local resetInfoText = Instance.new("TextLabel")
+resetInfoText.BackgroundTransparency = 1
+resetInfoText.Position = UDim2.fromOffset(14, 0)
+resetInfoText.Size = UDim2.new(1, -28, 1, 0)
+resetInfoText.Font = Enum.Font.GothamMedium
+resetInfoText.TextSize = 12
+resetInfoText.TextColor3 = THEME.textSoft
+resetInfoText.TextXAlignment = Enum.TextXAlignment.Center
+resetInfoText.Text = ""
+resetInfoText.Parent = resetInfo
 
 local closeBtn = Instance.new("TextButton")
 closeBtn.AnchorPoint = Vector2.new(1, 0)
-closeBtn.Position = UDim2.new(1, -16, 0, 16)
-closeBtn.Size = UDim2.fromOffset(28, 28)
-closeBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+closeBtn.Position = UDim2.new(1, -18, 0, 16)
+closeBtn.Size = UDim2.fromOffset(34, 34)
+closeBtn.BackgroundColor3 = Color3.fromRGB(28, 33, 46)
 closeBtn.BorderSizePixel = 0
 closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 14
-closeBtn.TextColor3 = Color3.fromRGB(210, 210, 210)
+closeBtn.TextSize = 16
+closeBtn.TextColor3 = Color3.fromRGB(224, 230, 238)
 closeBtn.Text = "X"
 closeBtn.Parent = panel
-addCorner(closeBtn, 10)
+addCorner(closeBtn, 12)
+addStroke(closeBtn, THEME.buttonDarkBorder, 1, 0.18)
 
-local tabs = Instance.new("Frame")
-tabs.BackgroundTransparency = 1
-tabs.Position = UDim2.fromOffset(24, 52)
-tabs.Size = UDim2.new(1, -48, 0, 36)
-tabs.Parent = panel
+local tabsWrap = Instance.new("Frame")
+tabsWrap.BackgroundTransparency = 1
+tabsWrap.Position = UDim2.fromOffset(20, 144)
+tabsWrap.Size = UDim2.new(1, -40, 0, 44)
+tabsWrap.Parent = panel
 
-local function makeTab(text: string, x: number)
-	local b = Instance.new("TextButton")
-	b.Size = UDim2.fromOffset(160, 32)
-	b.Position = UDim2.fromOffset(x, 2)
-	b.BackgroundColor3 = Color3.fromRGB(24, 24, 30)
-	b.BorderSizePixel = 0
-	b.Font = Enum.Font.GothamBold
-	b.TextSize = 13
-	b.TextColor3 = Color3.fromRGB(230, 230, 230)
-	b.Text = text
-	b.Parent = tabs
-	addCorner(b, 10)
-	addStroke(b, Color3.fromRGB(45, 45, 55))
-	return b
+local tabsRail = Instance.new("Frame")
+tabsRail.Size = UDim2.fromOffset(360, 44)
+tabsRail.BackgroundColor3 = THEME.tabBg
+tabsRail.BorderSizePixel = 0
+tabsRail.Parent = tabsWrap
+addCorner(tabsRail, 18)
+addStroke(tabsRail, THEME.tabBorder, 1, 0.18)
+
+local tabsLayout = Instance.new("UIListLayout")
+tabsLayout.FillDirection = Enum.FillDirection.Horizontal
+tabsLayout.Padding = UDim.new(0, 10)
+tabsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+tabsLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+tabsLayout.Parent = tabsRail
+
+local tabsPadding = Instance.new("UIPadding")
+tabsPadding.PaddingLeft = UDim.new(0, 8)
+tabsPadding.PaddingRight = UDim.new(0, 8)
+tabsPadding.PaddingTop = UDim.new(0, 6)
+tabsPadding.PaddingBottom = UDim.new(0, 6)
+tabsPadding.Parent = tabsRail
+
+local function makeTab(text: string)
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.fromOffset(167, 32)
+	button.BackgroundColor3 = THEME.tabBg
+	button.BorderSizePixel = 0
+	button.Font = Enum.Font.GothamBold
+	button.TextSize = 15
+	button.TextColor3 = Color3.fromRGB(242, 246, 252)
+	button.Text = text
+	button.Parent = tabsRail
+	addCorner(button, 14)
+	local stroke = addStroke(button, THEME.tabBorder, 1, 0.2)
+	local gradient = addGradient(button, 90, {
+		Color3.fromRGB(26, 32, 46),
+		Color3.fromRGB(19, 24, 35),
+	})
+	return {
+		button = button,
+		stroke = stroke,
+		gradient = gradient,
+	}
 end
 
-local tabDaily = makeTab("Daily", 0)
-local tabWeekly = makeTab("Weekly", 170)
+local tabDaily = makeTab("Daily")
+local tabWeekly = makeTab("Weekly")
 
 local body = Instance.new("Frame")
 body.BackgroundTransparency = 1
-body.Position = UDim2.fromOffset(24, 96)
-body.Size = UDim2.new(1, -48, 1, -120)
+body.Position = UDim2.fromOffset(20, 200)
+body.Size = UDim2.new(1, -40, 1, -220)
 body.Parent = panel
 
-local pageDaily = Instance.new("Frame")
-pageDaily.BackgroundTransparency = 1
-pageDaily.Size = UDim2.fromScale(1, 1)
-pageDaily.Parent = body
+local function makeMissionPage(parent: Instance, titleText: string, subtitleText: string, accent: Color3, accentSoft: Color3, emptyText: string)
+	local page = Instance.new("Frame")
+	page.BackgroundTransparency = 1
+	page.Size = UDim2.fromScale(1, 1)
+	page.Parent = parent
 
-local pageWeekly = Instance.new("Frame")
-pageWeekly.BackgroundTransparency = 1
-pageWeekly.Size = UDim2.fromScale(1, 1)
-pageWeekly.Visible = false
-pageWeekly.Parent = body
+	local listShell = Instance.new("Frame")
+	listShell.Size = UDim2.fromScale(1, 1)
+	listShell.BackgroundColor3 = Color3.fromRGB(14, 18, 28)
+	listShell.BorderSizePixel = 0
+	listShell.Parent = page
+	addCorner(listShell, 20)
+	addStroke(listShell, accent, 1, 0.22)
+	addGradient(listShell, 0, {
+		accentSoft,
+		Color3.fromRGB(14, 18, 28),
+		Color3.fromRGB(11, 15, 22),
+	})
 
-local function setTab(which: string)
-	if which == "Daily" then
-		pageDaily.Visible = true
-		pageWeekly.Visible = false
-		tabDaily.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
-		tabWeekly.BackgroundColor3 = Color3.fromRGB(24, 24, 30)
-	else
-		pageDaily.Visible = false
-		pageWeekly.Visible = true
-		tabDaily.BackgroundColor3 = Color3.fromRGB(24, 24, 30)
-		tabWeekly.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
-	end
-end
+	local accentBar = Instance.new("Frame")
+	accentBar.Position = UDim2.fromOffset(16, 16)
+	accentBar.Size = UDim2.new(0, 5, 0, 42)
+	accentBar.BackgroundColor3 = accent
+	accentBar.BorderSizePixel = 0
+	accentBar.Parent = listShell
+	addCorner(accentBar, 6)
 
-tabDaily.MouseButton1Click:Connect(function() setTab("Daily") end)
-tabWeekly.MouseButton1Click:Connect(function() setTab("Weekly") end)
+	local listHeader = Instance.new("TextLabel")
+	listHeader.BackgroundTransparency = 1
+	listHeader.Position = UDim2.fromOffset(32, 14)
+	listHeader.Size = UDim2.new(1, -250, 0, 24)
+	listHeader.Font = Enum.Font.GothamBlack
+	listHeader.TextSize = 18
+	listHeader.TextColor3 = THEME.text
+	listHeader.TextXAlignment = Enum.TextXAlignment.Left
+	listHeader.Text = "Board Entries"
+	listHeader.Parent = listShell
 
-local function makeList(parent: Instance)
+	local listSummary = Instance.new("TextLabel")
+	listSummary.BackgroundTransparency = 1
+	listSummary.Position = UDim2.fromOffset(32, 40)
+	listSummary.Size = UDim2.new(1, -250, 0, 18)
+	listSummary.Font = Enum.Font.GothamBold
+	listSummary.TextSize = 12
+	listSummary.TextColor3 = THEME.textSoft
+	listSummary.TextXAlignment = Enum.TextXAlignment.Left
+	listSummary.Text = titleText .. " | " .. subtitleText
+	listSummary.Parent = listShell
+
+	local resetPill = Instance.new("Frame")
+	resetPill.AnchorPoint = Vector2.new(1, 0)
+	resetPill.Position = UDim2.new(1, -18, 0, 16)
+	resetPill.Size = UDim2.fromOffset(190, 28)
+	resetPill.BackgroundColor3 = Color3.fromRGB(18, 23, 34)
+	resetPill.BorderSizePixel = 0
+	resetPill.Parent = listShell
+	addCorner(resetPill, 14)
+	addStroke(resetPill, accent, 1, 0.3)
+
+	local resetText = Instance.new("TextLabel")
+	resetText.BackgroundTransparency = 1
+	resetText.Position = UDim2.fromOffset(12, 0)
+	resetText.Size = UDim2.new(1, -24, 1, 0)
+	resetText.Font = Enum.Font.GothamBold
+	resetText.TextSize = 11
+	resetText.TextColor3 = THEME.textSoft
+	resetText.TextXAlignment = Enum.TextXAlignment.Center
+	resetText.Text = ""
+	resetText.Parent = resetPill
+
 	local list = Instance.new("ScrollingFrame")
-	list.Size = UDim2.new(1, 0, 1, -22)
-	list.Position = UDim2.fromOffset(0, 22)
+	list.Position = UDim2.fromOffset(18, 74)
+	list.Size = UDim2.new(1, -36, 1, -92)
 	list.BackgroundTransparency = 1
 	list.BorderSizePixel = 0
 	list.ScrollBarThickness = 6
+	list.ScrollBarImageColor3 = accent
 	list.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	list.Parent = parent
+	list.CanvasSize = UDim2.new()
+	list.Parent = listShell
 
-	local layout = Instance.new("UIListLayout")
-	layout.Padding = UDim.new(0, 10)
-	layout.Parent = list
+	local listPadding = Instance.new("UIPadding")
+	listPadding.PaddingBottom = UDim.new(0, 10)
+	listPadding.Parent = list
 
-	return list
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.Padding = UDim.new(0, 12)
+	listLayout.Parent = list
+
+	local emptyLabel = Instance.new("TextLabel")
+	emptyLabel.BackgroundTransparency = 1
+	emptyLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+	emptyLabel.Position = UDim2.fromScale(0.5, 0.5)
+	emptyLabel.Size = UDim2.new(1, -64, 0, 48)
+	emptyLabel.Font = Enum.Font.GothamMedium
+	emptyLabel.TextSize = 13
+	emptyLabel.TextColor3 = THEME.textMuted
+	emptyLabel.TextWrapped = true
+	emptyLabel.Text = emptyText
+	emptyLabel.Visible = false
+	emptyLabel.Parent = listShell
+
+	return {
+		page = page,
+		resetText = resetText,
+		summaryText = listSummary,
+		list = list,
+		emptyLabel = emptyLabel,
+	}
 end
 
-local dailyList = makeList(pageDaily)
-local weeklyList = makeList(pageWeekly)
+local dailyPage = makeMissionPage(
+	body,
+	"Daily Contracts",
+	"Six rotating objectives for fast silver, weapon point income, and a clean mission board every day.",
+	THEME.daily,
+	THEME.dailySoft,
+	"No daily missions are available right now."
+)
 
--- per-page reset labels
-local dailyResetLabel = Instance.new("TextLabel")
-dailyResetLabel.BackgroundTransparency = 1
-dailyResetLabel.Position = UDim2.fromOffset(0, 0)
-dailyResetLabel.Size = UDim2.new(1, 0, 0, 18)
-dailyResetLabel.Font = Enum.Font.Gotham
-dailyResetLabel.TextSize = 12
-dailyResetLabel.TextColor3 = Color3.fromRGB(190, 190, 190)
-dailyResetLabel.TextXAlignment = Enum.TextXAlignment.Left
-dailyResetLabel.Text = ""
-dailyResetLabel.Parent = pageDaily
+local weeklyPage = makeMissionPage(
+	body,
+	"Weekly Orders",
+	"Longer objectives with bigger payouts. Treat these like anchor goals for several runs.",
+	THEME.weekly,
+	THEME.weeklySoft,
+	"No weekly missions are available right now."
+)
+weeklyPage.page.Visible = false
 
-local weeklyResetLabel = Instance.new("TextLabel")
-weeklyResetLabel.BackgroundTransparency = 1
-weeklyResetLabel.Position = UDim2.fromOffset(0, 0)
-weeklyResetLabel.Size = UDim2.new(1, 0, 0, 18)
-weeklyResetLabel.Font = Enum.Font.Gotham
-weeklyResetLabel.TextSize = 12
-weeklyResetLabel.TextColor3 = Color3.fromRGB(190, 190, 190)
-weeklyResetLabel.TextXAlignment = Enum.TextXAlignment.Left
-weeklyResetLabel.Text = ""
-weeklyResetLabel.Parent = pageWeekly
+local function applyTabStyle(tabRef, active: boolean, accent: Color3)
+	tabRef.button.TextColor3 = active and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(242, 246, 252)
+	tabRef.button.BackgroundColor3 = active and accent or Color3.fromRGB(58, 69, 92)
+	tabRef.stroke.Color = active and accent or Color3.fromRGB(168, 180, 204)
+	tabRef.stroke.Transparency = active and 0.03 or 0.08
+	tabRef.gradient.Color = active and colorSequence({
+		Color3.new(
+			math.min(accent.R + 0.08, 1),
+			math.min(accent.G + 0.08, 1),
+			math.min(accent.B + 0.08, 1)
+		),
+		accent,
+	}) or colorSequence({
+		Color3.fromRGB(39, 47, 64),
+		Color3.fromRGB(23, 29, 40),
+	})
+end
+
+local function setTab(which: string)
+	local dailyActive = which == "Daily"
+	dailyPage.page.Visible = dailyActive
+	weeklyPage.page.Visible = not dailyActive
+	applyTabStyle(tabDaily, dailyActive, THEME.daily)
+	applyTabStyle(tabWeekly, not dailyActive, THEME.weekly)
+	headerAccent.BackgroundColor3 = dailyActive and THEME.daily or THEME.weekly
+	title.Text = dailyActive and "Daily Dispatch" or "Weekly Orders"
+	subtitle.Text = dailyActive
+		and "Track rotating contracts, finish runs, and cash out mission rewards straight from the lobby."
+		or "Check long-form weekly objectives, stack progress across runs, and collect heavier payouts."
+end
+
+tabDaily.button.MouseButton1Click:Connect(function()
+	setTab("Daily")
+end)
+
+tabWeekly.button.MouseButton1Click:Connect(function()
+	setTab("Weekly")
+end)
 
 local function clearList(list: ScrollingFrame)
 	for _, ch in ipairs(list:GetChildren()) do
-		if ch:IsA("Frame") then ch:Destroy() end
+		if ch:GetAttribute("MissionRow") == true then
+			ch:Destroy()
+		end
 	end
 end
 
 local function makeMissionRow(parentList: ScrollingFrame, mission: any, onClaim)
+	local state = getMissionState(mission)
+	local accent = mission.Type == "Weekly" and THEME.weekly or THEME.daily
+	local accentSoft = mission.Type == "Weekly" and THEME.weeklySoft or THEME.dailySoft
+	if state.claimable then
+		accent = THEME.claim
+		accentSoft = THEME.claimSoft
+	elseif state.completed then
+		accent = THEME.completed
+		accentSoft = THEME.completedSoft
+	end
+
 	local row = Instance.new("Frame")
-	row.Size = UDim2.new(1, 0, 0, 92)
-	row.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+	row:SetAttribute("MissionRow", true)
+	row.Size = UDim2.new(1, 0, 0, 126)
+	row.BackgroundColor3 = THEME.card
 	row.BorderSizePixel = 0
 	row.Parent = parentList
-	addCorner(row, 14)
-	addStroke(row, Color3.fromRGB(40, 40, 48))
+	addCorner(row, 18)
+	addStroke(row, THEME.cardBorder, 1, 0.22)
+	addGradient(row, 0, {
+		accentSoft,
+		THEME.card,
+		THEME.cardSoft,
+	})
 
-	local t = Instance.new("TextLabel")
-	t.BackgroundTransparency = 1
-	t.Position = UDim2.fromOffset(16, 12)
-	t.Size = UDim2.new(1, -220, 0, 18)
-	t.Font = Enum.Font.GothamBold
-	t.TextSize = 14
-	t.TextColor3 = Color3.fromRGB(240, 240, 240)
-	t.TextXAlignment = Enum.TextXAlignment.Left
-	t.Text = tostring(mission.Title or mission.Id or "Mission")
-	t.Parent = row
+	local accentBar = Instance.new("Frame")
+	accentBar.Position = UDim2.fromOffset(14, 14)
+	accentBar.Size = UDim2.new(0, 5, 1, -28)
+	accentBar.BackgroundColor3 = accent
+	accentBar.BorderSizePixel = 0
+	accentBar.Parent = row
+	addCorner(accentBar, 6)
 
-	local d = Instance.new("TextLabel")
-	d.BackgroundTransparency = 1
-	d.Position = UDim2.fromOffset(16, 32)
-	d.Size = UDim2.new(1, -220, 0, 16)
-	d.Font = Enum.Font.Gotham
-	d.TextSize = 12
-	d.TextColor3 = Color3.fromRGB(200, 200, 200)
-	d.TextXAlignment = Enum.TextXAlignment.Left
-	d.Text = tostring(mission.Description or "")
-	d.Parent = row
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Position = UDim2.fromOffset(30, 14)
+	titleLabel.Size = UDim2.new(1, -210, 0, 22)
+	titleLabel.Font = Enum.Font.GothamBold
+	titleLabel.TextSize = 16
+	titleLabel.TextColor3 = THEME.text
+	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	titleLabel.Text = tostring(mission.Title or mission.Id or "Mission")
+	titleLabel.Parent = row
 
-	local p = Instance.new("TextLabel")
-	p.BackgroundTransparency = 1
-	p.Position = UDim2.fromOffset(16, 50)
-	p.Size = UDim2.new(1, -220, 0, 16)
-	p.Font = Enum.Font.Gotham
-	p.TextSize = 12
-	p.TextColor3 = Color3.fromRGB(200, 200, 200)
-	p.TextXAlignment = Enum.TextXAlignment.Left
-	p.Text = formatProgress(mission)
-	p.Parent = row
+	local rewardHolder = Instance.new("Frame")
+	rewardHolder.AnchorPoint = Vector2.new(1, 0)
+	rewardHolder.Position = UDim2.new(1, -142, 0, 16)
+	rewardHolder.Size = UDim2.fromOffset(0, 24)
+	rewardHolder.BackgroundTransparency = 1
+	rewardHolder.Parent = row
 
-	local reward = Instance.new("TextLabel")
-	reward.BackgroundTransparency = 1
-	reward.AnchorPoint = Vector2.new(1, 0)
-	reward.Position = UDim2.new(1, -120, 0, 12)
-	reward.Size = UDim2.fromOffset(320, 16)
-	reward.Font = Enum.Font.Gotham
-	reward.TextSize = 12
-	reward.TextColor3 = Color3.fromRGB(200, 200, 200)
-	reward.TextXAlignment = Enum.TextXAlignment.Right
-	reward.Text = formatReward(mission.Reward)
-	reward.Parent = row
+	local rewardLayout = Instance.new("UIListLayout")
+	rewardLayout.FillDirection = Enum.FillDirection.Horizontal
+	rewardLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	rewardLayout.Padding = UDim.new(0, 6)
+	rewardLayout.Parent = rewardHolder
+
+	for _, rewardPart in ipairs(buildRewardParts(mission.Reward)) do
+		local pill = Instance.new("Frame")
+		pill.BackgroundColor3 = rewardPart.fill
+		pill.BorderSizePixel = 0
+		pill.Parent = rewardHolder
+		addCorner(pill, 11)
+		addStroke(pill, rewardPart.stroke, 1, 0.12)
+
+		local rewardText = Instance.new("TextLabel")
+		rewardText.BackgroundTransparency = 1
+		rewardText.Position = UDim2.fromOffset(10, 0)
+		rewardText.Size = UDim2.new(1, -20, 1, 0)
+		rewardText.Font = Enum.Font.GothamBold
+		rewardText.TextSize = 11
+		rewardText.TextColor3 = rewardPart.textColor
+		rewardText.TextXAlignment = Enum.TextXAlignment.Center
+		rewardText.Text = rewardPart.text
+		rewardText.Parent = pill
+
+		local rewardBounds = TextService:GetTextSize(rewardPart.text, 11, Enum.Font.GothamBold, Vector2.new(200, 18))
+		pill.Size = UDim2.fromOffset(rewardBounds.X + 24, 22)
+	end
+
+	local description = Instance.new("TextLabel")
+	description.BackgroundTransparency = 1
+	description.Position = UDim2.fromOffset(30, 40)
+	description.Size = UDim2.new(1, -210, 0, 34)
+	description.Font = Enum.Font.Gotham
+	description.TextSize = 12
+	description.TextColor3 = THEME.textSoft
+	description.TextWrapped = true
+	description.TextXAlignment = Enum.TextXAlignment.Left
+	description.TextYAlignment = Enum.TextYAlignment.Top
+	description.Text = tostring(mission.Description or "")
+	description.Parent = row
+
+	local progressText = Instance.new("TextLabel")
+	progressText.BackgroundTransparency = 1
+	progressText.Position = UDim2.fromOffset(30, 82)
+	progressText.Size = UDim2.new(1, -210, 0, 16)
+	progressText.Font = Enum.Font.GothamBold
+	progressText.TextSize = 11
+	progressText.TextColor3 = THEME.textMuted
+	progressText.TextXAlignment = Enum.TextXAlignment.Left
+	progressText.Text = formatProgress(mission)
+	progressText.Parent = row
+
+	local progressTrack = Instance.new("Frame")
+	progressTrack.Position = UDim2.fromOffset(30, 102)
+	progressTrack.Size = UDim2.new(1, -210, 0, 10)
+	progressTrack.BackgroundColor3 = Color3.fromRGB(22, 26, 36)
+	progressTrack.BorderSizePixel = 0
+	progressTrack.Parent = row
+	addCorner(progressTrack, 5)
+	addStroke(progressTrack, THEME.cardBorder, 1, 0.5)
+
+	local progressFill = Instance.new("Frame")
+	progressFill.Size = UDim2.new(state.fraction, 0, 1, 0)
+	progressFill.BackgroundColor3 = accent
+	progressFill.BorderSizePixel = 0
+	progressFill.Parent = progressTrack
+	addCorner(progressFill, 5)
+	addGradient(progressFill, 0, {
+		Color3.new(
+			math.min(accent.R + 0.1, 1),
+			math.min(accent.G + 0.1, 1),
+			math.min(accent.B + 0.1, 1)
+		),
+		accent,
+	})
 
 	local claim = Instance.new("TextButton")
-	claim.AnchorPoint = Vector2.new(1, 0.5)
-	claim.Position = UDim2.new(1, -16, 0.5, 0)
-	claim.Size = UDim2.fromOffset(96, 34)
+	claim.AnchorPoint = Vector2.new(1, 1)
+	claim.Position = UDim2.new(1, -16, 1, -14)
+	claim.Size = UDim2.fromOffset(116, 38)
 	claim.BorderSizePixel = 0
 	claim.Font = Enum.Font.GothamBold
 	claim.TextSize = 13
 	claim.TextColor3 = Color3.fromRGB(255, 255, 255)
 	claim.Parent = row
-	addCorner(claim, 12)
+	addCorner(claim, 14)
 
-	local claimCount = tonumber(mission.ClaimCount) or 0
-	local repeatable = (mission.Repeatable == true)
-	local completed = (claimCount > 0 and not repeatable)
-	local claimable = (mission.Claimable == true) and (not completed)
+	local statusPill = Instance.new("Frame")
+	statusPill.AnchorPoint = Vector2.new(1, 0)
+	statusPill.Position = UDim2.new(1, -16, 0, 54)
+	statusPill.Size = UDim2.fromOffset(116, 24)
+	statusPill.BorderSizePixel = 0
+	statusPill.Parent = row
+	addCorner(statusPill, 12)
 
-	if completed then
-		claim.BackgroundColor3 = Color3.fromRGB(32, 46, 32)
-		claim.Text = "Completed"
-		claim.Active = false
-		-- pokaż pełny progress dla czytelności
-		local prog = mission.Progress
-		if typeof(prog) == "table" then
-			local tgt = tonumber(prog.Target) or 0
-			if tgt > 0 then
-				p.Text = ("Progress: %d/%d"):format(tgt, tgt)
-			end
-		end
-	elseif claimable then
-		claim.BackgroundColor3 = Color3.fromRGB(60, 140, 255)
+	local statusText = Instance.new("TextLabel")
+	statusText.BackgroundTransparency = 1
+	statusText.Size = UDim2.fromScale(1, 1)
+	statusText.Font = Enum.Font.GothamBold
+	statusText.TextSize = 10
+	statusText.Parent = statusPill
+
+	if state.completed then
+		claim.BackgroundColor3 = THEME.completed
+		claim.Text = "Claimed"
+		setButtonInteractable(claim, false)
+		statusPill.BackgroundColor3 = THEME.completedSoft
+		statusText.Text = "DONE"
+		statusText.TextColor3 = Color3.fromRGB(196, 255, 213)
+	elseif state.claimable then
+		claim.BackgroundColor3 = THEME.claim
 		claim.Text = "Claim"
-		claim.Active = true
+		setButtonInteractable(claim, true)
+		statusPill.BackgroundColor3 = THEME.claimSoft
+		statusText.Text = "READY"
+		statusText.TextColor3 = Color3.fromRGB(199, 255, 213)
 	else
-		claim.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
-		claim.Text = "In progress"
-		claim.Active = false
+		claim.BackgroundColor3 = THEME.buttonDark
+		claim.Text = "In Progress"
+		setButtonInteractable(claim, false)
+		statusPill.BackgroundColor3 = Color3.fromRGB(25, 31, 43)
+		statusText.Text = "ACTIVE"
+		statusText.TextColor3 = THEME.textMuted
 	end
 
 	claim.MouseButton1Click:Connect(function()
-		if claimable then onClaim(mission) end
+		if state.claimable then
+			onClaim(mission)
+		end
 	end)
+end
+
+local function updatePageSummary(pageRef, missions, resetAt, labelPrefix)
+	local summary = summarizeMissions(missions)
+	pageRef.summaryText.Text = ("%d missions | %d ready | %d done"):format(
+		summary.total,
+		summary.claimable,
+		summary.completed
+	)
+	pageRef.resetText.Text = resetAt and (labelPrefix .. " " .. formatCountdown(resetAt - os.time())) or (labelPrefix .. " --:--:--")
+	pageRef.emptyLabel.Visible = #missions == 0
 end
 
 local function getPayload()
@@ -370,11 +806,13 @@ local function claimMission(id: string): boolean
 end
 
 local function refreshUI()
-	clearList(dailyList)
-	clearList(weeklyList)
+	clearList(dailyPage.list)
+	clearList(weeklyPage.list)
 
 	local payload = getPayload()
-	if typeof(payload) ~= "table" then return end
+	if typeof(payload) ~= "table" then
+		return
+	end
 
 	if typeof(payload.resets) == "table" then
 		dailyResetAt = tonumber(payload.resets.dailyAt)
@@ -382,69 +820,94 @@ local function refreshUI()
 	end
 
 	local missions = payload.missions
-	if typeof(missions) ~= "table" then return end
+	if typeof(missions) ~= "table" then
+		return
+	end
 
 	local daily, weekly = {}, {}
-	for _, m in ipairs(missions) do
-		if typeof(m) == "table" then
-			if m.Type == "Daily" then table.insert(daily, m) end
-			if m.Type == "Weekly" then table.insert(weekly, m) end
+	for _, mission in ipairs(missions) do
+		if typeof(mission) == "table" then
+			if mission.Type == "Daily" then
+				daily[#daily + 1] = mission
+			elseif mission.Type == "Weekly" then
+				weekly[#weekly + 1] = mission
+			end
 		end
 	end
 
-	while #daily > DAILY_MAX do table.remove(daily) end
-	while #weekly > WEEKLY_MAX do table.remove(weekly) end
+	while #daily > DAILY_MAX do
+		table.remove(daily)
+	end
+	while #weekly > WEEKLY_MAX do
+		table.remove(weekly)
+	end
 
 	local function onClaim(mission)
 		local id = tostring(mission.Id or "")
-		if id == "" then return end
-		if claimMission(id) then refreshUI() end
+		if id == "" then
+			return
+		end
+		if claimMission(id) then
+			refreshUI()
+		end
 	end
 
-	for _, m in ipairs(daily) do makeMissionRow(dailyList, m, onClaim) end
-	for _, m in ipairs(weekly) do makeMissionRow(weeklyList, m, onClaim) end
+	for _, mission in ipairs(daily) do
+		makeMissionRow(dailyPage.list, mission, onClaim)
+	end
+	for _, mission in ipairs(weekly) do
+		makeMissionRow(weeklyPage.list, mission, onClaim)
+	end
+
+	updatePageSummary(dailyPage, daily, dailyResetAt, "Refresh in")
+	updatePageSummary(weeklyPage, weekly, weeklyResetAt, "Refresh in")
 end
 
 local timerConn: RBXScriptConnection? = nil
+local function updateResetLabels(now: number)
+	dailyPage.resetText.Text = dailyResetAt and ("Refresh in " .. formatCountdown(dailyResetAt - now)) or "Refresh in --:--:--"
+	weeklyPage.resetText.Text = weeklyResetAt and ("Refresh in " .. formatCountdown(weeklyResetAt - now)) or "Refresh in --:--:--"
+
+	if dailyResetAt and weeklyResetAt then
+		resetInfoText.Text = ("Daily %s   |   Weekly %s"):format(
+			formatCountdown(dailyResetAt - now),
+			formatCountdown(weeklyResetAt - now)
+		)
+	elseif dailyResetAt then
+		resetInfoText.Text = "Daily " .. formatCountdown(dailyResetAt - now)
+	elseif weeklyResetAt then
+		resetInfoText.Text = "Weekly " .. formatCountdown(weeklyResetAt - now)
+	else
+		resetInfoText.Text = ""
+	end
+end
+
 local function startTimer()
-	if timerConn then timerConn:Disconnect() end
+	if timerConn then
+		timerConn:Disconnect()
+	end
 	local acc = 0
 	timerConn = RunService.Heartbeat:Connect(function(dt)
-		if not gui.Enabled then return end
+		if not gui.Enabled then
+			return
+		end
 		acc += dt
-		if acc < 0.25 then return end
+		if acc < 0.25 then
+			return
+		end
 		acc = 0
-		local now = os.time()
-		if dailyResetAt then
-			dailyResetLabel.Text = "Daily resets in: " .. formatCountdown(dailyResetAt - now)
-		end
-		if weeklyResetAt then
-			weeklyResetLabel.Text = "Weekly resets in: " .. formatCountdown(weeklyResetAt - now)
-		end
-		-- top-right summary
-		if dailyResetAt and weeklyResetAt then
-			resetInfo.Text = ("Daily %s | Weekly %s"):format(
-				formatCountdown(dailyResetAt - now),
-				formatCountdown(weeklyResetAt - now)
-			)
-		elseif dailyResetAt then
-			resetInfo.Text = "Daily " .. formatCountdown(dailyResetAt - now)
-		elseif weeklyResetAt then
-			resetInfo.Text = "Weekly " .. formatCountdown(weeklyResetAt - now)
-		else
-			resetInfo.Text = ""
-		end
+		updateResetLabels(os.time())
 	end)
 end
 
 local function openUI()
 	if not tutorialComplete() then
-		-- w trakcie tutoriala nie otwieramy
 		return
 	end
 	gui.Enabled = true
 	setTab("Daily")
 	refreshUI()
+	updateResetLabels(os.time())
 	startTimer()
 end
 
@@ -504,3 +967,5 @@ ProximityPromptService.PromptTriggered:Connect(function(prompt, plr)
 		openUI()
 	end
 end)
+
+setTab("Daily")
