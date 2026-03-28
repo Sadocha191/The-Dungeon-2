@@ -1,16 +1,21 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local StarterGui = game:GetService("StarterGui")
 local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local screenGui = script.Parent
 local frame = screenGui:WaitForChild("Frame")
+local SETTINGS_BUTTON_IMAGE = "rbxassetid://116594278084498"
+local SETTINGS_BUTTON_HOTKEY = "O"
 
 local CONTROL_GUIS = {
+	"ProfileStats",
 	"MissionsGui",
 	"PartyGui",
 	"InventoryGui",
+	"Settings",
 }
 
 local requestCounters = {}
@@ -28,6 +33,36 @@ local function findButtons(names)
 	end
 
 	return buttons
+end
+
+local function ensureSettingsButton()
+	local existing = frame:FindFirstChild("Settings")
+	if existing and existing:IsA("GuiButton") then
+		return existing
+	end
+
+	local template = findButtons({ "Events", "Inventory", "Missions", "Party" })[1]
+	if not template then
+		return nil
+	end
+
+	local button = template:Clone()
+	button.Name = "Settings"
+	button.LayoutOrder = 0
+	button.Image = SETTINGS_BUTTON_IMAGE
+	button.Parent = frame
+
+	local playerIcon = button:FindFirstChild("PlayerIcon", true)
+	if playerIcon then
+		playerIcon:Destroy()
+	end
+
+	local hotKeyLabel = button:FindFirstChild("HotKey", true)
+	if hotKeyLabel and (hotKeyLabel:IsA("TextLabel") or hotKeyLabel:IsA("TextButton") or hotKeyLabel:IsA("TextBox")) then
+		hotKeyLabel.Text = SETTINGS_BUTTON_HOTKEY
+	end
+
+	return button
 end
 
 local function resolveGui(guiName, timeoutSeconds)
@@ -74,6 +109,10 @@ local function isGuiOpen(guiName)
 end
 
 local function shouldHideButtons()
+	if playerGui:GetAttribute("ShowScreenButtons") == false then
+		return true
+	end
+
 	for _, inst in ipairs(playerGui:GetChildren()) do
 		if inst ~= screenGui and inst:IsA("ScreenGui") and inst.Enabled then
 			if inst:GetAttribute("Modal") == true then
@@ -166,8 +205,21 @@ local function registerHotKey(buttons, callback)
 		local keyCode = getButtonHotKey(button)
 		if keyCode then
 			hotkeyBindings[keyCode] = callback
-			return
 		end
+	end
+end
+
+local function showNotification(title, text)
+	local ok, err = pcall(function()
+		StarterGui:SetCore("SendNotification", {
+			Title = title,
+			Text = text,
+			Duration = 3,
+		})
+	end)
+
+	if not ok then
+		warn("[ScreenButtonsClient] Notification failed:", err)
 	end
 end
 
@@ -195,13 +247,37 @@ local function applyProfileIcon()
 	end
 end
 
-local missionsButtons = findButtons({ "Events", "Missions" })
+local settingsButtons = findButtons({ "Settings" })
+if #settingsButtons == 0 then
+	local createdSettingsButton = ensureSettingsButton()
+	if createdSettingsButton then
+		settingsButtons = { createdSettingsButton }
+	end
+end
+setHotKeyVisibility(settingsButtons)
+connectButtons(settingsButtons, function()
+	openExclusive("Settings")
+end)
+registerHotKey(settingsButtons, function()
+	openExclusive("Settings")
+end)
+
+local missionsButtons = findButtons({ "Missions" })
 setHotKeyVisibility(missionsButtons)
 connectButtons(missionsButtons, function()
 	openExclusive("MissionsGui")
 end)
 registerHotKey(missionsButtons, function()
 	openExclusive("MissionsGui")
+end)
+
+local eventsButtons = findButtons({ "Events" })
+setHotKeyVisibility(eventsButtons)
+connectButtons(eventsButtons, function()
+	showNotification("Events", "Events are not available yet.")
+end)
+registerHotKey(eventsButtons, function()
+	showNotification("Events", "Events are not available yet.")
 end)
 
 local partyButtons = findButtons({ "Party" })
@@ -225,10 +301,19 @@ end)
 local profileButtons = findButtons({ "Profile" })
 setHotKeyVisibility(profileButtons)
 connectButtons(profileButtons, function()
-	-- Placeholder until profile UI exists.
+	openExclusive("ProfileStats")
 end)
 registerHotKey(profileButtons, function()
-	-- Placeholder until profile UI exists.
+	openExclusive("ProfileStats")
+end)
+
+local loginRewardsButtons = findButtons({ "Login Rewards" })
+setHotKeyVisibility(loginRewardsButtons)
+connectButtons(loginRewardsButtons, function()
+	showNotification("Login Rewards", "Login rewards are not available yet.")
+end)
+registerHotKey(loginRewardsButtons, function()
+	showNotification("Login Rewards", "Login rewards are not available yet.")
 end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
