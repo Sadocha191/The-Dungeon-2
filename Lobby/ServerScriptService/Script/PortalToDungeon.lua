@@ -273,6 +273,77 @@ local function compactWeaponEntry(entry: any): {[string]: any}?
 	end
 	return out
 end
+
+local function numberMapsEqual(a: any, b: any): boolean
+	if a == nil and b == nil then
+		return true
+	end
+	if typeof(a) ~= "table" or typeof(b) ~= "table" then
+		return false
+	end
+
+	for key, value in pairs(a) do
+		if typeof(key) == "string" and typeof(value) == "number" then
+			if b[key] ~= value then
+				return false
+			end
+		end
+	end
+
+	for key, value in pairs(b) do
+		if typeof(key) == "string" and typeof(value) == "number" then
+			if a[key] ~= value then
+				return false
+			end
+		end
+	end
+
+	return true
+end
+
+local function weaponEntriesEqual(a: any, b: any): boolean
+	if typeof(a) ~= "table" or typeof(b) ~= "table" then
+		return false
+	end
+
+	return tostring(a.id or a.weaponId or "") == tostring(b.id or b.weaponId or "")
+		and math.max(1, math.floor(tonumber(a.level) or 1)) == math.max(1, math.floor(tonumber(b.level) or 1))
+		and tostring(a.rarity or "") == tostring(b.rarity or "")
+		and tostring(a.prefix or "") == tostring(b.prefix or "")
+		and numberMapsEqual(a.rollStats, b.rollStats)
+end
+
+local function syncProfileLoadout(player: Player, weaponName: string?, weaponEntry: any)
+	if typeof(weaponName) ~= "string" or weaponName == "" then
+		return
+	end
+
+	local profile = PlayerData.Get(player)
+	if typeof(profile) ~= "table" then
+		return
+	end
+
+	local nextEntry = compactWeaponEntry(weaponEntry) or {
+		id = weaponName,
+		weaponId = weaponName,
+		level = 1,
+	}
+
+	local currentEntry = nil
+	if typeof(profile.Loadout) == "table" and typeof(profile.Loadout[1]) == "table" then
+		currentEntry = compactWeaponEntry(profile.Loadout[1])
+	end
+
+	if currentEntry and weaponEntriesEqual(currentEntry, nextEntry) then
+		return
+	end
+
+	profile.Loadout = { nextEntry }
+	if PlayerData.MarkDirty then
+		PlayerData.MarkDirty(player)
+	end
+end
+
 local function buildTeleportDataForLeader(leader: Player, runMode: string, partyId: string?, leaderUserId: number?)
 	local st = PlayerStateStore.Get(leader) or PlayerStateStore.Load(leader)
 	local weaponName, weaponEntry = resolveWeaponSelection(leader, st)
@@ -303,6 +374,7 @@ local function tryTeleport(players: {Player}, placeId: number, tpData: any)
 		local st = PlayerStateStore.Get(p) or PlayerStateStore.Load(p)
 		local weaponName, weaponEntry = resolveWeaponSelection(p, st)
 		local uidKey = tostring(p.UserId)
+		syncProfileLoadout(p, weaponName, weaponEntry)
 		weaponByUserId[uidKey] = {
 			StarterWeaponName = weaponName,
 			StarterWeaponEntry = compactWeaponEntry(weaponEntry),
@@ -313,6 +385,14 @@ local function tryTeleport(players: {Player}, placeId: number, tpData: any)
 	end
 	tpData.WeaponByUserId = weaponByUserId
 	tpData.WeaponNameByUserId = weaponNameByUserId
+
+	for _, p in ipairs(players) do
+		if PlayerData.Save then
+			pcall(function()
+				PlayerData.Save(p, false)
+			end)
+		end
+	end
 
 	local options = Instance.new("TeleportOptions")
 	options:SetTeleportData(tpData)

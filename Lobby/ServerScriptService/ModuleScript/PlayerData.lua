@@ -441,11 +441,15 @@ function PlayerData.Save(plr, force: boolean)
 	if (not force) and (not PlayerData._dirty[uid]) then return end
 
 	PlayerData._saving[uid] = true
-	pcall(function()
+	local ok = pcall(function()
 		store:SetAsync(tostring(uid), data)
 	end)
 	PlayerData._saving[uid] = false
-	PlayerData._dirty[uid] = false
+	if ok then
+		PlayerData._dirty[uid] = false
+	else
+		PlayerData._dirty[uid] = true
+	end
 end
 
 function PlayerData.Reset(plr)
