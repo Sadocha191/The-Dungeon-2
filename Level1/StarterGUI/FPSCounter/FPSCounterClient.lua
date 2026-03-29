@@ -31,39 +31,13 @@ if playerGui:GetAttribute("ShowFPSCounter") == nil then
 	playerGui:SetAttribute("ShowFPSCounter", getPersistedVisibility())
 end
 
-gui.Enabled = playerGui:GetAttribute("ShowFPSCounter") == true
-
 local function applyVisibility()
 	local enabled = playerGui:GetAttribute("ShowFPSCounter") == true
 	gui.Enabled = enabled
 	persistVisibility(enabled)
 end
 
-local function setVisible(enabled: boolean)
-	playerGui:SetAttribute("ShowFPSCounter", enabled)
-end
-
-local lastScreenButtonsNonce = nil
-local function handleScreenButtonsRequest()
-	local nonce = gui:GetAttribute("ScreenButtonsNonce")
-	if nonce == nil or nonce == lastScreenButtonsNonce then
-		return
-	end
-
-	lastScreenButtonsNonce = nonce
-	local action = gui:GetAttribute("ScreenButtonsAction")
-	if action == "open" then
-		setVisible(true)
-	elseif action == "close" then
-		setVisible(false)
-	elseif action == "toggle" then
-		setVisible(not (playerGui:GetAttribute("ShowFPSCounter") == true))
-	end
-end
-
 playerGui:GetAttributeChangedSignal("ShowFPSCounter"):Connect(applyVisibility)
-gui:GetAttributeChangedSignal("ScreenButtonsNonce"):Connect(handleScreenButtonsRequest)
-handleScreenButtonsRequest()
 applyVisibility()
 
 local sampleTime = 0

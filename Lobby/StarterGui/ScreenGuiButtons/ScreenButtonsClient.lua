@@ -8,7 +8,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 local screenGui = script.Parent
 local frame = screenGui:WaitForChild("Frame")
 local SETTINGS_BUTTON_IMAGE = "rbxassetid://116594278084498"
-local SETTINGS_BUTTON_HOTKEY = "O"
+local SETTINGS_BUTTON_HOTKEY = "L"
 
 local CONTROL_GUIS = {
 	"ProfileStats",
@@ -41,11 +41,23 @@ local function ensureSettingsButton()
 	local existing = screenGui:FindFirstChild("Settings") or frame:FindFirstChild("Settings")
 	if existing and existing:IsA("GuiButton") then
 		local anchorPoint, position, size = getSettingsButtonLayout()
+		existing.Image = SETTINGS_BUTTON_IMAGE
 		existing.Parent = screenGui
 		existing.AnchorPoint = anchorPoint
 		existing.Position = position
 		existing.Size = size
 		existing.LayoutOrder = 0
+
+		local existingPlayerIcon = existing:FindFirstChild("PlayerIcon", true)
+		if existingPlayerIcon then
+			existingPlayerIcon:Destroy()
+		end
+
+		local existingHotKeyLabel = existing:FindFirstChild("HotKey", true)
+		if existingHotKeyLabel and (existingHotKeyLabel:IsA("TextLabel") or existingHotKeyLabel:IsA("TextButton") or existingHotKeyLabel:IsA("TextBox")) then
+			existingHotKeyLabel.Text = SETTINGS_BUTTON_HOTKEY
+		end
+
 		return existing
 	end
 
