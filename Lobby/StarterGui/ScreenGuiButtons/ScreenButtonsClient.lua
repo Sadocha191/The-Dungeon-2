@@ -21,6 +21,7 @@ local CONTROL_GUIS = {
 local requestCounters = {}
 local hotkeyBindings = {}
 local isPC = UserInputService.KeyboardEnabled and UserInputService.MouseEnabled
+local getSettingsButtonLayout
 
 local function findButtons(names)
 	local buttons = {}
@@ -35,9 +36,16 @@ local function findButtons(names)
 	return buttons
 end
 
+-- Settings button stays outside the shortcut grid so it can live on the left side.
 local function ensureSettingsButton()
-	local existing = frame:FindFirstChild("Settings")
+	local existing = screenGui:FindFirstChild("Settings") or frame:FindFirstChild("Settings")
 	if existing and existing:IsA("GuiButton") then
+		local anchorPoint, position, size = getSettingsButtonLayout()
+		existing.Parent = screenGui
+		existing.AnchorPoint = anchorPoint
+		existing.Position = position
+		existing.Size = size
+		existing.LayoutOrder = 0
 		return existing
 	end
 
@@ -46,11 +54,15 @@ local function ensureSettingsButton()
 		return nil
 	end
 
+	local anchorPoint, position, size = getSettingsButtonLayout()
 	local button = template:Clone()
 	button.Name = "Settings"
 	button.LayoutOrder = 0
 	button.Image = SETTINGS_BUTTON_IMAGE
-	button.Parent = frame
+	button.AnchorPoint = anchorPoint
+	button.Position = position
+	button.Size = size
+	button.Parent = screenGui
 
 	local playerIcon = button:FindFirstChild("PlayerIcon", true)
 	if playerIcon then
@@ -79,6 +91,18 @@ local function resolveGui(guiName, timeoutSeconds)
 	end
 
 	return nil
+end
+
+getSettingsButtonLayout = function()
+	local settingsGui = resolveGui("Settings", 0) or playerGui:WaitForChild("Settings", 2)
+	if settingsGui and settingsGui:IsA("ScreenGui") then
+		local settingsFrame = settingsGui:FindFirstChild("Frame")
+		if settingsFrame and settingsFrame:IsA("Frame") then
+			return settingsFrame.AnchorPoint, settingsFrame.Position, settingsFrame.Size
+		end
+	end
+
+	return Vector2.new(0, 0), UDim2.new(0, 0, 0, 0), UDim2.fromOffset(72, 72)
 end
 
 local function sendRequest(guiName, action, timeoutSeconds)
@@ -223,6 +247,12 @@ local function showNotification(title, text)
 	end
 end
 
+local function setStandaloneButtonsVisible(buttons, visible)
+	for _, button in ipairs(buttons) do
+		button.Visible = visible
+	end
+end
+
 local function applyProfileIcon()
 	local profileButton = findButtons({ "Profile" })[1]
 	if not profileButton then
@@ -247,12 +277,10 @@ local function applyProfileIcon()
 	end
 end
 
-local settingsButtons = findButtons({ "Settings" })
-if #settingsButtons == 0 then
-	local createdSettingsButton = ensureSettingsButton()
-	if createdSettingsButton then
-		settingsButtons = { createdSettingsButton }
-	end
+local settingsButtons = {}
+local createdSettingsButton = ensureSettingsButton()
+if createdSettingsButton then
+	settingsButtons = { createdSettingsButton }
 end
 setHotKeyVisibility(settingsButtons)
 connectButtons(settingsButtons, function()
@@ -342,6 +370,7 @@ RunService.RenderStepped:Connect(function()
 	local hide = shouldHideButtons()
 	if hide ~= lastHidden then
 		frame.Visible = not hide
+		setStandaloneButtonsVisible(settingsButtons, not hide)
 		lastHidden = hide
 	end
 end)

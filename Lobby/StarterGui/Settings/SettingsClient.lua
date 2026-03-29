@@ -6,6 +6,8 @@ local playerGui = player:WaitForChild("PlayerGui")
 local gui = script.Parent
 local root = gui:WaitForChild("Frame")
 local icon = root:FindFirstChild("Settings")
+local originalRootPosition = root.Position
+local originalRootSize = root.Size
 
 local DEFAULTS = {
 	ShowFPSCounter = false,
@@ -69,8 +71,8 @@ root.Active = true
 
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
-panel.AnchorPoint = Vector2.new(0.5, 0.5)
-panel.Position = UDim2.fromScale(0.5, 0.5)
+panel.AnchorPoint = Vector2.new(0, 0)
+panel.Position = originalRootPosition
 panel.Size = UDim2.new(0, 560, 0, 430)
 panel.BackgroundColor3 = Color3.fromRGB(14, 18, 28)
 panel.BorderSizePixel = 0
@@ -97,10 +99,10 @@ header.BackgroundTransparency = 1
 header.Parent = panel
 
 if icon and icon:IsA("ImageLabel") then
-	icon.Parent = header
-	icon.AnchorPoint = Vector2.new(0, 0.5)
-	icon.Position = UDim2.new(0, 18, 0.5, 0)
-	icon.Size = UDim2.fromOffset(54, 54)
+	icon.Parent = root
+	icon.AnchorPoint = Vector2.new(0, 0)
+	icon.Position = originalRootPosition
+	icon.Size = originalRootSize
 	icon.BackgroundTransparency = 1
 	icon.ScaleType = Enum.ScaleType.Fit
 	icon.ImageTransparency = 0
@@ -176,6 +178,7 @@ local function makeRow(titleText: string, descriptionText: string)
 	titleLabel.Text = titleText
 	titleLabel.Parent = row
 
+	-- Secondary copy keeps the option purpose readable without crowding the action button.
 	local descriptionLabel = Instance.new("TextLabel")
 	descriptionLabel.BackgroundTransparency = 1
 	descriptionLabel.Position = UDim2.fromOffset(18, 38)
