@@ -41,7 +41,11 @@ local presentations = {}
 local pendingTrackBuilds = {}
 local currentSyncRequestId = 0
 local syncOverlayToken = nil
-local SCREEN_VISIBILITY_PADDING = 96
+local RUN_ANIM_START_SPEED = 1.5
+local RUN_ANIM_STOP_SPEED = 0.75
+local RUN_ANIM_HOLD_TIME = 0.18
+local bulkMoveParts = table.create(64)
+local bulkMoveFrames = table.create(64)
 
 local function flatDir(v: Vector3?): Vector3
 	if typeof(v) ~= "Vector3" then
@@ -52,6 +56,13 @@ local function flatDir(v: Vector3?): Vector3
 		return Vector3.new(0, 0, -1)
 	end
 	return xz.Unit
+end
+
+local function flatSpeed(v: Vector3?): number
+	if typeof(v) ~= "Vector3" then
+		return 0
+	end
+	return math.sqrt((v.X * v.X) + (v.Z * v.Z))
 end
 
 local function resolveRoot(model: Model): BasePart?
@@ -74,27 +85,6 @@ local function computeRootToPivot(model: Model, root: BasePart): CFrame?
 		return nil
 	end
 	return root.CFrame:ToObjectSpace(pivot)
-end
-
-local function isWorldPositionVisible(worldPos: Vector3): boolean
-	local camera = workspace.CurrentCamera
-	if not camera then
-		return true
-	end
-
-	local viewportPoint, onScreen = camera:WorldToViewportPoint(worldPos)
-	if viewportPoint.Z <= 0 then
-		return false
-	end
-	if onScreen then
-		return true
-	end
-
-	local viewportSize = camera.ViewportSize
-	return viewportPoint.X >= -SCREEN_VISIBILITY_PADDING
-		and viewportPoint.X <= (viewportSize.X + SCREEN_VISIBILITY_PADDING)
-		and viewportPoint.Y >= -SCREEN_VISIBILITY_PADDING
-		and viewportPoint.Y <= (viewportSize.Y + SCREEN_VISIBILITY_PADDING)
 end
 
 local function refreshRigBinding(entry)
@@ -139,6 +129,24 @@ local function resolveWeight(animation: Animation): number
 	return 1
 end
 
+local function animationMatchesProbe(animation: Animation, probe: string): boolean
+	local lowerProbe = string.lower(probe)
+	local animationName = string.lower(animation.Name)
+	if animationName == lowerProbe or string.sub(animationName, 1, #lowerProbe) == lowerProbe then
+		return true
+	end
+
+	local parent = animation.Parent
+	while parent and not parent:IsA("Model") do
+		if string.lower(parent.Name) == lowerProbe then
+			return true
+		end
+		parent = parent.Parent
+	end
+
+	return false
+end
+
 local function collectAnimations(model: Model, stateName: string): {Animation}
 	local list = {}
 	local seen = {}
@@ -146,9 +154,8 @@ local function collectAnimations(model: Model, stateName: string): {Animation}
 
 	for _, descendant in ipairs(model:GetDescendants()) do
 		if descendant:IsA("Animation") then
-			local lower = string.lower(descendant.Name)
 			for _, probe in ipairs(names) do
-				if lower == probe or string.find(lower, probe, 1, true) then
+				if animationMatchesProbe(descendant, probe) then
 					if not seen[descendant] then
 						seen[descendant] = true
 						table.insert(list, descendant)
@@ -245,13 +252,56 @@ local function stopAnimation(entry, fadeTime: number?)
 	entry.currentAnimState = nil
 end
 
+local function updateAnimationMotion(entry, dt: number, now: number)
+	local renderPos = entry.renderPos
+	if typeof(renderPos) ~= "Vector3" then
+		return
+	end
+
+	local previousPos = entry.lastRenderPos or renderPos
+	local displayedSpeed = 0
+	if typeof(previousPos) == "Vector3" and dt > 1e-4 then
+		displayedSpeed = flatSpeed(renderPos - previousPos) / dt
+	end
+
+	local targetSpeed = math.max(displayedSpeed, flatSpeed(entry.velocity))
+	if entry.animMotionSpeed == nil then
+		entry.animMotionSpeed = targetSpeed
+	else
+		entry.animMotionSpeed += (targetSpeed - entry.animMotionSpeed) * math.clamp(dt * 10, 0, 1)
+	end
+
+	local threshold = entry.animMoving and RUN_ANIM_STOP_SPEED or RUN_ANIM_START_SPEED
+	if (entry.animMotionSpeed or 0) >= threshold then
+		entry.animMoving = true
+		entry.lastMoveAt = now
+	elseif entry.animMoving and (now - (entry.lastMoveAt or 0)) > RUN_ANIM_HOLD_TIME then
+		entry.animMoving = false
+	end
+
+	entry.lastRenderPos = renderPos
+end
+
+local function resolveAnimationState(entry): string
+	if entry.dead or NpcShared.IsDeadState(entry.state) then
+		return "death"
+	end
+	if entry.state == NpcShared.States.Attacking then
+		return "attack"
+	end
+	if entry.animMoving == true then
+		return "run"
+	end
+	return "idle"
+end
+
 local function playAnimation(entry)
 	if not entry.animBuilt then
 		queueTrackBuild(entry)
 		return
 	end
 
-	local animState = NpcShared.AnimationStateByNpcState[entry.state] or "idle"
+	local animState = resolveAnimationState(entry)
 	if animState == "death" and entry.currentAnimState == "death" then
 		return
 	end
@@ -261,6 +311,9 @@ local function playAnimation(entry)
 
 	local nextTrack = chooseTrack(entry, animState)
 	if not nextTrack then
+		if animState == "death" then
+			stopAnimation(entry, 0.1)
+		end
 		return
 	end
 
@@ -372,6 +425,7 @@ local function ensureEntry(id: string)
 	end
 	entry = {
 		id = id,
+		numericId = tonumber(id) or 0,
 		state = NpcShared.States.Idle,
 		targetPos = nil,
 		renderPos = nil,
@@ -386,6 +440,10 @@ local function ensureEntry(id: string)
 		rootToPivot = nil,
 		boundRoot = nil,
 		animQueued = false,
+		lastRenderPos = nil,
+		animMotionSpeed = 0,
+		animMoving = false,
+		lastMoveAt = 0,
 	}
 	presentations[id] = entry
 	return entry
@@ -434,28 +492,62 @@ finishSyncGate = function(requestId: number?)
 	syncOverlayToken = nil
 end
 
+local function getPayloadItems(payload)
+	if typeof(payload.packet) == "buffer" then
+		return NpcShared.DecodePacket(payload.packet)
+	end
+
+	if typeof(payload.items) == "table" then
+		return payload.items
+	end
+
+	return nil
+end
+
+local function getPayloadModels(payload)
+	if typeof(payload.models) ~= "table" then
+		return nil
+	end
+
+	local lookup = {}
+	for _, ref in ipairs(payload.models) do
+		if typeof(ref) == "table" then
+			local numericId = tonumber(ref[1] or ref.id)
+			local model = ref[2] or ref.model
+			if numericId and typeof(model) == "Instance" and model:IsA("Model") then
+				lookup[numericId] = model
+			end
+		end
+	end
+
+	return lookup
+end
+
 batchEvent.OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then
 		return
 	end
 
-	local items = payload.items
+	local items = getPayloadItems(payload)
 	if typeof(items) ~= "table" then
 		return
 	end
 
 	local fullSnapshot = payload.full == true
+	local modelLookup = getPayloadModels(payload)
 	local seen = fullSnapshot and {} or nil
 	local now = os.clock()
 	for _, item in ipairs(items) do
 		if typeof(item) == "table" and item.id ~= nil then
 			local id = tostring(item.id)
 			local entry = ensureEntry(id)
+			entry.numericId = tonumber(item.numericId) or entry.numericId
 			if seen then
 				seen[id] = true
 			end
-			if typeof(item.model) == "Instance" and item.model:IsA("Model") then
-				entry.model = item.model
+			local model = modelLookup and entry.numericId and modelLookup[entry.numericId] or item.model
+			if typeof(model) == "Instance" and model:IsA("Model") then
+				entry.model = model
 				refreshRigBinding(entry)
 				queueTrackBuild(entry)
 			end
@@ -505,6 +597,42 @@ batchEvent.OnClientEvent:Connect(function(payload)
 	end
 end)
 
+local function renderPresentationEntry(entry, dt: number, now: number)
+	local model = entry.model
+	if not model or not model.Parent or not entry.targetPos then
+		return
+	end
+
+	local goalPos = entry.targetPos
+	if typeof(entry.velocity) == "Vector3" and not entry.dead then
+		goalPos += entry.velocity * 0.05
+	end
+	local goalDir = flatDir(entry.targetDir or entry.velocity)
+	if typeof(entry.velocity) == "Vector3" and entry.velocity.Magnitude > 0.2 then
+		goalDir = flatDir(entry.velocity)
+	end
+
+	entry.renderPos = entry.renderPos and entry.renderPos:Lerp(goalPos, math.clamp(dt * 12, 0, 1)) or goalPos
+	entry.renderDir = entry.renderDir and entry.renderDir:Lerp(goalDir, math.clamp(dt * 14, 0, 1)) or goalDir
+	entry.renderDir = flatDir(entry.renderDir)
+
+	local root = refreshRigBinding(entry)
+	local rootFrame = CFrame.lookAt(entry.renderPos, entry.renderPos + entry.renderDir)
+
+	updateAnimationMotion(entry, dt, now)
+	if root then
+		bulkMoveParts[#bulkMoveParts + 1] = root
+		bulkMoveFrames[#bulkMoveFrames + 1] = rootFrame
+	elseif entry.rootToPivot then
+		model:PivotTo(rootFrame * entry.rootToPivot)
+	else
+		model:PivotTo(rootFrame)
+	end
+
+	updateHealthbar(entry)
+	playAnimation(entry)
+end
+
 RunService.RenderStepped:Connect(function(dt)
 	local now = os.clock()
 
@@ -521,49 +649,36 @@ RunService.RenderStepped:Connect(function(dt)
 		buildsLeft -= 1
 	end
 
+	local renderList = table.create(64)
 	for id, entry in pairs(presentations) do
 		local model = entry.model
 		if model and not model.Parent then
 			cleanupEntry(id)
 			continue
 		end
-		if (entry.despawned and not model) or (now - entry.lastSeen) > 2 then
+		if (entry.despawned and not model) or ((now - entry.lastSeen) > 2 and not model) then
 			cleanupEntry(id)
 			continue
 		end
-		if not model or not model.Parent then
+		if not model or not model.Parent or not entry.targetPos then
 			continue
 		end
-		if not entry.targetPos then
-			continue
-		end
+		renderList[#renderList + 1] = entry
+	end
 
-		local goalPos = entry.targetPos
-		if typeof(entry.velocity) == "Vector3" and not entry.dead then
-			goalPos += entry.velocity * 0.05
-		end
-		local goalDir = flatDir(entry.targetDir or entry.velocity)
-		if typeof(entry.velocity) == "Vector3" and entry.velocity.Magnitude > 0.2 then
-			goalDir = flatDir(entry.velocity)
-		end
+	local total = #renderList
+	if total == 0 then
+		return
+	end
 
-		entry.renderPos = entry.renderPos and entry.renderPos:Lerp(goalPos, math.clamp(dt * 12, 0, 1)) or goalPos
-		entry.renderDir = entry.renderDir and entry.renderDir:Lerp(goalDir, math.clamp(dt * 14, 0, 1)) or goalDir
-		entry.renderDir = flatDir(entry.renderDir)
+	table.clear(bulkMoveParts)
+	table.clear(bulkMoveFrames)
+	for index = 1, total do
+		renderPresentationEntry(renderList[index], dt, now)
+	end
 
-		refreshRigBinding(entry)
-		local rootFrame = CFrame.lookAt(entry.renderPos, entry.renderPos + entry.renderDir)
-		if entry.rootToPivot then
-			model:PivotTo(rootFrame * entry.rootToPivot)
-		else
-			model:PivotTo(rootFrame)
-		end
-		updateHealthbar(entry)
-		if isWorldPositionVisible(entry.renderPos) then
-			playAnimation(entry)
-		else
-			stopAnimation(entry, 0.12)
-		end
+	if #bulkMoveParts > 0 then
+		workspace:BulkMoveTo(bulkMoveParts, bulkMoveFrames, Enum.BulkMoveMode.FireCFrameChanged)
 	end
 end)
 

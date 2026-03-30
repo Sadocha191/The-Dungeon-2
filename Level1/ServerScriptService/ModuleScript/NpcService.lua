@@ -73,6 +73,21 @@ type AlivePlayerInfo = {
 	humanoid: Humanoid,
 }
 
+type PacketEntry = {
+	numericId: number,
+	flags: number,
+	stateId: number,
+	hp: number,
+	maxHp: number,
+	px: number,
+	py: number,
+	pz: number,
+	vx: number,
+	vy: number,
+	vz: number,
+	yaw: number,
+}
+
 type NpcRecord = {
 	id: string,
 	model: Model,
@@ -104,8 +119,12 @@ type NpcRecord = {
 	groundOffset: number,
 	lastGroundAt: number,
 	lastGroundXZ: Vector3,
+	separationRadius: number,
+	hardSeparationRadius: number,
 	orbitSign: number,
 	orbitRadius: number,
+	modelPending: boolean,
+	lastPacketEntry: PacketEntry?,
 	deathCallbacks: {((any, {[string]: any}) -> ())},
 }
 
@@ -115,6 +134,9 @@ local nextNpcId = 0
 local npcById: {[string]: NpcRecord} = {}
 local npcByModel: {[Model]: NpcRecord} = {}
 local tombstones = {}
+local NPC_SEPARATION_CELL_SIZE = 8
+local NPC_SEPARATION_PUSH_SPEED = 12
+local NPC_SEPARATION_MAX_SPEED = 18
 
 local function enemiesFolder(): Instance?
 	return workspace:FindFirstChild("Enemies") or workspace:FindFirstChild("Mobs")
@@ -337,6 +359,79 @@ local function raycastObstacle(origin: Vector3, direction: Vector3, ignoreInstan
 	return nil
 end
 
+local function separationCell(pos: Vector3): (number, number)
+	return math.floor(pos.X / NPC_SEPARATION_CELL_SIZE), math.floor(pos.Z / NPC_SEPARATION_CELL_SIZE)
+end
+
+local function separationKey(cellX: number, cellZ: number): string
+	return tostring(cellX) .. ":" .. tostring(cellZ)
+end
+
+local function separationFallbackDir(npc: NpcRecord): Vector3
+	local angle = ((tonumber(npc.id) or 0) * 2.399963229728653) % (math.pi * 2)
+	return Vector3.new(math.cos(angle), 0, math.sin(angle))
+end
+
+local function buildSeparationGrid(): {[string]: {NpcRecord}}
+	local grid = {}
+	for _, npc in pairs(npcById) do
+		if not npc.dead and npc.model.Parent then
+			local cellX, cellZ = separationCell(npc.position)
+			local key = separationKey(cellX, cellZ)
+			local bucket = grid[key]
+			if not bucket then
+				bucket = {}
+				grid[key] = bucket
+			end
+			bucket[#bucket + 1] = npc
+		end
+	end
+	return grid
+end
+
+local function computeNpcSeparationMove(npc: NpcRecord, separationGrid: {[string]: {NpcRecord}}, dt: number): Vector3
+	local cellX, cellZ = separationCell(npc.position)
+	local push = Vector3.zero
+	local hardPush = Vector3.zero
+
+	for offsetX = -1, 1 do
+		for offsetZ = -1, 1 do
+			local bucket = separationGrid[separationKey(cellX + offsetX, cellZ + offsetZ)]
+			if bucket then
+				for _, other in ipairs(bucket) do
+					if other ~= npc and not other.dead and other.model.Parent then
+						local offset = flat(npc.position - other.position)
+						local dist = offset.Magnitude
+						local pairSoftRadius = ((npc.separationRadius + other.separationRadius) * 0.5) + 1.5
+						if dist < pairSoftRadius then
+							local dir = if dist > 1e-4 then (offset / dist) else separationFallbackDir(npc)
+							local weight = (pairSoftRadius - dist) / pairSoftRadius
+							push += dir * weight
+
+							local pairHardRadius = math.max((npc.hardSeparationRadius + other.hardSeparationRadius) * 0.5, pairSoftRadius * 0.7)
+							if dist < pairHardRadius then
+								local hardWeight = (pairHardRadius - dist) / math.max(pairHardRadius, 1e-4)
+								hardPush += dir * hardWeight
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	local combined = push + (hardPush * 2.25)
+	if combined.Magnitude <= 1e-4 then
+		return Vector3.zero
+	end
+
+	local speed = NPC_SEPARATION_PUSH_SPEED * math.min(1.85, combined.Magnitude)
+	if hardPush.Magnitude > 0 then
+		speed += NPC_SEPARATION_PUSH_SPEED * math.min(1.5, hardPush.Magnitude)
+	end
+	return clampMagnitude(combined.Unit * (speed * dt), NPC_SEPARATION_MAX_SPEED * dt)
+end
+
 local function getAlivePlayers(): {AlivePlayerInfo}
 	local result = {}
 	for _, plr in ipairs(Players:GetPlayers()) do
@@ -419,21 +514,35 @@ local function fireDamageIndicator(sourcePlayer: Player?, npc: NpcRecord, amount
 	})
 end
 
+local function buildPacketEntry(npc: NpcRecord, options: {[string]: any}?): PacketEntry
+	local data = options or {}
+	return NpcShared.BuildPacketEntry({
+		numericId = tonumber(npc.id) or 0,
+		pos = if data.pos ~= nil then data.pos else npc.position,
+		dir = if data.dir ~= nil then data.dir else npc.look,
+		vel = if data.vel ~= nil then data.vel else npc.velocity,
+		state = if data.state ~= nil then data.state else npc.state,
+		hp = if data.hp ~= nil then data.hp else npc.health,
+		maxHp = if data.maxHp ~= nil then data.maxHp else npc.maxHealth,
+		dead = if data.dead ~= nil then data.dead else npc.dead,
+		despawned = data.despawned == true,
+	})
+end
+
+local function clonePacketEntryWithModel(entry: PacketEntry, includeModel: boolean): PacketEntry
+	local clone = NpcShared.ClonePacketEntry(entry)
+	if includeModel then
+		clone.flags += NpcShared.PacketFlags.HasModel
+	end
+	return clone
+end
+
 local function queueTombstone(npc: NpcRecord, despawned: boolean)
-	table.insert(tombstones, {
-		id = npc.id,
-		model = npc.model,
-		type = npc.mobType,
-		pos = npc.position,
-		dir = npc.look,
-		vel = npc.velocity,
-		speed = 0,
+	table.insert(tombstones, buildPacketEntry(npc, {
 		state = despawned and STATE.Despawned or npc.state,
-		hp = npc.health,
-		maxHp = npc.maxHealth,
 		dead = npc.dead,
 		despawned = despawned,
-	})
+	}))
 end
 
 local function unregisterNpc(npc: NpcRecord, despawned: boolean?)
@@ -611,7 +720,13 @@ local function steerAroundObstacles(npc: NpcRecord, desiredMove: Vector3, target
 	return Vector3.zero
 end
 
-local function updateNpc(npc: NpcRecord, dt: number, alivePlayers: {AlivePlayerInfo}, now: number)
+local function updateNpc(
+	npc: NpcRecord,
+	dt: number,
+	alivePlayers: {AlivePlayerInfo},
+	now: number,
+	separationGrid: {[string]: {NpcRecord}}
+)
 	if npc.dead then
 		return
 	end
@@ -641,6 +756,7 @@ local function updateNpc(npc: NpcRecord, dt: number, alivePlayers: {AlivePlayerI
 	local toTarget = flat(targetPos - npc.position)
 	local dist = toTarget.Magnitude
 	local stopDistance = math.max(1.5, npc.attackRange - 0.35)
+	local speed = getCurrentSpeed(npc, now)
 	local baseMove = Vector3.zero
 
 	if npc.attackUntil > now then
@@ -661,7 +777,6 @@ local function updateNpc(npc: NpcRecord, dt: number, alivePlayers: {AlivePlayerI
 	else
 		local desiredPos = computeOrbitTarget(npc, targetPos, stopDistance)
 		local desiredMove = flat(desiredPos - npc.position)
-		local speed = getCurrentSpeed(npc, now)
 		if speed > 0 and desiredMove.Magnitude > 0.05 then
 			baseMove = clampMagnitude(desiredMove, speed * dt)
 			baseMove = steerAroundObstacles(npc, baseMove, targetPos)
@@ -675,6 +790,15 @@ local function updateNpc(npc: NpcRecord, dt: number, alivePlayers: {AlivePlayerI
 		else
 			npc.look = safeUnit(toTarget, npc.look)
 			setState(npc, STATE.Idle)
+		end
+	end
+
+	local separationMove = computeNpcSeparationMove(npc, separationGrid, dt)
+	if separationMove.Magnitude > 0.01 then
+		local maxMove = math.max(speed * dt, baseMove.Magnitude, separationMove.Magnitude)
+		baseMove = clampMagnitude(baseMove + separationMove, maxMove + (NPC_SEPARATION_MAX_SPEED * dt * 0.65))
+		if npc.attackUntil <= now and npc.state ~= STATE.Attacking and baseMove.Magnitude > 0.05 then
+			npc.look = safeUnit(baseMove, npc.look)
 		end
 	end
 
@@ -701,34 +825,37 @@ local function updateNpc(npc: NpcRecord, dt: number, alivePlayers: {AlivePlayerI
 	writeStateAttributes(npc)
 end
 
-local function buildSnapshot(npc: NpcRecord)
-	return {
-		id = npc.id,
-		model = npc.model,
-		type = npc.mobType,
-		pos = npc.position,
-		dir = npc.look,
-		vel = npc.velocity,
-		speed = npc.baseSpeed,
-		state = npc.state,
-		hp = npc.health,
-		maxHp = npc.maxHealth,
-		dead = npc.dead,
-		despawned = false,
-	}
-end
+local function collectBatchEntries(fullSnapshot: boolean?, includeTombstones: boolean?): ({PacketEntry}, {{any}})
+	local entries = {}
+	local modelRefs = {}
 
-local function collectBatchItems(includeTombstones: boolean?)
-	local items = {}
 	for _, npc in pairs(npcById) do
-		table.insert(items, buildSnapshot(npc))
-	end
-	if includeTombstones == true then
-		for _, tombstone in ipairs(tombstones) do
-			table.insert(items, tombstone)
+		local baseEntry = buildPacketEntry(npc)
+		local includeModel = fullSnapshot == true or npc.modelPending == true
+		local isDirty = fullSnapshot == true
+			or includeModel
+			or npc.lastPacketEntry == nil
+			or not NpcShared.PacketEntryEquals(npc.lastPacketEntry, baseEntry)
+
+		if isDirty then
+			table.insert(entries, clonePacketEntryWithModel(baseEntry, includeModel))
+			if includeModel then
+				table.insert(modelRefs, { tonumber(npc.id) or 0, npc.model })
+			end
+			if fullSnapshot ~= true then
+				npc.lastPacketEntry = NpcShared.ClonePacketEntry(baseEntry)
+				npc.modelPending = false
+			end
 		end
 	end
-	return items
+
+	if includeTombstones == true then
+		for _, tombstone in ipairs(tombstones) do
+			table.insert(entries, NpcShared.ClonePacketEntry(tombstone))
+		end
+	end
+
+	return entries, modelRefs
 end
 
 local function sendBatchToPlayer(player: Player, fullSnapshot: boolean?, requestId: number?)
@@ -736,26 +863,28 @@ local function sendBatchToPlayer(player: Player, fullSnapshot: boolean?, request
 		return
 	end
 
-	local items = collectBatchItems(false)
+	local entries, modelRefs = collectBatchEntries(true, false)
 	batchEvent:FireClient(player, {
 		serverTime = workspace:GetServerTimeNow(),
 		full = fullSnapshot == true,
 		requestId = requestId,
-		items = items,
+		packet = NpcShared.EncodePacket(entries),
+		models = modelRefs,
 	})
 end
 
 local function broadcastBatch()
-	local items = collectBatchItems(true)
+	local entries, modelRefs = collectBatchEntries(false, true)
 	table.clear(tombstones)
 
-	if #items == 0 then
+	if #entries == 0 then
 		return
 	end
 
 	batchEvent:FireAllClients({
 		serverTime = workspace:GetServerTimeNow(),
-		items = items,
+		packet = NpcShared.EncodePacket(entries),
+		models = modelRefs,
 	})
 end
 
@@ -940,6 +1069,9 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 	local maxHealth = math.max(1, math.floor(tonumber(config and config.maxHealth) or 1))
 	local speed = math.max(0, tonumber(config and config.speed) or 0)
 	local groundOffset = computeGroundOffset(model, root)
+	local rootSpan = math.max(root.Size.X, root.Size.Z)
+	local separationRadius = math.max(3.0, rootSpan * 1.6)
+	local hardSeparationRadius = math.max(2.1, rootSpan * 1.05)
 
 	local npc: NpcRecord = {
 		id = npcId,
@@ -972,8 +1104,12 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		groundOffset = groundOffset,
 		lastGroundAt = 0,
 		lastGroundXZ = Vector3.new(root.Position.X, 0, root.Position.Z),
+		separationRadius = separationRadius,
+		hardSeparationRadius = hardSeparationRadius,
 		orbitSign = math.random() < 0.5 and -1 or 1,
 		orbitRadius = 0.8 + math.random() * 1.35,
+		modelPending = true,
+		lastPacketEntry = nil,
 		deathCallbacks = {},
 	}
 
@@ -1024,9 +1160,10 @@ local batchAccumulator = 0
 RunService.Heartbeat:Connect(function(dt)
 	local now = os.clock()
 	local alivePlayers = getAlivePlayers()
+	local separationGrid = buildSeparationGrid()
 
 	for _, npc in pairs(npcById) do
-		updateNpc(npc, dt, alivePlayers, now)
+		updateNpc(npc, dt, alivePlayers, now, separationGrid)
 	end
 
 	batchAccumulator += dt
