@@ -7,9 +7,9 @@ Levels.List = {
 	{
 		key = "AshenWastes",
 		instanceName = "AshenWastes",
-		aliases = { "Level1" },
+		aliases = { "Level", "Level1" },
 		name = "Ashen Wastes",
-		placeId = 82864046258949,
+		placeId = 113361902471683,
 		description = "A burned wasteland covered in gray ash, dead trees, and the ruins of a long-fallen civilization. Fits an open map with low visibility and enemy waves emerging from clouds of ash.",
 		highscore = 0,
 		speedrun = "00:00.00",

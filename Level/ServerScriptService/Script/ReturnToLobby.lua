@@ -3,7 +3,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
 
-local LOBBY_PLACE_ID = 72651938611811
+local LOBBY_PLACE_ID = 88516424167732
 
 local remote = ReplicatedStorage:FindFirstChild("ReturnToLobby")
 if not remote then
