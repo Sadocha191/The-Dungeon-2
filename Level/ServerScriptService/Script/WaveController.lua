@@ -376,7 +376,7 @@ local ENEMY_CONFIGS = {
 }
 
 local RUN_TIME_LIMIT = 15 * 60 -- 15:00 (portal/boss threshold)
-local ENEMY_HP_MULTIPLIER = 1.5
+local ENEMY_HP_MULTIPLIER = 2 / 3 -- start slime dies in 2 hits from Knight's Oath; the rest scales from the same baseline
 local BOSS_BASE_HP = math.floor(1600 * ENEMY_HP_MULTIPLIER)
 local BOSS_HP_MULT_EARLY = 22
 local BOSS_HP_MULT_LATE = 6
