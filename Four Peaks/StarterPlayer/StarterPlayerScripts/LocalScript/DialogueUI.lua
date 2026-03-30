@@ -6,6 +6,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TextService = game:GetService("TextService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 
@@ -201,14 +202,31 @@ local function finishDialogue()
 	lineIndex = 1
 end
 
-closeButton.MouseButton1Click:Connect(finishDialogue)
-
-nextButton.MouseButton1Click:Connect(function()
+local function advanceDialogue()
+	if not gui.Enabled then
+		return
+	end
 	if lineIndex < #lines then
 		lineIndex += 1
 		showLine()
 	else
 		finishDialogue()
+	end
+end
+
+closeButton.MouseButton1Click:Connect(finishDialogue)
+
+nextButton.MouseButton1Click:Connect(advanceDialogue)
+
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed or not gui.Enabled then
+		return
+	end
+	if UserInputService:GetFocusedTextBox() then
+		return
+	end
+	if input.KeyCode == Enum.KeyCode.Space then
+		advanceDialogue()
 	end
 end)
 

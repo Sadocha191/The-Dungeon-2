@@ -385,6 +385,8 @@ local ELITE_SOUL_DROP_MIN = 18
 local ELITE_SOUL_DROP_MAX = 28
 local BOSS_SOUL_DROP_MIN = 45
 local BOSS_SOUL_DROP_MAX = 65
+local RUN_COIN_DROP_MULTIPLIER = 3
+local RUN_SOUL_DROP_MULTIPLIER = 3
 local ELITE_INTERVAL_SECONDS = 5 * 60
 local BOSS_REINFORCEMENT_INTERVAL = 10
 local materialRng = Random.new()
@@ -580,6 +582,9 @@ local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, isBoss: b
 		coinDrop = math.floor(coinDrop * 7)
 		soulsDrop = math.random(ELITE_SOUL_DROP_MIN, ELITE_SOUL_DROP_MAX)
 	end
+
+	coinDrop = math.max(1, math.floor(coinDrop * RUN_COIN_DROP_MULTIPLIER))
+	soulsDrop = math.max(0, math.floor(soulsDrop * RUN_SOUL_DROP_MULTIPLIER))
 
 	local dropsOk, dropsErr = pcall(function()
 		awardPersistentMobDrops(tostring(mob:GetAttribute("MobType") or mob.Name), isElite, isBoss)

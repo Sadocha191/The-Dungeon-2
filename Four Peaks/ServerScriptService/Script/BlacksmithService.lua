@@ -32,6 +32,10 @@ local BlacksmithAction = ensureRemote("BlacksmithAction")
 
 local WeaponTemplates = ServerStorage:FindFirstChild("WeaponTemplates")
 
+local function tutorialComplete(player: Player): boolean
+	return player:GetAttribute("TutorialComplete") == true
+end
+
 local function findAnyBasePart(model)
 	if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
 		return model.PrimaryPart
@@ -75,6 +79,9 @@ local function setupBlacksmithPrompt()
 	prompt.ActionText = "Craft / Upgrade"
 
 	prompt.Triggered:Connect(function(player)
+		if not tutorialComplete(player) then
+			return
+		end
 		OpenBlacksmithUI:FireClient(player)
 	end)
 end
@@ -162,6 +169,9 @@ setupBlacksmithPrompt()
 
 BlacksmithAction.OnServerEvent:Connect(function(player, payload)
 	if typeof(payload) ~= "table" then
+		return
+	end
+	if not tutorialComplete(player) then
 		return
 	end
 

@@ -8,6 +8,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
+local PickupToastService = require(serverModules:WaitForChild("PickupToastService"))
 local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
 local WeaponCatalog = require(serverModules:WaitForChild("WeaponCatalog"))
 
@@ -214,8 +215,111 @@ local function applyAttributes(player: Player, tutorial: {Active: boolean, Step:
 end
 
 -- ZMIANA: nie dajemy już miecza (broń jest od kowala)
-local function giveStarterSword(_player: Player)
-	return
+local function isWeaponTool(inst: Instance): boolean
+	if not inst:IsA("Tool") then
+		return false
+	end
+	return typeof(inst:GetAttribute("WeaponType")) == "string"
+		or typeof(inst:GetAttribute("WeaponInstanceId")) == "string"
+end
+
+local function clearWeaponTools(container: Instance?)
+	if not container then
+		return
+	end
+	for _, inst in ipairs(container:GetChildren()) do
+		if isWeaponTool(inst) then
+			inst:Destroy()
+		end
+	end
+end
+
+local function applyInstanceAttributes(tool: Tool, weaponInstance: any)
+	tool:SetAttribute("WeaponInstanceId", weaponInstance.instanceId)
+	tool:SetAttribute("WeaponLevel", tonumber(weaponInstance.level) or 1)
+	tool:SetAttribute("WeaponPrefix", tostring(weaponInstance.prefix or "Standard"))
+	if typeof(weaponInstance.rollStats) ~= "table" then
+		return
+	end
+	for key, value in pairs(weaponInstance.rollStats) do
+		if typeof(key) == "string" and typeof(value) == "number" then
+			tool:SetAttribute("Roll_" .. key, value)
+		end
+	end
+end
+
+local function findWeaponInstanceById(player: Player, weaponId: string)
+	for _, inst in ipairs(PlayerStateStore.ListWeaponInstances(player) or {}) do
+		if typeof(inst) == "table" and inst.weaponId == weaponId then
+			return inst
+		end
+	end
+	return nil
+end
+
+local function resolveStarterSword(): (string?, Tool?)
+	local starterTemplate = WeaponCatalog.FindTemplate(STARTER_SWORD_NAME)
+	if starterTemplate then
+		return STARTER_SWORD_NAME, starterTemplate
+	end
+
+	local fallbackTemplate = WeaponCatalog.FindTemplate(FALLBACK_SWORD_NAME)
+	if fallbackTemplate then
+		return FALLBACK_SWORD_NAME, fallbackTemplate
+	end
+
+	return nil, nil
+end
+
+local function giveStarterSword(player: Player)
+	local weaponName, template = resolveStarterSword()
+	if typeof(weaponName) ~= "string" or not template then
+		warn("[TutorialService] Missing starter sword template.")
+		return false
+	end
+
+	local weaponInstance = findWeaponInstanceById(player, weaponName)
+	local createdNow = false
+	if not weaponInstance then
+		weaponInstance = PlayerStateStore.EnsureOwnedWeapon(player, weaponName)
+		createdNow = weaponInstance ~= nil
+	end
+	if not weaponInstance then
+		return false
+	end
+
+	PlayerStateStore.SetEquippedWeaponInstance(player, weaponInstance.instanceId)
+
+	local backpack = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 10)
+	if backpack then
+		clearWeaponTools(backpack)
+		clearWeaponTools(player.Character)
+
+		local clone = template:Clone()
+		WeaponCatalog.PrepareTool(clone, weaponName)
+		applyInstanceAttributes(clone, weaponInstance)
+		clone.Parent = backpack
+	end
+
+	if createdNow then
+		PickupToastService.PushWeapon(player, weaponName, "Blacksmith Gift", 1)
+	end
+
+	return true
+end
+
+local function ensureTutorialStarterWeapon(player: Player)
+	local tutorial = PlayerStateStore.GetTutorialState(player)
+	if not tutorial or tutorial.Complete then
+		return
+	end
+	if tutorial.Active ~= true then
+		return
+	end
+	if (tutorial.Step or 1) < 3 then
+		return
+	end
+	giveStarterSword(player)
 end
 
 local function giveStarterSpell(player: Player)
@@ -263,6 +367,7 @@ DialogueFinishedEvent.OnServerEvent:Connect(function(player: Player, dialogueKey
 	if not current or current.dialogueKey ~= dialogueKey then return end
 
 	if tutorial.Step == 2 then
+		giveStarterSword(player)
 		advanceStep(player, 3)
 		return
 	end
@@ -282,11 +387,13 @@ end)
 Players.PlayerAdded:Connect(function(player: Player)
 	local tutorial = ensureDefaults(player)
 	applyAttributes(player, tutorial)
+	ensureTutorialStarterWeapon(player)
 	sendObjective(player, tutorial.Step, tutorial.Active)
 
 	player.CharacterAdded:Connect(function()
 		local current = PlayerStateStore.GetTutorialState(player)
 		applyAttributes(player, current)
+		ensureTutorialStarterWeapon(player)
 		sendObjective(player, current.Step, current.Active)
 	end)
 end)

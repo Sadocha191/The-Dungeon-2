@@ -317,6 +317,10 @@ local selectedKeys = {
 	Sell = nil,
 }
 
+local function tutorialComplete()
+	return player:GetAttribute("TutorialComplete") == true
+end
+
 local function getEntryRarity(entry)
 	if typeof(entry) ~= "table" then
 		return "Common"
@@ -626,6 +630,9 @@ local function refresh()
 end
 
 local function openUI()
+	if not tutorialComplete() then
+		return
+	end
 	gui.Enabled = true
 	BlacksmithAction:FireServer({ type = "request" })
 end

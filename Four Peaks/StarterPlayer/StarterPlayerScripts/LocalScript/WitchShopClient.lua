@@ -162,6 +162,10 @@ local sortState = { key = "name", ascending = true }
 local addRow
 local setRight
 
+local function tutorialComplete()
+	return plr:GetAttribute("TutorialComplete") == true
+end
+
 local ELEMENT_ORDER = {
 	Fire = 1,
 	Electricity = 2,
@@ -455,6 +459,7 @@ end
 ProximityPromptService.PromptTriggered:Connect(function(prompt, player)
 	if player ~= plr then return end
 	if gui.Enabled then return end
+	if not tutorialComplete() then return end
 	if isPromptInsideWitch(prompt) then
 		WitchShopEvent:FireServer({ type = "OPEN" })
 	end

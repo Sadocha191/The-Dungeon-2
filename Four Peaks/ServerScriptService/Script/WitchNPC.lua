@@ -148,10 +148,6 @@ prompt.Triggered:Connect(function(plr)
 	end
 
 	if plr:GetAttribute("TutorialComplete") ~= true then
-		WitchShopEvent:FireClient(plr, {
-			type = "INFO",
-			message = "Finish the tutorial to access the witch shop.",
-		})
 		return
 	end
 
