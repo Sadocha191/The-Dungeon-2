@@ -44,8 +44,6 @@ local syncOverlayToken = nil
 local RUN_ANIM_START_SPEED = 1.5
 local RUN_ANIM_STOP_SPEED = 0.75
 local RUN_ANIM_HOLD_TIME = 0.18
-local bulkMoveParts = table.create(64)
-local bulkMoveFrames = table.create(64)
 
 local function flatDir(v: Vector3?): Vector3
 	if typeof(v) ~= "Vector3" then
@@ -62,6 +60,7 @@ local function flatSpeed(v: Vector3?): number
 	if typeof(v) ~= "Vector3" then
 		return 0
 	end
+
 	return math.sqrt((v.X * v.X) + (v.Z * v.Z))
 end
 
@@ -311,9 +310,6 @@ local function playAnimation(entry)
 
 	local nextTrack = chooseTrack(entry, animState)
 	if not nextTrack then
-		if animState == "death" then
-			stopAnimation(entry, 0.1)
-		end
 		return
 	end
 
@@ -425,7 +421,6 @@ local function ensureEntry(id: string)
 	end
 	entry = {
 		id = id,
-		numericId = tonumber(id) or 0,
 		state = NpcShared.States.Idle,
 		targetPos = nil,
 		renderPos = nil,
@@ -492,62 +487,28 @@ finishSyncGate = function(requestId: number?)
 	syncOverlayToken = nil
 end
 
-local function getPayloadItems(payload)
-	if typeof(payload.packet) == "buffer" then
-		return NpcShared.DecodePacket(payload.packet)
-	end
-
-	if typeof(payload.items) == "table" then
-		return payload.items
-	end
-
-	return nil
-end
-
-local function getPayloadModels(payload)
-	if typeof(payload.models) ~= "table" then
-		return nil
-	end
-
-	local lookup = {}
-	for _, ref in ipairs(payload.models) do
-		if typeof(ref) == "table" then
-			local numericId = tonumber(ref[1] or ref.id)
-			local model = ref[2] or ref.model
-			if numericId and typeof(model) == "Instance" and model:IsA("Model") then
-				lookup[numericId] = model
-			end
-		end
-	end
-
-	return lookup
-end
-
 batchEvent.OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then
 		return
 	end
 
-	local items = getPayloadItems(payload)
+	local items = payload.items
 	if typeof(items) ~= "table" then
 		return
 	end
 
 	local fullSnapshot = payload.full == true
-	local modelLookup = getPayloadModels(payload)
 	local seen = fullSnapshot and {} or nil
 	local now = os.clock()
 	for _, item in ipairs(items) do
 		if typeof(item) == "table" and item.id ~= nil then
 			local id = tostring(item.id)
 			local entry = ensureEntry(id)
-			entry.numericId = tonumber(item.numericId) or entry.numericId
 			if seen then
 				seen[id] = true
 			end
-			local model = modelLookup and entry.numericId and modelLookup[entry.numericId] or item.model
-			if typeof(model) == "Instance" and model:IsA("Model") then
-				entry.model = model
+			if typeof(item.model) == "Instance" and item.model:IsA("Model") then
+				entry.model = item.model
 				refreshRigBinding(entry)
 				queueTrackBuild(entry)
 			end
@@ -597,42 +558,6 @@ batchEvent.OnClientEvent:Connect(function(payload)
 	end
 end)
 
-local function renderPresentationEntry(entry, dt: number, now: number)
-	local model = entry.model
-	if not model or not model.Parent or not entry.targetPos then
-		return
-	end
-
-	local goalPos = entry.targetPos
-	if typeof(entry.velocity) == "Vector3" and not entry.dead then
-		goalPos += entry.velocity * 0.05
-	end
-	local goalDir = flatDir(entry.targetDir or entry.velocity)
-	if typeof(entry.velocity) == "Vector3" and entry.velocity.Magnitude > 0.2 then
-		goalDir = flatDir(entry.velocity)
-	end
-
-	entry.renderPos = entry.renderPos and entry.renderPos:Lerp(goalPos, math.clamp(dt * 12, 0, 1)) or goalPos
-	entry.renderDir = entry.renderDir and entry.renderDir:Lerp(goalDir, math.clamp(dt * 14, 0, 1)) or goalDir
-	entry.renderDir = flatDir(entry.renderDir)
-
-	local root = refreshRigBinding(entry)
-	local rootFrame = CFrame.lookAt(entry.renderPos, entry.renderPos + entry.renderDir)
-
-	updateAnimationMotion(entry, dt, now)
-	if root then
-		bulkMoveParts[#bulkMoveParts + 1] = root
-		bulkMoveFrames[#bulkMoveFrames + 1] = rootFrame
-	elseif entry.rootToPivot then
-		model:PivotTo(rootFrame * entry.rootToPivot)
-	else
-		model:PivotTo(rootFrame)
-	end
-
-	updateHealthbar(entry)
-	playAnimation(entry)
-end
-
 RunService.RenderStepped:Connect(function(dt)
 	local now = os.clock()
 
@@ -649,36 +574,46 @@ RunService.RenderStepped:Connect(function(dt)
 		buildsLeft -= 1
 	end
 
-	local renderList = table.create(64)
 	for id, entry in pairs(presentations) do
 		local model = entry.model
 		if model and not model.Parent then
 			cleanupEntry(id)
 			continue
 		end
-		if (entry.despawned and not model) or ((now - entry.lastSeen) > 2 and not model) then
+		if (entry.despawned and not model) or (now - entry.lastSeen) > 2 then
 			cleanupEntry(id)
 			continue
 		end
-		if not model or not model.Parent or not entry.targetPos then
+		if not model or not model.Parent then
 			continue
 		end
-		renderList[#renderList + 1] = entry
-	end
+		if not entry.targetPos then
+			continue
+		end
 
-	local total = #renderList
-	if total == 0 then
-		return
-	end
+		local goalPos = entry.targetPos
+		if typeof(entry.velocity) == "Vector3" and not entry.dead then
+			goalPos += entry.velocity * 0.05
+		end
+		local goalDir = flatDir(entry.targetDir or entry.velocity)
+		if typeof(entry.velocity) == "Vector3" and entry.velocity.Magnitude > 0.2 then
+			goalDir = flatDir(entry.velocity)
+		end
 
-	table.clear(bulkMoveParts)
-	table.clear(bulkMoveFrames)
-	for index = 1, total do
-		renderPresentationEntry(renderList[index], dt, now)
-	end
+		entry.renderPos = entry.renderPos and entry.renderPos:Lerp(goalPos, math.clamp(dt * 12, 0, 1)) or goalPos
+		entry.renderDir = entry.renderDir and entry.renderDir:Lerp(goalDir, math.clamp(dt * 14, 0, 1)) or goalDir
+		entry.renderDir = flatDir(entry.renderDir)
 
-	if #bulkMoveParts > 0 then
-		workspace:BulkMoveTo(bulkMoveParts, bulkMoveFrames, Enum.BulkMoveMode.FireCFrameChanged)
+		refreshRigBinding(entry)
+		local rootFrame = CFrame.lookAt(entry.renderPos, entry.renderPos + entry.renderDir)
+		if entry.rootToPivot then
+			model:PivotTo(rootFrame * entry.rootToPivot)
+		else
+			model:PivotTo(rootFrame)
+		end
+		updateHealthbar(entry)
+		updateAnimationMotion(entry, dt, now)
+		playAnimation(entry)
 	end
 end)
 
