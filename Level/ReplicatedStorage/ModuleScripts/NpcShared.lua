@@ -32,6 +32,7 @@ NpcShared.Attributes = table.freeze({
 	Direction = "NpcDirection",
 	Velocity = "NpcVelocity",
 	IsElite = "IsElite",
+	IsBoss = "IsBoss",
 	IsRanged = "IsRanged",
 	Damage = "Damage",
 	AttackRange = "AttackRange",

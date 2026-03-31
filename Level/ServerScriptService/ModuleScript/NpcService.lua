@@ -61,6 +61,7 @@ type NpcConfig = {
 	attackCooldown: number?,
 	damage: number?,
 	isElite: boolean?,
+	isBoss: boolean?,
 	isRanged: boolean?,
 	despawnDelay: number?,
 	attackWindup: number?,
@@ -90,6 +91,7 @@ type NpcRecord = {
 	attackCooldown: number,
 	damage: number,
 	isElite: boolean,
+	isBoss: boolean,
 	isRanged: boolean,
 	despawnDelay: number,
 	attackWindup: number,
@@ -103,9 +105,13 @@ type NpcRecord = {
 	look: Vector3,
 	velocity: Vector3,
 	impulse: Vector3,
+	damageTakenMult: number,
+	damageTakenEnd: number,
 	slowPct: number,
 	slowEnd: number,
 	freezeEnd: number,
+	aiLockUntil: number,
+	aiLookTarget: Vector3?,
 	groundOffset: number,
 	lastGroundAt: number,
 	lastGroundXZ: Vector3,
@@ -601,6 +607,31 @@ local function getCurrentSpeed(npc: NpcRecord, now: number): number
 	return npc.baseSpeed
 end
 
+local function getControlResistance(npc: NpcRecord)
+	if npc.isBoss then
+		return {
+			slowPct = 0.55,
+			slowDuration = 0.45,
+			freezeDuration = 0.22,
+			impulse = 0.20,
+		}
+	end
+	if npc.isElite then
+		return {
+			slowPct = 0.78,
+			slowDuration = 0.72,
+			freezeDuration = 0.45,
+			impulse = 0.48,
+		}
+	end
+	return {
+		slowPct = 1,
+		slowDuration = 1,
+		freezeDuration = 1,
+		impulse = 1,
+	}
+end
+
 local function groundAdjustedPosition(npc: NpcRecord, pos: Vector3, now: number): Vector3
 	if now - npc.lastGroundAt >= 0.12 or flatMagnitude(pos, npc.lastGroundXZ) >= 4 then
 		local groundY = sampleGroundY(npc.model, pos)
@@ -696,6 +727,17 @@ local function updateNpc(
 		writeStateAttributes(npc)
 		return
 	end
+
+	if now < npc.aiLockUntil then
+		npc.velocity = Vector3.zero
+		if npc.aiLookTarget then
+			npc.look = safeUnit(flat(npc.aiLookTarget - npc.position), npc.look)
+		end
+		setState(npc, STATE.Attacking)
+		writeStateAttributes(npc)
+		return
+	end
+	npc.aiLookTarget = nil
 
 	local targetInfo = findNearestTarget(npc, alivePlayers, now)
 	if not targetInfo then
@@ -901,9 +943,10 @@ function NpcService.ApplySlow(target: any, slowPct: number, duration: number)
 		return
 	end
 
+	local resist = getControlResistance(npc)
 	local now = os.clock()
-	npc.slowPct = math.max(npc.slowPct, math.clamp(tonumber(slowPct) or 0, 0, 0.95))
-	npc.slowEnd = math.max(npc.slowEnd, now + math.max(0.05, tonumber(duration) or 0))
+	npc.slowPct = math.max(npc.slowPct, math.clamp((tonumber(slowPct) or 0) * resist.slowPct, 0, 0.95))
+	npc.slowEnd = math.max(npc.slowEnd, now + math.max(0.05, (tonumber(duration) or 0) * resist.slowDuration))
 end
 
 function NpcService.ApplyFreeze(target: any, duration: number)
@@ -912,8 +955,9 @@ function NpcService.ApplyFreeze(target: any, duration: number)
 		return
 	end
 
+	local resist = getControlResistance(npc)
 	local now = os.clock()
-	npc.freezeEnd = math.max(npc.freezeEnd, now + math.max(0.1, tonumber(duration) or 0))
+	npc.freezeEnd = math.max(npc.freezeEnd, now + math.max(0.08, (tonumber(duration) or 0) * resist.freezeDuration))
 end
 
 function NpcService.AddImpulse(target: any, impulse: Vector3)
@@ -927,7 +971,8 @@ function NpcService.AddImpulse(target: any, impulse: Vector3)
 		return
 	end
 
-	npc.impulse = clampMagnitude(npc.impulse + flatImpulse, 90)
+	local resist = getControlResistance(npc)
+	npc.impulse = clampMagnitude(npc.impulse + (flatImpulse * resist.impulse), 90)
 end
 
 function NpcService.BindDeath(target: any, callback: (any, {[string]: any}) -> ())
@@ -945,7 +990,14 @@ function NpcService.ApplyDamage(target: any, amount: number, meta: {[string]: an
 		return 0
 	end
 
-	local dealt = math.floor(tonumber(amount) or 0)
+	local dealt = tonumber(amount) or 0
+	if npc.damageTakenEnd > os.clock() then
+		dealt *= npc.damageTakenMult
+	elseif npc.damageTakenEnd ~= 0 then
+		npc.damageTakenEnd = 0
+		npc.damageTakenMult = 1
+	end
+	dealt = math.floor(dealt)
 	if dealt <= 0 then
 		return 0
 	end
@@ -968,6 +1020,43 @@ function NpcService.ApplyDamage(target: any, amount: number, meta: {[string]: an
 	end
 
 	return dealt
+end
+
+function NpcService.SetIncomingDamageModifier(target: any, multiplier: number, duration: number)
+	local npc = resolveNpc(target)
+	if not npc or npc.dead then
+		return
+	end
+
+	npc.damageTakenMult = math.clamp(tonumber(multiplier) or 1, 0.10, 3)
+	npc.damageTakenEnd = os.clock() + math.max(0.1, tonumber(duration) or 0)
+end
+
+function NpcService.LockForAbility(target: any, duration: number, faceTarget: Vector3?)
+	local npc = resolveNpc(target)
+	if not npc or npc.dead then
+		return
+	end
+
+	npc.aiLockUntil = math.max(npc.aiLockUntil, os.clock() + math.max(0.05, tonumber(duration) or 0))
+	npc.aiLookTarget = typeof(faceTarget) == "Vector3" and faceTarget or npc.aiLookTarget
+end
+
+function NpcService.SetPosition(target: any, pos: Vector3, lookDir: Vector3?)
+	local npc = resolveNpc(target)
+	if not npc or npc.dead or typeof(pos) ~= "Vector3" then
+		return
+	end
+
+	npc.position = pos
+	if typeof(lookDir) == "Vector3" and lookDir.Magnitude > 1e-4 then
+		npc.look = lookDir.Unit
+	end
+	npc.velocity = Vector3.zero
+	pcall(function()
+		npc.model:PivotTo(CFrame.lookAt(npc.position, npc.position + npc.look))
+	end)
+	writeStateAttributes(npc)
 end
 
 function NpcService.Register(model: Model, config: NpcConfig?): string?
@@ -1021,6 +1110,7 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		attackCooldown = math.max(0.1, tonumber(config and config.attackCooldown) or 1),
 		damage = math.max(0, math.floor(tonumber(config and config.damage) or 0)),
 		isElite = config and config.isElite == true or false,
+		isBoss = config and config.isBoss == true or false,
 		isRanged = config and config.isRanged == true or false,
 		despawnDelay = math.max(0.1, tonumber(config and config.despawnDelay) or 3),
 		attackWindup = math.max(0.15, tonumber(config and config.attackWindup) or 0.35),
@@ -1034,9 +1124,13 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		look = Vector3.new(0, 0, -1),
 		velocity = Vector3.zero,
 		impulse = Vector3.zero,
+		damageTakenMult = 1,
+		damageTakenEnd = 0,
 		slowPct = 0,
 		slowEnd = 0,
 		freezeEnd = 0,
+		aiLockUntil = 0,
+		aiLookTarget = nil,
 		groundOffset = groundOffset,
 		lastGroundAt = 0,
 		lastGroundXZ = Vector3.new(root.Position.X, 0, root.Position.Z),
@@ -1057,6 +1151,7 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 	setAttributeIfChanged(model, ATTR.MobType, mobType)
 	setAttributeIfChanged(model, ATTR.Speed, npc.baseSpeed)
 	setAttributeIfChanged(model, ATTR.IsElite, npc.isElite)
+	setAttributeIfChanged(model, ATTR.IsBoss, npc.isBoss)
 	setAttributeIfChanged(model, ATTR.IsRanged, npc.isRanged)
 	setAttributeIfChanged(model, ATTR.Damage, npc.damage)
 	setAttributeIfChanged(model, ATTR.AttackRange, npc.attackRange)

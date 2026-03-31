@@ -20,8 +20,8 @@ local coinText = coinFrame:WaitForChild("CoinText")
 local soulsFrame = frame:WaitForChild("Souls")
 local soulsText = soulsFrame:WaitForChild("SoulText")
 
--- Config: 15:00 countdown -> then count up
-local RUN_TARGET_SECONDS = 15 * 60
+-- Config: 20:00 countdown -> then count up
+local RUN_TARGET_SECONDS = 20 * 60
 
 local function fmtMMSS(totalSeconds: number)
 	totalSeconds = math.max(0, math.floor(tonumber(totalSeconds) or 0))

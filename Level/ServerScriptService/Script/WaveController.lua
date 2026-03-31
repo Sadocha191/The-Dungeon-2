@@ -7,6 +7,8 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local PhysicsService = game:GetService("PhysicsService")
+local Debris = game:GetService("Debris")
+local TweenService = game:GetService("TweenService")
 
 -- Collision groups (prevent mob stacking/climbing on players and weapons)
 local GROUP_PLAYERS = "Players"
@@ -362,25 +364,25 @@ end
 
 -- Enemy config (custom movement/combat stats)
 local ENEMY_CONFIGS = {
-    Slime =      { hp = 30,  speed = 9,  range = 3,  cd = 1.8, dmg = 6,  xp = 5,  coins = 1 },
-    Zombie =     { hp = 110, speed = 8,  range = 4,  cd = 2.2, dmg = 10, xp = 10, coins = 2 },
-    Skeleton =   { hp = 70,  speed = 12, range = 4,  cd = 1.4, dmg = 9,  xp = 12, coins = 2 },
-    Goblin =     { hp = 80,  speed = 16, range = 3,  cd = 1.2, dmg = 8,  xp = 15, coins = 2 },
-    Warewolf =   { hp = 240, speed = 18, range = 5,  cd = 1.1, dmg = 14, xp = 25, coins = 3 },
-    Harp =       { hp = 160, speed = 14, range = 25, cd = 2.0, dmg = 12, xp = 22, coins = 3, isRanged = true },
-    Demon =      { hp = 300, speed = 11, range = 6,  cd = 1.6, dmg = 16, xp = 28, coins = 4, hasFireball = true },
-    LandShark =  { hp = 260, speed = 20, range = 8,  cd = 3.0, dmg = 18, xp = 26, coins = 4, isBurrow = true },
-    Golem =      { hp = 550, speed = 6,  range = 6,  cd = 2.5, dmg = 20, xp = 35, coins = 5 },
-    Knight =     { hp = 280, speed = 12, range = 5,  cd = 1.3, dmg = 15, xp = 30, coins = 4 },
-    Ent =        { hp = 650, speed = 5,  range = 8,  cd = 3.0, dmg = 22, xp = 40, coins = 6 },
+    Slime =      { hp = 22,  speed = 8.5, range = 3,  cd = 1.9, dmg = 5,  xp = 5,  coins = 1 },
+    Zombie =     { hp = 74,  speed = 7.0, range = 4,  cd = 2.3, dmg = 9,  xp = 9,  coins = 2 },
+    Skeleton =   { hp = 44,  speed = 13.5, range = 4,  cd = 1.45, dmg = 10, xp = 11, coins = 2 },
+    Goblin =     { hp = 56,  speed = 15.5, range = 3,  cd = 1.18, dmg = 8,  xp = 13, coins = 2 },
+    Warewolf =   { hp = 112, speed = 17.0, range = 5,  cd = 1.18, dmg = 13, xp = 20, coins = 3 },
+    Harp =       { hp = 88,  speed = 13.5, range = 25, cd = 2.1, dmg = 11, xp = 19, coins = 3, isRanged = true },
+    Demon =      { hp = 128, speed = 11.5, range = 18, cd = 1.85, dmg = 13, xp = 23, coins = 4, isRanged = true, hasFireball = true },
+    LandShark =  { hp = 108, speed = 18.5, range = 7,  cd = 2.7, dmg = 15, xp = 22, coins = 4, isBurrow = true },
+    Golem =      { hp = 210, speed = 6.5, range = 6,  cd = 2.6, dmg = 18, xp = 30, coins = 5 },
+    Knight =     { hp = 150, speed = 11.8, range = 5,  cd = 1.35, dmg = 14, xp = 27, coins = 4 },
+    Ent =        { hp = 260, speed = 5.5, range = 8,  cd = 2.9, dmg = 17, xp = 34, coins = 6 },
 }
 
-local RUN_TIME_LIMIT = 15 * 60 -- 15:00 (portal/boss threshold)
-local ENEMY_HP_MULTIPLIER = 2 / 3 -- start slime dies in 2 hits from Knight's Oath; the rest scales from the same baseline
-local BOSS_BASE_HP = math.floor(1600 * ENEMY_HP_MULTIPLIER)
-local BOSS_HP_MULT_EARLY = 22
-local BOSS_HP_MULT_LATE = 6
-local BOSS_LEVEL_TARGET = 10
+local RUN_TIME_LIMIT = 20 * 60 -- 20:00 (portal/boss threshold)
+local ENEMY_HP_MULTIPLIER = 1
+local BOSS_BASE_HP = 3600
+local BOSS_HP_MULT_EARLY = 1.00
+local BOSS_HP_MULT_LATE = 1.35
+local BOSS_LEVEL_TARGET = 12
 local ELITE_SOUL_DROP_MIN = 18
 local ELITE_SOUL_DROP_MAX = 28
 local BOSS_SOUL_DROP_MIN = 45
@@ -409,39 +411,39 @@ end
 local function getRunPressure(elapsedSeconds: number)
 	local minutes = math.floor(math.max(0, elapsedSeconds) / 60)
 	local avgRunLevel = getAverageRunLevel()
-	local levelPressure = math.max(0, avgRunLevel - 2)
+	local levelPressure = math.max(0, avgRunLevel - 3)
 	return minutes, avgRunLevel, levelPressure
 end
 
 local function timeScaleMult(elapsed: number)
 	local minutes, _, levelPressure = getRunPressure(elapsed)
-	local hpMult = (1.07) ^ minutes * (1.14 ^ levelPressure)
-	local dmgMult = (1.045) ^ minutes * (1.09 ^ levelPressure)
-	local speedMult = math.min(1.35, 1 + (minutes * 0.015) + (levelPressure * 0.035))
-	local cooldownMult = math.max(0.78, 1 - (minutes * 0.01) - (levelPressure * 0.025))
+	local hpMult = (1.042 ^ minutes) * (1.05 ^ levelPressure)
+	local dmgMult = (1.032 ^ minutes) * (1.04 ^ levelPressure)
+	local speedMult = math.min(1.24, 1 + (minutes * 0.009) + (levelPressure * 0.02))
+	local cooldownMult = math.max(0.84, 1 - (minutes * 0.006) - (levelPressure * 0.012))
 	return hpMult, dmgMult, speedMult, cooldownMult
 end
 
 local function getPool(elapsed: number)
     -- returns weighted pool (normal mobs)
-    if elapsed < 75 then
+    if elapsed < 90 then
         return { {"Slime", 100} }
-    elseif elapsed < 180 then
-        return { {"Slime", 65}, {"Zombie", 35} }
-    elseif elapsed < 300 then
-        return { {"Slime", 35}, {"Zombie", 40}, {"Skeleton", 25} }
-    elseif elapsed < 450 then
-        return { {"Zombie", 30}, {"Skeleton", 30}, {"Goblin", 25}, {"Slime", 15} }
-    elseif elapsed < 600 then
-        return { {"Zombie", 22}, {"Skeleton", 28}, {"Goblin", 28}, {"Warewolf", 22} }
-    elseif elapsed < 780 then
-        return { {"Skeleton", 20}, {"Goblin", 24}, {"Warewolf", 24}, {"Harp", 18}, {"Demon", 14} }
-    elseif elapsed < 960 then
-        return { {"Goblin", 22}, {"Warewolf", 24}, {"Harp", 18}, {"Demon", 18}, {"LandShark", 18} }
+    elseif elapsed < 210 then
+        return { {"Slime", 58}, {"Zombie", 42} }
+    elseif elapsed < 360 then
+        return { {"Slime", 22}, {"Zombie", 44}, {"Skeleton", 34} }
+    elseif elapsed < 540 then
+        return { {"Zombie", 28}, {"Skeleton", 30}, {"Goblin", 28}, {"Slime", 14} }
+    elseif elapsed < 720 then
+        return { {"Skeleton", 24}, {"Goblin", 30}, {"Warewolf", 26}, {"Zombie", 20} }
+    elseif elapsed < 900 then
+        return { {"Goblin", 24}, {"Warewolf", 24}, {"Harp", 20}, {"Demon", 18}, {"Skeleton", 14} }
+    elseif elapsed < 1080 then
+        return { {"Warewolf", 22}, {"Harp", 20}, {"Demon", 20}, {"LandShark", 20}, {"Knight", 18} }
     elseif elapsed < 1200 then
-        return { {"Warewolf", 20}, {"Harp", 18}, {"Demon", 18}, {"LandShark", 18}, {"Golem", 13}, {"Knight", 13} }
+        return { {"Harp", 18}, {"Demon", 18}, {"LandShark", 18}, {"Knight", 18}, {"Golem", 14}, {"Ent", 14} }
     else
-        return { {"Goblin", 12}, {"Warewolf", 18}, {"Harp", 16}, {"Demon", 18}, {"LandShark", 14}, {"Golem", 11}, {"Knight", 11}, {"Ent", 10} }
+        return { {"Goblin", 10}, {"Warewolf", 16}, {"Harp", 14}, {"Demon", 16}, {"LandShark", 16}, {"Golem", 12}, {"Knight", 10}, {"Ent", 6} }
     end
 end
 
@@ -616,6 +618,7 @@ local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, i
         attackCooldown = stats.cd,
         damage = stats.dmg,
         isElite = isElite,
+        isBoss = isBoss == true,
         isRanged = stats.isRanged == true,
         despawnDelay = 3,
         attackWindup = math.min(0.6, math.max(0.2, stats.cd * 0.45)),
@@ -666,13 +669,13 @@ local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vecto
     local cd = math.max(0.7, cfg.cd * cooldownMult)
 
     if isElite then
-        hp = math.floor(hp * 6)
-        dmg = math.floor(dmg * 2.8)
-        speed = speed * 1.12
-        cd = math.max(0.55, cd * 0.88)
+        hp = math.floor(hp * 5.0)
+        dmg = math.floor(dmg * 2.4)
+        speed = speed * 1.08
+        cd = math.max(0.60, cd * 0.90)
     end
 
-    return registerMobModel(mob, mobName, {
+    local registered = registerMobModel(mob, mobName, {
         hp = hp,
         speed = speed,
         range = cfg.range,
@@ -680,6 +683,12 @@ local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vecto
         dmg = dmg,
         isRanged = cfg.isRanged == true,
     }, cfg, isElite, false, nil)
+
+    if registered and isElite then
+		registerEliteController(registered, mobName, dmg)
+    end
+
+    return registered
 end
 
 local elapsed: () -> number
@@ -706,6 +715,759 @@ end
 _G.SpawnEnemyBurst = function(count: number, anchorPos: Vector3?, poolTime: number?)
     return spawnBurst(count, anchorPos, poolTime)
 end
+
+local AbilityVfxFolder = workspace:FindFirstChild("EnemyAbilityVFX")
+if not AbilityVfxFolder then
+	AbilityVfxFolder = Instance.new("Folder")
+	AbilityVfxFolder.Name = "EnemyAbilityVFX"
+	AbilityVfxFolder.Parent = workspace
+end
+
+local eliteControllers = {}
+local bossAbilityController = nil
+
+local ABILITY_COLORS = {
+	Elite = Color3.fromRGB(255, 132, 82),
+	Golem = Color3.fromRGB(201, 175, 112),
+	Knight = Color3.fromRGB(132, 186, 255),
+	Demon = Color3.fromRGB(255, 98, 54),
+	Ent = Color3.fromRGB(120, 188, 108),
+	Boss = Color3.fromRGB(255, 170, 76),
+}
+
+local function flatVector(v: Vector3): Vector3
+	return Vector3.new(v.X, 0, v.Z)
+end
+
+local function groundify(pos: Vector3): Vector3
+	local hit = raycastGround(pos)
+	if hit and hit.Position then
+		return hit.Position + Vector3.new(0, 0.2, 0)
+	end
+	return pos
+end
+
+local function distancePointToSegment(point: Vector3, a: Vector3, b: Vector3): number
+	local ab = b - a
+	local denom = ab:Dot(ab)
+	if denom <= 1e-4 then
+		return (point - a).Magnitude
+	end
+	local t = math.clamp(((point - a):Dot(ab)) / denom, 0, 1)
+	local projection = a + (ab * t)
+	return (point - projection).Magnitude
+end
+
+local function getAliveCombatPlayers()
+	local out = {}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr.Parent and plr:GetAttribute("RunEnded") ~= true then
+			local char = plr.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			local hrp = char and char:FindFirstChild("HumanoidRootPart")
+			if hum and hrp and hum.Health > 0 then
+				out[#out + 1] = {
+					player = plr,
+					humanoid = hum,
+					hrp = hrp,
+				}
+			end
+		end
+	end
+	return out
+end
+
+local function pickNearestCombatPlayer(fromPos: Vector3)
+	local bestInfo = nil
+	local bestDist = math.huge
+	for _, info in ipairs(getAliveCombatPlayers()) do
+		local dist = (info.hrp.Position - fromPos).Magnitude
+		if dist < bestDist then
+			bestDist = dist
+			bestInfo = info
+		end
+	end
+	return bestInfo, bestDist
+end
+
+local function applyAbilityDamageToPlayer(player: Player, amount: number)
+	amount = math.max(1, math.floor(tonumber(amount) or 0))
+	if amount <= 0 then
+		return
+	end
+	if _G.ApplyDamageToPlayer then
+		_G.ApplyDamageToPlayer(player, amount)
+		return
+	end
+	local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	if hum and hum.Health > 0 then
+		hum:TakeDamage(amount)
+	end
+end
+
+local function makeTelegraphPart(name: string, color: Color3, transparency: number)
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.Material = Enum.Material.Neon
+	part.CastShadow = false
+	part.Color = color
+	part.Transparency = transparency
+	part.Parent = AbilityVfxFolder
+	return part
+end
+
+local function telegraphCircle(center: Vector3, radius: number, duration: number, color: Color3?)
+	local disk = makeTelegraphPart("TelegraphCircle", color or ABILITY_COLORS.Elite, 0.30)
+	disk.Shape = Enum.PartType.Cylinder
+	disk.Size = Vector3.new(radius * 2, 0.12, radius * 2)
+	disk.CFrame = CFrame.new(center + Vector3.new(0, 0.2, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	TweenService:Create(disk, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+		Transparency = 0.75,
+		Size = Vector3.new(radius * 2.18, 0.12, radius * 2.18),
+	}):Play()
+	Debris:AddItem(disk, duration + 0.2)
+	return disk
+end
+
+local function telegraphLine(startPos: Vector3, endPos: Vector3, width: number, duration: number, color: Color3?)
+	local dir = endPos - startPos
+	local length = math.max(1, dir.Magnitude)
+	local beam = makeTelegraphPart("TelegraphLine", color or ABILITY_COLORS.Elite, 0.36)
+	beam.Size = Vector3.new(width, 0.18, length)
+	beam.CFrame = CFrame.lookAt(startPos:Lerp(endPos, 0.5) + Vector3.new(0, 0.2, 0), endPos + Vector3.new(0, 0.2, 0))
+	TweenService:Create(beam, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+		Transparency = 0.8,
+		Size = Vector3.new(width * 1.08, 0.18, length),
+	}):Play()
+	Debris:AddItem(beam, duration + 0.2)
+	return beam
+end
+
+local function burstMarker(pos: Vector3, color: Color3?, scale: number?, duration: number?)
+	local burst = makeTelegraphPart("AbilityBurst", color or ABILITY_COLORS.Elite, 0.16)
+	burst.Shape = Enum.PartType.Ball
+	local size = math.max(1, tonumber(scale) or 1)
+	burst.Size = Vector3.new(size, size, size)
+	burst.CFrame = CFrame.new(pos)
+	TweenService:Create(burst, TweenInfo.new(duration or 0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Transparency = 1,
+		Size = Vector3.new(size * 2.2, size * 2.2, size * 2.2),
+	}):Play()
+	Debris:AddItem(burst, (duration or 0.35) + 0.1)
+end
+
+local function damagePlayersInRadius(center: Vector3, radius: number, damage: number)
+	for _, info in ipairs(getAliveCombatPlayers()) do
+		if (info.hrp.Position - center).Magnitude <= radius then
+			applyAbilityDamageToPlayer(info.player, damage)
+		end
+	end
+end
+
+local function damagePlayersAlongLine(startPos: Vector3, endPos: Vector3, width: number, damage: number)
+	for _, info in ipairs(getAliveCombatPlayers()) do
+		if (info.hrp.Position - startPos).Magnitude <= ((endPos - startPos).Magnitude + width + 2)
+			and distancePointToSegment(info.hrp.Position, startPos, endPos) <= width
+		then
+			applyAbilityDamageToPlayer(info.player, damage)
+		end
+	end
+end
+
+local function damagePlayersInCone(origin: Vector3, forward: Vector3, range: number, halfAngleDeg: number, damage: number)
+	local flatForward = flatVector(forward)
+	if flatForward.Magnitude <= 1e-4 then
+		return
+	end
+	flatForward = flatForward.Unit
+	local dotMin = math.cos(math.rad(halfAngleDeg))
+	for _, info in ipairs(getAliveCombatPlayers()) do
+		local toPlayer = flatVector(info.hrp.Position - origin)
+		if toPlayer.Magnitude <= range and toPlayer.Magnitude > 1e-4 then
+			if flatForward:Dot(toPlayer.Unit) >= dotMin then
+				applyAbilityDamageToPlayer(info.player, damage)
+			end
+		end
+	end
+end
+
+local function createHazardZone(center: Vector3, radius: number, duration: number, tickRate: number, damage: number, color: Color3?)
+	local zone = telegraphCircle(center, radius, duration, color)
+	zone.Transparency = 0.48
+	task.spawn(function()
+		local endAt = os.clock() + duration
+		while os.clock() < endAt do
+			if PauseState.Value then
+				task.wait(0.1)
+			else
+				damagePlayersInRadius(center, radius, damage)
+				task.wait(tickRate)
+			end
+		end
+	end)
+end
+
+local function abilityReady(controller, abilityId: string, now: number)
+	return now >= (controller.globalCooldown or 0) and now >= ((controller.cooldowns and controller.cooldowns[abilityId]) or 0)
+end
+
+local function setAbilityCooldown(controller, abilityId: string, now: number, cooldown: number, globalCooldown: number?)
+	local scale = tonumber(controller.cooldownScale) or 1
+	controller.cooldowns = controller.cooldowns or {}
+	controller.cooldowns[abilityId] = now + (cooldown * scale)
+	controller.globalCooldown = now + ((globalCooldown or 1.25) * scale)
+end
+
+local function castTargetImpact(controller, targetInfo, now, cfg)
+	local targetPos = targetInfo and groundify(targetInfo.hrp.Position) or nil
+	if not targetPos then
+		return false
+	end
+	NpcService.LockForAbility(controller.model, cfg.telegraph, targetPos)
+	telegraphCircle(targetPos, cfg.radius, cfg.telegraph, cfg.color)
+	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
+	task.delay(cfg.telegraph, function()
+		if controller.model.Parent and NpcService.IsAlive(controller.model) then
+			burstMarker(targetPos, cfg.color, cfg.radius * 0.45, 0.4)
+			damagePlayersInRadius(targetPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier))
+		end
+	end)
+	return true
+end
+
+local function castGroundSlam(controller, targetInfo, now, cfg)
+	local center = NpcService.GetPosition(controller.model)
+	if not center then
+		return false
+	end
+	center = groundify(center)
+	NpcService.LockForAbility(controller.model, cfg.telegraph, targetInfo and targetInfo.hrp.Position or center)
+	telegraphCircle(center, cfg.radius, cfg.telegraph, cfg.color)
+	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
+	task.delay(cfg.telegraph, function()
+		if controller.model.Parent and NpcService.IsAlive(controller.model) then
+			local currentPos = NpcService.GetPosition(controller.model) or center
+			burstMarker(currentPos, cfg.color, cfg.radius * 0.55, 0.45)
+			damagePlayersInRadius(currentPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier))
+		end
+	end)
+	return true
+end
+
+local function castDash(controller, targetInfo, now, cfg)
+	local startPos = NpcService.GetPosition(controller.model)
+	local targetPos = targetInfo and groundify(targetInfo.hrp.Position) or nil
+	if not startPos or not targetPos then
+		return false
+	end
+	local dir = flatVector(targetPos - startPos)
+	if dir.Magnitude <= 1e-4 then
+		return false
+	end
+	dir = dir.Unit
+	local dashDistance = math.min(cfg.distance, math.max(6, (targetPos - startPos).Magnitude - 2))
+	local endPos = startPos + (dir * dashDistance)
+	endPos = groundify(endPos)
+	telegraphLine(startPos, endPos, cfg.width, cfg.telegraph, cfg.color)
+	NpcService.LockForAbility(controller.model, cfg.telegraph, targetPos)
+	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
+	task.delay(cfg.telegraph, function()
+		if controller.model.Parent and NpcService.IsAlive(controller.model) then
+			NpcService.SetPosition(controller.model, endPos, dir)
+			burstMarker(endPos, cfg.color, cfg.width * 0.8, 0.35)
+			damagePlayersAlongLine(startPos, endPos, cfg.width, math.floor(controller.baseDamage * cfg.damageMultiplier))
+		end
+	end)
+	return true
+end
+
+local function castLineStrike(controller, targetInfo, now, cfg)
+	local startPos = NpcService.GetPosition(controller.model)
+	local targetPos = targetInfo and groundify(targetInfo.hrp.Position) or nil
+	if not startPos or not targetPos then
+		return false
+	end
+	local dir = flatVector(targetPos - startPos)
+	if dir.Magnitude <= 1e-4 then
+		return false
+	end
+	dir = dir.Unit
+	local strikeDistance = math.min(cfg.distance, math.max(8, (targetPos - startPos).Magnitude))
+	local endPos = groundify(startPos + (dir * strikeDistance))
+	telegraphLine(startPos, endPos, cfg.width, cfg.telegraph, cfg.color)
+	NpcService.LockForAbility(controller.model, cfg.telegraph, targetPos)
+	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
+	task.delay(cfg.telegraph, function()
+		if controller.model.Parent and NpcService.IsAlive(controller.model) then
+			damagePlayersAlongLine(startPos, endPos, cfg.width, math.floor(controller.baseDamage * cfg.damageMultiplier))
+			burstMarker(endPos, cfg.color, cfg.width * 0.7, 0.35)
+		end
+	end)
+	return true
+end
+
+local function castCone(controller, targetInfo, now, cfg)
+	local startPos = NpcService.GetPosition(controller.model)
+	local targetPos = targetInfo and groundify(targetInfo.hrp.Position) or nil
+	if not startPos or not targetPos then
+		return false
+	end
+	local dir = flatVector(targetPos - startPos)
+	if dir.Magnitude <= 1e-4 then
+		return false
+	end
+	telegraphCircle(startPos + (dir.Unit * math.min(cfg.range * 0.45, 6)), cfg.range * 0.52, cfg.telegraph, cfg.color)
+	NpcService.LockForAbility(controller.model, cfg.telegraph, targetPos)
+	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
+	task.delay(cfg.telegraph, function()
+		if controller.model.Parent and NpcService.IsAlive(controller.model) then
+			damagePlayersInCone(startPos, dir.Unit, cfg.range, cfg.angle, math.floor(controller.baseDamage * cfg.damageMultiplier))
+			burstMarker(startPos + (dir.Unit * math.min(cfg.range * 0.55, 7)), cfg.color, cfg.range * 0.20, 0.32)
+		end
+	end)
+	return true
+end
+
+local function castTripleCombo(controller, targetInfo, now, cfg)
+	local startPos = NpcService.GetPosition(controller.model)
+	local targetPos = targetInfo and groundify(targetInfo.hrp.Position) or nil
+	if not startPos or not targetPos then
+		return false
+	end
+	local dir = flatVector(targetPos - startPos)
+	if dir.Magnitude <= 1e-4 then
+		return false
+	end
+	NpcService.LockForAbility(controller.model, cfg.totalDuration, targetPos)
+	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
+	for _, hitDelay in ipairs(cfg.hitDelays) do
+		task.delay(hitDelay, function()
+			if controller.model.Parent and NpcService.IsAlive(controller.model) then
+				damagePlayersInCone(startPos, dir.Unit, cfg.range, cfg.angle, math.floor(controller.baseDamage * cfg.damageMultiplier))
+				burstMarker(startPos + (dir.Unit * math.min(cfg.range * 0.5, 6)), cfg.color, cfg.range * 0.16, 0.20)
+			end
+		end)
+	end
+	return true
+end
+
+local function castArmorUp(controller, now, cfg)
+	NpcService.SetIncomingDamageModifier(controller.model, cfg.damageTakenMult, cfg.duration)
+	local pos = NpcService.GetPosition(controller.model)
+	if pos then
+		burstMarker(pos, cfg.color, 5, 0.45)
+	end
+	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
+	return true
+end
+
+local function castVolley(controller, targetInfo, now, cfg)
+	local targetPos = targetInfo and groundify(targetInfo.hrp.Position) or nil
+	if not targetPos then
+		return false
+	end
+	NpcService.LockForAbility(controller.model, cfg.telegraph, targetPos)
+	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
+	for index = 1, cfg.count do
+		local angle = ((index - 1) / math.max(1, cfg.count)) * math.pi * 2
+		local impactPos = groundify(targetPos + Vector3.new(math.cos(angle) * cfg.spread, 0, math.sin(angle) * cfg.spread))
+		telegraphCircle(impactPos, cfg.radius, cfg.telegraph, cfg.color)
+		task.delay(cfg.telegraph, function()
+			if controller.model.Parent and NpcService.IsAlive(controller.model) then
+				burstMarker(impactPos, cfg.color, cfg.radius * 0.45, 0.35)
+				damagePlayersInRadius(impactPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier))
+			end
+		end)
+	end
+	return true
+end
+
+local function castTeleportStep(controller, targetInfo, now, cfg)
+	local targetPos = targetInfo and groundify(targetInfo.hrp.Position) or nil
+	if not targetPos then
+		return false
+	end
+	local offsetBase = flatVector(targetPos - (NpcService.GetPosition(controller.model) or targetPos))
+	if offsetBase.Magnitude <= 1e-4 then
+		offsetBase = Vector3.new(1, 0, 0)
+	end
+	local side = Vector3.new(-offsetBase.Z, 0, offsetBase.X).Unit * (math.random() < 0.5 and -cfg.distance or cfg.distance)
+	local endPos = groundify(targetPos + side)
+	NpcService.LockForAbility(controller.model, cfg.telegraph, targetPos)
+	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
+	task.delay(cfg.telegraph, function()
+		if controller.model.Parent and NpcService.IsAlive(controller.model) then
+			NpcService.SetPosition(controller.model, endPos, flatVector(targetPos - endPos))
+			burstMarker(endPos, cfg.color, cfg.radius * 0.55, 0.35)
+			damagePlayersInRadius(endPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier))
+		end
+	end)
+	return true
+end
+
+local function castHazard(controller, targetInfo, now, cfg)
+	local targetPos = targetInfo and groundify(targetInfo.hrp.Position) or nil
+	if not targetPos then
+		return false
+	end
+	NpcService.LockForAbility(controller.model, cfg.telegraph, targetPos)
+	telegraphCircle(targetPos, cfg.radius, cfg.telegraph, cfg.color)
+	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
+	task.delay(cfg.telegraph, function()
+		if controller.model.Parent and NpcService.IsAlive(controller.model) then
+			createHazardZone(
+				targetPos,
+				cfg.radius,
+				cfg.duration,
+				cfg.tickRate,
+				math.floor(controller.baseDamage * cfg.damageMultiplier),
+				cfg.color
+			)
+		end
+	end)
+	return true
+end
+
+local function castSummon(controller, now, cfg)
+	local bossPos = NpcService.GetPosition(controller.model)
+	if not bossPos then
+		return false
+	end
+	bossPos = groundify(bossPos)
+	NpcService.LockForAbility(controller.model, cfg.telegraph or 0.6, bossPos)
+	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
+	task.delay(cfg.telegraph or 0.6, function()
+		if controller.model.Parent and NpcService.IsAlive(controller.model) then
+			spawnBurst(cfg.count, bossPos, math.max(elapsed(), RUN_TIME_LIMIT - 60))
+			burstMarker(bossPos, cfg.color, 6, 0.5)
+		end
+	end)
+	return true
+end
+
+local function castShockwaveSequence(controller, targetInfo, now, cfg)
+	local center = NpcService.GetPosition(controller.model)
+	if not center then
+		return false
+	end
+	center = groundify(center)
+	local longestDelay = 0
+	for _, pulse in ipairs(cfg.pulses) do
+		longestDelay = math.max(longestDelay, pulse.delay)
+	end
+	NpcService.LockForAbility(controller.model, longestDelay, targetInfo and targetInfo.hrp.Position or center)
+	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
+	for _, pulse in ipairs(cfg.pulses) do
+		telegraphCircle(center, pulse.radius, pulse.delay, cfg.color)
+		task.delay(pulse.delay, function()
+			if controller.model.Parent and NpcService.IsAlive(controller.model) then
+				burstMarker(center, cfg.color, pulse.radius * 0.35, 0.35)
+				damagePlayersInRadius(center, pulse.radius, math.floor(controller.baseDamage * pulse.damageMultiplier))
+			end
+		end)
+	end
+	return true
+end
+
+local function castMeteorRain(controller, now, cfg)
+	local players = getAliveCombatPlayers()
+	if #players <= 0 then
+		return false
+	end
+	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
+	for index = 1, cfg.count do
+		local info = players[((index - 1) % #players) + 1]
+		local impactPos = groundify(info.hrp.Position + Vector3.new(math.random(-cfg.spread, cfg.spread), 0, math.random(-cfg.spread, cfg.spread)))
+		telegraphCircle(impactPos, cfg.radius, cfg.telegraph, cfg.color)
+		task.delay(cfg.telegraph, function()
+			if controller.model.Parent and NpcService.IsAlive(controller.model) then
+				burstMarker(impactPos, cfg.color, cfg.radius * 0.55, 0.45)
+				damagePlayersInRadius(impactPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier))
+			end
+		end)
+	end
+	return true
+end
+
+local function castArenaPressure(controller, now, cfg)
+	local players = getAliveCombatPlayers()
+	if #players <= 0 then
+		return false
+	end
+	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
+	for _, info in ipairs(players) do
+		local offset = Vector3.new(math.random(-cfg.spread, cfg.spread), 0, math.random(-cfg.spread, cfg.spread))
+		local center = groundify(info.hrp.Position + offset)
+		telegraphCircle(center, cfg.radius, cfg.telegraph, cfg.color)
+		task.delay(cfg.telegraph, function()
+			if controller.model.Parent and NpcService.IsAlive(controller.model) then
+				createHazardZone(center, cfg.radius, cfg.duration, cfg.tickRate, math.floor(controller.baseDamage * cfg.damageMultiplier), cfg.color)
+			end
+		end)
+	end
+	return true
+end
+
+local function castEnrage(controller, now, cfg)
+	if controller.enraged then
+		return false
+	end
+	controller.enraged = true
+	controller.cooldownScale = cfg.cooldownScale
+	controller.baseDamage *= cfg.damageMultiplier
+	local bossPos = NpcService.GetPosition(controller.model)
+	if bossPos then
+		burstMarker(bossPos, cfg.color, 8, 0.55)
+	end
+	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
+	return true
+end
+
+local ELITE_ABILITY_DATA = {
+	Golem = {
+		{ id = "GroundSlam", kind = "GroundSlam", cooldown = 8.5, globalCooldown = 1.8, telegraph = 1.0, radius = 11, damageMultiplier = 1.55, color = ABILITY_COLORS.Golem },
+		{ id = "RockToss", kind = "TargetImpact", cooldown = 6.8, globalCooldown = 1.5, telegraph = 0.9, radius = 5.5, damageMultiplier = 1.15, color = ABILITY_COLORS.Golem },
+		{ id = "ArmorUp", kind = "ArmorUp", cooldown = 18.0, globalCooldown = 1.2, duration = 4.5, damageTakenMult = 0.72, color = ABILITY_COLORS.Golem },
+	},
+	Knight = {
+		{ id = "DashThrust", kind = "Dash", cooldown = 7.0, globalCooldown = 1.4, telegraph = 0.8, width = 4.0, distance = 18, damageMultiplier = 1.35, color = ABILITY_COLORS.Knight },
+		{ id = "ShieldCone", kind = "Cone", cooldown = 8.0, globalCooldown = 1.3, telegraph = 0.7, range = 12, angle = 55, damageMultiplier = 1.10, color = ABILITY_COLORS.Knight },
+		{ id = "TripleCombo", kind = "TripleCombo", cooldown = 10.0, globalCooldown = 1.8, totalDuration = 1.0, hitDelays = { 0.2, 0.45, 0.72 }, range = 8, angle = 60, damageMultiplier = 0.55, color = ABILITY_COLORS.Knight },
+	},
+	Demon = {
+		{ id = "FireballVolley", kind = "Volley", cooldown = 9.0, globalCooldown = 1.6, telegraph = 0.9, radius = 4.8, count = 3, spread = 5, damageMultiplier = 0.82, color = ABILITY_COLORS.Demon },
+		{ id = "FlamePool", kind = "Hazard", cooldown = 12.0, globalCooldown = 1.5, telegraph = 0.9, radius = 6.0, duration = 4.5, tickRate = 0.75, damageMultiplier = 0.46, color = ABILITY_COLORS.Demon },
+		{ id = "TeleportStep", kind = "TeleportStep", cooldown = 10.0, globalCooldown = 1.3, telegraph = 0.35, radius = 5.5, distance = 9, damageMultiplier = 0.95, color = ABILITY_COLORS.Demon },
+	},
+	Ent = {
+		{ id = "RootCage", kind = "Hazard", cooldown = 12.5, globalCooldown = 1.5, telegraph = 0.95, radius = 7.5, duration = 3.6, tickRate = 0.80, damageMultiplier = 0.38, color = ABILITY_COLORS.Ent },
+		{ id = "SeedMortar", kind = "Volley", cooldown = 9.5, globalCooldown = 1.5, telegraph = 1.0, radius = 5.2, count = 3, spread = 6, damageMultiplier = 0.84, color = ABILITY_COLORS.Ent },
+		{ id = "Sweep", kind = "Cone", cooldown = 8.5, globalCooldown = 1.4, telegraph = 0.75, range = 13, angle = 70, damageMultiplier = 1.18, color = ABILITY_COLORS.Ent },
+	},
+}
+
+local BOSS_PHASE_ABILITIES = {
+	[1] = {
+		{ id = "StoneFist", kind = "TargetImpact", cooldown = 7.0, globalCooldown = 1.5, telegraph = 1.0, radius = 8.0, damageMultiplier = 1.40, color = ABILITY_COLORS.Boss },
+		{ id = "Shockwave", kind = "ShockwaveSequence", cooldown = 10.0, globalCooldown = 1.8, pulses = { { delay = 0.85, radius = 17, damageMultiplier = 1.10 } }, color = ABILITY_COLORS.Boss },
+		{ id = "BoulderRain", kind = "MeteorRain", cooldown = 14.0, globalCooldown = 1.8, telegraph = 1.1, radius = 5.2, count = 5, spread = 8, damageMultiplier = 0.86, color = ABILITY_COLORS.Boss },
+		{ id = "SummonShards", kind = "Summon", cooldown = 18.0, globalCooldown = 1.4, telegraph = 0.8, count = 3, color = ABILITY_COLORS.Boss },
+	},
+	[2] = {
+		{ id = "ChargeCrush", kind = "Dash", cooldown = 8.0, globalCooldown = 1.5, telegraph = 0.8, width = 5.0, distance = 24, damageMultiplier = 1.60, color = ABILITY_COLORS.Boss },
+		{ id = "CrackedEarth", kind = "LineStrike", cooldown = 11.0, globalCooldown = 1.7, telegraph = 1.0, width = 4.5, distance = 28, damageMultiplier = 1.25, color = ABILITY_COLORS.Boss },
+		{ id = "HardenSkin", kind = "ArmorUp", cooldown = 20.0, globalCooldown = 1.2, duration = 5.0, damageTakenMult = 0.70, color = ABILITY_COLORS.Boss },
+		{ id = "DoubleShockwave", kind = "ShockwaveSequence", cooldown = 16.0, globalCooldown = 1.8, pulses = { { delay = 0.80, radius = 14, damageMultiplier = 0.95 }, { delay = 1.35, radius = 20, damageMultiplier = 0.95 } }, color = ABILITY_COLORS.Boss },
+	},
+	[3] = {
+		{ id = "ArenaPressure", kind = "ArenaPressure", cooldown = 15.0, globalCooldown = 1.7, telegraph = 0.9, radius = 6.0, duration = 4.5, tickRate = 0.80, spread = 8, damageMultiplier = 0.42, color = ABILITY_COLORS.Boss },
+		{ id = "MeteorCore", kind = "MeteorRain", cooldown = 17.0, globalCooldown = 1.8, telegraph = 1.2, radius = 6.2, count = 6, spread = 10, damageMultiplier = 1.05, color = ABILITY_COLORS.Boss },
+		{ id = "ChargeCrush", kind = "Dash", cooldown = 7.0, globalCooldown = 1.4, telegraph = 0.75, width = 5.2, distance = 26, damageMultiplier = 1.68, color = ABILITY_COLORS.Boss },
+		{ id = "Enrage", kind = "Enrage", cooldown = 999.0, globalCooldown = 0.8, damageMultiplier = 1.15, cooldownScale = 0.88, color = ABILITY_COLORS.Boss },
+	},
+}
+
+local function tryCastAbility(controller, targetInfo, now, cfg)
+	if not abilityReady(controller, cfg.id, now) then
+		return false
+	end
+	if cfg.kind == "TargetImpact" then
+		return castTargetImpact(controller, targetInfo, now, cfg)
+	elseif cfg.kind == "GroundSlam" then
+		return castGroundSlam(controller, targetInfo, now, cfg)
+	elseif cfg.kind == "Dash" then
+		return castDash(controller, targetInfo, now, cfg)
+	elseif cfg.kind == "LineStrike" then
+		return castLineStrike(controller, targetInfo, now, cfg)
+	elseif cfg.kind == "Cone" then
+		return castCone(controller, targetInfo, now, cfg)
+	elseif cfg.kind == "TripleCombo" then
+		return castTripleCombo(controller, targetInfo, now, cfg)
+	elseif cfg.kind == "ArmorUp" then
+		return castArmorUp(controller, now, cfg)
+	elseif cfg.kind == "Volley" then
+		return castVolley(controller, targetInfo, now, cfg)
+	elseif cfg.kind == "TeleportStep" then
+		return castTeleportStep(controller, targetInfo, now, cfg)
+	elseif cfg.kind == "Hazard" then
+		return castHazard(controller, targetInfo, now, cfg)
+	elseif cfg.kind == "Summon" then
+		return castSummon(controller, now, cfg)
+	elseif cfg.kind == "ShockwaveSequence" then
+		return castShockwaveSequence(controller, targetInfo, now, cfg)
+	elseif cfg.kind == "MeteorRain" then
+		return castMeteorRain(controller, now, cfg)
+	elseif cfg.kind == "ArenaPressure" then
+		return castArenaPressure(controller, now, cfg)
+	elseif cfg.kind == "Enrage" then
+		return castEnrage(controller, now, cfg)
+	end
+	return false
+end
+
+local function registerEliteController(model: Model, mobType: string, baseDamage: number)
+	if not ELITE_ABILITY_DATA[mobType] then
+		return
+	end
+	eliteControllers[model] = {
+		model = model,
+		mobType = mobType,
+		baseDamage = baseDamage,
+		cooldowns = {},
+		globalCooldown = 0,
+		cooldownScale = 1,
+	}
+end
+
+local function unregisterEncounterController(model: Model)
+	eliteControllers[model] = nil
+	if bossAbilityController and bossAbilityController.model == model then
+		bossAbilityController = nil
+	end
+end
+
+local function stepEliteControllers(now: number)
+	for model, controller in pairs(eliteControllers) do
+		if not model.Parent or not NpcService.IsAlive(model) then
+			eliteControllers[model] = nil
+		else
+			local pos = NpcService.GetPosition(model)
+			local targetInfo, dist = nil, math.huge
+			if pos then
+				targetInfo, dist = pickNearestCombatPlayer(pos)
+			end
+			if pos and targetInfo then
+				local casts = ELITE_ABILITY_DATA[controller.mobType]
+				if controller.mobType == "Golem" then
+					if dist <= 14 and tryCastAbility(controller, targetInfo, now, casts[1]) then
+						continue
+					end
+					if dist <= 36 and tryCastAbility(controller, targetInfo, now, casts[2]) then
+						continue
+					end
+					if not abilityReady(controller, casts[3].id, now) then
+						continue
+					end
+					local hp, maxHp = NpcService.GetHealth(model)
+					if maxHp > 0 and (hp / maxHp) <= 0.70 then
+						tryCastAbility(controller, targetInfo, now, casts[3])
+					end
+				elseif controller.mobType == "Knight" then
+					if dist >= 8 and dist <= 22 and tryCastAbility(controller, targetInfo, now, casts[1]) then
+						continue
+					end
+					if dist <= 12 and tryCastAbility(controller, targetInfo, now, casts[2]) then
+						continue
+					end
+					if dist <= 8 then
+						tryCastAbility(controller, targetInfo, now, casts[3])
+					end
+				elseif controller.mobType == "Demon" then
+					if dist <= 34 and tryCastAbility(controller, targetInfo, now, casts[1]) then
+						continue
+					end
+					if dist <= 30 and tryCastAbility(controller, targetInfo, now, casts[2]) then
+						continue
+					end
+					if dist <= 24 then
+						tryCastAbility(controller, targetInfo, now, casts[3])
+					end
+				elseif controller.mobType == "Ent" then
+					if dist <= 28 and tryCastAbility(controller, targetInfo, now, casts[1]) then
+						continue
+					end
+					if dist <= 38 and tryCastAbility(controller, targetInfo, now, casts[2]) then
+						continue
+					end
+					if dist <= 14 then
+						tryCastAbility(controller, targetInfo, now, casts[3])
+					end
+				end
+			end
+		end
+	end
+end
+
+local function registerBossController(model: Model, baseDamage: number)
+	bossAbilityController = {
+		model = model,
+		baseDamage = baseDamage,
+		cooldowns = {},
+		globalCooldown = 0,
+		cooldownScale = 1,
+		phase = 1,
+		enraged = false,
+	}
+end
+
+local function stepBossController(now: number)
+	local controller = bossAbilityController
+	if not controller then
+		return
+	end
+	if not controller.model.Parent or not NpcService.IsAlive(controller.model) then
+		bossAbilityController = nil
+		return
+	end
+
+	local bossPos = NpcService.GetPosition(controller.model)
+	local targetInfo, dist = nil, math.huge
+	if bossPos then
+		targetInfo, dist = pickNearestCombatPlayer(bossPos)
+	end
+	if not bossPos or not targetInfo then
+		return
+	end
+
+	local hp, maxHp = NpcService.GetHealth(controller.model)
+	local hpRatio = maxHp > 0 and (hp / maxHp) or 1
+	local phase = hpRatio <= 0.35 and 3 or (hpRatio <= 0.70 and 2 or 1)
+	controller.phase = phase
+	local casts = BOSS_PHASE_ABILITIES[phase]
+
+	if phase == 3 and not controller.enraged then
+		if tryCastAbility(controller, targetInfo, now, casts[4]) then
+			return
+		end
+	end
+
+	if phase == 1 then
+		if dist <= 22 and tryCastAbility(controller, targetInfo, now, casts[1]) then
+			return
+		end
+		if dist <= 20 and tryCastAbility(controller, targetInfo, now, casts[2]) then
+			return
+		end
+		if tryCastAbility(controller, targetInfo, now, casts[3]) then
+			return
+		end
+		tryCastAbility(controller, targetInfo, now, casts[4])
+	elseif phase == 2 then
+		if dist >= 10 and dist <= 30 and tryCastAbility(controller, targetInfo, now, casts[1]) then
+			return
+		end
+		if tryCastAbility(controller, targetInfo, now, casts[2]) then
+			return
+		end
+		if hpRatio <= 0.58 and tryCastAbility(controller, targetInfo, now, casts[3]) then
+			return
+		end
+		tryCastAbility(controller, targetInfo, now, casts[4])
+	else
+		if tryCastAbility(controller, targetInfo, now, casts[2]) then
+			return
+		end
+		if tryCastAbility(controller, targetInfo, now, casts[1]) then
+			return
+		end
+		tryCastAbility(controller, targetInfo, now, casts[3])
+	end
+end
+
 -- Run clock (server-side)
 local runStart = 0 -- set when RunStarted becomes true
 local pausedAccum = 0
@@ -778,7 +1540,7 @@ if not _G.__InfoUI_Wrapped then
 	end)
 end
 
-local SWARM_EVENT_TIMES = { 240, 720 } -- 4:00, 12:00
+local SWARM_EVENT_TIMES = { 360, 960 } -- 6:00, 16:00
 local SWARM_DURATION = 60
 
 local swarmIndex = 1
@@ -792,29 +1554,28 @@ end
 
 local function desiredMaxAlive(t: number)
 	local _, _, levelPressure = getRunPressure(t)
-    local base = 28
-    local add = math.floor(t / 60) * 6
-	local v = math.clamp(base + add + math.floor(levelPressure * 8), 28, 170)
-	-- After 15 minutes: big pressure increase
+    local base = 24
+    local add = math.floor(t / 60) * 4
+	local v = math.clamp(base + add + math.floor(levelPressure * 5), 24, 130)
+	-- After the boss timer, pressure ramps faster but should stay readable.
 	if t >= RUN_TIME_LIMIT then
-		v = math.clamp(v + 90 + math.floor((t - RUN_TIME_LIMIT) / 12) * 7, 140, 300)
+		v = math.clamp(v + 55 + math.floor((t - RUN_TIME_LIMIT) / 18) * 4, 90, 220)
 	end
 	return v
 end
 
 local function spawnInterval(t: number)
 	local _, _, levelPressure = getRunPressure(t)
-    local minI = 0.24
-    local maxI = 0.56
-    local p = math.clamp(t / 1500, 0, 1)
+    local minI = 0.22
+    local maxI = 0.62
+    local p = math.clamp(t / RUN_TIME_LIMIT, 0, 1)
 	local i = maxI - (maxI - minI) * p
-	i = i / (1 + (levelPressure * 0.08))
+	i = i / (1 + (levelPressure * 0.05))
 	if t >= RUN_TIME_LIMIT then
-		-- After 15 minutes: noticeably faster
-		i = math.max(0.09, i * 0.42)
+		i = math.max(0.14, i * 0.60)
 	end
     if isSwarmActiveAt(t) then
-        i = math.max(0.08, i / 3)
+        i = math.max(0.10, i / 2.4)
     end
 	return i
 end
@@ -874,7 +1635,7 @@ local function getBossHealthForCurrentRun(): number
 	local levelProgress = math.clamp(avgRunLevel / BOSS_LEVEL_TARGET, 0, 1)
 
 	local readiness = math.max(timeProgress, levelProgress)
-	local hpMultiplier = BOSS_HP_MULT_EARLY + ((BOSS_HP_MULT_LATE - BOSS_HP_MULT_EARLY) * readiness) + (levelPressure * 0.85)
+	local hpMultiplier = BOSS_HP_MULT_EARLY + ((BOSS_HP_MULT_LATE - BOSS_HP_MULT_EARLY) * readiness) + (levelPressure * 0.08)
 	return math.max(BOSS_BASE_HP, math.floor(BOSS_BASE_HP * hpMultiplier))
 end
 
@@ -887,10 +1648,10 @@ local function getBossCombatStatsForCurrentRun()
 
 	return {
 		hp = getBossHealthForCurrentRun(),
-		speed = 10.5 + math.min(4, (levelPressure * 0.4) + (readiness * 1.6)),
-		range = 8,
-		cd = math.max(0.85, 1.25 - (readiness * 0.18)),
-		dmg = math.max(28, math.floor(28 * (1 + (timeProgress * 0.55) + (levelPressure * 0.12)))),
+		speed = 9.8 + math.min(2.4, (levelPressure * 0.18) + (readiness * 1.0)),
+		range = 9,
+		cd = math.max(0.95, 1.35 - (readiness * 0.14)),
+		dmg = math.max(24, math.floor(24 * (1 + (timeProgress * 0.42) + (levelPressure * 0.08)))),
 	}
 end
 
@@ -1016,6 +1777,7 @@ local function ensurePortal()
 		}, { xp = 120, coins = 60 }, true, true, function()
 			bossDefeated = true
 			nextBossReinforcementAt = math.huge
+			unregisterEncounterController(mob)
 			broadcast({ type = "portalBossDefeated" })
 			setPromptState()
 		end)
@@ -1024,7 +1786,8 @@ local function ensurePortal()
 		end
 
 		bossModel = registered
-		nextBossReinforcementAt = elapsed() + BOSS_REINFORCEMENT_INTERVAL
+		registerBossController(registered, bossStats.dmg)
+		nextBossReinforcementAt = math.huge
 		if type(_G.NotifyBossSpawn) == "function" then
 			pcall(function()
 				_G.NotifyBossSpawn()
@@ -1107,6 +1870,9 @@ RunService.Heartbeat:Connect(function()
         return
     end
 
+	stepEliteControllers(os.clock())
+	stepBossController(os.clock())
+
     -- HUD update (4x/sec max)
     if t - lastHudPush >= 0.25 then
         lastHudPush = t
@@ -1160,17 +1926,6 @@ RunService.Heartbeat:Connect(function()
         swarmActiveUntil = 0
         broadcast({ type = "swarmEnd" })
     end
-
-	if bossModel and bossModel.Parent and not bossDefeated and NpcService.IsAlive(bossModel) and t >= nextBossReinforcementAt then
-		local bossPos = NpcService.GetPosition(bossModel)
-		if bossPos then
-			local reinforcementCount = math.clamp(3 + math.floor(math.max(0, t - RUN_TIME_LIMIT) / 45), 3, 6)
-			spawnBurst(reinforcementCount, bossPos, math.max(t, RUN_TIME_LIMIT))
-			nextBossReinforcementAt = t + math.max(7, BOSS_REINFORCEMENT_INTERVAL - math.floor(math.max(0, t - RUN_TIME_LIMIT) / 90))
-		else
-			nextBossReinforcementAt = t + 2
-		end
-	end
 
     -- Normal spawns
     local interval = spawnInterval(t)

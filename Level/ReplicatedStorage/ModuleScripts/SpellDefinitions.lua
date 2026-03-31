@@ -9,10 +9,10 @@ SpellDefs.COLOR_BASE = Color3.fromRGB(120, 190, 255)
 SpellDefs.COLOR_SHOP = Color3.fromRGB(190, 120, 255)
 
 SpellDefs.UPGRADE_QUALITIES = {
-	Common = { id = "Common", label = "Common Upgrade", power = 0.85, cardColor = Color3.fromRGB(220, 220, 220), bonusText = "Reliable scaling bump" },
-	Uncommon = { id = "Uncommon", label = "Uncommon Upgrade", power = 1.15, cardColor = Color3.fromRGB(120, 255, 175), bonusText = "Sharper growth and utility" },
-	Rare = { id = "Rare", label = "Rare Upgrade", power = 1.50, cardColor = Color3.fromRGB(120, 175, 255), bonusText = "Heavy spike to core stats" },
-	Epic = { id = "Epic", label = "Epic Upgrade", power = 1.90, cardColor = Color3.fromRGB(255, 170, 120), bonusText = "Run-defining power jump" },
+	Common = { id = "Common", label = "Common Upgrade", power = 0.95, cardColor = Color3.fromRGB(220, 220, 220), bonusText = "Reliable scaling bump" },
+	Uncommon = { id = "Uncommon", label = "Uncommon Upgrade", power = 1.30, cardColor = Color3.fromRGB(120, 255, 175), bonusText = "Sharper growth and utility" },
+	Rare = { id = "Rare", label = "Rare Upgrade", power = 1.75, cardColor = Color3.fromRGB(120, 175, 255), bonusText = "Heavy spike to core stats" },
+	Epic = { id = "Epic", label = "Epic Upgrade", power = 2.20, cardColor = Color3.fromRGB(255, 170, 120), bonusText = "Run-defining power jump" },
 }
 
 SpellDefs.BASE_VARIANT_QUALITIES = {
@@ -65,6 +65,55 @@ local ATTACK_NOTES = {
 	Nova = "Triggers a burst around the player.",
 	Zone = "Creates an area that punishes enemies standing inside.",
 	Beam = "Fires a sustained line attack through nearby enemies.",
+}
+
+local ARCHETYPE_PROFILES = {
+	Projectile = {
+		damage = 1.00,
+		cooldown = 1.00,
+		range = 1.03,
+		eliteMultiplier = 1.05,
+		bossMultiplier = 1.00,
+		breakpointCount = 1,
+		breakpointPierce = 1,
+	},
+	Orbit = {
+		damage = 0.68,
+		hitCooldown = 1.18,
+		radius = 0.95,
+		eliteMultiplier = 0.90,
+		bossMultiplier = 0.82,
+		breakpointCount = 1,
+		breakpointRadius = 0.08,
+	},
+	Nova = {
+		damage = 1.08,
+		cooldown = 1.06,
+		eliteMultiplier = 1.00,
+		bossMultiplier = 0.94,
+		breakpointRadius = 0.14,
+		breakpointDamage = 0.06,
+	},
+	Zone = {
+		damage = 0.90,
+		cooldown = 0.98,
+		radius = 1.02,
+		duration = 1.08,
+		eliteMultiplier = 0.92,
+		bossMultiplier = 0.86,
+		breakpointRadius = 0.10,
+		breakpointDuration = 0.12,
+	},
+	Beam = {
+		damage = 1.16,
+		cooldown = 0.94,
+		duration = 1.06,
+		width = 1.08,
+		eliteMultiplier = 1.12,
+		bossMultiplier = 1.18,
+		breakpointDuration = 0.10,
+		breakpointWidth = 0.12,
+	},
 }
 
 local UPGRADE_COPY_BY_ELEMENT_AND_ATTACK = {
@@ -451,31 +500,68 @@ function SpellDefs.ComputeRuntimeStats(spellIdOrDef, state)
 	local baseMultiplier = math.max(0.5, tonumber(state and state.baseMultiplier) or 1)
 	local basePower = math.max(0, tonumber(state and state.basePower) or 0)
 	local upgradePower = math.max(0, tonumber(state and state.upgradePower) or 0)
-	local levelFactor = 1 + ((level - 1) * 0.14)
-	local powerFactor = 1 + (basePower * 0.08) + (upgradePower * 0.055)
-	local areaFactor = 1 + ((level - 1) * 0.04) + (basePower * 0.025) + (upgradePower * 0.015)
-	local cooldownFactor = math.max(0.68, 1 - ((level - 1) * 0.018) - (upgradePower * 0.008) - (basePower * 0.008))
+	local levelFactor = 1 + ((level - 1) * 0.15)
+	local powerFactor = 1 + (basePower * 0.085) + (upgradePower * 0.062)
+	local areaFactor = 1 + ((level - 1) * 0.045) + (basePower * 0.026) + (upgradePower * 0.017)
+	local cooldownFactor = math.max(0.60, 1 - ((level - 1) * 0.020) - (upgradePower * 0.010) - (basePower * 0.009))
 	runtime.damage = (runtime.baseDamage or 10) * baseMultiplier * levelFactor * powerFactor
 	runtime.cooldown = (runtime.cooldown or 1) * cooldownFactor
 	runtime.radius = (runtime.baseRadius or 0) * areaFactor
-	runtime.duration = (runtime.duration or 0) * (1 + ((level - 1) * 0.05) + (upgradePower * 0.015))
+	runtime.duration = (runtime.duration or 0) * (1 + ((level - 1) * 0.055) + (upgradePower * 0.018))
 	runtime.width = (runtime.width or 0) * areaFactor
-	runtime.range = (runtime.range or 0) * (1 + ((level - 1) * 0.025) + (upgradePower * 0.008))
-	runtime.projectileSpeed = (runtime.projectileSpeed or 0) * (1 + ((level - 1) * 0.015) + (upgradePower * 0.008))
-	runtime.orbitSpeed = (runtime.orbitSpeed or 0) * (1 + ((level - 1) * 0.025) + (upgradePower * 0.008))
-	runtime.count = math.max(1, math.floor((runtime.baseCount or 1) + math.floor((level - 1) / 4) * (runtime.countPerThreeLevels or 0) + math.floor(upgradePower / 5)))
-	runtime.pierce = math.max(0, math.floor((runtime.pierce or 0) + (basePower >= 0.8 and 1 or 0) + math.floor(upgradePower / 7)))
+	runtime.range = (runtime.range or 0) * (1 + ((level - 1) * 0.028) + (upgradePower * 0.009))
+	runtime.projectileSpeed = (runtime.projectileSpeed or 0) * (1 + ((level - 1) * 0.018) + (upgradePower * 0.009))
+	runtime.orbitSpeed = (runtime.orbitSpeed or 0) * (1 + ((level - 1) * 0.028) + (upgradePower * 0.009))
+	runtime.hitCooldown = math.max(0.12, (runtime.hitCooldown or 0.35) * math.max(0.82, 1 - ((level - 1) * 0.008) - (upgradePower * 0.004)))
+	runtime.count = math.max(1, math.floor((runtime.baseCount or 1) + math.floor((level - 1) / 5) * (runtime.countPerThreeLevels or 0) + math.floor(upgradePower / 6)))
+	runtime.pierce = math.max(0, math.floor((runtime.pierce or 0) + (basePower >= 0.8 and 1 or 0) + math.floor(upgradePower / 8)))
 	runtime.level = level
 	runtime.baseMultiplier = baseMultiplier
 	runtime.basePower = basePower
 	runtime.upgradePower = upgradePower
-	runtime.effectPower = 1 + ((level - 1) * 0.06) + (upgradePower * 0.045) + (basePower * 0.02)
+	runtime.effectPower = 1 + ((level - 1) * 0.07) + (upgradePower * 0.050) + (basePower * 0.025)
 	runtime.spellId = def.id
 	runtime.spellName = def.name
 	runtime.element = def.element
 	runtime.secondaryElement = def.secondaryElement
 	runtime.attackType = def.attackType
 	runtime.spellType = def.spellType
+	local archetype = tostring(runtime.archetype or def.attackType or "")
+	local profile = ARCHETYPE_PROFILES[archetype]
+	if profile then
+		runtime.damage *= profile.damage or 1
+		runtime.cooldown *= profile.cooldown or 1
+		runtime.radius *= profile.radius or 1
+		runtime.duration *= profile.duration or 1
+		runtime.width *= profile.width or 1
+		runtime.range *= profile.range or 1
+		runtime.hitCooldown *= profile.hitCooldown or 1
+
+		local breakpointTier = 0
+		if upgradePower >= 2.2 then
+			breakpointTier = 1
+		end
+		if upgradePower >= 4.8 then
+			breakpointTier = 2
+		end
+		runtime.breakpointTier = breakpointTier
+
+		if breakpointTier > 0 then
+			runtime.count += math.floor((profile.breakpointCount or 0) * breakpointTier)
+			runtime.pierce += math.floor((profile.breakpointPierce or 0) * breakpointTier)
+			runtime.radius *= 1 + ((profile.breakpointRadius or 0) * breakpointTier)
+			runtime.duration *= 1 + ((profile.breakpointDuration or 0) * breakpointTier)
+			runtime.width *= 1 + ((profile.breakpointWidth or 0) * breakpointTier)
+			runtime.damage *= 1 + ((profile.breakpointDamage or 0) * breakpointTier)
+		end
+
+		runtime.eliteDamageMultiplier = profile.eliteMultiplier or 1
+		runtime.bossDamageMultiplier = profile.bossMultiplier or 1
+	else
+		runtime.breakpointTier = 0
+		runtime.eliteDamageMultiplier = 1
+		runtime.bossDamageMultiplier = 1
+	end
 	runtime.visualColor = SpellDefs.GetSpellColor(def)
 	runtime.visualSecondaryColor = def.secondaryElement and SpellDefs.GetElementColor(def.secondaryElement) or blend(runtime.visualColor, Color3.new(1, 1, 1), def.spellType == "Physical" and 0.18 or 0.34)
 	local effects = copyTable(EFFECTS[def.element] or {})

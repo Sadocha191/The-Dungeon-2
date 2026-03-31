@@ -180,8 +180,8 @@ function MissionProgress.OnRunComplete(plr: Player, waves: number, seconds: numb
 		MissionProgress.Add(plr, "FAST_RUNS", 1)
 	end
 
-	-- Boss spawn reached (15:00)
-	if seconds >= 900 then
+	-- Boss spawn reached (20:00)
+	if seconds >= 1200 then
 		MissionProgress.Add(plr, "BOSS_SPAWN_REACHED", 1)
 	end
 

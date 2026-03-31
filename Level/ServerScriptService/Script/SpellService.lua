@@ -43,6 +43,8 @@ end
 local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
 local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions"))
 local NpcService = require(findServerModule("NpcService") or error("[SpellService] Missing NpcService"))
+local PlayerData = require(findServerModule("PlayerData") or error("[SpellService] Missing PlayerData"))
+local WeaponConfigs = modFolder and require(modFolder:WaitForChild("WeaponConfigs"))
 
 local vfxRoot = workspace:FindFirstChild("SpellVFX")
 if not vfxRoot then
@@ -367,15 +369,76 @@ local function getSpellState(plr, spellId)
 	}
 end
 
+local function getEquippedWeaponCombat(plr)
+	local data = PlayerData.Get(plr)
+	local entry = data and typeof(data.Loadout) == "table" and data.Loadout[1] or nil
+	local weaponId = entry and (entry.id or entry.Id)
+	if typeof(weaponId) ~= "string" or weaponId == "" or not WeaponConfigs or not WeaponConfigs.Get then
+		return nil
+	end
+	local def = WeaponConfigs.Get(weaponId)
+	return def and def.combat or nil
+end
+
 local function getAtkMult(plr)
 	local runAtkMult = tonumber(plr:GetAttribute("RunAtkMult")) or 1
 	local shrineDamageMult = tonumber(plr:GetAttribute("ShrineDamageMult")) or 1
 	local spellDamageMult = tonumber(plr:GetAttribute("SpellDamageMult")) or 1
-	return runAtkMult * shrineDamageMult * spellDamageMult
+	local weaponCombat = getEquippedWeaponCombat(plr)
+	local weaponSpellDamage = 1 + math.max(0, tonumber(weaponCombat and weaponCombat.spellDamageBonus) or 0)
+	return runAtkMult * shrineDamageMult * spellDamageMult * weaponSpellDamage
 end
 
 local function getDurationMult(plr)
-	return math.max(0.1, 1 + (tonumber(plr:GetAttribute("ShrineDurationBonus")) or 0))
+	local weaponCombat = getEquippedWeaponCombat(plr)
+	local weaponEffectBonus = math.max(0, tonumber(weaponCombat and weaponCombat.spellEffectBonus) or 0)
+	return math.max(0.1, (1 + (tonumber(plr:GetAttribute("ShrineDurationBonus")) or 0)) * (1 + weaponEffectBonus))
+end
+
+local function getCooldownMult(plr)
+	local weaponCombat = getEquippedWeaponCombat(plr)
+	local weaponCooldownBonus = math.max(0, tonumber(weaponCombat and weaponCombat.spellCooldownBonus) or 0)
+	return math.max(0.72, 1 - weaponCooldownBonus)
+end
+
+local function isBossEnemy(model)
+	return model and (model:GetAttribute("IsBoss") == true or string.sub(model.Name, 1, 5) == "Boss_")
+end
+
+local function isEliteEnemy(model)
+	return model and (model:GetAttribute("IsElite") == true or isBossEnemy(model))
+end
+
+local function getTargetDamageMultiplier(enemy, stats)
+	if isBossEnemy(enemy) then
+		return tonumber(stats and stats.bossDamageMultiplier) or 1
+	end
+	if isEliteEnemy(enemy) then
+		return tonumber(stats and stats.eliteDamageMultiplier) or 1
+	end
+	return 1
+end
+
+local function getEffectResistance(enemy)
+	if isBossEnemy(enemy) then
+		return {
+			dot = 0.70,
+			vulnerability = 0.55,
+			duration = 0.45,
+		}
+	end
+	if isEliteEnemy(enemy) then
+		return {
+			dot = 0.85,
+			vulnerability = 0.75,
+			duration = 0.72,
+		}
+	end
+	return {
+		dot = 1,
+		vulnerability = 1,
+		duration = 1,
+	}
 end
 
 local function distancePointToSegment(point, a, b)
@@ -404,9 +467,15 @@ local function applyEffects(plr, enemy, stats, sourcePos)
 	local effectPower = stats.effectPower or 1
 	local durationMult = getDurationMult(plr)
 	local enemyPos = getEnemyPosition(enemy)
+	local resist = getEffectResistance(enemy)
 
 	if effects.dot then
-		applyTimedDot(plr, enemy, (effects.dot.dps or 0) * effectPower, (effects.dot.duration or 0) * durationMult)
+		applyTimedDot(
+			plr,
+			enemy,
+			(effects.dot.dps or 0) * effectPower * resist.dot,
+			(effects.dot.duration or 0) * durationMult * resist.duration
+		)
 	end
 	if effects.slow then
 		applySlow(enemy, math.clamp((effects.slow.pct or 0) * (0.9 + (effectPower * 0.1)), 0, 0.7), (effects.slow.duration or 0) * durationMult)
@@ -415,8 +484,8 @@ local function applyEffects(plr, enemy, stats, sourcePos)
 		applyFreeze(enemy, (effects.stun.duration or 0) * durationMult * (0.9 + (effectPower * 0.1)))
 	end
 	if effects.vulnerability then
-		enemy:SetAttribute("VulnerableUntil", spellClock() + ((effects.vulnerability.duration or 0) * durationMult))
-		enemy:SetAttribute("VulnerablePct", (effects.vulnerability.pct or 0) * (0.9 + (effectPower * 0.1)))
+		enemy:SetAttribute("VulnerableUntil", spellClock() + ((effects.vulnerability.duration or 0) * durationMult * resist.duration))
+		enemy:SetAttribute("VulnerablePct", (effects.vulnerability.pct or 0) * (0.9 + (effectPower * 0.1)) * resist.vulnerability)
 	end
 	if enemyPos and sourcePos and effects.knockback then
 		local direction = enemyPos - sourcePos
@@ -481,7 +550,7 @@ local function hitEnemy(plr, enemy, damage, stats, sourcePos, impactPos)
 	if not enemy or not enemyAlive(enemy) then
 		return
 	end
-	local dealt = damage * getAtkMult(plr)
+	local dealt = damage * getAtkMult(plr) * getTargetDamageMultiplier(enemy, stats)
 	local vulnUntil = tonumber(enemy:GetAttribute("VulnerableUntil")) or 0
 	local vulnPct = tonumber(enemy:GetAttribute("VulnerablePct")) or 0
 	if vulnUntil > spellClock() and vulnPct > 0 then
@@ -831,7 +900,7 @@ local function runProjectile(plr, spellId, stats, hrp)
 		return
 	end
 
-	s.cds[spellId] = now + (stats.cooldown or 1)
+	s.cds[spellId] = now + ((stats.cooldown or 1) * getCooldownMult(plr))
 	local origin = getCastOrigin(hrp)
 	local searchRange = stats.range or 60
 	local targets = pickRandomEnemyList(hrp.Position, searchRange, math.max(1, stats.count or 1))
@@ -911,7 +980,7 @@ local function runNova(plr, spellId, stats, hrp)
 	if now < (s.cds[spellId] or 0) then
 		return
 	end
-	s.cds[spellId] = now + (stats.cooldown or 3)
+	s.cds[spellId] = now + ((stats.cooldown or 3) * getCooldownMult(plr))
 
 	local radius = stats.radius or 8
 	spawnNovaVisual(hrp.Position, radius, stats)
@@ -926,7 +995,7 @@ local function runZone(plr, spellId, stats, hrp)
 	if now < (s.cds[spellId] or 0) then
 		return
 	end
-	s.cds[spellId] = now + (stats.cooldown or 4)
+	s.cds[spellId] = now + ((stats.cooldown or 4) * getCooldownMult(plr))
 
 	local origin = hrp.Position
 	local center = origin
@@ -961,7 +1030,7 @@ local function runBeam(plr, spellId, stats, hrp)
 	if now < (s.cds[spellId] or 0) then
 		return
 	end
-	s.cds[spellId] = now + (stats.cooldown or 5)
+	s.cds[spellId] = now + ((stats.cooldown or 5) * getCooldownMult(plr))
 
 	local origin = getCastOrigin(hrp)
 	local target = pickRandomEnemy(hrp.Position, stats.range or 60)
