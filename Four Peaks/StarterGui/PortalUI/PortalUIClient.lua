@@ -14,9 +14,9 @@ local PlayerProgressEvent = remoteEvents:FindFirstChild("PlayerProgressEvent") o
 
 local moduleFolder = (
 	ReplicatedStorage:FindFirstChild("ModuleScripts")
-	or ReplicatedStorage:FindFirstChild("ModuleScript")
-	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
-	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
+		or ReplicatedStorage:FindFirstChild("ModuleScript")
+		or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+		or ReplicatedStorage:WaitForChild("ModuleScript", 5)
 )
 
 if not screenGui then
@@ -540,6 +540,10 @@ local function messageForFailure(reason)
 		return ERROR_PREFIX .. "This level does not have a placeId yet."
 	elseif reason == "unknown_level" then
 		return "The selected level could not be found."
+	elseif reason == "mining_active" then
+		return "Stop mining first before entering a battle."
+	elseif reason == "party_member_mining" then
+		return "A party member is still mining and must stop before entering a battle."
 	end
 
 	return "Teleport failed. Try again."
@@ -672,8 +676,7 @@ ProximityPromptService.PromptTriggered:Connect(function(prompt, triggeredPlayer)
 		return
 	end
 
-	print("[PortalUIClient] Opening from local portal prompt:", prompt:GetFullName())
-	openUI()
+	print("[PortalUIClient] Portal prompt triggered, waiting for server confirmation:", prompt:GetFullName())
 end)
 
 OpenLevelSelect.OnClientEvent:Connect(function()

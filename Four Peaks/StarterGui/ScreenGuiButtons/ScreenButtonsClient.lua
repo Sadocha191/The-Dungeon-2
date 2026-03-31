@@ -2,6 +2,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
 local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -9,6 +10,11 @@ local screenGui = script.Parent
 local frame = screenGui:WaitForChild("Frame")
 local SETTINGS_BUTTON_IMAGE = "rbxassetid://116594278084498"
 local SETTINGS_BUTTON_HOTKEY = "L"
+local BADGE_NAME = "AttentionBadge"
+local BADGE_REFRESH_INTERVAL = 10
+
+local remoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions", 5)
+local RF_GetMissions = remoteFunctions and remoteFunctions:FindFirstChild("RF_GetMissions")
 
 local CONTROL_GUIS = {
 	"ProfileStats",
@@ -20,6 +26,10 @@ local CONTROL_GUIS = {
 
 local requestCounters = {}
 local hotkeyBindings = {}
+local badgeGroups = {}
+local badgeStates = {}
+local isMissionBadgeRefreshInFlight = false
+local lastMissionBadgeRefreshAt = 0
 local isPC = UserInputService.KeyboardEnabled and UserInputService.MouseEnabled
 local getSettingsButtonLayout
 
@@ -265,6 +275,131 @@ local function setStandaloneButtonsVisible(buttons, visible)
 	end
 end
 
+local function ensureAttentionBadge(button)
+	local badge = button:FindFirstChild(BADGE_NAME)
+	if badge and badge:IsA("TextLabel") then
+		return badge
+	end
+	if badge then
+		badge:Destroy()
+	end
+
+	badge = Instance.new("TextLabel")
+	badge.Name = BADGE_NAME
+	badge.AnchorPoint = Vector2.new(1, 0)
+	badge.Position = UDim2.new(1, -4, 0, 4)
+	badge.Size = UDim2.fromOffset(20, 20)
+	badge.BackgroundColor3 = Color3.fromRGB(220, 51, 51)
+	badge.BorderSizePixel = 0
+	badge.Font = Enum.Font.GothamBlack
+	badge.Text = "!"
+	badge.TextColor3 = Color3.fromRGB(255, 255, 255)
+	badge.TextSize = 14
+	badge.Visible = false
+	badge.ZIndex = math.max(button.ZIndex, 1) + 8
+	badge.Parent = button
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(1, 0)
+	corner.Parent = badge
+
+	local stroke = Instance.new("UIStroke")
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Color = Color3.fromRGB(255, 232, 232)
+	stroke.Thickness = 1
+	stroke.Transparency = 0.2
+	stroke.Parent = badge
+
+	return badge
+end
+
+local function registerBadgeGroup(key, buttons)
+	badgeGroups[key] = buttons
+	badgeStates[key] = badgeStates[key] == true
+
+	for _, button in ipairs(buttons) do
+		local badge = ensureAttentionBadge(button)
+		badge.Visible = badgeStates[key]
+	end
+end
+
+local function setBadgeVisible(key, visible)
+	if badgeStates[key] == visible then
+		return
+	end
+
+	badgeStates[key] = visible
+	for _, button in ipairs(badgeGroups[key] or {}) do
+		local badge = ensureAttentionBadge(button)
+		badge.Visible = visible
+	end
+end
+
+local function isMissionClaimable(mission)
+	if typeof(mission) ~= "table" then
+		return false
+	end
+
+	local claimCount = tonumber(mission.ClaimCount) or 0
+	local repeatable = mission.Repeatable == true
+	local completed = claimCount > 0 and not repeatable
+	return mission.Claimable == true and not completed
+end
+
+local function getClaimableMissionCount(payload)
+	if typeof(payload) ~= "table" then
+		return nil
+	end
+
+	local missions = payload.missions
+	if typeof(missions) ~= "table" then
+		return nil
+	end
+
+	local claimable = 0
+	for _, mission in ipairs(missions) do
+		if isMissionClaimable(mission) then
+			claimable += 1
+		end
+	end
+
+	return claimable
+end
+
+local function refreshMissionBadge(force)
+	local missionButtons = badgeGroups["Missions"]
+	if not RF_GetMissions or not missionButtons or #missionButtons == 0 or isMissionBadgeRefreshInFlight then
+		return
+	end
+
+	local now = os.clock()
+	if not force and (now - lastMissionBadgeRefreshAt) < BADGE_REFRESH_INTERVAL then
+		return
+	end
+
+	lastMissionBadgeRefreshAt = now
+	isMissionBadgeRefreshInFlight = true
+
+	task.spawn(function()
+		local ok, payload = pcall(function()
+			return RF_GetMissions:InvokeServer()
+		end)
+
+		isMissionBadgeRefreshInFlight = false
+		if not ok then
+			warn("[ScreenButtonsClient] RF_GetMissions error:", payload)
+			return
+		end
+
+		local claimableCount = getClaimableMissionCount(payload)
+		if claimableCount == nil then
+			return
+		end
+
+		setBadgeVisible("Missions", claimableCount > 0)
+	end)
+end
+
 local function applyProfileIcon()
 	local profileButton = findButtons({ "Profile" })[1]
 	if not profileButton then
@@ -303,6 +438,7 @@ registerHotKey(settingsButtons, function()
 end)
 
 local missionsButtons = findButtons({ "Missions" })
+registerBadgeGroup("Missions", missionsButtons)
 setHotKeyVisibility(missionsButtons)
 connectButtons(missionsButtons, function()
 	openExclusive("MissionsGui")
@@ -310,6 +446,7 @@ end)
 registerHotKey(missionsButtons, function()
 	openExclusive("MissionsGui")
 end)
+refreshMissionBadge(true)
 
 local eventsButtons = findButtons({ "Events" })
 setHotKeyVisibility(eventsButtons)
@@ -384,5 +521,11 @@ RunService.RenderStepped:Connect(function()
 		frame.Visible = not hide
 		setStandaloneButtonsVisible(settingsButtons, not hide)
 		lastHidden = hide
+
+		if not hide then
+			refreshMissionBadge(true)
+		end
+	elseif not hide then
+		refreshMissionBadge(false)
 	end
 end)

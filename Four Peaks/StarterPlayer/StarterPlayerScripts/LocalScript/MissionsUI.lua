@@ -26,6 +26,7 @@ local WEEKLY_MAX = 12
 
 local dailyResetAt: number? = nil
 local weeklyResetAt: number? = nil
+local currentTab = "Daily"
 
 local THEME = table.freeze({
 	overlay = Color3.fromRGB(4, 6, 11),
@@ -410,62 +411,103 @@ body.Position = UDim2.fromOffset(20, 200)
 body.Size = UDim2.new(1, -40, 1, -220)
 body.Parent = panel
 
+local function makeValueChip(parent: Instance, accent: Color3, labelText: string)
+	local chip = Instance.new("Frame")
+	chip.Size = UDim2.fromOffset(128, 40)
+	chip.BackgroundColor3 = Color3.fromRGB(18, 23, 34)
+	chip.BorderSizePixel = 0
+	chip.Parent = parent
+	addCorner(chip, 14)
+	addStroke(chip, accent, 1, 0.35)
+
+	local value = Instance.new("TextLabel")
+	value.BackgroundTransparency = 1
+	value.Position = UDim2.fromOffset(12, 4)
+	value.Size = UDim2.new(1, -24, 0, 20)
+	value.Font = Enum.Font.GothamBlack
+	value.TextSize = 18
+	value.TextColor3 = THEME.text
+	value.TextXAlignment = Enum.TextXAlignment.Left
+	value.Text = "0"
+	value.Parent = chip
+
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Position = UDim2.fromOffset(12, 22)
+	label.Size = UDim2.new(1, -24, 0, 14)
+	label.Font = Enum.Font.GothamBold
+	label.TextSize = 10
+	label.TextColor3 = THEME.textMuted
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Text = labelText
+	label.Parent = chip
+
+	return {
+		frame = chip,
+		value = value,
+		label = label,
+	}
+end
+
 local function makeMissionPage(parent: Instance, titleText: string, subtitleText: string, accent: Color3, accentSoft: Color3, emptyText: string)
 	local page = Instance.new("Frame")
 	page.BackgroundTransparency = 1
 	page.Size = UDim2.fromScale(1, 1)
 	page.Parent = parent
 
-	local listShell = Instance.new("Frame")
-	listShell.Size = UDim2.fromScale(1, 1)
-	listShell.BackgroundColor3 = Color3.fromRGB(14, 18, 28)
-	listShell.BorderSizePixel = 0
-	listShell.Parent = page
-	addCorner(listShell, 20)
-	addStroke(listShell, accent, 1, 0.22)
-	addGradient(listShell, 0, {
+	local summary = Instance.new("Frame")
+	summary.Size = UDim2.new(1, 0, 0, 0)
+	summary.BackgroundColor3 = THEME.panelAlt
+	summary.BorderSizePixel = 0
+	summary.Parent = page
+	summary.Visible = false
+	addCorner(summary, 20)
+	addStroke(summary, accent, 1, 0.28)
+	addGradient(summary, 0, {
 		accentSoft,
-		Color3.fromRGB(14, 18, 28),
-		Color3.fromRGB(11, 15, 22),
+		THEME.panelAlt,
+		THEME.panelAltSoft,
 	})
 
-	local accentBar = Instance.new("Frame")
-	accentBar.Position = UDim2.fromOffset(16, 16)
-	accentBar.Size = UDim2.new(0, 5, 0, 42)
-	accentBar.BackgroundColor3 = accent
-	accentBar.BorderSizePixel = 0
-	accentBar.Parent = listShell
-	addCorner(accentBar, 6)
+	local summaryAccent = Instance.new("Frame")
+	summaryAccent.Size = UDim2.new(0, 5, 1, -28)
+	summaryAccent.Position = UDim2.fromOffset(14, 14)
+	summaryAccent.BackgroundColor3 = accent
+	summaryAccent.BorderSizePixel = 0
+	summaryAccent.Parent = summary
+	addCorner(summaryAccent, 6)
 
-	local listHeader = Instance.new("TextLabel")
-	listHeader.BackgroundTransparency = 1
-	listHeader.Position = UDim2.fromOffset(32, 14)
-	listHeader.Size = UDim2.new(1, -250, 0, 24)
-	listHeader.Font = Enum.Font.GothamBlack
-	listHeader.TextSize = 18
-	listHeader.TextColor3 = THEME.text
-	listHeader.TextXAlignment = Enum.TextXAlignment.Left
-	listHeader.Text = "Board Entries"
-	listHeader.Parent = listShell
+	local summaryTitle = Instance.new("TextLabel")
+	summaryTitle.BackgroundTransparency = 1
+	summaryTitle.Position = UDim2.fromOffset(32, 16)
+	summaryTitle.Size = UDim2.new(1, -260, 0, 24)
+	summaryTitle.Font = Enum.Font.GothamBlack
+	summaryTitle.TextSize = 20
+	summaryTitle.TextColor3 = THEME.text
+	summaryTitle.TextXAlignment = Enum.TextXAlignment.Left
+	summaryTitle.Text = titleText
+	summaryTitle.Parent = summary
 
-	local listSummary = Instance.new("TextLabel")
-	listSummary.BackgroundTransparency = 1
-	listSummary.Position = UDim2.fromOffset(32, 40)
-	listSummary.Size = UDim2.new(1, -250, 0, 18)
-	listSummary.Font = Enum.Font.GothamBold
-	listSummary.TextSize = 12
-	listSummary.TextColor3 = THEME.textSoft
-	listSummary.TextXAlignment = Enum.TextXAlignment.Left
-	listSummary.Text = titleText .. " | " .. subtitleText
-	listSummary.Parent = listShell
+	local summarySubtitle = Instance.new("TextLabel")
+	summarySubtitle.BackgroundTransparency = 1
+	summarySubtitle.Position = UDim2.fromOffset(32, 42)
+	summarySubtitle.Size = UDim2.new(1, -300, 0, 34)
+	summarySubtitle.Font = Enum.Font.Gotham
+	summarySubtitle.TextSize = 12
+	summarySubtitle.TextColor3 = THEME.textSoft
+	summarySubtitle.TextWrapped = true
+	summarySubtitle.TextXAlignment = Enum.TextXAlignment.Left
+	summarySubtitle.TextYAlignment = Enum.TextYAlignment.Top
+	summarySubtitle.Text = subtitleText
+	summarySubtitle.Parent = summary
 
 	local resetPill = Instance.new("Frame")
 	resetPill.AnchorPoint = Vector2.new(1, 0)
-	resetPill.Position = UDim2.new(1, -18, 0, 16)
+	resetPill.Position = UDim2.new(1, -18, 0, 18)
 	resetPill.Size = UDim2.fromOffset(190, 28)
 	resetPill.BackgroundColor3 = Color3.fromRGB(18, 23, 34)
 	resetPill.BorderSizePixel = 0
-	resetPill.Parent = listShell
+	resetPill.Parent = summary
 	addCorner(resetPill, 14)
 	addStroke(resetPill, accent, 1, 0.3)
 
@@ -480,9 +522,56 @@ local function makeMissionPage(parent: Instance, titleText: string, subtitleText
 	resetText.Text = ""
 	resetText.Parent = resetPill
 
+	local chips = Instance.new("Frame")
+	chips.BackgroundTransparency = 1
+	chips.Position = UDim2.fromOffset(32, 74)
+	chips.Size = UDim2.new(1, -50, 0, 40)
+	chips.Parent = summary
+
+	local chipsLayout = Instance.new("UIListLayout")
+	chipsLayout.FillDirection = Enum.FillDirection.Horizontal
+	chipsLayout.Padding = UDim.new(0, 10)
+	chipsLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	chipsLayout.Parent = chips
+
+	local missionCountChip = makeValueChip(chips, accent, "MISSIONS")
+	local claimableChip = makeValueChip(chips, THEME.claim, "READY")
+	local completedChip = makeValueChip(chips, THEME.completed, "DONE")
+
+	local listShell = Instance.new("Frame")
+	listShell.Position = UDim2.fromOffset(0, 0)
+	listShell.Size = UDim2.new(1, 0, 1, 0)
+	listShell.BackgroundColor3 = Color3.fromRGB(14, 18, 28)
+	listShell.BorderSizePixel = 0
+	listShell.Parent = page
+	addCorner(listShell, 20)
+	addStroke(listShell, THEME.cardBorder, 1, 0.24)
+
+	local listHeader = Instance.new("TextLabel")
+	listHeader.BackgroundTransparency = 1
+	listHeader.Position = UDim2.fromOffset(18, 16)
+	listHeader.Size = UDim2.new(1, -36, 0, 22)
+	listHeader.Font = Enum.Font.GothamBold
+	listHeader.TextSize = 14
+	listHeader.TextColor3 = THEME.text
+	listHeader.TextXAlignment = Enum.TextXAlignment.Left
+	listHeader.Text = "Board Entries"
+	listHeader.Parent = listShell
+
+	local listSubheader = Instance.new("TextLabel")
+	listSubheader.BackgroundTransparency = 1
+	listSubheader.Position = UDim2.fromOffset(18, 38)
+	listSubheader.Size = UDim2.new(1, -36, 0, 18)
+	listSubheader.Font = Enum.Font.Gotham
+	listSubheader.TextSize = 12
+	listSubheader.TextColor3 = THEME.textMuted
+	listSubheader.TextXAlignment = Enum.TextXAlignment.Left
+	listSubheader.Text = "Claimable missions light up when their objective is complete."
+	listSubheader.Parent = listShell
+
 	local list = Instance.new("ScrollingFrame")
-	list.Position = UDim2.fromOffset(18, 74)
-	list.Size = UDim2.new(1, -36, 1, -92)
+	list.Position = UDim2.fromOffset(18, 68)
+	list.Size = UDim2.new(1, -36, 1, -84)
 	list.BackgroundTransparency = 1
 	list.BorderSizePixel = 0
 	list.ScrollBarThickness = 6
@@ -515,9 +604,12 @@ local function makeMissionPage(parent: Instance, titleText: string, subtitleText
 	return {
 		page = page,
 		resetText = resetText,
-		summaryText = listSummary,
+		missionCountChip = missionCountChip,
+		claimableChip = claimableChip,
+		completedChip = completedChip,
 		list = list,
 		emptyLabel = emptyLabel,
+		accent = accent,
 	}
 end
 
@@ -559,6 +651,7 @@ local function applyTabStyle(tabRef, active: boolean, accent: Color3)
 end
 
 local function setTab(which: string)
+	currentTab = which
 	local dailyActive = which == "Daily"
 	dailyPage.page.Visible = dailyActive
 	weeklyPage.page.Visible = not dailyActive
@@ -774,11 +867,9 @@ end
 
 local function updatePageSummary(pageRef, missions, resetAt, labelPrefix)
 	local summary = summarizeMissions(missions)
-	pageRef.summaryText.Text = ("%d missions | %d ready | %d done"):format(
-		summary.total,
-		summary.claimable,
-		summary.completed
-	)
+	pageRef.missionCountChip.value.Text = tostring(summary.total)
+	pageRef.claimableChip.value.Text = tostring(summary.claimable)
+	pageRef.completedChip.value.Text = tostring(summary.completed)
 	pageRef.resetText.Text = resetAt and (labelPrefix .. " " .. formatCountdown(resetAt - os.time())) or (labelPrefix .. " --:--:--")
 	pageRef.emptyLabel.Visible = #missions == 0
 end
