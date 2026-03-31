@@ -6,7 +6,7 @@ if gui and gui:IsA("ScreenGui") then
 	gui.IgnoreGuiInset = true
 end
 
-local frame = gui:WaitForChild("Frame")
+local frame = gui:WaitForChild("InfoUI")
 
 local timerFrame = frame:WaitForChild("Timer")
 local timerText = timerFrame:WaitForChild("TimerText")
@@ -20,8 +20,8 @@ local coinText = coinFrame:WaitForChild("CoinText")
 local soulsFrame = frame:WaitForChild("Souls")
 local soulsText = soulsFrame:WaitForChild("SoulText")
 
--- Config: 20:00 countdown -> then count up
-local RUN_TARGET_SECONDS = 20 * 60
+-- Config: 15:00 countdown -> then count up
+local RUN_TARGET_SECONDS = 15 * 60
 
 local function fmtMMSS(totalSeconds: number)
 	totalSeconds = math.max(0, math.floor(tonumber(totalSeconds) or 0))
@@ -53,17 +53,16 @@ local progressEvent = remotes:WaitForChild("PlayerProgressEvent")
 progressEvent.OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then return end
 	if payload.type ~= "progress" then return end
-    if payload.kills ~= nil then
-        killText.Text = tostring(math.floor(tonumber(payload.kills) or 0))
-    end
-    if payload.coins ~= nil then
-        coinText.Text = tostring(math.floor(tonumber(payload.coins) or 0))
-    end
-    if payload.souls ~= nil then
-        soulsText.Text = tostring(math.floor(tonumber(payload.souls) or 0))
-    end
+	if payload.kills ~= nil then
+		killText.Text = tostring(math.floor(tonumber(payload.kills) or 0))
+	end
+	if payload.coins ~= nil then
+		coinText.Text = tostring(math.floor(tonumber(payload.coins) or 0))
+	end
+	if payload.souls ~= nil then
+		soulsText.Text = tostring(math.floor(tonumber(payload.souls) or 0))
+	end
 end)
-
 
 -- Pull initial snapshot (first server push can happen before this UI binds).
 local function requestProgressSync()
@@ -75,24 +74,24 @@ task.delay(1, requestProgressSync)
 
 -- Time comes from WaveStatusEvent (seconds elapsed on server; respects PauseState)
 local function getWaveStatusEvent()
-    local rem = ReplicatedStorage:FindFirstChild("Remotes")
-    if rem then
-        local ev = rem:FindFirstChild("WaveStatusEvent")
-        if ev and ev:IsA("RemoteEvent") then
-            return ev
-        end
-    end
-    local ev = ReplicatedStorage:FindFirstChild("WaveStatusEvent")
-    if ev and ev:IsA("RemoteEvent") then
-        return ev
-    end
-    return ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("WaveStatusEvent")
+	local rem = ReplicatedStorage:FindFirstChild("Remotes")
+	if rem then
+		local ev = rem:FindFirstChild("WaveStatusEvent")
+		if ev and ev:IsA("RemoteEvent") then
+			return ev
+		end
+	end
+	local ev = ReplicatedStorage:FindFirstChild("WaveStatusEvent")
+	if ev and ev:IsA("RemoteEvent") then
+		return ev
+	end
+	return ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("WaveStatusEvent")
 end
 
 local waveEvent = getWaveStatusEvent()
 waveEvent.OnClientEvent:Connect(function(payload)
-    if typeof(payload) ~= "table" then return end
-    if payload.type == "timeUpdate" and payload.seconds ~= nil then
-        setTimerFromElapsed(payload.seconds)
-    end
+	if typeof(payload) ~= "table" then return end
+	if payload.type == "timeUpdate" and payload.seconds ~= nil then
+		setTimerFromElapsed(payload.seconds)
+	end
 end)

@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TeleportService = game:GetService("TeleportService")
 
@@ -8,6 +9,8 @@ local gui = script.Parent
 local frame = gui:WaitForChild("Frame")
 local fpsLabel = frame:WaitForChild("FPS")
 local FPS_TELEPORT_SETTING = "ShowFPSCounter"
+local debugSettings = ReplicatedStorage:FindFirstChild("DebugSettings")
+local perfHudDefault = debugSettings and debugSettings:FindFirstChild("PerfHudEnabled")
 
 local function getPersistedVisibility(): boolean
 	local ok, value = pcall(function()
@@ -18,6 +21,9 @@ local function getPersistedVisibility(): boolean
 		return value
 	end
 
+	if perfHudDefault and perfHudDefault:IsA("BoolValue") then
+		return perfHudDefault.Value == true
+	end
 	return false
 end
 

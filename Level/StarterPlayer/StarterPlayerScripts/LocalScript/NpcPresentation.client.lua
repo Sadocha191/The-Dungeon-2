@@ -44,6 +44,9 @@ local syncOverlayToken = nil
 local RUN_ANIM_START_SPEED = 1.5
 local RUN_ANIM_STOP_SPEED = 0.75
 local RUN_ANIM_HOLD_TIME = 0.18
+local PROCEDURAL_VISUAL_ATTR = "NpcLightweight"
+local PROCEDURAL_IDLE_SWAY_SPEED = 1.8
+local PROCEDURAL_MOVE_BOUNCE_SPEED = 8
 
 local function flatDir(v: Vector3?): Vector3
 	if typeof(v) ~= "Vector3" then
@@ -84,6 +87,26 @@ local function computeRootToPivot(model: Model, root: BasePart): CFrame?
 		return nil
 	end
 	return root.CFrame:ToObjectSpace(pivot)
+end
+
+local function isProceduralVisualModel(model: Model?): boolean
+	return model ~= nil and model:GetAttribute(PROCEDURAL_VISUAL_ATTR) == true
+end
+
+local function buildProceduralPose(entry, now: number): CFrame
+	local motion = math.max(0, tonumber(entry.animMotionSpeed) or 0)
+	if entry.state == NpcShared.States.Attacking then
+		local pulse = math.sin(now * 16)
+		return CFrame.new(0, 0.1 + math.abs(pulse) * 0.08, 0) * CFrame.Angles(math.rad(-10), 0, math.rad(pulse * 3))
+	end
+	if entry.animMoving == true or motion >= RUN_ANIM_STOP_SPEED then
+		local amp = math.clamp(motion / 18, 0.25, 1)
+		local bounce = math.abs(math.sin(now * PROCEDURAL_MOVE_BOUNCE_SPEED))
+		local roll = math.sin(now * (PROCEDURAL_MOVE_BOUNCE_SPEED * 0.5))
+		return CFrame.new(0, bounce * 0.22 * amp, 0) * CFrame.Angles(math.rad(-8 * amp), 0, math.rad(roll * 4 * amp))
+	end
+	local sway = math.sin(now * PROCEDURAL_IDLE_SWAY_SPEED)
+	return CFrame.new(0, math.abs(sway) * 0.05, 0) * CFrame.Angles(0, 0, math.rad(sway * 2.5))
 end
 
 local function refreshRigBinding(entry)
@@ -180,6 +203,9 @@ local function buildTracks(entry)
 	if not model then
 		return
 	end
+	if isProceduralVisualModel(model) then
+		return
+	end
 	local animator = ensureAnimator(model)
 	if not animator then
 		return
@@ -206,6 +232,11 @@ end
 
 local function queueTrackBuild(entry)
 	if entry.animBuilt or entry.animQueued or not entry.model then
+		return
+	end
+	if isProceduralVisualModel(entry.model) then
+		entry.animBuilt = true
+		entry.animTracks = {}
 		return
 	end
 
@@ -604,15 +635,18 @@ RunService.RenderStepped:Connect(function(dt)
 		entry.renderDir = entry.renderDir and entry.renderDir:Lerp(goalDir, math.clamp(dt * 14, 0, 1)) or goalDir
 		entry.renderDir = flatDir(entry.renderDir)
 
+		updateAnimationMotion(entry, dt, now)
 		refreshRigBinding(entry)
 		local rootFrame = CFrame.lookAt(entry.renderPos, entry.renderPos + entry.renderDir)
+		if isProceduralVisualModel(model) then
+			rootFrame = rootFrame * buildProceduralPose(entry, now)
+		end
 		if entry.rootToPivot then
 			model:PivotTo(rootFrame * entry.rootToPivot)
 		else
 			model:PivotTo(rootFrame)
 		end
 		updateHealthbar(entry)
-		updateAnimationMotion(entry, dt, now)
 		playAnimation(entry)
 	end
 end)
@@ -625,6 +659,3 @@ requestFullSync()
 localPlayer.CharacterAdded:Connect(function()
 	requestFullSync()
 end)
-
-
-

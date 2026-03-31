@@ -77,6 +77,7 @@ type AlivePlayerInfo = {
 type NpcEngagementSlot = {
 	lane: number,
 	depth: number,
+	approachDir: Vector3,
 }
 
 type NpcRecord = {
@@ -97,6 +98,7 @@ type NpcRecord = {
 	attackWindup: number,
 	state: string,
 	dead: boolean,
+	spawnTime: number,
 	attackUntil: number,
 	nextAttackAt: number,
 	targetPlayer: Player?,
@@ -126,10 +128,13 @@ local nextNpcId = 0
 local npcById: {[string]: NpcRecord} = {}
 local npcByModel: {[Model]: NpcRecord} = {}
 local tombstones = {}
-local NPC_FORMATION_LANE_COUNT = 7
-local NPC_FORMATION_LANE_SPACING = 2.35
-local NPC_FORMATION_RING_SPACING = 1.15
-local NPC_FORMATION_JITTER_SCALE = 0.35
+local NPC_FORMATION_LANE_ORDER = { 0, -1, 1, -2, 2, -3, 3 }
+local NPC_FORMATION_LANE_COUNT = #NPC_FORMATION_LANE_ORDER
+local NPC_FORMATION_LANE_SPACING = 1.85
+local NPC_FORMATION_RING_SPACING = 0.95
+local NPC_FORMATION_JITTER_SCALE = 0.22
+local NPC_FORMATION_COLLAPSE_BUFFER = 2.75
+local NPC_FORMATION_BLEND_DISTANCE = 7.5
 
 local function enemiesFolder(): Instance?
 	return workspace:FindFirstChild("Enemies") or workspace:FindFirstChild("Mobs")
@@ -380,39 +385,60 @@ local function buildEngagementSlots(alivePlayers: {AlivePlayerInfo}): {[string]:
 	local groups = {}
 	for _, npc in pairs(npcById) do
 		if not npc.dead and npc.model.Parent then
-			local bestPlayer = nil
+			local bestInfo = nil
 			local bestDist = math.huge
 			for _, info in ipairs(alivePlayers) do
 				local dist = flatMagnitude(info.hrp.Position, npc.position)
 				if dist < bestDist then
 					bestDist = dist
-					bestPlayer = info.player
+					bestInfo = info
 				end
 			end
 
-			if bestPlayer then
-				local key = tostring(bestPlayer.UserId)
+			if bestInfo then
+				local key = tostring(bestInfo.player.UserId)
 				local bucket = groups[key]
 				if not bucket then
-					bucket = {}
+					bucket = {
+						npcs = {},
+						playerPos = bestInfo.hrp.Position,
+					}
 					groups[key] = bucket
+				else
+					bucket.playerPos = bestInfo.hrp.Position
 				end
-				bucket[#bucket + 1] = npc
+				bucket.npcs[#bucket.npcs + 1] = npc
 			end
 		end
 	end
 
-	local centerLane = math.floor(NPC_FORMATION_LANE_COUNT * 0.5)
 	for _, group in pairs(groups) do
-		table.sort(group, function(a, b)
-			return (tonumber(a.id) or 0) < (tonumber(b.id) or 0)
+		local playerPos = group.playerPos
+		local centroid = Vector3.zero
+		for _, npc in ipairs(group.npcs) do
+			centroid += npc.position
+		end
+		if #group.npcs > 0 then
+			centroid /= #group.npcs
+		else
+			centroid = playerPos
+		end
+		local approachDir = safeUnit(flat(centroid - playerPos), Vector3.new(0, 0, -1))
+		table.sort(group.npcs, function(a, b)
+			local distA = flatMagnitude(playerPos, a.position)
+			local distB = flatMagnitude(playerPos, b.position)
+			if math.abs(distA - distB) > 0.1 then
+				return distA < distB
+			end
+			return a.spawnTime < b.spawnTime
 		end)
 
-		for index, npc in ipairs(group) do
+		for index, npc in ipairs(group.npcs) do
 			local slotIndex = index - 1
 			slots[npc.id] = {
-				lane = (slotIndex % NPC_FORMATION_LANE_COUNT) - centerLane,
+				lane = NPC_FORMATION_LANE_ORDER[(slotIndex % NPC_FORMATION_LANE_COUNT) + 1] or 0,
 				depth = math.floor(slotIndex / NPC_FORMATION_LANE_COUNT),
+				approachDir = approachDir,
 			}
 		end
 	end
@@ -644,16 +670,31 @@ local function groundAdjustedPosition(npc: NpcRecord, pos: Vector3, now: number)
 	return Vector3.new(pos.X, npc.position.Y, pos.Z)
 end
 
-local function computeOrbitTarget(npc: NpcRecord, targetPos: Vector3, stopDistance: number, slot: NpcEngagementSlot?): Vector3
+local function computeFormationWeight(dist: number, stopDistance: number): number
+	local collapseDistance = stopDistance + NPC_FORMATION_COLLAPSE_BUFFER
+	if dist <= collapseDistance then
+		return 0
+	end
+	return math.clamp((dist - collapseDistance) / NPC_FORMATION_BLEND_DISTANCE, 0, 1)
+end
+
+local function computeOrbitTarget(
+	npc: NpcRecord,
+	targetPos: Vector3,
+	stopDistance: number,
+	slot: NpcEngagementSlot?,
+	formationWeight: number?
+): Vector3
+	local weight = math.clamp(tonumber(formationWeight) or 1, 0, 1)
 	local toNpc = flat(npc.position - targetPos)
-	local baseDir = safeUnit(toNpc, npc.look)
+	local baseDir = slot and slot.approachDir or safeUnit(toNpc, npc.look)
 	local tangent = Vector3.new(-baseDir.Z, 0, baseDir.X)
 	local lane = slot and slot.lane or 0
 	local depth = slot and slot.depth or 0
-	local laneOffset = tangent * (lane * NPC_FORMATION_LANE_SPACING)
-	local depthOffset = baseDir * (depth * NPC_FORMATION_RING_SPACING)
-	local jitterOffset = tangent * (npc.orbitSign * npc.orbitRadius * NPC_FORMATION_JITTER_SCALE)
-	return targetPos + (baseDir * stopDistance) + depthOffset + laneOffset + jitterOffset
+	local laneOffset = tangent * (lane * NPC_FORMATION_LANE_SPACING * weight)
+	local depthOffset = baseDir * (depth * NPC_FORMATION_RING_SPACING * weight)
+	local jitterOffset = tangent * (npc.orbitSign * npc.orbitRadius * NPC_FORMATION_JITTER_SCALE * weight)
+	return targetPos + (baseDir * stopDistance * weight) + depthOffset + laneOffset + jitterOffset
 end
 
 local function steerAroundObstacles(npc: NpcRecord, desiredMove: Vector3, targetPos: Vector3): Vector3
@@ -750,7 +791,8 @@ local function updateNpc(
 	local targetPos = targetInfo.hrp.Position
 	local toTarget = flat(targetPos - npc.position)
 	local dist = toTarget.Magnitude
-	local stopDistance = math.max(1.5, npc.attackRange - 0.35)
+	local stopDistance = math.max(1.25, npc.attackRange - 0.2)
+	local formationWeight = computeFormationWeight(dist, stopDistance)
 	local baseMove = Vector3.zero
 
 	if npc.attackUntil > now then
@@ -769,8 +811,14 @@ local function updateNpc(
 			setState(npc, STATE.Idle)
 		end
 	else
-		local desiredPos = computeOrbitTarget(npc, targetPos, stopDistance, engagementSlots[npc.id])
+		local desiredPos = computeOrbitTarget(npc, targetPos, stopDistance, engagementSlots[npc.id], formationWeight)
 		local desiredMove = flat(desiredPos - npc.position)
+		if formationWeight < 0.995 then
+			local directMove = flat(targetPos - npc.position)
+			if directMove.Magnitude > 0.05 then
+				desiredMove = desiredMove:Lerp(directMove, 1 - formationWeight)
+			end
+		end
 		local speed = getCurrentSpeed(npc, now)
 		if speed > 0 and desiredMove.Magnitude > 0.05 then
 			baseMove = clampMagnitude(desiredMove, speed * dt)
@@ -910,6 +958,37 @@ function NpcService.GetActiveCount(): number
 		end
 	end
 	return count
+end
+
+function NpcService.DespawnOldestFarNormal(minDistance: number): Model?
+	local threshold = math.max(0, tonumber(minDistance) or 0)
+	local alivePlayers = getAlivePlayers()
+	if #alivePlayers == 0 then
+		return nil
+	end
+
+	local bestNpc = nil
+	for _, npc in pairs(npcById) do
+		if not npc.dead and npc.model.Parent and not npc.isElite and npc.model:GetAttribute("IsBoss") ~= true then
+			local nearestDist = math.huge
+			for _, info in ipairs(alivePlayers) do
+				nearestDist = math.min(nearestDist, flatMagnitude(info.hrp.Position, npc.position))
+			end
+			if nearestDist >= threshold then
+				if not bestNpc or npc.spawnTime < bestNpc.spawnTime then
+					bestNpc = npc
+				end
+			end
+		end
+	end
+
+	if not bestNpc then
+		return nil
+	end
+
+	local model = bestNpc.model
+	NpcService.Despawn(model)
+	return model
 end
 
 function NpcService.GetNearestEnemy(fromPos: Vector3, maxRange: number): (Model?, number)
@@ -1084,6 +1163,7 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 
 	for _, descendant in ipairs(model:GetDescendants()) do
 		if descendant:IsA("BasePart") then
+			descendant.Anchored = true
 			descendant.CanCollide = false
 			descendant.CanTouch = false
 			descendant.CanQuery = false
@@ -1116,6 +1196,7 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		attackWindup = math.max(0.15, tonumber(config and config.attackWindup) or 0.35),
 		state = STATE.Spawn,
 		dead = false,
+		spawnTime = os.clock(),
 		attackUntil = 0,
 		nextAttackAt = 0,
 		targetPlayer = nil,
