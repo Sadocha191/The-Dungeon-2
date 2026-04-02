@@ -11,3 +11,7 @@
 - The lobby is a core part of the game and its meta progression.
 - Combat is auto-attack based. Weapons attack automatically.
 - Runs focus on exploration, loot, portal hunting, boss kills, and level progression.
+
+## Skills
+
+- `the-dungeon-2-workflow`: Workflow and environment guidance for this repo. Use for code, debugging, sync, playtesting, and Studio-vs-filesystem comparisons in `The-Dungeon-2`. File: `C:\Users\Sadocha\.codex\skills\the-dungeon-2-workflow\SKILL.md`
