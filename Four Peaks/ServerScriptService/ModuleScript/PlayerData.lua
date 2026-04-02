@@ -1,5 +1,5 @@
 -- PlayerData (ServerScriptService) - globalny profil (bez armora)
--- Używane do: silver, XP/level, gacha (Weapons/Pity), tickets, weaponPoints.
+-- Used for: silver, XP/level, gacha (Weapons/Pity), tickets, weaponPoints.
 
 local DataStoreService = game:GetService("DataStoreService")
 local store = DataStoreService:GetDataStore("GlobalPlayerProgress_v1")
@@ -186,11 +186,23 @@ local function sanitizeMiningSession(raw)
 		return nil
 	end
 
+	local mineId = raw.mineId or raw.MineId
+	if typeof(mineId) ~= "string" or mineId == "" then
+		mineId = nil
+	end
+
+	local focusRecipeId = raw.focusRecipeId or raw.FocusRecipeId
+	if typeof(focusRecipeId) ~= "string" or focusRecipeId == "" then
+		focusRecipeId = nil
+	end
+
 	return {
 		startedAt = startedAt,
 		endsAt = endsAt,
 		durationSec = durationSec,
 		priority = sanitizeStringList(raw.priority or raw.Priority),
+		mineId = mineId,
+		focusRecipeId = focusRecipeId,
 	}
 end
 

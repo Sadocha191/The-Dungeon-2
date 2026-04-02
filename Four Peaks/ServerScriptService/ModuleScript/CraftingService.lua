@@ -202,12 +202,87 @@ local function getResourceDisplayOrder(resourceMap, orderIds)
 	return out
 end
 
+local function buildRequirementProgress(resourceMap, list)
+	local progressEntries = {}
+	local missingEntries = {}
+	local totals = {
+		required = 0,
+		owned = 0,
+		missing = 0,
+	}
+
+	for _, entry in ipairs(list or {}) do
+		local amount = clampInt(entry.amount, 0)
+		if typeof(entry.id) == "string" and entry.id ~= "" and amount > 0 then
+			local owned = clampInt(resourceMap and resourceMap[entry.id], 0)
+			local missing = math.max(0, amount - owned)
+			totals.required += amount
+			totals.owned += math.min(owned, amount)
+			totals.missing += missing
+			table.insert(progressEntries, {
+				id = entry.id,
+				amount = amount,
+				owned = owned,
+				missing = missing,
+				ready = missing <= 0,
+			})
+			if missing > 0 then
+				table.insert(missingEntries, {
+					id = entry.id,
+					amount = missing,
+					owned = owned,
+					required = amount,
+				})
+			end
+		end
+	end
+
+	return progressEntries, missingEntries, totals
+end
+
 local function getMineResourceOrder()
 	local out = {}
 	for _, def in ipairs(CraftingConfig.MINE_RESOURCE_DEFS or {}) do
 		table.insert(out, def.id)
 	end
 	return out
+end
+
+local function normalizeMineId(mineId)
+	local fallback = nil
+	if typeof(CraftingConfig.GetDefaultMineId) == "function" then
+		fallback = CraftingConfig.GetDefaultMineId()
+	end
+
+	if typeof(mineId) == "string" and mineId ~= ""
+		and typeof(CraftingConfig.GetMine) == "function"
+		and CraftingConfig.GetMine(mineId)
+	then
+		return mineId
+	end
+
+	return fallback
+end
+
+local function getMineDropEntries(mineId)
+	local chanceEntries = nil
+	if typeof(CraftingConfig.GetMineDropChanceList) == "function" then
+		chanceEntries = CraftingConfig.GetMineDropChanceList(mineId)
+	end
+	if typeof(chanceEntries) == "table" and #chanceEntries > 0 then
+		return chanceEntries
+	end
+
+	local fallback = {}
+	for _, def in ipairs(CraftingConfig.MINE_RESOURCE_DEFS or {}) do
+		table.insert(fallback, {
+			id = def.id,
+			weight = tonumber(def.weight) or 0,
+			yieldMin = clampInt(def.yieldMin, 1),
+			yieldMax = math.max(clampInt(def.yieldMin, 1), clampInt(def.yieldMax, clampInt(def.yieldMin, 1))),
+		})
+	end
+	return fallback
 end
 
 local function getMobResourceOrder()
@@ -334,10 +409,10 @@ local function spendRequirementList(resourceMap, list)
 	return true
 end
 
-local function normalizePriorityList(priority)
+local function normalizePriorityList(priority, mineId)
 	local valid = {}
 	local seen = {}
-	local fallback = CraftingConfig.GetDefaultMinePriority()
+	local fallback = CraftingConfig.GetDefaultMinePriority(mineId)
 
 	if typeof(priority) == "table" then
 		for _, resourceId in ipairs(priority) do
@@ -358,26 +433,17 @@ local function normalizePriorityList(priority)
 	return valid
 end
 
-local function getPriorityMultiplier(priority, resourceId)
-	for index, id in ipairs(priority or {}) do
-		if id == resourceId then
-			local bonus = 3.0 - ((index - 1) * 0.35)
-			return math.max(1.0, bonus)
-		end
-	end
-	return 1.0
-end
-
-local function rollMiningYield(userId, startedAt, durationSec, priority)
+local function rollMiningYield(userId, startedAt, durationSec, mineId)
 	local rolls = math.max(0, math.floor(clampInt(durationSec, 0) / 60))
 	local seed = clampInt(userId, 0) + clampInt(startedAt, 0) + rolls
 	local rng = Random.new(seed)
 	local counts = {}
+	local dropEntries = getMineDropEntries(mineId)
 
 	for _ = 1, rolls do
 		local totalWeight = 0
-		for _, def in ipairs(CraftingConfig.MINE_RESOURCE_DEFS or {}) do
-			totalWeight += (tonumber(def.weight) or 0) * getPriorityMultiplier(priority, def.id)
+		for _, def in ipairs(dropEntries) do
+			totalWeight += tonumber(def.weight) or 0
 		end
 		if totalWeight <= 0 then
 			break
@@ -385,8 +451,8 @@ local function rollMiningYield(userId, startedAt, durationSec, priority)
 
 		local pick = rng:NextNumber(0, totalWeight)
 		local acc = 0
-		for _, def in ipairs(CraftingConfig.MINE_RESOURCE_DEFS or {}) do
-			acc += (tonumber(def.weight) or 0) * getPriorityMultiplier(priority, def.id)
+		for _, def in ipairs(dropEntries) do
+			acc += tonumber(def.weight) or 0
 			if pick <= acc then
 				local minYield = clampInt(def.yieldMin, 1)
 				local maxYield = math.max(minYield, clampInt(def.yieldMax, minYield))
@@ -411,8 +477,8 @@ local function finalizeCompletedMining(player, nowTimestamp)
 		return nil
 	end
 
-	local priority = normalizePriorityList(session.priority)
-	local yieldMap = rollMiningYield(player.UserId, session.startedAt, session.durationSec, priority)
+	local mineId = normalizeMineId(session.mineId)
+	local yieldMap = rollMiningYield(player.UserId, session.startedAt, session.durationSec, mineId)
 	for resourceId, amount in pairs(yieldMap) do
 		addCount(progress.mineResources, resourceId, amount)
 	end
@@ -429,13 +495,17 @@ local function buildMiningSessionSnapshot(player)
 	if typeof(session) ~= "table" then
 		return {
 			active = false,
-			priority = normalizePriorityList(nil),
+			mineId = normalizeMineId(nil),
+			priority = normalizePriorityList(nil, nil),
 			recentClaim = autoClaimed and getResourceDisplayOrder(autoClaimed, getMineResourceOrder()) or nil,
 		}
 	end
 
 	local now = os.time()
 	local elapsed = math.clamp(now - clampInt(session.startedAt, 0), 0, clampInt(session.durationSec, 0))
+	local mineId = normalizeMineId(session.mineId)
+	local mine = typeof(CraftingConfig.GetMine) == "function" and CraftingConfig.GetMine(mineId) or nil
+	local focusRecipe = typeof(CraftingConfig.GetRecipe) == "function" and CraftingConfig.GetRecipe(session.focusRecipeId) or nil
 	return {
 		active = true,
 		startedAt = session.startedAt,
@@ -443,7 +513,11 @@ local function buildMiningSessionSnapshot(player)
 		durationSec = session.durationSec,
 		elapsedSec = elapsed,
 		remainingSec = math.max(0, clampInt(session.endsAt, 0) - now),
-		priority = normalizePriorityList(session.priority),
+		mineId = mineId,
+		mineName = mine and (mine.displayName or mine.id) or mineId,
+		focusRecipeId = focusRecipe and session.focusRecipeId or nil,
+		focusRecipeName = focusRecipe and focusRecipe.weaponId or nil,
+		priority = normalizePriorityList(session.priority, mineId),
 		recentClaim = autoClaimed and getResourceDisplayOrder(autoClaimed, getMineResourceOrder()) or nil,
 	}
 end
@@ -456,6 +530,102 @@ local function countCraftedWeaponsById(instances)
 		end
 	end
 	return counts
+end
+
+local function normalizeFocusRecipeId(progress, recipeId)
+	if typeof(recipeId) ~= "string" or recipeId == "" then
+		return nil
+	end
+
+	local state = getRecipeState(progress, recipeId)
+	if not state or not state.found then
+		return nil
+	end
+	if not CraftingConfig.GetRecipe(recipeId) then
+		return nil
+	end
+
+	return recipeId
+end
+
+local function buildCraftEntries(data, progress, balances, craftedCounts)
+	local silverBalance = clampInt(balances and balances.Silver, 0)
+	local craftEntries = {}
+
+	for recipeId, recipeState in pairs(progress.recipes or {}) do
+		local recipe = CraftingConfig.GetRecipe(recipeId)
+		local stateEntry = getRecipeState(progress, recipeId)
+		if recipe and recipeState and stateEntry and stateEntry.found then
+			local tier = CraftingConfig.GetRecipeTierFromCopies(stateEntry.copies)
+			stateEntry.tier = tier
+			local requirements = CraftingConfig.BuildRecipeRequirements(recipeId, tier)
+			local craftedCount = clampInt(craftedCounts[recipe.weaponId], 0)
+			local hasMine = hasAllRequirements(progress.mineResources, requirements.mineResources)
+			local hasMob = hasAllRequirements(progress.mobMaterials, requirements.mobMaterials)
+			local levelOk = clampInt(data.level, 1) >= clampInt(recipe.requiredLevel, 1)
+			local silverForCraft = silverBalance >= clampInt(requirements.craftSilverCost, 0)
+			local silverForUnlock = silverBalance >= clampInt(requirements.unlockSilverCost, 0)
+			local canCraft = stateEntry.unlocked and levelOk and hasMine and hasMob and silverForCraft
+			local status = "Found"
+			if craftedCount > 0 then
+				status = "Crafted"
+			elseif canCraft then
+				status = "Craftable"
+			elseif stateEntry.unlocked then
+				status = "Unlocked"
+			end
+
+			local mineResourceProgress, missingMineResources, mineProgressSummary =
+				buildRequirementProgress(progress.mineResources, requirements.mineResources)
+			local mobMaterialProgress, missingMobMaterials, mobProgressSummary =
+				buildRequirementProgress(progress.mobMaterials, requirements.mobMaterials)
+
+			table.insert(craftEntries, {
+				recipeId = recipeId,
+				weaponId = recipe.weaponId,
+				name = recipe.weaponId,
+				rarity = recipe.rarity,
+				requiredLevel = recipe.requiredLevel,
+				status = status,
+				copies = stateEntry.copies,
+				tier = tier,
+				nextTierCopies = CraftingConfig.GetNextTierCopyTarget(tier),
+				unlocked = stateEntry.unlocked,
+				craftedCount = craftedCount,
+				unlockSilverCost = requirements.unlockSilverCost,
+				craftSilverCost = requirements.craftSilverCost,
+				unlockSilverMissing = math.max(0, clampInt(requirements.unlockSilverCost, 0) - silverBalance),
+				craftSilverMissing = math.max(0, clampInt(requirements.craftSilverCost, 0) - silverBalance),
+				mineResources = copyRequirementList(requirements.mineResources),
+				mobMaterials = copyRequirementList(requirements.mobMaterials),
+				mineResourceProgress = mineResourceProgress,
+				mobMaterialProgress = mobMaterialProgress,
+				missingMineResources = missingMineResources,
+				missingMobMaterials = missingMobMaterials,
+				mineProgressSummary = mineProgressSummary,
+				mobProgressSummary = mobProgressSummary,
+				canUnlock = (not stateEntry.unlocked) and levelOk and silverForUnlock,
+				canCraft = canCraft,
+				hasMineResources = hasMine,
+				hasMobMaterials = hasMob,
+				levelMet = levelOk,
+			})
+		end
+	end
+
+	table.sort(craftEntries, function(a, b)
+		if a.requiredLevel ~= b.requiredLevel then
+			return a.requiredLevel < b.requiredLevel
+		end
+		local rarityA = RARITY_RANK[a.rarity] or 0
+		local rarityB = RARITY_RANK[b.rarity] or 0
+		if rarityA ~= rarityB then
+			return rarityA < rarityB
+		end
+		return tostring(a.name) < tostring(b.name)
+	end)
+
+	return craftEntries
 end
 
 local function getSellPreview(inst, def)
@@ -611,7 +781,7 @@ function CraftingService.BuildMaterialInventorySnapshot(player)
 	}
 end
 
-function CraftingService.StartMining(player, durationSec, priority)
+function CraftingService.StartMining(player, durationSec, mineSelection, focusRecipeId)
 	local _, progress = getPlayerProgress(player)
 	finalizeCompletedMining(player, os.time())
 
@@ -631,12 +801,35 @@ function CraftingService.StartMining(player, durationSec, priority)
 		return false, "BadDuration"
 	end
 
+	local legacyPriority = nil
+	local mineId = nil
+	if typeof(mineSelection) == "table" then
+		if typeof(mineSelection.mineId) == "string" then
+			mineId = mineSelection.mineId
+		end
+		if focusRecipeId == nil and typeof(mineSelection.focusRecipeId) == "string" then
+			focusRecipeId = mineSelection.focusRecipeId
+		end
+		if mineSelection[1] ~= nil then
+			legacyPriority = mineSelection
+		end
+	elseif typeof(mineSelection) == "string" then
+		mineId = mineSelection
+	end
+
+	mineId = normalizeMineId(mineId)
+	if not mineId then
+		return false, "BadMine"
+	end
+
 	local now = os.time()
 	progress.miningSession = {
 		startedAt = now,
 		endsAt = now + validDuration,
 		durationSec = validDuration,
-		priority = normalizePriorityList(priority),
+		mineId = mineId,
+		focusRecipeId = normalizeFocusRecipeId(progress, focusRecipeId),
+		priority = normalizePriorityList(legacyPriority, mineId),
 	}
 	markPlayerDataDirty(player)
 	return true, buildMiningSessionSnapshot(player)
@@ -651,7 +844,8 @@ function CraftingService.StopMining(player)
 
 	local now = os.time()
 	local elapsed = math.clamp(now - clampInt(session.startedAt, 0), 0, clampInt(session.durationSec, 0))
-	local yieldMap = rollMiningYield(player.UserId, session.startedAt, elapsed, normalizePriorityList(session.priority))
+	local mineId = normalizeMineId(session.mineId)
+	local yieldMap = rollMiningYield(player.UserId, session.startedAt, elapsed, mineId)
 	for resourceId, amount in pairs(yieldMap) do
 		addCount(progress.mineResources, resourceId, amount)
 	end
@@ -659,18 +853,28 @@ function CraftingService.StopMining(player)
 	markPlayerDataDirty(player)
 	pushCountMapToasts(player, yieldMap, "Mining Claim", "mineResources")
 	return true, {
+		mineId = mineId,
 		yield = getResourceDisplayOrder(yieldMap, getMineResourceOrder()),
 	}
 end
 
 function CraftingService.GetMiningSnapshot(player)
-	local _, progress = getPlayerProgress(player)
+	finalizeCompletedMining(player, os.time())
+	local data, progress = getPlayerProgress(player)
+	local balances = CurrencyService.GetBalances(player)
+	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
+	local craftedCounts = countCraftedWeaponsById(state and state.WeaponInstances or {})
+
 	return {
-		silver = CurrencyService.GetSilver(player),
+		silver = clampInt(balances.Silver, 0),
+		accountLevel = clampInt(data.level, 1),
 		mineResources = getResourceDisplayOrder(progress.mineResources, getMineResourceOrder()),
+		mobMaterials = getResourceDisplayOrder(progress.mobMaterials, getMobResourceOrder()),
 		session = buildMiningSessionSnapshot(player),
 		durationOptions = CraftingConfig.MINE_DURATION_OPTIONS,
-		defaultPriority = normalizePriorityList(nil),
+		defaultPriority = normalizePriorityList(nil, nil),
+		defaultMineId = normalizeMineId(nil),
+		craftEntries = buildCraftEntries(data, progress, balances, craftedCounts),
 	}
 end
 
@@ -870,67 +1074,7 @@ function CraftingService.BuildBlacksmithSnapshot(player)
 	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
 	local instances = state.WeaponInstances or {}
 	local craftedCounts = countCraftedWeaponsById(instances)
-
-	local craftEntries = {}
-	for recipeId, recipeState in pairs(progress.recipes or {}) do
-		local recipe = CraftingConfig.GetRecipe(recipeId)
-		local stateEntry = getRecipeState(progress, recipeId)
-		if recipe and stateEntry and stateEntry.found then
-			local tier = CraftingConfig.GetRecipeTierFromCopies(stateEntry.copies)
-			stateEntry.tier = tier
-			local requirements = CraftingConfig.BuildRecipeRequirements(recipeId, tier)
-			local craftedCount = clampInt(craftedCounts[recipe.weaponId], 0)
-			local hasMine = hasAllRequirements(progress.mineResources, requirements.mineResources)
-			local hasMob = hasAllRequirements(progress.mobMaterials, requirements.mobMaterials)
-			local levelOk = clampInt(data.level, 1) >= clampInt(recipe.requiredLevel, 1)
-			local silverForCraft = clampInt(balances.Silver, 0) >= clampInt(requirements.craftSilverCost, 0)
-			local silverForUnlock = clampInt(balances.Silver, 0) >= clampInt(requirements.unlockSilverCost, 0)
-			local canCraft = stateEntry.unlocked and levelOk and hasMine and hasMob and silverForCraft
-			local status = "Found"
-			if craftedCount > 0 then
-				status = "Crafted"
-			elseif canCraft then
-				status = "Craftable"
-			elseif stateEntry.unlocked then
-				status = "Unlocked"
-			end
-
-			table.insert(craftEntries, {
-				recipeId = recipeId,
-				weaponId = recipe.weaponId,
-				name = recipe.weaponId,
-				rarity = recipe.rarity,
-				requiredLevel = recipe.requiredLevel,
-				status = status,
-				copies = stateEntry.copies,
-				tier = tier,
-				nextTierCopies = CraftingConfig.GetNextTierCopyTarget(tier),
-				unlocked = stateEntry.unlocked,
-				craftedCount = craftedCount,
-				unlockSilverCost = requirements.unlockSilverCost,
-				craftSilverCost = requirements.craftSilverCost,
-				mineResources = copyRequirementList(requirements.mineResources),
-				mobMaterials = copyRequirementList(requirements.mobMaterials),
-				canUnlock = (not stateEntry.unlocked) and levelOk and silverForUnlock,
-				canCraft = canCraft,
-				hasMineResources = hasMine,
-				hasMobMaterials = hasMob,
-				levelMet = levelOk,
-			})
-		end
-	end
-
-	table.sort(craftEntries, function(a, b)
-		if a.requiredLevel ~= b.requiredLevel then
-			return a.requiredLevel < b.requiredLevel
-		end
-		local rarityA = RARITY_RANK[a.rarity] or 0
-		local rarityB = RARITY_RANK[b.rarity] or 0
-		if rarityA ~= rarityB then
-			return rarityA < rarityB
-		end
-		return tostring(a.name) < tostring(b.name)
-	end)
+	local craftEntries = buildCraftEntries(data, progress, balances, craftedCounts)
 
 	local upgradeEntries = {}
 	local sellEntries = {}

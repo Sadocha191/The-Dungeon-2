@@ -83,8 +83,8 @@ local function ensureMinePrompt()
 		prompt.Parent = promptPart
 	end
 
-	prompt.ObjectText = "Mine"
-	prompt.ActionText = "Start Mining"
+	prompt.ObjectText = "Mining Routes"
+	prompt.ActionText = "Open Planner"
 	prompt.Triggered:Connect(function(player)
 		OpenMineUI:FireClient(player)
 	end)
@@ -116,7 +116,12 @@ MineAction.OnServerEvent:Connect(function(player, payload)
 	local reason = nil
 
 	if actionType == "start" then
-		ok, details = CraftingService.StartMining(player, tonumber(payload.durationSec) or 0, payload.priority)
+		ok, details = CraftingService.StartMining(
+			player,
+			tonumber(payload.durationSec) or 0,
+			payload.mineId,
+			payload.focusRecipeId
+		)
 		if ok ~= true then
 			reason = details
 		end

@@ -36,6 +36,14 @@ local function getRarityColor(rarity)
 	return rarityColors[tostring(rarity or "")] or rarityColors.Common
 end
 
+local function clampInt(value, minValue)
+	value = math.floor(tonumber(value) or 0)
+	if minValue ~= nil and value < minValue then
+		return minValue
+	end
+	return value
+end
+
 local gui = playerGui:WaitForChild("BlacksmithGui")
 gui.ResetOnSpawn = false
 gui.Enabled = false
@@ -252,7 +260,7 @@ detailTitle.Parent = details
 local detailBody = Instance.new("TextLabel")
 detailBody.BackgroundTransparency = 1
 detailBody.Position = UDim2.fromOffset(18, 46)
-detailBody.Size = UDim2.new(1, -36, 1, -124)
+detailBody.Size = UDim2.new(1, -36, 1, -132)
 detailBody.Font = Enum.Font.Gotham
 detailBody.TextSize = 12
 detailBody.TextWrapped = true
@@ -264,18 +272,20 @@ detailBody.Parent = details
 
 local statusLabel = Instance.new("TextLabel")
 statusLabel.BackgroundTransparency = 1
-statusLabel.Position = UDim2.fromOffset(18, 272)
-statusLabel.Size = UDim2.new(1, -36, 0, 18)
+statusLabel.Position = UDim2.fromOffset(18, 248)
+statusLabel.Size = UDim2.new(1, -36, 0, 36)
 statusLabel.Font = Enum.Font.Gotham
-statusLabel.TextSize = 12
+statusLabel.TextSize = 11
 statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.TextYAlignment = Enum.TextYAlignment.Top
+statusLabel.TextWrapped = true
 statusLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
 statusLabel.Text = ""
 statusLabel.Parent = details
 
 local function createActionButton(text, x)
 	local button = Instance.new("TextButton")
-	button.Position = UDim2.fromOffset(x, 294)
+	button.Position = UDim2.fromOffset(x, 290)
 	button.Size = UDim2.fromOffset(180, 38)
 	button.BackgroundColor3 = Color3.fromRGB(42, 44, 54)
 	button.BorderSizePixel = 0
@@ -309,8 +319,7 @@ footer.Parent = panel
 
 local snapshot = nil
 local activeTab = "Craft"
-local lastActionMessage = nil
-local lastActionOk = nil
+local lastActionResult = nil
 local selectedKeys = {
 	Craft = nil,
 	Upgrade = nil,
@@ -367,6 +376,173 @@ local function formatResourceLines(label, list)
 	return label .. ":\n" .. table.concat(parts, ", ")
 end
 
+local function formatProgressLines(list)
+	if typeof(list) ~= "table" or #list == 0 then
+		return "-"
+	end
+
+	local lines = {}
+	for index, entry in ipairs(list) do
+		local owned = math.min(clampInt(entry.owned, 0), clampInt(entry.amount, 0))
+		local required = clampInt(entry.amount, 0)
+		local missing = math.max(0, clampInt(entry.missing, 0))
+		local status = missing > 0 and string.format("missing %d", missing) or "ready"
+		lines[index] = string.format("- %s: %d / %d (%s)", tostring(entry.id), owned, required, status)
+	end
+
+	return table.concat(lines, "\n")
+end
+
+local function formatMissingList(list, maxItems)
+	if typeof(list) ~= "table" or #list == 0 then
+		return "-"
+	end
+
+	local parts = {}
+	local limit = math.max(1, clampInt(maxItems, 1))
+	for index, entry in ipairs(list) do
+		if index > limit then
+			break
+		end
+		parts[#parts + 1] = string.format("%s x%d", tostring(entry.id), clampInt(entry.amount, 0))
+	end
+	if #list > limit then
+		parts[#parts + 1] = string.format("+%d more", #list - limit)
+	end
+	return table.concat(parts, ", ")
+end
+
+local function buildCraftNeedSummary(entry)
+	if typeof(entry) ~= "table" then
+		return "-"
+	end
+
+	local chunks = {
+		string.format("Req Lv %d", clampInt(entry.requiredLevel, 1)),
+		string.format("Tier %d", clampInt(entry.tier, 1)),
+		string.format("Copies %d", clampInt(entry.copies, 0)),
+	}
+
+	if entry.unlocked then
+		local craftSilverMissing = clampInt(entry.craftSilverMissing, 0)
+		local mineMissing = entry.missingMineResources and #entry.missingMineResources or 0
+		local mobMissing = entry.missingMobMaterials and #entry.missingMobMaterials or 0
+		if entry.canCraft == true then
+			chunks[#chunks + 1] = "Ready now"
+		else
+			if craftSilverMissing > 0 then
+				chunks[#chunks + 1] = string.format("%d Silver", craftSilverMissing)
+			end
+			if mineMissing > 0 then
+				chunks[#chunks + 1] = string.format("%d mine mats", mineMissing)
+			end
+			if mobMissing > 0 then
+				chunks[#chunks + 1] = string.format("%d mob mats", mobMissing)
+			end
+		end
+	else
+		local unlockSilverMissing = clampInt(entry.unlockSilverMissing, 0)
+		if entry.canUnlock == true then
+			chunks[#chunks + 1] = "Ready to unlock"
+		elseif entry.levelMet == false then
+			chunks[#chunks + 1] = string.format("Reach Lv %d", clampInt(entry.requiredLevel, 1))
+		elseif unlockSilverMissing > 0 then
+			chunks[#chunks + 1] = string.format("%d Silver to unlock", unlockSilverMissing)
+		else
+			chunks[#chunks + 1] = "Unlock blocked"
+		end
+	end
+
+	return table.concat(chunks, " | ")
+end
+
+local function buildCraftMissingMessage(entry, mode)
+	if typeof(entry) ~= "table" then
+		return "Select a recipe first."
+	end
+
+	local lines = {}
+	if entry.levelMet == false then
+		lines[#lines + 1] = string.format("Reach account level %d first.", clampInt(entry.requiredLevel, 1))
+	end
+
+	if mode == "unlock" or entry.unlocked ~= true then
+		local unlockSilverMissing = clampInt(entry.unlockSilverMissing, 0)
+		if unlockSilverMissing > 0 then
+			lines[#lines + 1] = string.format("Need %d more Silver to unlock the recipe.", unlockSilverMissing)
+		end
+		if #lines == 0 then
+			lines[#lines + 1] = "Recipe is ready to unlock."
+		end
+		return table.concat(lines, "\n")
+	end
+
+	local craftSilverMissing = clampInt(entry.craftSilverMissing, 0)
+	if craftSilverMissing > 0 then
+		lines[#lines + 1] = string.format("Need %d more Silver for crafting.", craftSilverMissing)
+	end
+	if typeof(entry.missingMineResources) == "table" and #entry.missingMineResources > 0 then
+		lines[#lines + 1] = "Missing mine materials: " .. formatMissingList(entry.missingMineResources, 4)
+	end
+	if typeof(entry.missingMobMaterials) == "table" and #entry.missingMobMaterials > 0 then
+		lines[#lines + 1] = "Missing mob materials: " .. formatMissingList(entry.missingMobMaterials, 4)
+	end
+	if #lines == 0 then
+		lines[#lines + 1] = "Recipe is ready to craft."
+	end
+
+	return table.concat(lines, "\n")
+end
+
+local function buildActionMessage(entry, actionResult)
+	if typeof(actionResult) ~= "table" then
+		return nil, nil
+	end
+
+	if actionResult.ok == true then
+		if activeTab == "Craft" then
+			if actionResult.type == "unlockRecipe" then
+				return true, "Recipe unlocked."
+			end
+			if actionResult.type == "craft" then
+				return true, "Weapon crafted."
+			end
+		elseif activeTab == "Upgrade" and actionResult.type == "upgrade" then
+			local upgraded = clampInt(actionResult.details, 0)
+			return true, upgraded > 0 and string.format("Upgraded %d level(s).", upgraded) or "Upgrade completed."
+		elseif activeTab == "Sell" and actionResult.type == "sell" then
+			local silverRefund = clampInt(actionResult.details and actionResult.details.silver, 0)
+			return true, silverRefund > 0 and string.format("Sold for %d Silver.", silverRefund) or "Weapon sold."
+		end
+		return nil, nil
+	end
+
+	local details = actionResult.details
+	if typeof(details) == "table" and typeof(details.message) == "string" and details.message ~= "" then
+		return false, details.message
+	end
+
+	local reason = tostring(actionResult.reason or "")
+	if activeTab == "Craft" and (actionResult.type == "craft" or actionResult.type == "unlockRecipe") then
+		if reason == "MissingMineResources" or reason == "MissingMobMaterials" or reason == "NotEnoughSilver" or reason == "LevelLocked" then
+			return false, buildCraftMissingMessage(entry, actionResult.type == "unlockRecipe" and "unlock" or "craft")
+		end
+		if reason ~= "" then
+			return false, "Craft action failed: " .. reason
+		end
+	elseif activeTab == "Upgrade" and actionResult.type == "upgrade" then
+		if reason ~= "" then
+			return false, "Upgrade failed: " .. reason
+		end
+	elseif activeTab == "Sell" and actionResult.type == "sell" then
+		if reason ~= "" then
+			return false, "Sell failed: " .. reason
+		end
+	end
+
+	return nil, nil
+end
+
 local function getEntriesForTab()
 	if not snapshot then
 		return {}
@@ -413,8 +589,13 @@ local function updateDetailPanel()
 		applyEntryTheme(nil)
 		detailTitle.Text = "Select an entry"
 		detailBody.Text = "Select an entry from the list."
-		statusLabel.Text = lastActionMessage or ""
-		statusLabel.TextColor3 = lastActionOk == false and Color3.fromRGB(232, 144, 144) or Color3.fromRGB(170, 170, 170)
+		local actionOk, actionMessage = buildActionMessage(nil, lastActionResult)
+		statusLabel.Text = actionMessage or ""
+		if actionOk == false then
+			statusLabel.TextColor3 = Color3.fromRGB(232, 144, 144)
+		else
+			statusLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
+		end
 		setButtonState(primaryButton, false, "Action", nil)
 		setButtonState(secondaryButton, false, "Action", nil)
 		secondaryButton.Visible = false
@@ -436,20 +617,33 @@ local function updateDetailPanel()
 			string.format("Crafted Copies: %d", tonumber(entry.craftedCount) or 0),
 			entry.nextTierCopies and string.format("Next Tier At: %d copies", tonumber(entry.nextTierCopies) or 0) or "Recipe Tier Maxed",
 			"",
-			string.format("Unlock Cost: %d Silver", tonumber(entry.unlockSilverCost) or 0),
-			string.format("Craft Cost: %d Silver", tonumber(entry.craftSilverCost) or 0),
+			string.format(
+				"Unlock Cost: %d Silver%s",
+				tonumber(entry.unlockSilverCost) or 0,
+				clampInt(entry.unlockSilverMissing, 0) > 0 and string.format(" (%d missing)", clampInt(entry.unlockSilverMissing, 0)) or " (ready)"
+			),
+			string.format(
+				"Craft Cost: %d Silver%s",
+				tonumber(entry.craftSilverCost) or 0,
+				clampInt(entry.craftSilverMissing, 0) > 0 and string.format(" (%d missing)", clampInt(entry.craftSilverMissing, 0)) or " (ready)"
+			),
 			"",
-			"Mob Materials:",
-			formatResourceLines("", entry.mobMaterials),
+			"Mob Materials Progress:",
+			formatProgressLines(entry.mobMaterialProgress),
 			"",
-			"Mine Resources:",
-			formatResourceLines("", entry.mineResources),
+			"Mine Materials Progress:",
+			formatProgressLines(entry.mineResourceProgress),
 		}, "\n")
-		statusLabel.Text = entry.unlocked and "Recipe unlocked." or "Recipe found. Unlock it at the blacksmith first."
 		if not entry.unlocked then
-			setButtonState(primaryButton, entry.canUnlock == true, string.format("Buy Recipe (%d)", tonumber(entry.unlockSilverCost) or 0), accent)
+			local unlockText = entry.canUnlock == true
+				and string.format("Buy Recipe (%d)", tonumber(entry.unlockSilverCost) or 0)
+				or string.format("Buy Recipe (%d) - Show Needs", tonumber(entry.unlockSilverCost) or 0)
+			setButtonState(primaryButton, true, unlockText, accent)
 		else
-			setButtonState(primaryButton, entry.canCraft == true, string.format("Craft (%d)", tonumber(entry.craftSilverCost) or 0), accent)
+			local craftText = entry.canCraft == true
+				and string.format("Craft (%d)", tonumber(entry.craftSilverCost) or 0)
+				or string.format("Craft (%d) - Show Needs", tonumber(entry.craftSilverCost) or 0)
+			setButtonState(primaryButton, true, craftText, accent)
 		end
 		setButtonState(secondaryButton, false, "", accent)
 		secondaryButton.Visible = false
@@ -507,9 +701,21 @@ local function updateDetailPanel()
 		secondaryButton.Visible = false
 	end
 
-	if lastActionMessage then
-		statusLabel.Text = lastActionMessage .. " | " .. statusLabel.Text
-		statusLabel.TextColor3 = lastActionOk == true and Color3.fromRGB(156, 220, 170) or Color3.fromRGB(232, 144, 144)
+	local defaultStatus
+	if activeTab == "Craft" then
+		defaultStatus = buildCraftNeedSummary(entry)
+	elseif activeTab == "Upgrade" then
+		defaultStatus = entry.canUpgrade and ((entry.canAfford and "Ready to upgrade.") or "Missing Silver or upgrade materials.") or "Weapon already maxed."
+	else
+		defaultStatus = "Selling returns Silver and part of the crafting materials."
+	end
+
+	local actionOk, actionMessage = buildActionMessage(entry, lastActionResult)
+	statusLabel.Text = actionMessage or defaultStatus
+	if actionOk == true then
+		statusLabel.TextColor3 = Color3.fromRGB(156, 220, 170)
+	elseif actionOk == false then
+		statusLabel.TextColor3 = Color3.fromRGB(232, 144, 144)
 	else
 		statusLabel.TextColor3 = blendColor(Color3.fromRGB(170, 170, 170), accent, 0.3)
 	end
@@ -534,8 +740,10 @@ local function rebuildList()
 		local accent = getRarityColor(getEntryRarity(entry))
 		local selected = currentKey == key
 		local baseColor = blendColor(Color3.fromRGB(30, 34, 44), accent, selected and 0.2 or 0.1)
+		local isCraftTab = activeTab == "Craft"
+		local cardHeight = isCraftTab and 80 or 62
 		local button = Instance.new("TextButton")
-		button.Size = UDim2.new(1, -16, 0, 62)
+		button.Size = UDim2.new(1, -16, 0, cardHeight)
 		button.Position = UDim2.fromOffset(8, 0)
 		button.BackgroundColor3 = baseColor
 		button.BorderSizePixel = 0
@@ -552,7 +760,7 @@ local function rebuildList()
 
 		if activeTab == "Craft" then
 			line1 = string.format("%s [%s]", tostring(entry.name), tostring(entry.status))
-			line2 = string.format("Req Lv %d | Tier %d | Copies %d", tonumber(entry.requiredLevel) or 0, tonumber(entry.tier) or 1, tonumber(entry.copies) or 0)
+			line2 = buildCraftNeedSummary(entry)
 		elseif activeTab == "Upgrade" then
 			line1 = string.format("%s [Lv %d/%d]", tostring(entry.name), tonumber(entry.level) or 1, tonumber(entry.maxLevel) or 1)
 			if entry.upgradeCost then
@@ -566,7 +774,7 @@ local function rebuildList()
 		end
 
 		local accentBar = Instance.new("Frame")
-		accentBar.Size = UDim2.fromOffset(4, 46)
+		accentBar.Size = UDim2.fromOffset(4, cardHeight - 16)
 		accentBar.Position = UDim2.fromOffset(10, 8)
 		accentBar.BackgroundColor3 = accent
 		accentBar.BorderSizePixel = 0
@@ -587,9 +795,11 @@ local function rebuildList()
 		local metaLabel = Instance.new("TextLabel")
 		metaLabel.BackgroundTransparency = 1
 		metaLabel.Position = UDim2.fromOffset(24, 31)
-		metaLabel.Size = UDim2.new(1, -32, 0, 16)
+		metaLabel.Size = UDim2.new(1, -32, 0, isCraftTab and 34 or 16)
 		metaLabel.Font = Enum.Font.Gotham
-		metaLabel.TextSize = 11
+		metaLabel.TextSize = isCraftTab and 10 or 11
+		metaLabel.TextWrapped = isCraftTab
+		metaLabel.TextYAlignment = isCraftTab and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center
 		metaLabel.TextXAlignment = Enum.TextXAlignment.Left
 		metaLabel.TextColor3 = Color3.fromRGB(214, 220, 232)
 		metaLabel.Text = line2
@@ -597,6 +807,7 @@ local function rebuildList()
 
 		button.MouseButton1Click:Connect(function()
 			selectedKeys[activeTab] = key
+			lastActionResult = nil
 			rebuildList()
 		end)
 	end
@@ -655,6 +866,7 @@ end)
 for tabName, button in pairs(tabButtons) do
 	button.MouseButton1Click:Connect(function()
 		activeTab = tabName
+		lastActionResult = nil
 		refresh()
 	end)
 end
@@ -666,9 +878,31 @@ primaryButton.MouseButton1Click:Connect(function()
 	end
 	if activeTab == "Craft" then
 		if entry.unlocked then
-			BlacksmithAction:FireServer({ type = "craft", recipeId = entry.recipeId })
+			if entry.canCraft == true then
+				BlacksmithAction:FireServer({ type = "craft", recipeId = entry.recipeId })
+			else
+				lastActionResult = {
+					type = "craft",
+					ok = false,
+					details = {
+						message = buildCraftMissingMessage(entry, "craft"),
+					},
+				}
+				updateDetailPanel()
+			end
 		else
-			BlacksmithAction:FireServer({ type = "unlockRecipe", recipeId = entry.recipeId })
+			if entry.canUnlock == true then
+				BlacksmithAction:FireServer({ type = "unlockRecipe", recipeId = entry.recipeId })
+			else
+				lastActionResult = {
+					type = "unlockRecipe",
+					ok = false,
+					details = {
+						message = buildCraftMissingMessage(entry, "unlock"),
+					},
+				}
+				updateDetailPanel()
+			end
 		end
 	elseif activeTab == "Upgrade" then
 		BlacksmithAction:FireServer({ type = "upgrade", instanceId = entry.instanceId, steps = 1 })
@@ -721,12 +955,6 @@ BlacksmithSync.OnClientEvent:Connect(function(data)
 		return
 	end
 	snapshot = data
-	if data.lastResult then
-		lastActionOk = data.lastResult.ok == true
-		lastActionMessage = lastActionOk and "Action completed" or ("Action failed: " .. tostring(data.lastResult.reason or "Unknown"))
-	else
-		lastActionOk = nil
-		lastActionMessage = nil
-	end
+	lastActionResult = typeof(data.lastResult) == "table" and data.lastResult or nil
 	refresh()
 end)

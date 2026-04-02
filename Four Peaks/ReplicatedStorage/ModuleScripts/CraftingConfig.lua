@@ -49,6 +49,7 @@ CraftingConfig.MINE_RESOURCE_DEFS = {
 		weight = 55,
 		yieldMin = 1,
 		yieldMax = 3,
+		color = Color3.fromRGB(176, 186, 202),
 	},
 	{
 		id = "Coal Chunk",
@@ -56,6 +57,7 @@ CraftingConfig.MINE_RESOURCE_DEFS = {
 		weight = 42,
 		yieldMin = 1,
 		yieldMax = 3,
+		color = Color3.fromRGB(112, 118, 132),
 	},
 	{
 		id = "Emberstone",
@@ -63,6 +65,7 @@ CraftingConfig.MINE_RESOURCE_DEFS = {
 		weight = 24,
 		yieldMin = 1,
 		yieldMax = 2,
+		color = Color3.fromRGB(236, 140, 96),
 	},
 	{
 		id = "Moonsteel Ore",
@@ -70,6 +73,7 @@ CraftingConfig.MINE_RESOURCE_DEFS = {
 		weight = 12,
 		yieldMin = 1,
 		yieldMax = 2,
+		color = Color3.fromRGB(118, 190, 255),
 	},
 	{
 		id = "Void Crystal",
@@ -77,6 +81,7 @@ CraftingConfig.MINE_RESOURCE_DEFS = {
 		weight = 5,
 		yieldMin = 1,
 		yieldMax = 1,
+		color = Color3.fromRGB(178, 118, 255),
 	},
 	{
 		id = "Astral Core",
@@ -84,8 +89,111 @@ CraftingConfig.MINE_RESOURCE_DEFS = {
 		weight = 2,
 		yieldMin = 1,
 		yieldMax = 1,
+		color = Color3.fromRGB(255, 214, 126),
 	},
 }
+
+local mineList = {
+	{
+		id = "Ironvein Quarry",
+		displayName = "Ironvein Quarry",
+		subtitle = "Starter mineral route",
+		description = "Reliable starter shafts with dense iron seams and cheap fuel veins.",
+		tone = "Best for early swords, bows and blackpowder recipes.",
+		colors = {
+			primary = Color3.fromRGB(94, 157, 255),
+			secondary = Color3.fromRGB(34, 50, 86),
+			accent = Color3.fromRGB(214, 232, 255),
+		},
+		drops = {
+			{ id = "Iron Ore", weight = 52, yieldMin = 2, yieldMax = 4 },
+			{ id = "Coal Chunk", weight = 30, yieldMin = 1, yieldMax = 3 },
+			{ id = "Emberstone", weight = 14, yieldMin = 1, yieldMax = 2 },
+			{ id = "Moonsteel Ore", weight = 4, yieldMin = 1, yieldMax = 1 },
+		},
+	},
+	{
+		id = "Cinder Excavation",
+		displayName = "Cinder Excavation",
+		subtitle = "Heat-cracked galleries",
+		description = "Charred tunnels stacked with coal pockets and emberstone blooms.",
+		tone = "Best for halberds, pistols and bows that need emberstone fast.",
+		colors = {
+			primary = Color3.fromRGB(255, 134, 80),
+			secondary = Color3.fromRGB(102, 44, 34),
+			accent = Color3.fromRGB(255, 224, 206),
+		},
+		drops = {
+			{ id = "Emberstone", weight = 34, yieldMin = 1, yieldMax = 2 },
+			{ id = "Coal Chunk", weight = 30, yieldMin = 1, yieldMax = 3 },
+			{ id = "Iron Ore", weight = 22, yieldMin = 1, yieldMax = 3 },
+			{ id = "Moonsteel Ore", weight = 10, yieldMin = 1, yieldMax = 1 },
+			{ id = "Void Crystal", weight = 4, yieldMin = 1, yieldMax = 1 },
+		},
+	},
+	{
+		id = "Moonsteel Gallery",
+		displayName = "Moonsteel Gallery",
+		subtitle = "Cold lunar veins",
+		description = "Deep silver caverns tuned for rare alloys and disciplined routes.",
+		tone = "Best for staves, recurve bows and elite polearms.",
+		colors = {
+			primary = Color3.fromRGB(110, 198, 255),
+			secondary = Color3.fromRGB(29, 69, 102),
+			accent = Color3.fromRGB(214, 245, 255),
+		},
+		drops = {
+			{ id = "Moonsteel Ore", weight = 24, yieldMin = 1, yieldMax = 2 },
+			{ id = "Emberstone", weight = 26, yieldMin = 1, yieldMax = 2 },
+			{ id = "Coal Chunk", weight = 22, yieldMin = 1, yieldMax = 2 },
+			{ id = "Iron Ore", weight = 12, yieldMin = 1, yieldMax = 2 },
+			{ id = "Void Crystal", weight = 12, yieldMin = 1, yieldMax = 1 },
+			{ id = "Astral Core", weight = 4, yieldMin = 1, yieldMax = 1 },
+		},
+	},
+	{
+		id = "Voidscar Hollow",
+		displayName = "Voidscar Hollow",
+		subtitle = "Shattered crystal fault",
+		description = "A dangerous breach with excellent void output and steady moonsteel.",
+		tone = "Best for epic and legendary weapons that hinge on void crystal.",
+		colors = {
+			primary = Color3.fromRGB(166, 104, 255),
+			secondary = Color3.fromRGB(60, 34, 96),
+			accent = Color3.fromRGB(240, 225, 255),
+		},
+		drops = {
+			{ id = "Void Crystal", weight = 20, yieldMin = 1, yieldMax = 1 },
+			{ id = "Moonsteel Ore", weight = 24, yieldMin = 1, yieldMax = 2 },
+			{ id = "Emberstone", weight = 20, yieldMin = 1, yieldMax = 2 },
+			{ id = "Coal Chunk", weight = 14, yieldMin = 1, yieldMax = 2 },
+			{ id = "Iron Ore", weight = 14, yieldMin = 1, yieldMax = 2 },
+			{ id = "Astral Core", weight = 8, yieldMin = 1, yieldMax = 1 },
+		},
+	},
+	{
+		id = "Astral Sanctum",
+		displayName = "Astral Sanctum",
+		subtitle = "Celestial breach",
+		description = "A slow but premium route for endgame alloy and astral core pulls.",
+		tone = "Best for legendary and mythical finishers.",
+		colors = {
+			primary = Color3.fromRGB(255, 198, 94),
+			secondary = Color3.fromRGB(112, 70, 24),
+			accent = Color3.fromRGB(255, 242, 202),
+		},
+		drops = {
+			{ id = "Astral Core", weight = 5, yieldMin = 1, yieldMax = 1 },
+			{ id = "Void Crystal", weight = 22, yieldMin = 1, yieldMax = 1 },
+			{ id = "Moonsteel Ore", weight = 28, yieldMin = 1, yieldMax = 2 },
+			{ id = "Emberstone", weight = 18, yieldMin = 1, yieldMax = 2 },
+			{ id = "Coal Chunk", weight = 15, yieldMin = 1, yieldMax = 2 },
+			{ id = "Iron Ore", weight = 12, yieldMin = 1, yieldMax = 2 },
+		},
+	},
+}
+
+CraftingConfig.MINE_DEFS = mineList
 
 CraftingConfig.MOB_MATERIAL_DEFS = {
 	{ id = "Slime Gem", mobType = "Slime" },
@@ -305,6 +413,7 @@ local recipesById = {}
 local mobMaterialsByMobType = {}
 local mobMaterialsById = {}
 local mineResourcesById = {}
+local mineDefsById = {}
 local materialDefsById = {}
 local materialList = {}
 
@@ -336,6 +445,10 @@ end
 
 for _, recipe in ipairs(recipeList) do
 	recipesById[recipe.recipeId] = recipe
+end
+
+for _, mineDef in ipairs(mineList) do
+	mineDefsById[mineDef.id] = mineDef
 end
 
 local function clampTier(tier)
@@ -373,12 +486,74 @@ function CraftingConfig.GetMobMaterialForMob(mobType)
 	return mobMaterialsByMobType[mobType]
 end
 
-function CraftingConfig.GetDefaultMinePriority()
+function CraftingConfig.GetDefaultMinePriority(mineId)
 	local priority = {}
+	local seen = {}
+	local defaultMine = CraftingConfig.GetMine(mineId) or mineList[1]
+	if defaultMine and typeof(defaultMine.drops) == "table" then
+		for _, entry in ipairs(defaultMine.drops) do
+			if typeof(entry.id) == "string" and entry.id ~= "" and not seen[entry.id] then
+				seen[entry.id] = true
+				table.insert(priority, entry.id)
+			end
+		end
+	end
 	for _, def in ipairs(CraftingConfig.MINE_RESOURCE_DEFS) do
-		table.insert(priority, def.id)
+		if not seen[def.id] then
+			table.insert(priority, def.id)
+		end
 	end
 	return priority
+end
+
+function CraftingConfig.GetAllMines()
+	return mineList
+end
+
+function CraftingConfig.GetDefaultMineId()
+	return mineList[1] and mineList[1].id or nil
+end
+
+function CraftingConfig.GetMine(mineId)
+	if typeof(mineId) ~= "string" or mineId == "" then
+		return nil
+	end
+	return mineDefsById[mineId]
+end
+
+function CraftingConfig.GetMineDropChanceList(mineId)
+	local mine = CraftingConfig.GetMine(mineId) or mineList[1]
+	if not mine or typeof(mine.drops) ~= "table" then
+		return {}
+	end
+
+	local totalWeight = 0
+	for _, entry in ipairs(mine.drops) do
+		totalWeight += math.max(0, math.floor(tonumber(entry.weight) or 0))
+	end
+	if totalWeight <= 0 then
+		return {}
+	end
+
+	local out = {}
+	for _, entry in ipairs(mine.drops) do
+		local weight = math.max(0, math.floor(tonumber(entry.weight) or 0))
+		if typeof(entry.id) == "string" and entry.id ~= "" and weight > 0 then
+			local baseDef = CraftingConfig.GetMineResource(entry.id) or {}
+			local yieldMin = math.max(1, math.floor(tonumber(entry.yieldMin or baseDef.yieldMin) or 1))
+			local yieldMax = math.max(yieldMin, math.floor(tonumber(entry.yieldMax or baseDef.yieldMax or yieldMin) or yieldMin))
+			table.insert(out, {
+				id = entry.id,
+				weight = weight,
+				chance = weight / totalWeight,
+				yieldMin = yieldMin,
+				yieldMax = yieldMax,
+				rarity = baseDef.rarity,
+				color = baseDef.color,
+			})
+		end
+	end
+	return out
 end
 
 function CraftingConfig.GetMineResource(resourceId)
@@ -508,6 +683,7 @@ CraftingConfig.RecipesById = recipesById
 CraftingConfig.MobMaterialsByMobType = mobMaterialsByMobType
 CraftingConfig.MobMaterialsById = mobMaterialsById
 CraftingConfig.MineResourcesById = mineResourcesById
+CraftingConfig.MineDefsById = mineDefsById
 CraftingConfig.MaterialDefsById = materialDefsById
 
 return CraftingConfig
