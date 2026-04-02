@@ -50,7 +50,7 @@ script.Parent.BowRE.OnServerEvent:Connect(function(plr, instruction, charge, mHi
 		script.Parent.BowRE:FireClient(plr, newArrow, charge)
 		
 		
-		wait(1)
+		task.wait(1)
 		
 		script.Parent.Arrow.Transparency = 0
 		

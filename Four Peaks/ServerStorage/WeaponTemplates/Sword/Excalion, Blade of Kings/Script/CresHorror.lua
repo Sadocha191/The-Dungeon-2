@@ -13,7 +13,7 @@ local FindFirstChildOfClass = script.FindFirstChildOfClass
 local Clone, Destroy = script.Clone, script.Destroy
 
 repeat
-	wait(Seed:NextNumber(10,15))
+	task.wait(Seed:NextNumber(10,15))
 	if FindFirstChildOfClass(Tool.Parent,"Humanoid") then
 		local Sound = Clone(SoundBank[Seed:NextInteger(1,#SoundBank)])
 		Sound.Parent = Handle

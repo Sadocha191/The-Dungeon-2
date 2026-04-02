@@ -1,6 +1,6 @@
 --Black hole shield!(also prevents being pushed by other stuff)
 
-wait(0.2)
+task.wait(0.2)
 
 Char = script.Parent
 Hum = Char:FindFirstChild("Humanoid")
@@ -81,7 +81,7 @@ for a = 1, #ch do
 --end
 
 while Char:FindFirstChild("GravityShieldPart") do
-	wait()
+	task.wait()
 	ch = Char:GetDescendants()
 	for a = 1, #ch do
 		if ch[a]:IsA("BodyMover") and ch[a].Name ~= "FAKE" then

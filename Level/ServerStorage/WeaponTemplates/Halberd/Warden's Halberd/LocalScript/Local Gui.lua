@@ -12,7 +12,7 @@ function waitfor(parent,name)
 		if child~=nil then
 			return child
 		end
-		wait()
+		task.wait()
 	end
 end
 
@@ -24,7 +24,7 @@ function onButton1Down(mouse)
 	end
 	enabled=false
 	mouse.Icon="rbxasset://textures\\GunWaitCursor.png"
-	wait(.75)
+	task.wait(.75)
 	mouse.Icon="rbxasset://textures\\GunCursor.png"
 	enabled=true
 end
@@ -59,13 +59,13 @@ function onEquippedLocal(mouse)
 				h.WalkSpeed=0
 				tauntanim=h:LoadAnimation(sp.Taunt)
 				tauntanim:Play()
-				wait(1)
+				task.wait(1)
 				swordOut()
 				sp.Grip=currentgrip
-				wait(1.4)
+				task.wait(1.4)
 				swordUp()
 				sp.Grip=currentgrip
-				wait(1)
+				task.wait(1)
 				h.WalkSpeed=16
 				sp.Taunting.Value=false
 			end
@@ -87,15 +87,15 @@ sp.RunAnim.Changed:connect(function()
 				spinsword(.5)
 			end
 			if sp.RunAnim.Value=="OverHeadSwing" then
-				wait(.25)
+				task.wait(.25)
 				swordOut()
-				wait(.5)
+				task.wait(.5)
 				swordUp()
 				sp.Grip=currentgrip
 			elseif sp.RunAnim.Value=="OverHeadSwingFast" then
-				wait(.125)
+				task.wait(.125)
 				swordOut()
-				wait(.25)
+				task.wait(.25)
 				swordUp()
 				sp.Grip=currentgrip
 			end

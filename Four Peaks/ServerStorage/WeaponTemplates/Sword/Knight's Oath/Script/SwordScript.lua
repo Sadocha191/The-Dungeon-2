@@ -166,9 +166,9 @@ function Lunge()
 	end
 	]]
 	
-	wait(0.2)
+	task.wait(0.2)
 	Tool.Grip = Grips.Out
-	wait(0.6)
+	task.wait(0.6)
 	Tool.Grip = Grips.Up
 
 	Damage = DamageValues.SlashDamage
@@ -189,7 +189,7 @@ function Activated()
 		Attack()
 	end
 	LastAttack = Tick
-	--wait(0.5)
+	--task.wait(0.5)
 	Damage = DamageValues.BaseDamage
 	local SlashAnim = (Tool:FindFirstChild("R15Slash") or Create("Animation"){
 		Name = "R15Slash",

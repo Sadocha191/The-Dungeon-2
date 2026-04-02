@@ -141,6 +141,6 @@ if Creator and Creator.Character then
 	
 end
 
-wait(45 + GlobalSound.TimeLength)
+task.wait(45 + GlobalSound.TimeLength)
 
 Clean()

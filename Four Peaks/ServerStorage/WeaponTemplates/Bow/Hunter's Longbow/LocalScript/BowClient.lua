@@ -50,7 +50,7 @@ script.Parent.BowRE.OnClientEvent:Connect(function(arrow, charge)
 end)
 
 
-while wait(0.1) do
+while task.wait(0.1) do
 	
 	script.Parent.BowRE:FireServer("string", script.Parent.Bow.Middle.Position, script.Parent.Bow.Weld.C1)
 end

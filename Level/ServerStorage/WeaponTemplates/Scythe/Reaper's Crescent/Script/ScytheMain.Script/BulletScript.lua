@@ -200,5 +200,5 @@ end
 Wave:Destroy()
 P:Destroy()
 
-wait(3)
+task.wait(3)
 Scythe:Destroy()

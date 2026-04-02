@@ -44,7 +44,7 @@ function waitfor(parent,name)
 		if child ~= nil then
 			return child
 		end
-		wait()
+		task.wait()
 	end
 end
 
@@ -84,11 +84,11 @@ function blow(hit)
 								-- No PvP in multiplayer runs
 								local targetPlr = game.Players:playerFromCharacter(humanoid.Parent)
 								if targetPlr and vPlayer:GetAttribute("RunMode") == "Multi" then
-									wait(.3)
+									task.wait(.3)
 									return
 								end
 								humanoid:TakeDamage(damage)
-								wait(.3)
+								task.wait(.3)
 							end
 						end
 					end
@@ -133,7 +133,7 @@ function onActivated()
 		else
 			damage = slashdamage
 		end
-		wait(.75)
+		task.wait(.75)
 		damage = basedamage
 		sp.Enabled = true
 	end

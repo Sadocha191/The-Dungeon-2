@@ -194,7 +194,7 @@ WallEvent.OnServerEvent:Connect(function(plr, pos)
 			brick, p = placeBrick(cf, Vector3.new(x, y, 0), color)
 			x = p.x
 			table.insert(bricks, brick)
-			wait()
+			task.wait()
 		end
 		y = p.y
 	end

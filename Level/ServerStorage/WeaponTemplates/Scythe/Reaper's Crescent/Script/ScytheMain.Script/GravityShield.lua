@@ -71,7 +71,7 @@ end
 
 ShieldPart:Destroy()
 
-wait(1)
+task.wait(1)
 if GSL and GSL.Parent then
 	GSL:Destroy()
 end

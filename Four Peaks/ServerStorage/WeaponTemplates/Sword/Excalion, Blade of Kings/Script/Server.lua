@@ -643,10 +643,10 @@ function Activated()
 		until not Lunging
 	end)()
 	
-	wait(0.75)
+	task.wait(0.75)
 	Lunging = false
 	Tool.Grip = Grips.Up
-	wait(0.5)
+	task.wait(0.5)
 	
 	
 	else

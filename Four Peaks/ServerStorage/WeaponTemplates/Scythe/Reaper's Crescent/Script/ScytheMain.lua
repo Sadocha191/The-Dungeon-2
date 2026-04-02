@@ -118,7 +118,7 @@ function UndoBG()
 			partics[c].Enabled = false
 		end
 	end
-	wait(2)
+	task.wait(2)
 	BGpart:Destroy()
 end
 
@@ -240,7 +240,7 @@ function ThrowScythe()
 	DoingSpecial = true
 	ThrowAnim = Hum:LoadAnimation(AnimSet.Throw)
 	if ThrowAnim then ThrowAnim:Play() end
-	wait(0.5)
+	task.wait(0.5)
 	Scythe.Transparency = 1
 	ScytheFire.Parent = Tool.Particles
 	ScytheFire2.Parent = Tool.Particles
@@ -272,7 +272,7 @@ function ThrowScythe()
 	TagHumanoid(BS,Plyr)
 	BS.Disabled = false
 	
-	wait(2)
+	task.wait(2)
 	
 	if InvisoTimer == 0 then
 		for s = 1,20 do
@@ -354,7 +354,7 @@ function DoShield()
 	GSL = script.GravityShieldLocal:Clone()
 	GSL.Parent = Char
 	GSL.Disabled = false
-	wait(1)
+	task.wait(1)
 	DoingSpecial = false
 	while GS.Parent do
 		Running.Heartbeat:wait()
@@ -369,7 +369,7 @@ function DoSpecial(Client, Key)
 			ScytheFire.Enabled = false
 			ScytheFire2.Enabled = false
 			Singularity()
-			wait(20)
+			task.wait(20)
 			Special1 = true
 			ScytheFire.Enabled = true
 			ScytheFire2.Enabled = true
@@ -379,7 +379,7 @@ function DoSpecial(Client, Key)
 			Special2 = false
 			ScytheStatic.Enabled = false
 			ThrowScythe()
-			wait(20)
+			task.wait(20)
 			Special2 = true
 			ScytheStatic.Enabled = true
 		end
@@ -388,7 +388,7 @@ function DoSpecial(Client, Key)
 			Special3 = false
 			ScytheSparkles.Enabled = false
 			Inviso()
-			wait(15)
+			task.wait(15)
 			ScytheSparkles.Enabled = true
 			Special3 = true
 		end
@@ -396,7 +396,7 @@ function DoSpecial(Client, Key)
 		if Special4 == true then
 			Special4 = false
 			DoShield()
-			wait(15)
+			task.wait(15)
 			Special4 = true
 		end
 	end
@@ -408,7 +408,7 @@ function Slash()
 		SlashAnim = Hum:LoadAnimation(AnimSet.DualSlash)
 		if SlashAnim then SlashAnim:Play() end
 		Scythe.Slash:Play()
-		wait(1)
+		task.wait(1)
 		Tool.Enabled = true
 	end
 end

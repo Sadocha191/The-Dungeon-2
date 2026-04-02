@@ -117,13 +117,13 @@ function MeteorStorm()
 	DS.Disabled = false
 	DoingSpecial = false
 	while DS.Parent ~= nil do
-		wait()
+		task.wait()
 	end
 end
 
 function ShootingStar()
 	--DoingSpecial = true
-	--wait(2)
+	--task.wait(2)
 	--DoingSpecial = false
 end
 
@@ -137,7 +137,7 @@ function DoSpecial(Client, Key)
 			Special1 = false
 			SP1.Enabled = false
 			MeteorStorm()
-			wait(30)
+			task.wait(30)
 			Special1 = true
 			SP1.Enabled = true
 		end
@@ -145,14 +145,14 @@ function DoSpecial(Client, Key)
 		if Special2 == true then
 			Special2 = false
 			--ShootingStar()
-			wait(25)
+			task.wait(25)
 			Special2 = true
 		end
 	elseif Key == Enum.KeyCode.X then
 		if Special3 == true then
 			Special3 = false
 			--Inviso()
-			--wait(20)
+			--task.wait(20)
 			Special3 = true
 		end
 	end
@@ -264,7 +264,7 @@ function Summon()
 		if SummonAnim then SummonAnim:Play(nil,nil,AnimSpeed) end
 		Tool.Summon:Play()
 		SpawnMeteor()
-		wait(8)
+		task.wait(8)
 		Tool.Enabled = true
 	end
 end

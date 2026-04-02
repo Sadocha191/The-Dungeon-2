@@ -102,7 +102,7 @@ function BulletHit(hit)
 		Sparkles.Enabled = false
 		Sparkles:Emit(200)
 		FindCharacters(Meteor.Position, 15)
-		wait(3)
+		task.wait(3)
 		Meteor:Destroy()
 	end
 end
@@ -159,7 +159,7 @@ end
 StarImpact = Meteor.Touched:Connect(BulletHit)
 --FlySound:Play()
 
-wait(5)
+task.wait(5)
 if Meteor.Anchored == false then
 	Meteor:Destroy()
 end

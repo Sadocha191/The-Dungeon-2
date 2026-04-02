@@ -48,7 +48,7 @@ if Tool then
 	Tool:Destroy()
 end
 
-wait(2.75)
+task.wait(2.75)
 
 Lift:Destroy()
 

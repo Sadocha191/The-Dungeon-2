@@ -141,7 +141,7 @@ end
 
 --Engage:Play()
 while MeteorsLeft > 0 do
-	wait(0.3)
+	task.wait(0.3)
 	MeteorsLeft = MeteorsLeft - 1
 	SpawnMeteor()
 	if (Torso == nil or Torso.Parent == nil or Char.Parent == nil) and Plyr.Parent then
@@ -151,5 +151,5 @@ while MeteorsLeft > 0 do
 end
 
 
-wait(2)
+task.wait(2)
 script:Destroy()
