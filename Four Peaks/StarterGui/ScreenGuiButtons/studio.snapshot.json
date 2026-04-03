@@ -1,0 +1,243 @@
+{
+  "source": "Roblox Studio MCP",
+  "studio": "Four Peaks",
+  "capturedAt": "2026-04-03",
+  "root": {
+    "name": "ScreenGuiButtons",
+    "className": "ScreenGui",
+    "properties": {
+      "Enabled": true,
+      "DisplayOrder": 0,
+      "ResetOnSpawn": true,
+      "IgnoreGuiInset": false,
+      "ZIndexBehavior": "Sibling"
+    }
+  },
+  "frame": {
+    "name": "Frame",
+    "className": "Frame",
+    "properties": {
+      "AnchorPoint": [0, 0],
+      "Position": [0.6489999890327454, 0, 0, 0],
+      "Size": [0.35565102100372317, 0, 0.16514599323272706, 0],
+      "BackgroundTransparency": 1,
+      "BackgroundColor3": [255, 255, 255],
+      "Visible": true
+    }
+  },
+  "layout": {
+    "name": "UIGridLayout",
+    "className": "UIGridLayout",
+    "properties": {
+      "CellPadding": [0.029999999329447748, 0, 0.10000000149011612, 0],
+      "CellSize": [0.11999999731779099, 0, 0.5, 0],
+      "FillDirectionMaxCells": 6,
+      "HorizontalAlignment": "Center",
+      "SortOrder": "LayoutOrder",
+      "StartCorner": "TopRight",
+      "VerticalAlignment": "Top"
+    }
+  },
+  "buttons": {
+    "Profile": {
+      "className": "ImageButton",
+      "properties": {
+        "AnchorPoint": [0, 0],
+        "Position": [0.8488549590110779, 0, 0, 0],
+        "Size": [0, 100, 0, 100],
+        "BackgroundTransparency": 1,
+        "BackgroundColor3": [255, 255, 255],
+        "Image": "rbxassetid://140422694903523",
+        "ScaleType": "Fit",
+        "Visible": true,
+        "LayoutOrder": 1
+      },
+      "hotKey": {
+        "className": "TextLabel",
+        "properties": {
+          "AnchorPoint": [0, 0],
+          "Position": [0.6000000238418579, 0, 0.6133332252502441, 0],
+          "Size": [0.47058823704719546, 0, 0.47058823704719546, 0],
+          "BackgroundTransparency": 1,
+          "BackgroundColor3": [255, 255, 255],
+          "Text": "C",
+          "TextScaled": true,
+          "TextSize": 14,
+          "TextColor3": [255, 255, 255],
+          "Font": "Highway",
+          "Visible": true,
+          "ZIndex": 1
+        }
+      },
+      "playerIcon": {
+        "className": "ImageLabel",
+        "properties": {
+          "AnchorPoint": [0.5, 0.5],
+          "Position": [0.4881501793861389, 0, 0.49608829617500307, 0],
+          "Size": [0.6467990279197693, 0, 0.6460685133934021, 0],
+          "BackgroundTransparency": 1,
+          "BackgroundColor3": [255, 255, 255],
+          "Image": "rbxassetid://131629919158658",
+          "ScaleType": "Stretch",
+          "Visible": true,
+          "ZIndex": 1
+        }
+      }
+    },
+    "Missions": {
+      "className": "ImageButton",
+      "properties": {
+        "AnchorPoint": [0, 0],
+        "Position": [0.25190168619155886, 0, 0.8418604731559753, 0],
+        "Size": [0, 100, 0, 100],
+        "BackgroundTransparency": 1,
+        "BackgroundColor3": [255, 255, 255],
+        "Image": "rbxassetid://108088730122245",
+        "ScaleType": "Fit",
+        "Visible": true,
+        "LayoutOrder": 3
+      },
+      "hotKey": {
+        "className": "TextLabel",
+        "properties": {
+          "AnchorPoint": [0, 0],
+          "Position": [0.6000000238418579, 0, 0.6133332252502441, 0],
+          "Size": [0.47099998593330386, 0, 0.47099998593330386, 0],
+          "BackgroundTransparency": 1,
+          "BackgroundColor3": [255, 255, 255],
+          "Text": "J",
+          "TextScaled": true,
+          "TextSize": 14,
+          "TextColor3": [255, 255, 255],
+          "Font": "Highway",
+          "Visible": true,
+          "ZIndex": 1
+        }
+      }
+    },
+    "Events": {
+      "className": "ImageButton",
+      "properties": {
+        "AnchorPoint": [0, 0],
+        "Position": [0.35877862572669985, 0, 0, 0],
+        "Size": [0, 100, 0, 100],
+        "BackgroundTransparency": 1,
+        "BackgroundColor3": [255, 255, 255],
+        "Image": "rbxassetid://76454090355194",
+        "ScaleType": "Fit",
+        "Visible": true,
+        "LayoutOrder": 6
+      },
+      "hotKey": {
+        "className": "TextLabel",
+        "properties": {
+          "AnchorPoint": [0, 0],
+          "Position": [0.6000000238418579, 0, 0.6133332252502441, 0],
+          "Size": [0.47099998593330386, 0, 0.47099998593330386, 0],
+          "BackgroundTransparency": 1,
+          "BackgroundColor3": [255, 255, 255],
+          "Text": "G",
+          "TextScaled": true,
+          "TextSize": 14,
+          "TextColor3": [255, 255, 255],
+          "Font": "Highway",
+          "Visible": true,
+          "ZIndex": 1
+        }
+      }
+    },
+    "Login Rewards": {
+      "className": "ImageButton",
+      "properties": {
+        "AnchorPoint": [0, 0],
+        "Position": [0.17557251453399659, 0, 0, 0],
+        "Size": [0, 100, 0, 100],
+        "BackgroundTransparency": 1,
+        "BackgroundColor3": [255, 255, 255],
+        "Image": "rbxassetid://75858400486953",
+        "ScaleType": "Fit",
+        "Visible": true,
+        "LayoutOrder": 4
+      },
+      "hotKey": {
+        "className": "TextLabel",
+        "properties": {
+          "AnchorPoint": [0, 0],
+          "Position": [0.6000000238418579, 0, 0.6133332252502441, 0],
+          "Size": [0.47099998593330386, 0, 0.47099998593330386, 0],
+          "BackgroundTransparency": 1,
+          "BackgroundColor3": [255, 255, 255],
+          "Text": "F",
+          "TextScaled": true,
+          "TextSize": 14,
+          "TextColor3": [255, 255, 255],
+          "Font": "Highway",
+          "Visible": true,
+          "ZIndex": 1
+        }
+      }
+    },
+    "Inventory": {
+      "className": "ImageButton",
+      "properties": {
+        "AnchorPoint": [0, 0],
+        "Position": [0.8432601690292358, 0, -7.553855851938352e-08, 0],
+        "Size": [0, 100, 0, 100],
+        "BackgroundTransparency": 1,
+        "BackgroundColor3": [255, 255, 255],
+        "Image": "rbxassetid://102243337596667",
+        "ScaleType": "Fit",
+        "Visible": true,
+        "LayoutOrder": 1
+      },
+      "hotKey": {
+        "className": "TextLabel",
+        "properties": {
+          "AnchorPoint": [0, 0],
+          "Position": [0.6000000238418579, 0, 0.6133332252502441, 0],
+          "Size": [0.47099998593330386, 0, 0.47099998593330386, 0],
+          "BackgroundTransparency": 1,
+          "BackgroundColor3": [255, 255, 255],
+          "Text": "B",
+          "TextScaled": true,
+          "TextSize": 17,
+          "TextColor3": [255, 255, 255],
+          "Font": "Highway",
+          "Visible": true,
+          "ZIndex": 1
+        }
+      }
+    },
+    "Party": {
+      "className": "ImageButton",
+      "properties": {
+        "AnchorPoint": [0, 0],
+        "Position": [0.6793892979621887, 0, 0, 0],
+        "Size": [0, 100, 0, 100],
+        "BackgroundTransparency": 1,
+        "BackgroundColor3": [255, 255, 255],
+        "Image": "rbxassetid://108901796736306",
+        "ScaleType": "Fit",
+        "Visible": true,
+        "LayoutOrder": 2
+      },
+      "hotKey": {
+        "className": "TextLabel",
+        "properties": {
+          "AnchorPoint": [0, 0],
+          "Position": [0.6000000238418579, 0, 0.6133332252502441, 0],
+          "Size": [0.47058823704719546, 0, 0.47058823704719546, 0],
+          "BackgroundTransparency": 1,
+          "BackgroundColor3": [255, 255, 255],
+          "Text": "P",
+          "TextScaled": true,
+          "TextSize": 14,
+          "TextColor3": [255, 255, 255],
+          "Font": "Highway",
+          "Visible": true,
+          "ZIndex": 1
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "source": "Roblox Studio MCP",
+  "studio": "Four Peaks",
+  "capturedAt": "2026-04-03",
+  "root": {
+    "name": "Settings",
+    "className": "ScreenGui",
+    "properties": {
+      "Enabled": true,
+      "DisplayOrder": 0,
+      "ResetOnSpawn": true,
+      "IgnoreGuiInset": false,
+      "ZIndexBehavior": "Sibling"
+    }
+  },
+  "frame": {
+    "name": "Frame",
+    "className": "Frame",
+    "properties": {
+      "AnchorPoint": [0, 0],
+      "Position": [0, 0, 0, 0],
+      "Size": [0.04323184862732887, 0, 0.08257299661636353, 0],
+      "BackgroundTransparency": 1,
+      "BackgroundColor3": [255, 255, 255],
+      "Visible": true
+    }
+  },
+  "settingsIcon": {
+    "name": "Settings",
+    "className": "ImageLabel",
+    "properties": {
+      "AnchorPoint": [0, 0],
+      "Position": [0, 0, -0.011234227567911148, 0],
+      "Size": [1, 0, 1, 0],
+      "BackgroundTransparency": 1,
+      "BackgroundColor3": [255, 255, 255],
+      "Image": "rbxassetid://116594278084498",
+      "ScaleType": "Fit",
+      "Visible": true,
+      "ZIndex": 1
+    }
+  },
+  "hotKey": {
+    "name": "HotKey",
+    "className": "TextLabel",
+    "properties": {
+      "AnchorPoint": [0, 0],
+      "Position": [0.6000000238418579, 0, 0.6133332252502441, 0],
+      "Size": [0.47099998593330386, 0, 0.47099998593330386, 0],
+      "BackgroundTransparency": 1,
+      "BackgroundColor3": [255, 255, 255],
+      "Text": "L",
+      "TextScaled": true,
+      "TextSize": 17,
+      "TextColor3": [255, 255, 255],
+      "Font": "Highway",
+      "Visible": true,
+      "ZIndex": 1
+    }
+  },
+  "aspectRatioConstraint": {
+    "name": "UIAspectRatioConstraint",
+    "className": "UIAspectRatioConstraint",
+    "properties": {
+      "AspectRatio": 1.7810760736465455,
+      "DominantAxis": "Width"
+    }
+  }
+}
