@@ -31,9 +31,6 @@ local frozenCFrame: CFrame? = nil
 local touchLookDelta = Vector2.zero
 local lastTouchPanTranslation = Vector2.zero
 local movementLocked = false
-local savedWalkSpeed = nil
-local savedJumpPower = nil
-local savedJumpHeight = nil
 
 local function getHRP(): BasePart?
 	local char = player.Character
@@ -109,33 +106,19 @@ local function setUiInput()
 	UIS.MouseIconEnabled = true
 end
 
-local function applyHumanoidLock(humanoid: Humanoid?, locked: boolean)
+local function cancelCharacterMotion()
+	local humanoid = getHumanoid()
 	if not humanoid then
 		return
 	end
 
-	if locked then
-		humanoid.WalkSpeed = 0
-		humanoid.JumpPower = 0
-		humanoid.JumpHeight = 0
-		return
-	end
-
-	if savedWalkSpeed ~= nil then
-		humanoid.WalkSpeed = savedWalkSpeed
-	end
-	if savedJumpPower ~= nil then
-		humanoid.JumpPower = savedJumpPower
-	end
-	if savedJumpHeight ~= nil then
-		humanoid.JumpHeight = savedJumpHeight
-	end
+	humanoid:Move(Vector3.zero, true)
+	humanoid.Jump = false
 end
 
 local function setMovementLocked(locked: boolean)
 	if locked then
 		if movementLocked then
-			applyHumanoidLock(getHumanoid(), true)
 			return
 		end
 
@@ -153,14 +136,6 @@ local function setMovementLocked(locked: boolean)
 			Enum.PlayerActions.CharacterRight,
 			Enum.PlayerActions.CharacterJump
 		)
-
-		local humanoid = getHumanoid()
-		if humanoid then
-			savedWalkSpeed = humanoid.WalkSpeed
-			savedJumpPower = humanoid.JumpPower
-			savedJumpHeight = humanoid.JumpHeight
-			applyHumanoidLock(humanoid, true)
-		end
 		return
 	end
 
@@ -170,10 +145,6 @@ local function setMovementLocked(locked: boolean)
 
 	movementLocked = false
 	ContextActionService:UnbindAction("LevelModalMovementLock")
-	applyHumanoidLock(getHumanoid(), false)
-	savedWalkSpeed = nil
-	savedJumpPower = nil
-	savedJumpHeight = nil
 end
 
 UIS.TouchPan:Connect(function(touchPositions, totalTranslation, _velocity, state, gameProcessedEvent)
@@ -229,6 +200,7 @@ local function orbitStep(dt: number)
 	camera.CameraType = Enum.CameraType.Scriptable
 
 	if blockingUiOpen then
+		cancelCharacterMotion()
 		if not frozenCFrame then
 			frozenCFrame = camera.CFrame
 		end

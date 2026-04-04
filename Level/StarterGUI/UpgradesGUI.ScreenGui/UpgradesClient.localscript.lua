@@ -129,7 +129,6 @@ local function updateRerollButtonState()
 end
 
 -- movement lock
-local savedWalkSpeed, savedJumpPower, savedJumpHeight
 local movementLocked = false
 
 local function getHumanoid()
@@ -139,24 +138,17 @@ local function getHumanoid()
 end
 
 
-local function applyHumanoidLock(hum, on)
+local function cancelCharacterMotion()
+	local hum = getHumanoid()
 	if not hum then return end
-	if on then
-		hum.WalkSpeed = 0
-		hum.JumpPower = 0
-		hum.JumpHeight = 0
-	else
-		if savedWalkSpeed ~= nil then hum.WalkSpeed = savedWalkSpeed end
-		if savedJumpPower ~= nil then hum.JumpPower = savedJumpPower end
-		if savedJumpHeight ~= nil then hum.JumpHeight = savedJumpHeight end
-	end
+	hum:Move(Vector3.zero, true)
+	hum.Jump = false
 end
 
 local function lockMovement(on: boolean)
 	if on then
 		if movementLocked then
-			-- already locked (e.g. reroll re-renders offers). Don't overwrite saved values.
-			applyHumanoidLock(getHumanoid(), true)
+			cancelCharacterMotion()
 			return
 		end
 		movementLocked = true
@@ -172,19 +164,10 @@ local function lockMovement(on: boolean)
 			Enum.PlayerActions.CharacterRight,
 			Enum.PlayerActions.CharacterJump
 		)
-
-		local hum = getHumanoid()
-		if hum then
-			savedWalkSpeed = hum.WalkSpeed
-			savedJumpPower = hum.JumpPower
-			savedJumpHeight = hum.JumpHeight
-			applyHumanoidLock(hum, true)
-		end
+		cancelCharacterMotion()
 	else
 		movementLocked = false
 		ContextActionService:UnbindAction("UpgradeMenuLock")
-		applyHumanoidLock(getHumanoid(), false)
-		savedWalkSpeed, savedJumpPower, savedJumpHeight = nil, nil, nil
 	end
 end
 
