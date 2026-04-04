@@ -680,6 +680,35 @@ local function clearList(list: ScrollingFrame)
 	end
 end
 
+local function captureScrollState()
+	return {
+		daily = dailyPage.list.CanvasPosition,
+		weekly = weeklyPage.list.CanvasPosition,
+	}
+end
+
+local function restoreScrollPosition(list: ScrollingFrame, canvasPosition: Vector2?)
+	if typeof(canvasPosition) ~= "Vector2" then
+		return
+	end
+
+	list.CanvasPosition = canvasPosition
+	task.defer(function()
+		if list.Parent then
+			list.CanvasPosition = canvasPosition
+		end
+	end)
+end
+
+local function restoreScrollState(scrollState)
+	if typeof(scrollState) ~= "table" then
+		return
+	end
+
+	restoreScrollPosition(dailyPage.list, scrollState.daily)
+	restoreScrollPosition(weeklyPage.list, scrollState.weekly)
+end
+
 local function makeMissionRow(parentList: ScrollingFrame, mission: any, onClaim)
 	local state = getMissionState(mission)
 	local accent = mission.Type == "Weekly" and THEME.weekly or THEME.daily
@@ -896,7 +925,8 @@ local function claimMission(id: string): boolean
 	return (typeof(payload) == "table" and payload.ok == true) or false
 end
 
-local function refreshUI()
+local function refreshUI(preserveScroll: boolean?)
+	local scrollState = preserveScroll == true and captureScrollState() or nil
 	clearList(dailyPage.list)
 	clearList(weeklyPage.list)
 
@@ -939,7 +969,7 @@ local function refreshUI()
 			return
 		end
 		if claimMission(id) then
-			refreshUI()
+			refreshUI(true)
 		end
 	end
 
@@ -952,6 +982,7 @@ local function refreshUI()
 
 	updatePageSummary(dailyPage, daily, dailyResetAt, "Refresh in")
 	updatePageSummary(weeklyPage, weekly, weeklyResetAt, "Refresh in")
+	restoreScrollState(scrollState)
 end
 
 local timerConn: RBXScriptConnection? = nil
@@ -997,7 +1028,7 @@ local function openUI()
 	end
 	gui.Enabled = true
 	setTab("Daily")
-	refreshUI()
+	refreshUI(false)
 	updateResetLabels(os.time())
 	startTimer()
 end

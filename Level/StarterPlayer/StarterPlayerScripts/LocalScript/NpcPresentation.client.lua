@@ -45,8 +45,12 @@ local RUN_ANIM_START_SPEED = 1.5
 local RUN_ANIM_STOP_SPEED = 0.75
 local RUN_ANIM_HOLD_TIME = 0.18
 local PROCEDURAL_VISUAL_ATTR = "NpcLightweight"
+local VISUAL_SCALE_ATTR = "NpcVisualScale"
 local PROCEDURAL_IDLE_SWAY_SPEED = 1.8
 local PROCEDURAL_MOVE_BOUNCE_SPEED = 8
+local NAME_COLOR_NORMAL = Color3.fromRGB(242, 246, 252)
+local NAME_COLOR_ELITE = Color3.fromRGB(255, 171, 102)
+local NAME_COLOR_BOSS = Color3.fromRGB(255, 214, 128)
 
 local function flatDir(v: Vector3?): Vector3
 	if typeof(v) ~= "Vector3" then
@@ -77,6 +81,62 @@ local function resolveRoot(model: Model): BasePart?
 		return primary
 	end
 	return model:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function getVisualScale(entry): number
+	local model = entry and entry.model
+	local scale = model and model:GetAttribute(VISUAL_SCALE_ATTR)
+	if typeof(scale) == "number" and scale > 0 then
+		return scale
+	end
+	return 1
+end
+
+local function formatDisplayName(rawName: any): string
+	local text = tostring(rawName or "Enemy")
+	text = string.gsub(text, "_", " ")
+	text = string.gsub(text, "(%l)(%u)", "%1 %2")
+	return text
+end
+
+local function resolveDisplayName(entry): string
+	local model = entry and entry.model
+	if not model then
+		return "Enemy"
+	end
+
+	local rawName = model:GetAttribute("DisplayName")
+		or model:GetAttribute(ATTR.MobType)
+		or model:GetAttribute(ATTR.Type)
+		or model.Name
+	return formatDisplayName(rawName)
+end
+
+local function resolveNameColor(entry): Color3
+	local model = entry and entry.model
+	if model and model:GetAttribute(ATTR.IsBoss) == true then
+		return NAME_COLOR_BOSS
+	end
+	if model and model:GetAttribute(ATTR.IsElite) == true then
+		return NAME_COLOR_ELITE
+	end
+	return NAME_COLOR_NORMAL
+end
+
+local function updateNameplateAppearance(entry)
+	local gui = entry and entry.healthbar
+	if not gui then
+		return
+	end
+
+	local scale = getVisualScale(entry)
+	gui.Size = UDim2.fromOffset(math.floor(148 + math.min(28, math.max(0, scale - 1) * 14)), 36)
+	gui.StudsOffset = Vector3.new(0, 2 + (scale * 1.2), 0)
+
+	if entry.nameLabel then
+		entry.nameLabel.Text = resolveDisplayName(entry)
+		entry.nameLabel.TextColor3 = resolveNameColor(entry)
+	end
 end
 
 local function computeRootToPivot(model: Model, root: BasePart): CFrame?
@@ -376,18 +436,31 @@ local function ensureHealthbar(entry)
 
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "NpcHealthbarClient"
-	gui.Size = UDim2.fromOffset(110, 14)
+	gui.Size = UDim2.fromOffset(148, 36)
 	gui.StudsOffset = Vector3.new(0, 3.2, 0)
 	gui.AlwaysOnTop = true
 	gui.LightInfluence = 0
+	gui.MaxDistance = 140
 	gui.Adornee = root
 	gui.Parent = entry.model
 
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Name = "Name"
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Size = UDim2.new(1, 0, 0, 16)
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextSize = 13
+	nameLabel.TextStrokeTransparency = 0.55
+	nameLabel.Text = resolveDisplayName(entry)
+	nameLabel.Parent = gui
+
 	local bg = Instance.new("Frame")
+	bg.Name = "Bar"
 	bg.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
 	bg.BackgroundTransparency = 0.2
 	bg.BorderSizePixel = 0
-	bg.Size = UDim2.fromScale(1, 1)
+	bg.Position = UDim2.new(0, 8, 0, 22)
+	bg.Size = UDim2.new(1, -16, 0, 10)
 	bg.Parent = gui
 
 	local fill = Instance.new("Frame")
@@ -406,7 +479,9 @@ local function ensureHealthbar(entry)
 	fillCorner.Parent = fill
 
 	entry.healthbar = gui
+	entry.nameLabel = nameLabel
 	entry.healthFill = fill
+	updateNameplateAppearance(entry)
 	return gui
 end
 
@@ -419,6 +494,7 @@ local function updateHealthbar(entry)
 	local maxHp = math.max(1, tonumber(entry.maxHp) or 1)
 	local hp = math.max(0, tonumber(entry.hp) or 0)
 	entry.healthFill.Size = UDim2.fromScale(math.clamp(hp / maxHp, 0, 1), 1)
+	updateNameplateAppearance(entry)
 	gui.Enabled = not entry.dead
 end
 

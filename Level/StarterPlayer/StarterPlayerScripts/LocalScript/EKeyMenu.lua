@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local plr = Players.LocalPlayer
 local PauseState = ReplicatedStorage:WaitForChild("PauseState")
+local pauseMenuEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("PauseMenuEvent")
 
 local returnToLobby = ReplicatedStorage:WaitForChild("ReturnToLobby")
 
@@ -73,13 +74,23 @@ btnClose.Text = "X"
 btnClose.Parent = panel
 Instance.new("UICorner", btnClose).CornerRadius = UDim.new(0, 14)
 
-local function open()
-	gui.Enabled = true
-	PauseState.Value = true
+local function setOpen(open: boolean, notifyServer: boolean)
+	if gui.Enabled == open then
+		return
+	end
+
+	gui.Enabled = open
+	if notifyServer then
+		pauseMenuEvent:FireServer(open and "pause" or "resume")
+	end
 end
+
+local function open()
+	setOpen(true, true)
+end
+
 local function close()
-	gui.Enabled = false
-	PauseState.Value = false
+	setOpen(false, true)
 end
 
 UserInputService.InputBegan:Connect(function(input, gp)
@@ -93,4 +104,16 @@ btnClose.MouseButton1Click:Connect(close)
 
 btnLobby.MouseButton1Click:Connect(function()
 	returnToLobby:FireServer()
+end)
+
+PauseState:GetPropertyChangedSignal("Value"):Connect(function()
+	if gui.Enabled and PauseState.Value == false then
+		setOpen(false, false)
+	end
+end)
+
+plr:GetAttributeChangedSignal("RunEnded"):Connect(function()
+	if plr:GetAttribute("RunEnded") == true then
+		setOpen(false, false)
+	end
 end)

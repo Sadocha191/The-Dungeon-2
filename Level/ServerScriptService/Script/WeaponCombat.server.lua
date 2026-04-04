@@ -82,6 +82,17 @@ local DOT_TICK = 0.5
 local DOT_STATES = {}
 local loops = {}
 
+local function isCombatPlayerActive(plr: Player): boolean
+	if not plr or plr.Parent ~= Players or plr:GetAttribute("RunEnded") == true then
+		return false
+	end
+
+	local char = plr.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	return hum ~= nil and hum.Health > 0 and hrp ~= nil
+end
+
 local function shallowCopy(src)
 	local out = {}
 	for key, value in pairs(src or {}) do
@@ -293,11 +304,15 @@ local function applyBleed(plr: Player, enemyModel: Model, stats, runtime)
 		DOT_STATES[key] = entry
 		task.spawn(function()
 			while DOT_STATES[key] == entry do
-				if not entry.player.Parent or not NpcService.IsAlive(entry.enemy) then
+				if not isCombatPlayerActive(entry.player) or not NpcService.IsAlive(entry.enemy) then
 					break
 				end
 				if time() >= (entry.expiresAt or 0) then
 					break
+				end
+				if PauseState.Value then
+					task.wait(0.1)
+					continue
 				end
 
 				local tickDamage = (entry.dps or 0) * math.max(1, entry.stacks or 1) * DOT_TICK
@@ -460,6 +475,9 @@ local function startLoop(plr: Player)
 		local last = 0
 		while state.alive and plr.Parent do
 			task.wait(0.05)
+			if plr:GetAttribute("RunEnded") == true then
+				break
+			end
 
 			if PauseState.Value then
 				continue
@@ -653,6 +671,10 @@ local function startLoop(plr: Player)
 				pos = primaryPos,
 				lookAt = hrp.Position,
 			})
+		end
+
+		if loops[plr] == state then
+			loops[plr] = nil
 		end
 	end)
 end

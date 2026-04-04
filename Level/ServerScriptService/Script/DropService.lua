@@ -144,6 +144,9 @@ end
 local function nearestAlivePlayer(pos: Vector3)
 	local bestPlr, bestDist = nil, math.huge
 	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr:GetAttribute("RunEnded") == true then
+			continue
+		end
 		local c = plr.Character
 		local hrp = c and c:FindFirstChild("HumanoidRootPart")
 		local h = c and c:FindFirstChildOfClass("Humanoid")
@@ -162,6 +165,10 @@ local function cleanupGlobalMagnets()
 	local now = os.clock()
 	for userId, info in pairs(activeGlobalMagnets) do
 		local plr = info.player
+		if plr and plr:GetAttribute("RunEnded") == true then
+			activeGlobalMagnets[userId] = nil
+			continue
+		end
 		local char = plr and plr.Character
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -172,13 +179,16 @@ local function cleanupGlobalMagnets()
 end
 
 local function getGlobalMagnetTarget(pos: Vector3, kind: string)
-	if kind ~= "xp" and kind ~= "coins" then
+	if kind ~= "xp" and kind ~= "coins" and kind ~= "souls" then
 		return nil, math.huge
 	end
 
 	local bestPlr, bestDist = nil, math.huge
 	for _, info in pairs(activeGlobalMagnets) do
 		local plr = info.player
+		if plr and plr:GetAttribute("RunEnded") == true then
+			continue
+		end
 		local char = plr and plr.Character
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -264,7 +274,7 @@ local function setSparklesEnabled(meta, enabled: boolean)
 end
 
 local function awardDrop(plr: Player, meta)
-	if meta.awarded or not plr or not plr.Parent then
+	if meta.awarded or not plr or not plr.Parent or plr:GetAttribute("RunEnded") == true then
 		return
 	end
 

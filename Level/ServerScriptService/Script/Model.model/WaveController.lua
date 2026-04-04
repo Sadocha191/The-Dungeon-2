@@ -669,8 +669,39 @@ local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, isBoss: b
 	end
 end
 
+local ELITE_VISUAL_SCALE = 3
+local BOSS_VISUAL_SCALE = 3
+
+local function getMobVisualScale(isElite: boolean, isBoss: boolean): number
+	if isBoss then
+		return BOSS_VISUAL_SCALE
+	end
+	if isElite then
+		return ELITE_VISUAL_SCALE
+	end
+	return 1
+end
+
+local function applyMobVisualScale(mob: Model, isElite: boolean, isBoss: boolean): number
+	local desiredScale = getMobVisualScale(isElite, isBoss)
+	local appliedScale = 1
+	if desiredScale > 1.001 then
+		local ok, err = pcall(function()
+			mob:ScaleTo(desiredScale)
+		end)
+		if ok then
+			appliedScale = desiredScale
+		else
+			warn("[WaveController] Failed to scale mob:", mob.Name, err)
+		end
+	end
+	mob:SetAttribute("NpcVisualScale", appliedScale)
+	return appliedScale
+end
+
 local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, isElite: boolean, isBoss: boolean, extraOnDeath)
 	mob:SetAttribute("MobType", mobType)
+	mob:SetAttribute("DisplayName", mobType)
 	mob:SetAttribute("Damage", stats.dmg)
 	mob:SetAttribute("AttackRange", stats.range)
 	mob:SetAttribute("AttackCooldown", stats.cd)
@@ -729,6 +760,7 @@ local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vecto
     mob.Name = mobName
     cleanupTemplateScripts(mob)
     setMobGroup(mob)
+    applyMobVisualScale(mob, isElite, false)
     mob.Parent = ENEMIES_FOLDER
     mob:PivotTo(cf)
 
@@ -974,15 +1006,42 @@ local function createHazardZone(center: Vector3, radius: number, duration: numbe
 	local zone = telegraphCircle(center, radius, duration, color)
 	zone.Transparency = 0.48
 	task.spawn(function()
-		local endAt = os.clock() + duration
-		while os.clock() < endAt do
+		local remaining = math.max(0.05, tonumber(duration) or 0)
+		while remaining > 0 do
+			if not RunStarted.Value or not anyPlayersAlive() then
+				return
+			end
 			if PauseState.Value then
 				task.wait(0.1)
 			else
 				damagePlayersInRadius(center, radius, damage)
-				task.wait(tickRate)
+				local step = math.min(math.max(0.05, tonumber(tickRate) or 0.5), remaining)
+				task.wait(step)
+				remaining -= step
 			end
 		end
+	end)
+end
+
+local function scheduleGameplayDelay(delaySeconds: number, callback: () -> ())
+	task.spawn(function()
+		local remaining = math.max(0, tonumber(delaySeconds) or 0)
+		while remaining > 0 do
+			if not RunStarted.Value or not anyPlayersAlive() then
+				return
+			end
+			if PauseState.Value then
+				task.wait(0.1)
+			else
+				local step = math.min(0.1, remaining)
+				task.wait(step)
+				remaining -= step
+			end
+		end
+		if PauseState.Value or not RunStarted.Value or not anyPlayersAlive() then
+			return
+		end
+		callback()
 	end)
 end
 
@@ -1005,7 +1064,7 @@ local function castTargetImpact(controller, targetInfo, now, cfg)
 	NpcService.LockForAbility(controller.model, cfg.telegraph, targetPos)
 	telegraphCircle(targetPos, cfg.radius, cfg.telegraph, cfg.color)
 	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
-	task.delay(cfg.telegraph, function()
+	scheduleGameplayDelay(cfg.telegraph, function()
 		if controller.model.Parent and NpcService.IsAlive(controller.model) then
 			burstMarker(targetPos, cfg.color, cfg.radius * 0.45, 0.4)
 			damagePlayersInRadius(targetPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier))
@@ -1023,7 +1082,7 @@ local function castGroundSlam(controller, targetInfo, now, cfg)
 	NpcService.LockForAbility(controller.model, cfg.telegraph, targetInfo and targetInfo.hrp.Position or center)
 	telegraphCircle(center, cfg.radius, cfg.telegraph, cfg.color)
 	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
-	task.delay(cfg.telegraph, function()
+	scheduleGameplayDelay(cfg.telegraph, function()
 		if controller.model.Parent and NpcService.IsAlive(controller.model) then
 			local currentPos = NpcService.GetPosition(controller.model) or center
 			burstMarker(currentPos, cfg.color, cfg.radius * 0.55, 0.45)
@@ -1050,7 +1109,7 @@ local function castDash(controller, targetInfo, now, cfg)
 	telegraphLine(startPos, endPos, cfg.width, cfg.telegraph, cfg.color)
 	NpcService.LockForAbility(controller.model, cfg.telegraph, targetPos)
 	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
-	task.delay(cfg.telegraph, function()
+	scheduleGameplayDelay(cfg.telegraph, function()
 		if controller.model.Parent and NpcService.IsAlive(controller.model) then
 			NpcService.SetPosition(controller.model, endPos, dir)
 			burstMarker(endPos, cfg.color, cfg.width * 0.8, 0.35)
@@ -1076,7 +1135,7 @@ local function castLineStrike(controller, targetInfo, now, cfg)
 	telegraphLine(startPos, endPos, cfg.width, cfg.telegraph, cfg.color)
 	NpcService.LockForAbility(controller.model, cfg.telegraph, targetPos)
 	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
-	task.delay(cfg.telegraph, function()
+	scheduleGameplayDelay(cfg.telegraph, function()
 		if controller.model.Parent and NpcService.IsAlive(controller.model) then
 			damagePlayersAlongLine(startPos, endPos, cfg.width, math.floor(controller.baseDamage * cfg.damageMultiplier))
 			burstMarker(endPos, cfg.color, cfg.width * 0.7, 0.35)
@@ -1098,7 +1157,7 @@ local function castCone(controller, targetInfo, now, cfg)
 	telegraphCircle(startPos + (dir.Unit * math.min(cfg.range * 0.45, 6)), cfg.range * 0.52, cfg.telegraph, cfg.color)
 	NpcService.LockForAbility(controller.model, cfg.telegraph, targetPos)
 	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
-	task.delay(cfg.telegraph, function()
+	scheduleGameplayDelay(cfg.telegraph, function()
 		if controller.model.Parent and NpcService.IsAlive(controller.model) then
 			damagePlayersInCone(startPos, dir.Unit, cfg.range, cfg.angle, math.floor(controller.baseDamage * cfg.damageMultiplier))
 			burstMarker(startPos + (dir.Unit * math.min(cfg.range * 0.55, 7)), cfg.color, cfg.range * 0.20, 0.32)
@@ -1120,7 +1179,7 @@ local function castTripleCombo(controller, targetInfo, now, cfg)
 	NpcService.LockForAbility(controller.model, cfg.totalDuration, targetPos)
 	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
 	for _, hitDelay in ipairs(cfg.hitDelays) do
-		task.delay(hitDelay, function()
+		scheduleGameplayDelay(hitDelay, function()
 			if controller.model.Parent and NpcService.IsAlive(controller.model) then
 				damagePlayersInCone(startPos, dir.Unit, cfg.range, cfg.angle, math.floor(controller.baseDamage * cfg.damageMultiplier))
 				burstMarker(startPos + (dir.Unit * math.min(cfg.range * 0.5, 6)), cfg.color, cfg.range * 0.16, 0.20)
@@ -1151,7 +1210,7 @@ local function castVolley(controller, targetInfo, now, cfg)
 		local angle = ((index - 1) / math.max(1, cfg.count)) * math.pi * 2
 		local impactPos = groundify(targetPos + Vector3.new(math.cos(angle) * cfg.spread, 0, math.sin(angle) * cfg.spread))
 		telegraphCircle(impactPos, cfg.radius, cfg.telegraph, cfg.color)
-		task.delay(cfg.telegraph, function()
+		scheduleGameplayDelay(cfg.telegraph, function()
 			if controller.model.Parent and NpcService.IsAlive(controller.model) then
 				burstMarker(impactPos, cfg.color, cfg.radius * 0.45, 0.35)
 				damagePlayersInRadius(impactPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier))
@@ -1174,7 +1233,7 @@ local function castTeleportStep(controller, targetInfo, now, cfg)
 	local endPos = groundify(targetPos + side)
 	NpcService.LockForAbility(controller.model, cfg.telegraph, targetPos)
 	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
-	task.delay(cfg.telegraph, function()
+	scheduleGameplayDelay(cfg.telegraph, function()
 		if controller.model.Parent and NpcService.IsAlive(controller.model) then
 			NpcService.SetPosition(controller.model, endPos, flatVector(targetPos - endPos))
 			burstMarker(endPos, cfg.color, cfg.radius * 0.55, 0.35)
@@ -1192,7 +1251,7 @@ local function castHazard(controller, targetInfo, now, cfg)
 	NpcService.LockForAbility(controller.model, cfg.telegraph, targetPos)
 	telegraphCircle(targetPos, cfg.radius, cfg.telegraph, cfg.color)
 	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
-	task.delay(cfg.telegraph, function()
+	scheduleGameplayDelay(cfg.telegraph, function()
 		if controller.model.Parent and NpcService.IsAlive(controller.model) then
 			createHazardZone(
 				targetPos,
@@ -1215,7 +1274,7 @@ local function castSummon(controller, now, cfg)
 	bossPos = groundify(bossPos)
 	NpcService.LockForAbility(controller.model, cfg.telegraph or 0.6, bossPos)
 	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
-	task.delay(cfg.telegraph or 0.6, function()
+	scheduleGameplayDelay(cfg.telegraph or 0.6, function()
 		if controller.model.Parent and NpcService.IsAlive(controller.model) then
 			spawnBurst(cfg.count, bossPos, math.max(elapsed(), RUN_TIME_LIMIT - 60))
 			burstMarker(bossPos, cfg.color, 6, 0.5)
@@ -1238,7 +1297,7 @@ local function castShockwaveSequence(controller, targetInfo, now, cfg)
 	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
 	for _, pulse in ipairs(cfg.pulses) do
 		telegraphCircle(center, pulse.radius, pulse.delay, cfg.color)
-		task.delay(pulse.delay, function()
+		scheduleGameplayDelay(pulse.delay, function()
 			if controller.model.Parent and NpcService.IsAlive(controller.model) then
 				burstMarker(center, cfg.color, pulse.radius * 0.35, 0.35)
 				damagePlayersInRadius(center, pulse.radius, math.floor(controller.baseDamage * pulse.damageMultiplier))
@@ -1258,7 +1317,7 @@ local function castMeteorRain(controller, now, cfg)
 		local info = players[((index - 1) % #players) + 1]
 		local impactPos = groundify(info.hrp.Position + Vector3.new(math.random(-cfg.spread, cfg.spread), 0, math.random(-cfg.spread, cfg.spread)))
 		telegraphCircle(impactPos, cfg.radius, cfg.telegraph, cfg.color)
-		task.delay(cfg.telegraph, function()
+		scheduleGameplayDelay(cfg.telegraph, function()
 			if controller.model.Parent and NpcService.IsAlive(controller.model) then
 				burstMarker(impactPos, cfg.color, cfg.radius * 0.55, 0.45)
 				damagePlayersInRadius(impactPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier))
@@ -1278,7 +1337,7 @@ local function castArenaPressure(controller, now, cfg)
 		local offset = Vector3.new(math.random(-cfg.spread, cfg.spread), 0, math.random(-cfg.spread, cfg.spread))
 		local center = groundify(info.hrp.Position + offset)
 		telegraphCircle(center, cfg.radius, cfg.telegraph, cfg.color)
-		task.delay(cfg.telegraph, function()
+		scheduleGameplayDelay(cfg.telegraph, function()
 			if controller.model.Parent and NpcService.IsAlive(controller.model) then
 				createHazardZone(center, cfg.radius, cfg.duration, cfg.tickRate, math.floor(controller.baseDamage * cfg.damageMultiplier), cfg.color)
 			end
@@ -1863,6 +1922,7 @@ local function ensurePortal()
 		mob.Name = "Boss_" .. bossName
 		cleanupTemplateScripts(mob)
 		setMobGroup(mob)
+		applyMobVisualScale(mob, true, true)
 		mob.Parent = ENEMIES_FOLDER
 
 		pcall(function()

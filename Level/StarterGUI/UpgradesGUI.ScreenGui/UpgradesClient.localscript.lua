@@ -200,8 +200,7 @@ end
 local function showMenu()
 	main.Visible = true
 	lockMovement(true)
-	-- Prevent accidental clicks right as the menu pops up.
-	choiceLockedUntil = os.clock() + 2
+	choiceLockedUntil = os.clock()
 end
 
 local function clearSlot(slot: Instance)

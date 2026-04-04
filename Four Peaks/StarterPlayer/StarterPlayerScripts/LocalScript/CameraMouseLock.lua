@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local ContextActionService = game:GetService("ContextActionService")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
@@ -32,6 +33,10 @@ local frozenCFrame: CFrame? = nil
 local touchLookDelta = Vector2.zero
 local lastTouchPanTranslation = Vector2.zero
 local anglesInitialized = false
+local movementLocked = false
+local savedWalkSpeed = nil
+local savedJumpPower = nil
+local savedJumpHeight = nil
 
 local function getHRP(): BasePart?
 	local character = player.Character
@@ -42,6 +47,20 @@ local function getHRP(): BasePart?
 	local hrp = character:FindFirstChild("HumanoidRootPart")
 	if hrp and hrp:IsA("BasePart") then
 		return hrp
+	end
+
+	return nil
+end
+
+local function getHumanoid(): Humanoid?
+	local character = player.Character
+	if not character then
+		return nil
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid:IsA("Humanoid") then
+		return humanoid
 	end
 
 	return nil
@@ -81,6 +100,70 @@ local function shouldReleaseCursor(): boolean
 		or UIS:GetFocusedTextBox() ~= nil
 		or UIS:IsKeyDown(Enum.KeyCode.LeftAlt)
 		or UIS:IsKeyDown(Enum.KeyCode.RightAlt)
+end
+
+local function applyHumanoidLock(humanoid: Humanoid?, locked: boolean)
+	if not humanoid then
+		return
+	end
+	if locked then
+		humanoid.WalkSpeed = 0
+		humanoid.JumpPower = 0
+		humanoid.JumpHeight = 0
+	else
+		if savedWalkSpeed ~= nil then
+			humanoid.WalkSpeed = savedWalkSpeed
+		end
+		if savedJumpPower ~= nil then
+			humanoid.JumpPower = savedJumpPower
+		end
+		if savedJumpHeight ~= nil then
+			humanoid.JumpHeight = savedJumpHeight
+		end
+	end
+end
+
+local function setMovementLocked(locked: boolean)
+	if locked then
+		if movementLocked then
+			applyHumanoidLock(getHumanoid(), true)
+			return
+		end
+		movementLocked = true
+		ContextActionService:BindActionAtPriority(
+			"LobbyModalMovementLock",
+			function()
+				return Enum.ContextActionResult.Sink
+			end,
+			false,
+			9999,
+			Enum.PlayerActions.CharacterForward,
+			Enum.PlayerActions.CharacterBackward,
+			Enum.PlayerActions.CharacterLeft,
+			Enum.PlayerActions.CharacterRight,
+			Enum.PlayerActions.CharacterJump
+		)
+
+		local humanoid = getHumanoid()
+		if humanoid then
+			savedWalkSpeed = humanoid.WalkSpeed
+			savedJumpPower = humanoid.JumpPower
+			savedJumpHeight = humanoid.JumpHeight
+			applyHumanoidLock(humanoid, true)
+		end
+		return
+	end
+
+	if not movementLocked then
+		return
+	end
+
+	movementLocked = false
+	ContextActionService:UnbindAction("LobbyModalMovementLock")
+	applyHumanoidLock(getHumanoid(), false)
+	savedWalkSpeed = nil
+	savedJumpPower = nil
+	savedJumpHeight = nil
 end
 
 local function getCameraDistance(): number
@@ -151,12 +234,15 @@ end)
 local function orbitStep(dt: number)
 	local camera = Workspace.CurrentCamera
 	if not camera then
+		setMovementLocked(false)
 		return
 	end
+	setMovementLocked(anyBlockingUiOpen())
 
 	local hrp = getHRP()
 	if not hrp then
 		frozenCFrame = nil
+		setMovementLocked(false)
 		setUiInput()
 		return
 	end
@@ -217,6 +303,11 @@ end
 player.CharacterAdded:Connect(function()
 	anglesInitialized = false
 	frozenCFrame = nil
+	if movementLocked then
+		task.defer(function()
+			setMovementLocked(true)
+		end)
+	end
 end)
 
 script.Destroying:Connect(function()
@@ -224,6 +315,7 @@ script.Destroying:Connect(function()
 	if camera then
 		camera.CameraType = Enum.CameraType.Custom
 	end
+	setMovementLocked(false)
 	setUiInput()
 end)
 

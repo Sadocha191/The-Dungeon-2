@@ -86,6 +86,17 @@ local function getState(plr)
 	return s
 end
 
+local function isPlayerRunActive(plr: Player): boolean
+	if not plr or plr.Parent ~= Players or plr:GetAttribute("RunEnded") == true then
+		return false
+	end
+
+	local char = plr.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	return hum ~= nil and hum.Health > 0 and hrp ~= nil
+end
+
 local function getEnemyRoot(model)
 	return NpcService.GetRoot(model)
 end
@@ -96,6 +107,9 @@ end
 
 local function safeDamage(enemyModel, dmg, meta)
 	if isPaused() then
+		return 0
+	end
+	if meta and meta.player and not isPlayerRunActive(meta.player) then
 		return 0
 	end
 	dmg = math.floor(tonumber(dmg) or 0)
@@ -602,6 +616,15 @@ local function syncOrbitVFX(plr, spellId, enabled, params)
 	end
 end
 
+local function stopAllOrbitVfx(plr)
+	local s = getState(plr)
+	for spellId, info in pairs(s.vfx) do
+		if info and info.enabled == true then
+			syncOrbitVFX(plr, spellId, false)
+		end
+	end
+end
+
 local function spawnRingVisual(pos, radius, duration, stats)
 	local primary, secondary = getVisualColors(stats)
 	local intensity = getVisualIntensity(stats)
@@ -863,6 +886,11 @@ local function fireProjectile(plr, origin, dir, speed, range, damage, pierce, st
 			conn:Disconnect()
 			return
 		end
+		if not isPlayerRunActive(plr) then
+			conn:Disconnect()
+			destroyProjectileVisual(visual)
+			return
+		end
 		if isPaused() then
 			return
 		end
@@ -911,6 +939,9 @@ local function runProjectile(plr, spellId, stats, hrp)
 	for index = 1, math.max(1, stats.count or 1) do
 		local assignedTarget = targets[index]
 		task.delay((index - 1) * 0.05, function()
+			if not isPlayerRunActive(plr) then
+				return
+			end
 			local target = assignedTarget
 			if not target or not enemyAlive(target) then
 				target = pickRandomEnemy(hrp.Position, searchRange)
@@ -1016,6 +1047,9 @@ local function runZone(plr, spellId, stats, hrp)
 	local endAt = spellClock() + duration
 	task.spawn(function()
 		while spellClock() < endAt do
+			if not isPlayerRunActive(plr) then
+				break
+			end
 			for _, enemy in ipairs(getEnemiesInRadius(center, radius)) do
 				hitEnemy(plr, enemy, tickDamage, stats, center, getEnemyPosition(enemy))
 			end
@@ -1051,6 +1085,9 @@ local function runBeam(plr, spellId, stats, hrp)
 	local endAt = spellClock() + duration
 	task.spawn(function()
 		while spellClock() < endAt do
+			if not isPlayerRunActive(plr) then
+				break
+			end
 			local hitThisTick = {}
 			local beamEnd = origin + (direction * range)
 			for _, enemy in ipairs(getAllEnemies()) do
@@ -1082,12 +1119,17 @@ local function stopOrbitIfNeeded(plr, spellId)
 end
 
 local function stepPlayer(plr, dt)
+	if not isPlayerRunActive(plr) then
+		stopAllOrbitVfx(plr)
+		return
+	end
 	if isPaused() then
 		return
 	end
 	local char = plr.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
 	if not hrp then
+		stopAllOrbitVfx(plr)
 		return
 	end
 
@@ -1122,8 +1164,10 @@ RunService.Heartbeat:Connect(function(dt)
 		return
 	end
 	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr.Parent and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+		if isPlayerRunActive(plr) then
 			stepPlayer(plr, dt)
+		else
+			stopAllOrbitVfx(plr)
 		end
 	end
 end)

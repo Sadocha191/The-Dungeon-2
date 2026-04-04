@@ -109,7 +109,6 @@ local REWARDS = {
 	{ rarity = "Common", id = "pickup_20", label = "Attraction (+20% Pickup Range)", value = 0.20 },
 	{ rarity = "Common", id = "crit_dmg_10", label = "Crit Tonic (+10% Crit Damage)", value = 0.10 },
 	{ rarity = "Common", id = "move_15", label = "Turbo Socks (+15% Movement Speed)", value = 0.15 },
-	{ rarity = "Common", id = "regen_35", label = "Medkit (+35 HP Regen)", value = 35 },
 	{ rarity = "Common", id = "key_1", label = "Key (+1 stack)", value = 1 },
 	{ rarity = "Uncommon", id = "projectile_1", label = "Backpack (+1 Projectile)", value = 1 },
 	{ rarity = "Uncommon", id = "atkspd_8", label = "Battery (+8% Attack Speed)", value = 0.08 },
@@ -127,7 +126,6 @@ local REWARD_REVEAL_DESCRIPTIONS = {
 	pickup_20 = "Drops snap in from farther away.",
 	crit_dmg_10 = "Critical hits now deal more damage.",
 	move_15 = "Movement speed increases for the rest of the run.",
-	regen_35 = "Health regeneration gets a strong boost.",
 	key_1 = "Future chests are more likely to open for free.",
 	projectile_1 = "Projectile spells fire one extra projectile.",
 	atkspd_8 = "Attack speed rises and your swings come out faster.",
@@ -438,9 +436,6 @@ local function applyReward(plr, reward)
 		setNumAttr(plr, "RunBonusSpeed", getNumAttr(plr, "RunBonusSpeed", 0) + addSpeed)
 		setNumAttr(plr, "ShrineMoveSpeedAdded", getNumAttr(plr, "ShrineMoveSpeedAdded", 0) + addSpeed)
 		applyMovement(plr)
-
-	elseif reward.id == "regen_35" then
-		setNumAttr(plr, "ShrineHpRegenFlat", getNumAttr(plr, "ShrineHpRegenFlat", 0) + scaled)
 
 	elseif reward.id == "key_1" then
 		setNumAttr(plr, "ChestKeyStacks", getNumAttr(plr, "ChestKeyStacks", 0) + 1)

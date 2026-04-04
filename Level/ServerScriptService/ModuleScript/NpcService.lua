@@ -789,9 +789,10 @@ local function updateNpc(
 
 	if pauseState.Value then
 		npc.velocity = Vector3.zero
-		if npc.state ~= STATE.Attacking then
-			setState(npc, STATE.Idle)
-		end
+		npc.impulse = Vector3.zero
+		npc.attackUntil = 0
+		npc.nextAttackAt = math.max(npc.nextAttackAt, now + 0.1)
+		setState(npc, STATE.Idle)
 		writeStateAttributes(npc)
 		return
 	end

@@ -66,6 +66,7 @@ local Remotes = ensureFolder(ReplicatedStorage, "Remotes")
 local PlayerProgressEvent = ensureRemoteEvent(Remotes, "PlayerProgressEvent")
 local MissionSummaryEvent = ensureRemoteEvent(Remotes, "MissionSummaryEvent")
 local SpellEvent = ensureRemoteEvent(Remotes, "SpellEvent")
+local PauseMenuEvent = ensureRemoteEvent(Remotes, "PauseMenuEvent")
 
 -- PauseState (shared)
 local PauseState = ReplicatedStorage:FindFirstChild("PauseState")
@@ -74,6 +75,13 @@ if not PauseState then
 	PauseState.Name = "PauseState"
 	PauseState.Value = false
 	PauseState.Parent = ReplicatedStorage
+end
+local RunStarted = ReplicatedStorage:FindFirstChild("RunStarted")
+if not RunStarted then
+	RunStarted = Instance.new("BoolValue")
+	RunStarted.Name = "RunStarted"
+	RunStarted.Value = false
+	RunStarted.Parent = ReplicatedStorage
 end
 
 -- Run state
@@ -89,6 +97,17 @@ local pending = {} -- [uid] = {token, offers}
 
 -- Party shared progression (Multi)
 local party = {} -- [partyId] = {level, xp, nextXp, pendingLevelUps, inLevelUp, waitingFor = {[uid]=true}}
+local manualPauseUsers = {} -- [uid] = true while a player has pause UI open
+
+local function hasActiveRunPlayers(): boolean
+	for _, candidate in ipairs(Players:GetPlayers()) do
+		if candidate.Parent and candidate:GetAttribute("RunEnded") ~= true then
+			return true
+		end
+	end
+
+	return false
+end
 
 local function getPartyId(plr: Player): string?
 	local pid = plr:GetAttribute("PartyId")
@@ -145,6 +164,22 @@ local function syncPartyHud(partyId: string)
 	end
 end
 
+local function recomputePauseState()
+	for _ in pairs(manualPauseUsers) do
+		PauseState.Value = true
+		return
+	end
+
+	for _, r in pairs(run) do
+		if r.pauseStart then
+			PauseState.Value = true
+			return
+		end
+	end
+
+	PauseState.Value = false
+end
+
 
 local openSpellMenu -- forward declaration
 
@@ -158,8 +193,6 @@ local function startPartyLevelUp(partyId: string)
 	p.inLevelUp = true
 	p.waitingFor = {}
 
-	-- pause globally
-	PauseState.Value = true
 	local now = time()
 	for _, member in ipairs(members) do
 		local r = getRun(member)
@@ -170,6 +203,7 @@ local function startPartyLevelUp(partyId: string)
 			p.waitingFor[member.UserId] = true
 		end
 	end
+	recomputePauseState()
 
 	if next(p.waitingFor) == nil then
 		for _, member in ipairs(members) do
@@ -179,7 +213,7 @@ local function startPartyLevelUp(partyId: string)
 				r.pauseStart = nil
 			end
 		end
-		PauseState.Value = false
+		recomputePauseState()
 		if p.pendingLevelUps > 0 then
 			p.pendingLevelUps -= 1
 		end
@@ -444,18 +478,41 @@ end
 local function pauseBegin(plr: Player)
 	local r = getRun(plr)
 	if r.pauseStart then return end
-	PauseState.Value = true
 	r.pauseStart = time()
+	recomputePauseState()
 end
 
 local function pauseEnd(plr: Player)
 	local r = getRun(plr)
-	if not r.pauseStart then return end
+	if not r.pauseStart then
+		recomputePauseState()
+		return
+	end
 	r.pausedTotal += (time() - r.pauseStart)
 	r.pauseStart = nil
-	
-	PauseState.Value = false
+	recomputePauseState()
 end
+
+PauseMenuEvent.OnServerEvent:Connect(function(plr: Player, action)
+	if not plr or plr.Parent ~= Players then
+		return
+	end
+
+	if action == "pause" then
+		if plr:GetAttribute("RunEnded") == true or RunStarted.Value ~= true then
+			manualPauseUsers[plr.UserId] = nil
+			recomputePauseState()
+			return
+		end
+		manualPauseUsers[plr.UserId] = true
+	elseif action == "resume" then
+		manualPauseUsers[plr.UserId] = nil
+	else
+		return
+	end
+
+	recomputePauseState()
+end)
 
 
 local function finishUpgrade(plr: Player)
@@ -492,7 +549,7 @@ local function finishUpgrade(plr: Player)
 				r.pauseStart = nil
 			end
 		end
-		PauseState.Value = false
+		recomputePauseState()
 
 		if p.pendingLevelUps > 0 then
 			p.pendingLevelUps -= 1
@@ -1139,8 +1196,13 @@ local function endRunForPlayer(plr: Player, reason: string)
 	if r.ended then return end
 	r.ended = true
 	plr:SetAttribute("RunEnded", true)
+	pending[plr.UserId] = nil
+	manualPauseUsers[plr.UserId] = nil
 
 	pauseEnd(plr)
+	if not hasActiveRunPlayers() then
+		RunStarted.Value = false
+	end
 
 	local preciseSeconds = runSecondsPrecise(plr)
 	local seconds = math.floor(preciseSeconds)
@@ -1300,8 +1362,10 @@ Players.PlayerAdded:Connect(function(plr: Player)
 end)
 
 Players.PlayerRemoving:Connect(function(plr: Player)
+	manualPauseUsers[plr.UserId] = nil
 	run[plr.UserId] = nil
 	pending[plr.UserId] = nil
+	recomputePauseState()
 end)
 
 print("[ProgressService] Ready (v15)")

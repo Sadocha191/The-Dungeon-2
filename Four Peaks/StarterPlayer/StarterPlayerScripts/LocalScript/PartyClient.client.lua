@@ -295,7 +295,25 @@ local disband = makeActionButton(
 	Color3.fromRGB(132, 56, 56)
 )
 
-local currentParty = { id = nil, leaderUserId = nil, members = {}, maxMembers = 5 }
+local function normalizeParty(party)
+	if typeof(party) ~= "table" then
+		return {
+			id = nil,
+			leaderUserId = nil,
+			members = {},
+			maxMembers = 5,
+		}
+	end
+
+	return {
+		id = party.id,
+		leaderUserId = party.leaderUserId,
+		members = typeof(party.members) == "table" and party.members or {},
+		maxMembers = math.max(1, math.floor(tonumber(party.maxMembers) or 5)),
+	}
+end
+
+local currentParty = normalizeParty(nil)
 local activeInviteModal = nil
 
 local function refreshModalState()
@@ -329,11 +347,7 @@ local function fetchPartyState()
 		return PartyQuery:InvokeServer("GetParty")
 	end)
 
-	if typeof(party) == "table" then
-		currentParty = party
-	else
-		currentParty = { id = nil, leaderUserId = nil, members = {}, maxMembers = 5 }
-	end
+	currentParty = normalizeParty(party)
 end
 
 local function makeEmptyState(parent: Instance, titleText: string, descText: string)
@@ -446,8 +460,9 @@ end
 local function renderParty()
 	clearChildren(partyList)
 
+	local members = currentParty.members
 	local hasParty = currentParty.id ~= nil
-	local count = #currentParty.members
+	local count = #members
 	local maxMembers = currentParty.maxMembers or 5
 
 	if hasParty then
@@ -459,7 +474,7 @@ local function renderParty()
 	if not hasParty or count == 0 then
 		makeEmptyState(partyList, "No active party.", "Your current party members will appear here after you create or join a group.")
 	else
-		for _, member in ipairs(currentParty.members or {}) do
+		for _, member in ipairs(members) do
 			local row = Instance.new("Frame")
 			row.Size = UDim2.new(1, 0, 0, 60)
 			row.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
@@ -695,7 +710,7 @@ PartyUpdated.OnClientEvent:Connect(function(payload)
 		return
 	end
 
-	currentParty = payload
+	currentParty = normalizeParty(payload)
 
 	if overlay.Visible then
 		renderParty()
