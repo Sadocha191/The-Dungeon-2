@@ -64,6 +64,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local NpcService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("NpcService"))
 local PlayerData = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerData"))
 local PickupToastService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PickupToastService"))
+local RunSpawnConfig = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunSpawnConfig"))
 local WorldBounds = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WorldBounds"))
 local CraftingConfig = require((ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5)):WaitForChild("CraftingConfig"))
 
@@ -202,7 +203,6 @@ local SPAWN_RAY_START_Y = 200
 local GROUND_RAY_DIST = 600
 local MAX_SPAWN_TRIES = 25
 local MAX_GROUND_SLOPE_DEG = 35
-local NORMAL_REPLACEMENT_MIN_DISTANCE = SPAWN_RING_MIN + 8
 
 local function anyPlayersAlive(): boolean
     for _, plr in ipairs(Players:GetPlayers()) do
@@ -393,6 +393,22 @@ local RUN_SOUL_DROP_MULTIPLIER = 3
 local ELITE_INTERVAL_SECONDS = 5 * 60
 local BOSS_REINFORCEMENT_INTERVAL = 10
 local materialRng = Random.new()
+local MAX_LIVING_ENEMIES = math.max(1, math.floor(tonumber(RunSpawnConfig.MAX_LIVING_ENEMIES) or 100))
+local NORMAL_SOUL_DROP_CONFIG = RunSpawnConfig.NORMAL_SOUL_DROP or {}
+local LEVEL_SPAWN_BANDS = RunSpawnConfig.LEVEL_SPAWN_BANDS or {}
+local OVERTIME_SPAWN_CONFIG = RunSpawnConfig.OVERTIME or {}
+local SWARM_SPAWN_CONFIG = RunSpawnConfig.SWARM or {}
+local DEFAULT_LEVEL_SPAWN_BAND = {
+	baseMaxAlive = 24,
+	alivePerMinute = 4,
+	spawnBurst = 1,
+	intervalMultiplier = 1,
+}
+local NORMAL_ENEMY_COUNT_FILTER = {
+	includeNormal = true,
+	includeElite = false,
+	includeBoss = false,
+}
 
 local function getDebugNumber(name: string, defaultValue: number): number
 	local folder = ReplicatedStorage:FindFirstChild("DebugSettings")
@@ -439,6 +455,18 @@ local function getRunPressure(elapsedSeconds: number)
 	local avgRunLevel = getAverageRunLevel()
 	local levelPressure = math.max(0, avgRunLevel - 2)
 	return minutes, avgRunLevel, levelPressure
+end
+
+local function getSpawnBand(avgRunLevel: number)
+	local resolvedLevel = math.max(1, math.floor((tonumber(avgRunLevel) or 0) + 0.5))
+	for _, band in ipairs(LEVEL_SPAWN_BANDS) do
+		local minLevel = math.max(1, math.floor(tonumber(band.minLevel) or 1))
+		local maxLevel = tonumber(band.maxLevel) or math.huge
+		if resolvedLevel >= minLevel and resolvedLevel <= maxLevel then
+			return band
+		end
+	end
+	return LEVEL_SPAWN_BANDS[#LEVEL_SPAWN_BANDS] or DEFAULT_LEVEL_SPAWN_BAND
 end
 
 local function timeScaleMult(elapsed: number)
@@ -489,6 +517,15 @@ end
 
 local function activeEnemiesCount()
     return NpcService.GetActiveCount()
+end
+
+local function activeNormalEnemiesCount()
+	return NpcService.GetActiveCount(NORMAL_ENEMY_COUNT_FILTER)
+end
+
+local function hasEnemyCapacity(slotsNeeded: number?): boolean
+	local needed = math.max(1, math.floor(tonumber(slotsNeeded) or 1))
+	return (activeEnemiesCount() + needed) <= MAX_LIVING_ENEMIES
 end
 
 local function cleanupTemplateScripts(mob: Model)
@@ -609,6 +646,13 @@ local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, isBoss: b
 		xpDrop = math.floor(xpDrop * 7)
 		coinDrop = math.floor(coinDrop * 7)
 		soulsDrop = math.random(ELITE_SOUL_DROP_MIN, ELITE_SOUL_DROP_MAX)
+	else
+		local soulChance = math.clamp(tonumber(NORMAL_SOUL_DROP_CONFIG.chance) or 0, 0, 1)
+		if soulChance > 0 and math.random() <= soulChance then
+			local minSouls = math.max(1, math.floor(tonumber(NORMAL_SOUL_DROP_CONFIG.minAmount) or 1))
+			local maxSouls = math.max(minSouls, math.floor(tonumber(NORMAL_SOUL_DROP_CONFIG.maxAmount) or minSouls))
+			soulsDrop = math.random(minSouls, maxSouls)
+		end
 	end
 
 	coinDrop = math.max(1, math.floor(coinDrop * RUN_COIN_DROP_MULTIPLIER))
@@ -727,11 +771,16 @@ local function spawnBurst(count: number, anchorPos: Vector3?, poolTime: number?)
     end
 
     local pool = getPool(tonumber(poolTime) or elapsed())
+	local aliveNow = activeEnemiesCount()
     for _ = 1, targetCount do
+		if aliveNow >= MAX_LIVING_ENEMIES then
+			break
+		end
         local mobName = pickWeighted(pool)
         local mob = spawnMob(mobName, false, anchorPos)
         if mob then
             table.insert(spawned, mob)
+			aliveNow += 1
         end
     end
 
@@ -1579,32 +1628,53 @@ local function isSwarmActiveAt(t: number): boolean
 end
 
 local function desiredMaxAlive(t: number)
-	local _, _, levelPressure = getRunPressure(t)
-	local base = 28
-	local add = math.floor(t / 60) * 6
-	local v = math.clamp(base + add + math.floor(levelPressure * 8), 28, 170)
+	local minutes, avgRunLevel = getRunPressure(t)
+	local band = getSpawnBand(avgRunLevel)
+	local base = math.max(1, math.floor(tonumber(band.baseMaxAlive) or DEFAULT_LEVEL_SPAWN_BAND.baseMaxAlive))
+	local addPerMinute = math.max(0, math.floor(tonumber(band.alivePerMinute) or DEFAULT_LEVEL_SPAWN_BAND.alivePerMinute))
+	local v = base + (minutes * addPerMinute)
 	if t >= RUN_TIME_LIMIT then
-		v = math.clamp(v + 90 + math.floor((t - RUN_TIME_LIMIT) / 12) * 7, 140, 300)
+		local overtimeBase = math.max(0, math.floor(tonumber(OVERTIME_SPAWN_CONFIG.extraMaxAlive) or 0))
+		local overtimeStepSeconds = math.max(1, math.floor(tonumber(OVERTIME_SPAWN_CONFIG.maxAliveStepSeconds) or 12))
+		local overtimeStepAmount = math.max(0, math.floor(tonumber(OVERTIME_SPAWN_CONFIG.maxAliveStepAmount) or 0))
+		v += overtimeBase + (math.floor((t - RUN_TIME_LIMIT) / overtimeStepSeconds) * overtimeStepAmount)
 	end
 	local _, _, maxAliveScale = getSpawnStressConfig()
-	return math.max(28, math.floor((v * maxAliveScale) + 0.5))
+	local scaled = math.max(base, math.floor((v * maxAliveScale) + 0.5))
+	return math.clamp(scaled, base, MAX_LIVING_ENEMIES)
 end
 
 local function spawnInterval(t: number)
-	local _, _, levelPressure = getRunPressure(t)
+	local _, avgRunLevel, levelPressure = getRunPressure(t)
+	local band = getSpawnBand(avgRunLevel)
 	local minI = 0.24
 	local maxI = 0.56
 	local p = math.clamp(t / 1500, 0, 1)
 	local i = maxI - (maxI - minI) * p
 	i = i / (1 + (levelPressure * 0.08))
+	i *= math.max(0.05, tonumber(band.intervalMultiplier) or DEFAULT_LEVEL_SPAWN_BAND.intervalMultiplier)
 	if t >= RUN_TIME_LIMIT then
-		i = math.max(0.09, i * 0.42)
+		i = math.max(0.09, i * math.max(0.05, tonumber(OVERTIME_SPAWN_CONFIG.intervalMultiplier) or 0.42))
 	end
 	if isSwarmActiveAt(t) then
-		i = math.max(0.08, i / 3)
+		i = math.max(0.08, i * math.max(0.05, tonumber(SWARM_SPAWN_CONFIG.intervalMultiplier) or 0.33))
 	end
 	local _, intervalScale = getSpawnStressConfig()
 	return math.max(0.04, i * intervalScale)
+end
+
+local function getNormalSpawnBurstSize(t: number): number
+	local _, avgRunLevel = getRunPressure(t)
+	local band = getSpawnBand(avgRunLevel)
+	local burst = math.max(1, math.floor(tonumber(band.spawnBurst) or DEFAULT_LEVEL_SPAWN_BAND.spawnBurst))
+	if isSwarmActiveAt(t) then
+		burst += math.max(0, math.floor(tonumber(SWARM_SPAWN_CONFIG.extraBurst) or 0))
+	end
+	if t >= RUN_TIME_LIMIT then
+		burst += math.max(0, math.floor(tonumber(OVERTIME_SPAWN_CONFIG.extraBurst) or 0))
+	end
+	local debugBurstSize = select(1, getSpawnStressConfig())
+	return math.max(1, burst * debugBurstSize)
 end
 
 local function buildEliteOrder(): {string}
@@ -1643,6 +1713,7 @@ local nextEliteAt = eliteTotal > 0 and ELITE_INTERVAL_SECONDS or math.huge
 local portalModel: Model? = nil
 local portalActivated = false
 local bossModel: Model? = nil
+local bossSpawnPending = false
 local bossDefeated = false
 local nextBossReinforcementAt = math.huge
 local refreshPortalPromptState = nil
@@ -1772,7 +1843,11 @@ local function ensurePortal()
 
 	local function spawnBossNearPortal()
 		if bossModel and bossModel.Parent then
-			return
+			bossSpawnPending = false
+			return true
+		end
+		if not hasEnemyCapacity(1) then
+			return false
 		end
 
 		bossDefeated = false
@@ -1780,7 +1855,8 @@ local function ensurePortal()
 		local tpl = EliteFolder:FindFirstChild(bossName) or NormalFolder:FindFirstChild(bossName)
 		if not tpl or not tpl:IsA("Model") then
 			warn("[Portal] Missing boss template:", bossName)
-			return
+			bossSpawnPending = false
+			return false
 		end
 
 		local mob = tpl:Clone()
@@ -1803,15 +1879,17 @@ local function ensurePortal()
 			isRanged = false,
 		}, { xp = 120, coins = 60 }, true, true, function()
 			bossDefeated = true
+			bossSpawnPending = false
 			nextBossReinforcementAt = math.huge
 			unregisterEncounterController(mob)
 			broadcast({ type = "portalBossDefeated" })
 			setPromptState()
 		end)
 		if not registered then
-			return
+			return false
 		end
 
+		bossSpawnPending = false
 		bossModel = registered
 		registerBossController(registered, bossStats.dmg)
 		nextBossReinforcementAt = math.huge
@@ -1821,6 +1899,7 @@ local function ensurePortal()
 			end)
 		end
 		broadcast({ type = "portalBossSpawn" })
+		return true
 	end
 
 	prompt.Triggered:Connect(function(plr)
@@ -1829,6 +1908,7 @@ local function ensurePortal()
 
 		if not portalActivated then
 			portalActivated = true
+			bossSpawnPending = true
 			broadcast({ type = "portalActivated" })
 			spawnBossNearPortal()
 			setPromptState()
@@ -1924,18 +2004,26 @@ RunService.Heartbeat:Connect(function()
 	end
     -- Elites (every 5 minutes during the scheduled run)
     if eliteIndex <= eliteTotal and t >= nextEliteAt then
-        local eliteName = eliteOrder[((eliteIndex - 1) % #eliteOrder) + 1]
-        local elite = spawnMob(eliteName, true, nil)
-        if elite then
-            broadcast({ type = "eliteSpawn", name = eliteName, elitesDefeated = eliteCount, elitesTotal = eliteTotal })
-            watchEliteDeath(elite)
-			eliteIndex += 1
-			nextEliteAt = eliteIndex <= eliteTotal and (eliteIndex * ELITE_INTERVAL_SECONDS) or math.huge
-		else
-			-- Spawn could fail due temporary position/template issues; retry shortly.
+        if not hasEnemyCapacity(1) then
 			nextEliteAt = t + 1
+		else
+			local eliteName = eliteOrder[((eliteIndex - 1) % #eliteOrder) + 1]
+			local elite = spawnMob(eliteName, true, nil)
+			if elite then
+				broadcast({ type = "eliteSpawn", name = eliteName, elitesDefeated = eliteCount, elitesTotal = eliteTotal })
+				watchEliteDeath(elite)
+				eliteIndex += 1
+				nextEliteAt = eliteIndex <= eliteTotal and (eliteIndex * ELITE_INTERVAL_SECONDS) or math.huge
+			else
+				-- Spawn could fail due temporary position/template issues; retry shortly.
+				nextEliteAt = t + 1
+			end
         end
     end
+
+	if portalActivated and bossSpawnPending and not bossDefeated and (not bossModel or not bossModel.Parent) then
+		spawnBossNearPortal()
+	end
 
     if (not swarmActive) and swarmIndex <= #SWARM_EVENT_TIMES and t >= nextSwarmAt then
         local startedAt = nextSwarmAt
@@ -1963,24 +2051,19 @@ RunService.Heartbeat:Connect(function()
 
 	local maxAlive = desiredMaxAlive(t)
 	local aliveNow = activeEnemiesCount()
-	local spawnBurstSize = select(1, getSpawnStressConfig())
+	local normalAliveNow = activeNormalEnemiesCount()
+	local spawnBurstSize = getNormalSpawnBurstSize(t)
 	local pool = getPool(t)
 	for _ = 1, spawnBurstSize do
-		if aliveNow >= maxAlive then
-			local despawned = NpcService.DespawnOldestFarNormal(NORMAL_REPLACEMENT_MIN_DISTANCE)
-			if not despawned then
-				break
-			end
-			aliveNow = activeEnemiesCount()
-			if aliveNow >= maxAlive then
-				break
-			end
+		if aliveNow >= MAX_LIVING_ENEMIES or normalAliveNow >= maxAlive then
+			break
 		end
 
 		local mobName = pickWeighted(pool)
 		local spawnedMob = spawnMob(mobName, false, nil)
 		if spawnedMob then
 			aliveNow += 1
+			normalAliveNow += 1
 		end
 	end
 end)

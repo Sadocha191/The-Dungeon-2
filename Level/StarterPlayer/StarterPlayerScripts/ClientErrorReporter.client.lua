@@ -6,8 +6,11 @@ local player = Players.LocalPlayer
 local remotesFolder = ReplicatedStorage:WaitForChild("Remotes")
 local reportClientErrorRemote = remotesFolder:WaitForChild("ReportClientError")
 
+local CLIENT_TEST_ATTRIBUTE = "ErrorWebhookClientTestToken"
+local CLIENT_TEST_TARGET_ATTRIBUTE = "ErrorWebhookClientTestUserId"
 local DUPLICATE_WINDOW_SECONDS = 10
 local recentErrors = {}
+local lastClientTestToken = nil
 
 local function normalizeText(value)
 	if value == nil then
@@ -65,6 +68,63 @@ local function cleanupRecentErrors(now)
 			recentErrors[key] = nil
 		end
 	end
+end
+
+local function normalizeTriggerToken(value)
+	if value == nil then
+		return nil
+	end
+
+	local valueType = typeof(value)
+	if valueType ~= "string" and valueType ~= "number" and valueType ~= "boolean" then
+		return nil
+	end
+
+	return normalizeText(valueType == "string" and value or tostring(value))
+end
+
+local function isMatchingClientTestTarget(targetValue)
+	local valueType = typeof(targetValue)
+	if valueType == "number" then
+		return targetValue == player.UserId
+	end
+
+	if valueType == "string" then
+		local maybeUserId = tonumber(targetValue)
+		if maybeUserId then
+			return maybeUserId == player.UserId
+		end
+		return string.lower(targetValue) == string.lower(player.Name)
+	end
+
+	return targetValue == nil
+end
+
+local function triggerClientErrorTest(rawToken)
+	local token = normalizeTriggerToken(rawToken)
+	if not token or token == lastClientTestToken then
+		return
+	end
+
+	if not isMatchingClientTestTarget(ReplicatedStorage:GetAttribute(CLIENT_TEST_TARGET_ATTRIBUTE)) then
+		return
+	end
+
+	lastClientTestToken = token
+
+	task.defer(function()
+		error(
+			string.format(
+				"[ErrorWebhookTest][Client][%s][PlaceId=%d][JobId=%s][UserId=%d] token=%s",
+				game.Name,
+				game.PlaceId,
+				game.JobId,
+				player.UserId,
+				token
+			),
+			0
+		)
+	end)
 end
 
 local function readContextValue(attributeNames)
@@ -168,6 +228,12 @@ local function buildDedupKey(payload)
 		firstLineOf(payload.stack),
 	}, "|")
 end
+
+ReplicatedStorage:GetAttributeChangedSignal(CLIENT_TEST_ATTRIBUTE):Connect(function()
+	triggerClientErrorTest(ReplicatedStorage:GetAttribute(CLIENT_TEST_ATTRIBUTE))
+end)
+
+triggerClientErrorTest(ReplicatedStorage:GetAttribute(CLIENT_TEST_ATTRIBUTE))
 
 LogService.MessageOut:Connect(function(message, messageType)
 	if messageType ~= Enum.MessageType.MessageError then

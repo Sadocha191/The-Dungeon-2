@@ -68,6 +68,12 @@ type NpcConfig = {
 	onDeath: ((any, {[string]: any}) -> ())?,
 }
 
+type ActiveCountFilter = {
+	includeNormal: boolean?,
+	includeElite: boolean?,
+	includeBoss: boolean?,
+}
+
 type AlivePlayerInfo = {
 	player: Player,
 	hrp: BasePart,
@@ -495,6 +501,27 @@ local function resolveNpc(target: any): NpcRecord?
 	end
 
 	return nil
+end
+
+local function matchesActiveCountFilter(npc: NpcRecord, filter: ActiveCountFilter?): boolean
+	if not filter then
+		return true
+	end
+
+	local includeNormal = filter.includeNormal
+	local includeElite = filter.includeElite
+	local includeBoss = filter.includeBoss
+	if includeNormal == nil and includeElite == nil and includeBoss == nil then
+		return true
+	end
+
+	if npc.isBoss then
+		return includeBoss == true
+	end
+	if npc.isElite then
+		return includeElite == true
+	end
+	return includeNormal == true
 end
 
 local function fireDamageIndicator(sourcePlayer: Player?, npc: NpcRecord, amount: number, crit: boolean?)
@@ -950,10 +977,10 @@ function NpcService.GetLivingModels(): {Model}
 	return result
 end
 
-function NpcService.GetActiveCount(): number
+function NpcService.GetActiveCount(filter: ActiveCountFilter?): number
 	local count = 0
 	for _, npc in pairs(npcById) do
-		if not npc.dead and npc.model.Parent then
+		if not npc.dead and npc.model.Parent and matchesActiveCountFilter(npc, filter) then
 			count += 1
 		end
 	end
