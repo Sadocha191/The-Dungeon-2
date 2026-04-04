@@ -739,6 +739,8 @@ local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, i
     return mob
 end
 
+local registerEliteController
+
 local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vector3?)
     local templateFolder = isElite and EliteFolder or NormalFolder
     local template = templateFolder:FindFirstChild(mobName)
@@ -1443,7 +1445,7 @@ local function tryCastAbility(controller, targetInfo, now, cfg)
 	return false
 end
 
-local function registerEliteController(model: Model, mobType: string, baseDamage: number)
+registerEliteController = function(model: Model, mobType: string, baseDamage: number)
 	if not ELITE_ABILITY_DATA[mobType] then
 		return
 	end
