@@ -1,1 +1,1 @@
-print("Hello world, from server!")
+-- Server entrypoint intentionally left blank.

@@ -1,0 +1,347 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+if not RunService:IsStudio() then
+	return
+end
+
+local DEBUG_PREFIXES = {
+	";debug",
+	";td",
+}
+
+local function ensureDebugFolder(): Folder
+	local folder = ReplicatedStorage:FindFirstChild("DebugSettings")
+	if folder and folder:IsA("Folder") then
+		return folder
+	end
+
+	folder = Instance.new("Folder")
+	folder.Name = "DebugSettings"
+	folder.Parent = ReplicatedStorage
+	return folder
+end
+
+local function ensureValue(className: string, name: string, defaultValue)
+	local folder = ensureDebugFolder()
+	local value = folder:FindFirstChild(name)
+	if value and value.ClassName ~= className then
+		value:Destroy()
+		value = nil
+	end
+	if not value then
+		value = Instance.new(className)
+		value.Name = name
+		value.Value = defaultValue
+		value.Parent = folder
+	end
+	return value
+end
+
+local godModeEnabled = ensureValue("BoolValue", "GodModeEnabled", true)
+local autoMobSpawnsEnabled = ensureValue("BoolValue", "AutoMobSpawnsEnabled", true)
+local spawnStressMode = ensureValue("BoolValue", "SpawnStressMode", true)
+local spawnBurstSize = ensureValue("IntValue", "SpawnBurstSize", 3)
+local spawnIntervalScale = ensureValue("NumberValue", "SpawnIntervalScale", 0.55)
+local maxAliveScale = ensureValue("NumberValue", "MaxAliveScale", 2.6)
+
+local function log(player: Player, message: string)
+	print(("[DebugCommand][%s] %s"):format(player.Name, message))
+end
+
+local function tokenize(message: string): {string}
+	local tokens = {}
+	for token in string.gmatch(message, "%S+") do
+		table.insert(tokens, token)
+	end
+	return tokens
+end
+
+local function extractCommandBody(message: string): string?
+	local lowerMessage = string.lower(message)
+	for _, prefix in ipairs(DEBUG_PREFIXES) do
+		if string.sub(lowerMessage, 1, #prefix) == prefix then
+			local body = string.sub(message, #prefix + 1)
+			return string.gsub(body, "^%s+", "")
+		end
+	end
+	return nil
+end
+
+local function parseToggleArg(raw: string?, currentValue: boolean): boolean?
+	local token = string.lower(tostring(raw or "toggle"))
+	if token == "toggle" then
+		return not currentValue
+	end
+	if token == "on" or token == "true" or token == "1" then
+		return true
+	end
+	if token == "off" or token == "false" or token == "0" then
+		return false
+	end
+	return nil
+end
+
+local function parsePositiveInt(raw: string?): number?
+	local value = tonumber(raw)
+	if not value then
+		return nil
+	end
+	return math.max(0, math.floor(value))
+end
+
+local function parsePositiveNumber(raw: string?): number?
+	local value = tonumber(raw)
+	if not value then
+		return nil
+	end
+	return math.max(0, value)
+end
+
+local HELP_LINES = {
+	";debug help",
+	";debug status",
+	";debug god [on/off/toggle]",
+	";debug spawns [on/off/toggle]",
+	";debug stress [on/off/toggle]",
+	";debug elite [name] [count]",
+	";debug normal [name] [count]",
+	";debug boss",
+	";debug clear",
+	";debug xp <amount>",
+	";debug coins <amount>",
+	";debug burst <count>",
+	";debug interval <scale>",
+	";debug maxalive <scale>",
+}
+
+local function printHelp(player: Player)
+	for _, line in ipairs(HELP_LINES) do
+		log(player, line)
+	end
+end
+
+local function reportStatus(player: Player)
+	log(
+		player,
+		("god=%s autoSpawns=%s stress=%s burst=%d interval=%.2f maxAlive=%.2f"):format(
+			tostring(godModeEnabled.Value),
+			tostring(autoMobSpawnsEnabled.Value),
+			tostring(spawnStressMode.Value),
+			math.floor(spawnBurstSize.Value),
+			spawnIntervalScale.Value,
+			maxAliveScale.Value
+		)
+	)
+end
+
+local function handleSpawnRequest(player: Player, isElite: boolean, args: {string})
+	local count = 1
+	local name = args[2]
+
+	if #args == 2 then
+		local maybeCount = parsePositiveInt(args[2])
+		if maybeCount and maybeCount >= 1 then
+			name = nil
+			count = maybeCount
+		end
+	elseif #args >= 3 then
+		local explicitCount = parsePositiveInt(args[3])
+		if explicitCount and explicitCount >= 1 then
+			count = explicitCount
+		else
+			log(player, ("Use: ;debug %s [name] [count]"):format(isElite and "elite" or "normal"))
+			return
+		end
+	end
+
+	local spawnFn = isElite and _G.DebugForceEliteSpawn or _G.DebugForceSpawnMob
+	if type(spawnFn) ~= "function" then
+		log(player, "Spawn hook is not ready yet.")
+		return
+	end
+
+	local ok, result = pcall(function()
+		if isElite then
+			return spawnFn(name, count)
+		end
+		return spawnFn(name, false, count)
+	end)
+	if not ok then
+		log(player, ("Spawn failed: %s"):format(tostring(result)))
+		return
+	end
+
+	local spawnedCount = typeof(result) == "table" and #result or 0
+	log(player, ("Spawned %d %s mob(s)."):format(spawnedCount, isElite and "elite" or "normal"))
+end
+
+local function handleCommand(player: Player, message: string)
+	local body = extractCommandBody(message)
+	if not body then
+		return
+	end
+
+	local args = tokenize(body)
+	local command = string.lower(args[1] or "help")
+
+	if command == "" or command == "help" then
+		printHelp(player)
+		return
+	end
+
+	if command == "status" then
+		reportStatus(player)
+		return
+	end
+
+	if command == "god" then
+		local nextValue = parseToggleArg(args[2], godModeEnabled.Value)
+		if nextValue == nil then
+			log(player, "Use: ;debug god on|off|toggle")
+			return
+		end
+		godModeEnabled.Value = nextValue
+		log(player, ("God mode = %s"):format(tostring(nextValue)))
+		return
+	end
+
+	if command == "spawns" then
+		local nextValue = parseToggleArg(args[2], autoMobSpawnsEnabled.Value)
+		if nextValue == nil then
+			log(player, "Use: ;debug spawns on|off|toggle")
+			return
+		end
+		autoMobSpawnsEnabled.Value = nextValue
+		if type(_G.DebugSetAutoMobSpawnsEnabled) == "function" then
+			pcall(function()
+				_G.DebugSetAutoMobSpawnsEnabled(nextValue)
+			end)
+		end
+		log(player, ("Auto mob spawns = %s"):format(tostring(nextValue)))
+		return
+	end
+
+	if command == "stress" then
+		local nextValue = parseToggleArg(args[2], spawnStressMode.Value)
+		if nextValue == nil then
+			log(player, "Use: ;debug stress on|off|toggle")
+			return
+		end
+		spawnStressMode.Value = nextValue
+		log(player, ("Spawn stress mode = %s"):format(tostring(nextValue)))
+		return
+	end
+
+	if command == "burst" then
+		local count = parsePositiveInt(args[2])
+		if not count or count < 1 then
+			log(player, "Use: ;debug burst <count>")
+			return
+		end
+		spawnBurstSize.Value = count
+		log(player, ("Spawn burst size = %d"):format(count))
+		return
+	end
+
+	if command == "interval" then
+		local scale = parsePositiveNumber(args[2])
+		if not scale or scale <= 0 then
+			log(player, "Use: ;debug interval <scale>")
+			return
+		end
+		spawnIntervalScale.Value = scale
+		log(player, ("Spawn interval scale = %.2f"):format(scale))
+		return
+	end
+
+	if command == "maxalive" then
+		local scale = parsePositiveNumber(args[2])
+		if not scale or scale <= 0 then
+			log(player, "Use: ;debug maxalive <scale>")
+			return
+		end
+		maxAliveScale.Value = scale
+		log(player, ("Max alive scale = %.2f"):format(scale))
+		return
+	end
+
+	if command == "elite" then
+		handleSpawnRequest(player, true, args)
+		return
+	end
+
+	if command == "normal" then
+		handleSpawnRequest(player, false, args)
+		return
+	end
+
+	if command == "boss" then
+		if type(_G.DebugForceBossSpawn) ~= "function" then
+			log(player, "Boss spawn hook is not ready yet.")
+			return
+		end
+		local ok, result = pcall(function()
+			return _G.DebugForceBossSpawn()
+		end)
+		if not ok then
+			log(player, ("Boss spawn failed: %s"):format(tostring(result)))
+			return
+		end
+		log(player, result and "Boss spawned." or "Boss spawn returned nil.")
+		return
+	end
+
+	if command == "clear" then
+		if type(_G.DebugClearEnemies) ~= "function" then
+			log(player, "Clear hook is not ready yet.")
+			return
+		end
+		local ok, result = pcall(function()
+			return _G.DebugClearEnemies()
+		end)
+		if not ok then
+			log(player, ("Clear failed: %s"):format(tostring(result)))
+			return
+		end
+		log(player, ("Cleared %d enemy model(s)."):format(tonumber(result) or 0))
+		return
+	end
+
+	if command == "xp" or command == "coins" then
+		local amount = parsePositiveInt(args[2])
+		if not amount or amount <= 0 then
+			log(player, ("Use: ;debug %s <amount>"):format(command))
+			return
+		end
+		if type(_G.AwardPlayer) ~= "function" then
+			log(player, "Award hook is not ready yet.")
+			return
+		end
+		if command == "xp" then
+			_G.AwardPlayer(player, amount, 0)
+		else
+			_G.AwardPlayer(player, 0, amount)
+		end
+		log(player, ("Granted %d %s."):format(amount, command))
+		return
+	end
+
+	log(player, ("Unknown command: %s"):format(command))
+	printHelp(player)
+end
+
+local function hookPlayer(player: Player)
+	player.Chatted:Connect(function(message)
+		handleCommand(player, message)
+	end)
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+	hookPlayer(player)
+end
+
+Players.PlayerAdded:Connect(hookPlayer)
+
+print("[DebugCommandService] Ready (Studio only)")

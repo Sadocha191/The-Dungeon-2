@@ -25,6 +25,7 @@ local function ensureValue(className: string, name: string, defaultValue)
 end
 
 local godModeEnabled = ensureValue("BoolValue", "GodModeEnabled", true)
+ensureValue("BoolValue", "AutoMobSpawnsEnabled", true)
 ensureValue("BoolValue", "SpawnStressMode", true)
 ensureValue("IntValue", "SpawnBurstSize", 3)
 ensureValue("NumberValue", "SpawnIntervalScale", 0.55)

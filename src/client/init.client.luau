@@ -1,1 +1,1 @@
-print("Hello world, from client!")
+-- Client entrypoint intentionally left blank.

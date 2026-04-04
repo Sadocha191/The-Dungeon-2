@@ -419,10 +419,21 @@ local function getDebugNumber(name: string, defaultValue: number): number
 	return defaultValue
 end
 
-local function isSpawnStressEnabled(): boolean
+local function getDebugBoolean(name: string, defaultValue: boolean): boolean
 	local folder = ReplicatedStorage:FindFirstChild("DebugSettings")
-	local value = folder and folder:FindFirstChild("SpawnStressMode")
-	return value ~= nil and value:IsA("BoolValue") and value.Value == true
+	local value = folder and folder:FindFirstChild(name)
+	if value and value:IsA("BoolValue") then
+		return value.Value
+	end
+	return defaultValue
+end
+
+local function isSpawnStressEnabled(): boolean
+	return getDebugBoolean("SpawnStressMode", false)
+end
+
+local function areAutoMobSpawnsEnabled(): boolean
+	return getDebugBoolean("AutoMobSpawnsEnabled", true)
 end
 
 local function getSpawnStressConfig(): (number, number, number)
@@ -1778,6 +1789,7 @@ local bossSpawnPending = false
 local bossDefeated = false
 local nextBossReinforcementAt = math.huge
 local refreshPortalPromptState = nil
+local spawnBossNearPortal: (() -> boolean)? = nil
 
 -- Stats for InfoUI
 local function fmtTimePayload(tSeconds: number)
@@ -1902,7 +1914,7 @@ local function ensurePortal()
 		end
 	end
 
-	local function spawnBossNearPortal()
+	spawnBossNearPortal = function()
 		if bossModel and bossModel.Parent then
 			bossSpawnPending = false
 			return true
@@ -2000,6 +2012,126 @@ if RunStarted.Value == true then
 	ensurePortal()
 end
 
+local function ensureDebugSettingsFolder(): Folder
+	local folder = ReplicatedStorage:FindFirstChild("DebugSettings")
+	if folder and folder:IsA("Folder") then
+		return folder
+	end
+
+	folder = Instance.new("Folder")
+	folder.Name = "DebugSettings"
+	folder.Parent = ReplicatedStorage
+	return folder
+end
+
+local function setDebugBool(name: string, value: boolean): boolean
+	local folder = ensureDebugSettingsFolder()
+	local flag = folder:FindFirstChild(name)
+	if flag and not flag:IsA("BoolValue") then
+		flag:Destroy()
+		flag = nil
+	end
+	if not flag then
+		flag = Instance.new("BoolValue")
+		flag.Name = name
+		flag.Parent = folder
+	end
+	flag.Value = value == true
+	return flag.Value
+end
+
+local function resolveDebugSpawnName(mobName: string?, isElite: boolean): string?
+	local cleaned = typeof(mobName) == "string" and string.gsub(mobName, "^%s*(.-)%s*$", "%1") or ""
+	if cleaned ~= "" then
+		return cleaned
+	end
+
+	if isElite then
+		if #eliteOrder > 0 then
+			return eliteOrder[((eliteIndex - 1) % #eliteOrder) + 1]
+		end
+		local fallback = EliteFolder:FindFirstChildWhichIsA("Model")
+		return fallback and fallback.Name or nil
+	end
+
+	local pool = getPool(elapsed())
+	return pickWeighted(pool)
+end
+
+local function debugForceSpawn(mobName: string?, isElite: boolean, count: number?): {Model}
+	local spawned = {}
+	local targetCount = math.max(1, math.floor(tonumber(count) or 1))
+
+	for _ = 1, targetCount do
+		if not hasEnemyCapacity(1) then
+			break
+		end
+
+		local chosenName = resolveDebugSpawnName(mobName, isElite)
+		if not chosenName then
+			break
+		end
+
+		local mob = spawnMob(chosenName, isElite, nil)
+		if not mob then
+			break
+		end
+
+		table.insert(spawned, mob)
+	end
+
+	return spawned
+end
+
+local function debugClearEnemies(): number
+	local cleared = 0
+	for _, enemy in ipairs(ENEMIES_FOLDER:GetChildren()) do
+		if enemy:IsA("Model") then
+			cleared += 1
+			if NpcService and NpcService.Despawn then
+				pcall(function()
+					NpcService.Despawn(enemy)
+				end)
+			elseif enemy.Parent then
+				enemy:Destroy()
+			end
+		end
+	end
+	return cleared
+end
+
+_G.DebugAreAutoMobSpawnsEnabled = areAutoMobSpawnsEnabled
+_G.DebugSetAutoMobSpawnsEnabled = function(enabled: boolean)
+	return setDebugBool("AutoMobSpawnsEnabled", enabled == true)
+end
+_G.DebugForceSpawnMob = function(mobName: string?, isElite: boolean?, count: number?)
+	return debugForceSpawn(mobName, isElite == true, count)
+end
+_G.DebugForceEliteSpawn = function(mobName: string?, count: number?)
+	return debugForceSpawn(mobName, true, count)
+end
+_G.DebugForceBossSpawn = function()
+	ensurePortal()
+	portalActivated = true
+	bossDefeated = false
+	bossSpawnPending = true
+	if refreshPortalPromptState then
+		refreshPortalPromptState()
+	end
+	if not spawnBossNearPortal then
+		return nil
+	end
+	local ok = spawnBossNearPortal()
+	if refreshPortalPromptState then
+		refreshPortalPromptState()
+	end
+	if not ok then
+		return nil
+	end
+	return bossModel
+end
+_G.DebugClearEnemies = debugClearEnemies
+
 -- Initial HUD ping
 do
 	local left, over = fmtTimePayload(0)
@@ -2043,7 +2175,7 @@ RunService.Heartbeat:Connect(function()
 	stepBossController(os.clock())
 
     -- HUD update (4x/sec max)
-    if t - lastHudPush >= 0.25 then
+	if t - lastHudPush >= 0.25 then
         lastHudPush = t
 		local nextIn = nil
 		if eliteIndex <= eliteTotal and nextEliteAt < math.huge then
@@ -2064,6 +2196,11 @@ RunService.Heartbeat:Connect(function()
 			bossDefeated = bossDefeated,
         })
 	end
+
+	if not areAutoMobSpawnsEnabled() then
+		return
+	end
+
     -- Elites (every 5 minutes during the scheduled run)
     if eliteIndex <= eliteTotal and t >= nextEliteAt then
         if not hasEnemyCapacity(1) then

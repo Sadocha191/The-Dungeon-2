@@ -1,4 +1,5 @@
 local Workspace = game:GetService("Workspace")
+local CollectionService = game:GetService("CollectionService")
 
 local WorldBounds = {}
 
@@ -8,6 +9,7 @@ local DEFAULT_RANDOM_TRIES = 40
 local DEFAULT_RAY_ORIGIN_Y = 420
 local DEFAULT_RAY_DISTANCE = 900
 local DEFAULT_NEARBY_RADII = { 0, 4, 8, 12 }
+local GROUND_SURFACE_TAG = "Terrain"
 
 local function mergeBounds(bounds, minX, maxX, minZ, maxZ)
 	if minX == nil or maxX == nil or minZ == nil or maxZ == nil then
@@ -42,6 +44,48 @@ end
 
 local function getTerrain()
 	return Workspace:FindFirstChildOfClass("Terrain")
+end
+
+local function hasGroundTag(inst): boolean
+	local current = inst
+	while current and current ~= Workspace do
+		if CollectionService:HasTag(current, GROUND_SURFACE_TAG) then
+			return true
+		end
+		current = current.Parent
+	end
+	return false
+end
+
+local function forEachTaggedGroundPart(visitor)
+	local seen = {}
+	for _, inst in ipairs(CollectionService:GetTagged(GROUND_SURFACE_TAG)) do
+		if inst:IsA("BasePart") then
+			if not seen[inst] then
+				seen[inst] = true
+				visitor(inst)
+			end
+		else
+			for _, descendant in ipairs(inst:GetDescendants()) do
+				if descendant:IsA("BasePart") and not seen[descendant] then
+					seen[descendant] = true
+					visitor(descendant)
+				end
+			end
+		end
+	end
+end
+
+local function taggedGroundExtents()
+	local bounds = nil
+	forEachTaggedGroundPart(function(part)
+		bounds = mergeBounds(bounds, partExtents(part))
+	end)
+	return bounds
+end
+
+local function isGroundSurface(inst): boolean
+	return (inst and inst == getTerrain()) or hasGroundTag(inst)
 end
 
 local function terrainExtents()
@@ -154,6 +198,7 @@ end
 function WorldBounds.GetXZ(pad: number?, fallbackMin: Vector2?, fallbackMax: Vector2?)
 	local bounds = nil
 	bounds = mergeBounds(bounds, terrainExtents())
+	bounds = mergeBounds(bounds, taggedGroundExtents())
 
 	if not bounds then
 		local mapBounds = mapExtents()
@@ -179,18 +224,13 @@ function WorldBounds.GetXZ(pad: number?, fallbackMin: Vector2?, fallbackMax: Vec
 end
 
 function WorldBounds.RaycastTerrain(origin: Vector3, direction: Vector3, ignoreInstances: { Instance }?, ignoreWater: boolean?)
-	local terrain = getTerrain()
-	if not terrain then
-		return nil
-	end
-
 	local ignore = buildInstanceList(ignoreInstances)
 	for _ = 1, 8 do
 		local hit = Workspace:Raycast(origin, direction, buildRaycastParams(ignore, ignoreWater))
 		if not hit then
 			return nil
 		end
-		if hit.Instance == terrain then
+		if isGroundSurface(hit.Instance) then
 			return hit
 		end
 		table.insert(ignore, hit.Instance)
@@ -228,7 +268,7 @@ function WorldBounds.IsAreaClear(pos: Vector3, radius: number, height: number?, 
 	local hits = Workspace:GetPartBoundsInBox(CFrame.new(center), box, buildOverlapParams(ignoreInstances))
 
 	for _, hit in ipairs(hits) do
-		if isBlockingPart(hit) then
+		if isBlockingPart(hit) and not isGroundSurface(hit) then
 			return false, hit
 		end
 	end

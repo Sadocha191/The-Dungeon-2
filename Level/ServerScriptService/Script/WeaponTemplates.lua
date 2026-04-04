@@ -39,20 +39,57 @@ local function applyConfig(inst: Instance, def: any)
 	end
 end
 
+local function applyTemplateConfig(template: Instance, def: any): boolean
+	if not template then
+		return false
+	end
+
+	applyConfig(template, def)
+	for _, desc in ipairs(template:GetDescendants()) do
+		if desc:IsA("Tool") then
+			applyConfig(desc, def)
+		end
+	end
+
+	return true
+end
+
 local updated = 0
+local missingDefs = {}
+
 for _, def in ipairs(WeaponConfigs.GetAll()) do
 	local template = findTemplate(def.id)
-	if template then
-		applyConfig(template, def)
-		for _, desc in ipairs(template:GetDescendants()) do
-			if desc:IsA("Tool") then
-				applyConfig(desc, def)
-			end
-		end
+	if template and applyTemplateConfig(template, def) then
 		updated += 1
 	else
-		warn("[WeaponTemplates] Missing template:", def.id)
+		table.insert(missingDefs, def)
 	end
+end
+
+if #missingDefs > 0 then
+	local deadline = time() + 2
+	repeat
+		local stillMissing = {}
+		for _, def in ipairs(missingDefs) do
+			local template = findTemplate(def.id)
+			if template and applyTemplateConfig(template, def) then
+				updated += 1
+			else
+				table.insert(stillMissing, def)
+			end
+		end
+
+		missingDefs = stillMissing
+		if #missingDefs == 0 then
+			break
+		end
+
+		task.wait(0.1)
+	until time() >= deadline
+end
+
+for _, def in ipairs(missingDefs) do
+	warn("[WeaponTemplates] Missing template:", def.id)
 end
 
 print("[WeaponTemplates] Normalized weapon templates:", updated)
