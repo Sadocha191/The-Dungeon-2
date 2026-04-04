@@ -825,6 +825,10 @@ local function messageForFailure(reason: string): string
 		return ERROR_PREFIX .. "This level does not have a placeId yet."
 	elseif reason == "unknown_level" then
 		return "The selected level could not be found."
+	elseif reason == "mining_active" then
+		return "You cannot enter the portal right now because you are busy in the mine."
+	elseif reason == "party_member_mining" then
+		return "A party member is busy in the mine and cannot enter the portal yet."
 	end
 
 	return "Teleport failed. Try again."

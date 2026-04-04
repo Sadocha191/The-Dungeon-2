@@ -9,7 +9,9 @@ local Workspace = game:GetService("Workspace")
 
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 local PickupToastService = require(serverModules:WaitForChild("PickupToastService"))
+local PlayerData = require(serverModules:WaitForChild("PlayerData"))
 local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
+local CraftingService = require(serverModules:WaitForChild("CraftingService"))
 local WeaponCatalog = require(serverModules:WaitForChild("WeaponCatalog"))
 
 -- FIX: używamy RemoteEvents (zgodnie z resztą gry)
@@ -50,6 +52,7 @@ local NPCS_FOLDER = findNpcsFolder()
 
 local STARTER_SWORD_NAME = "StarterSword"
 local FALLBACK_SWORD_NAME = "Knight's Oath"
+local TUTORIAL_SCHEMATIC_RECIPE_ID = "Knight's Oath"
 local STARTER_SPELL_ID = "Spellbook"
 local REQUIRE_EQUIPPED = false
 
@@ -308,9 +311,33 @@ local function giveStarterSword(player: Player)
 	return true
 end
 
-local function ensureTutorialStarterWeapon(player: Player)
+local function hasTutorialSchematic(player: Player): boolean
+	local data = PlayerData.Get(player)
+	local crafting = typeof(data) == "table" and data.crafting or nil
+	local recipes = typeof(crafting) == "table" and crafting.recipes or nil
+	local state = typeof(recipes) == "table" and recipes[TUTORIAL_SCHEMATIC_RECIPE_ID] or nil
+	return state == true or (typeof(state) == "table" and state.found == true)
+end
+
+local function giveTutorialSchematic(player: Player, silentToast: boolean?): boolean
+	if hasTutorialSchematic(player) then
+		return true
+	end
+
+	local ok = CraftingService.AddRecipeDiscovery(player, TUTORIAL_SCHEMATIC_RECIPE_ID, {
+		silentToast = silentToast == true,
+		toastNote = "Blacksmith Schematic",
+	})
+	return ok == true
+end
+
+local function ensureTutorialBlacksmithRewards(player: Player)
 	local tutorial = PlayerStateStore.GetTutorialState(player)
-	if not tutorial or tutorial.Complete then
+	if not tutorial then
+		return
+	end
+	if tutorial.Complete then
+		giveTutorialSchematic(player, true)
 		return
 	end
 	if tutorial.Active ~= true then
@@ -319,6 +346,7 @@ local function ensureTutorialStarterWeapon(player: Player)
 	if (tutorial.Step or 1) < 3 then
 		return
 	end
+	giveTutorialSchematic(player, true)
 	giveStarterSword(player)
 end
 
@@ -367,6 +395,7 @@ DialogueFinishedEvent.OnServerEvent:Connect(function(player: Player, dialogueKey
 	if not current or current.dialogueKey ~= dialogueKey then return end
 
 	if tutorial.Step == 2 then
+		giveTutorialSchematic(player)
 		giveStarterSword(player)
 		advanceStep(player, 3)
 		return
@@ -387,13 +416,13 @@ end)
 Players.PlayerAdded:Connect(function(player: Player)
 	local tutorial = ensureDefaults(player)
 	applyAttributes(player, tutorial)
-	ensureTutorialStarterWeapon(player)
+	ensureTutorialBlacksmithRewards(player)
 	sendObjective(player, tutorial.Step, tutorial.Active)
 
 	player.CharacterAdded:Connect(function()
 		local current = PlayerStateStore.GetTutorialState(player)
 		applyAttributes(player, current)
-		ensureTutorialStarterWeapon(player)
+		ensureTutorialBlacksmithRewards(player)
 		sendObjective(player, current.Step, current.Active)
 	end)
 end)

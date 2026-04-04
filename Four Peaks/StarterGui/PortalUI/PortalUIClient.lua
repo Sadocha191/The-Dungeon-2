@@ -541,9 +541,9 @@ local function messageForFailure(reason)
 	elseif reason == "unknown_level" then
 		return "The selected level could not be found."
 	elseif reason == "mining_active" then
-		return "Stop mining first before entering a battle."
+		return "You cannot enter the portal right now because you are busy in the mine."
 	elseif reason == "party_member_mining" then
-		return "A party member is still mining and must stop before entering a battle."
+		return "A party member is busy in the mine and cannot enter the portal yet."
 	end
 
 	return "Teleport failed. Try again."

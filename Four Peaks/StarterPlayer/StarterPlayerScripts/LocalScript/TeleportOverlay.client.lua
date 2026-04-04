@@ -4,6 +4,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
 local ContextActionService = game:GetService("ContextActionService")
 
 local plr = Players.LocalPlayer
@@ -69,6 +70,28 @@ local function setTeleporting(on: boolean, message: string?)
 	end
 end
 
+local function getFailureMessage(reason: string?): string?
+	if reason == "mining_active" then
+		return "You cannot enter the portal right now because you are busy in the mine."
+	elseif reason == "party_member_mining" then
+		return "A party member is busy in the mine and cannot enter the portal yet."
+	end
+	return nil
+end
+
+local function showNotification(title: string, text: string)
+	local ok, err = pcall(function()
+		StarterGui:SetCore("SendNotification", {
+			Title = title,
+			Text = text,
+			Duration = 4,
+		})
+	end)
+	if not ok then
+		warn("[TeleportOverlay] Notification failed:", err)
+	end
+end
+
 TeleportStatus.OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then return end
 	if payload.type == "teleporting" then
@@ -76,5 +99,9 @@ TeleportStatus.OnClientEvent:Connect(function(payload)
 	elseif payload.type == "failed" then
 		-- Allow user to close/try again
 		setTeleporting(false)
+		local failureMessage = getFailureMessage(typeof(payload.reason) == "string" and payload.reason or nil)
+		if failureMessage then
+			showNotification("Portal blocked", failureMessage)
+		end
 	end
 end)
