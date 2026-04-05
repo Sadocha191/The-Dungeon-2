@@ -1,175 +1,110 @@
-The Dungeon 2 — Game Rules & Flow
-Core Concept
+# The Dungeon 2
 
-The Dungeon 2 is a session-based dungeon crawler built around short “runs” where you enter a level, fight increasingly dangerous enemies, build your power through drops and upgrades, and try to survive until the end.
+The Dungeon 2 is a Roblox survivors action RPG built around two connected experiences: a persistent lobby and high-pressure dungeon runs. Players prepare in town, enter a hostile biome, survive escalating enemy pressure, collect materials and rewards, then bring that progress back into the long-term meta loop.
 
-Your long-term progression (weapons, currency, quests) happens in the Lobby. Your short-term progression (combat power during the run) happens inside the Dungeon.
+The project takes inspiration from Vampire Survivors, Megabonk, and dark fantasy dungeon crawlers, but leans harder into exploration, loot routing, portal progression, and account-based progression between runs.
 
-Main Loop
+## Core Pillars
 
-Start in the Lobby (Village).
+- A lobby that matters, with progression systems that persist beyond a single match
+- Auto-attack combat focused on movement, positioning, upgrades, and survival pressure
+- Dark fantasy runs built around exploration, scaling enemy density, and boss finishes
+- Weapon progression through crafting, upgrading, recipes, and long-term collection
+- A connected loop where success in the dungeon feeds directly back into the lobby
 
-Interact with NPCs (tutorial, quests, blacksmith).
+## Current Gameplay Slice
 
-Enter the Portal and select a level.
+### Lobby (`Four Peaks`)
 
-Play a run: fight, collect rewards, improve your build.
+The lobby is the backbone of the game's meta progression. The current project includes systems for:
 
-Survive to the end and return to the Lobby with your earnings.
+- tutorial and onboarding flow
+- character creation and race selection
+- inventory, weapon ownership, and equipment syncing
+- blacksmith crafting, recipe unlocks, upgrades, and selling
+- rotating daily and weekly missions
+- mining routes and material gathering
+- party flow, level selection, and dungeon teleporting
+- banner and NPC-driven shop systems
 
-Tutorial Rules
+### Dungeon (`Level`)
 
-New players start with a guided tutorial in the Lobby.
+The combat place is built around survivors-style pressure and automatic attacking. The current project includes systems for:
 
-During the tutorial:
+- time-based enemy escalation instead of fixed waves
+- weapon archetypes across swords, scythes, halberds, bows, pistols, and staves
+- level-up offers with reroll, skip, banish, and spell selection
+- elite pressure spikes and late-run boss flow
+- chests, shrines, pickups, reward reveals, and mission tracking
+- persistent drops and progression hooks that feed rewards back to the lobby
 
-NPC menus (Blacksmith, Missions) are blocked.
+## World And Content
 
-Only tutorial dialogues are available.
+Current level definitions include:
 
-Once the tutorial is completed:
+- Ashen Wastes
+- Hollow Marsh
+- Blightmoor
+- Shattered Highlands
+- Dreadwood
 
-All NPC systems unlock permanently for that player.
+The current enemy roster in the combat place includes:
 
-Runs (Dungeon Sessions)
-Run Duration and Win Condition
+- Slime
+- Zombie
+- Skeleton
+- Goblin
+- Warewolf
+- Harp
+- Demon
+- LandShark
+- Golem
+- Knight
+- Ent
 
-A run lasts up to 20 minutes.
+Example weapon lineup currently present in the repo includes:
 
-After 20 minutes, the level boss spawns.
+- Knight's Oath
+- Hunter's Longbow
+- Warden's Halberd
+- Reaper's Crescent
+- Excalion, Blade of Kings
+- Harvest of the End
+- Archmage's Worldstaff
+- Kingslayer Handcannon
 
-Defeating the boss ends the run as a win and returns the player to the Lobby.
+## Repo Layout
 
-Enemy Scaling
+This repository is organized around place snapshots, not a single Rojo-first source tree.
 
-Enemies spawn in progressively stronger tiers (weak → strong).
+- `Four Peaks/` - lobby place snapshot with meta progression, NPC systems, missions, crafting, and teleport flow
+- `Level/` - combat place snapshot with enemy spawning, run systems, combat logic, rewards, and mission hooks
+- `src/` - minimal Rojo bootstrap/example source tree
+- `default.project.json` - lightweight Rojo project file for `src/`, not the primary workflow for the full game
 
-The same base enemy can appear in multiple variants, with scaled stats.
+If you are looking for the main gameplay code, start in `Four Peaks` for lobby systems and `Level` for run systems.
 
-Every 5 minutes, an Elite enemy spawns:
+## Good Entry Points
 
-Elites are stronger than standard enemies.
+Useful files for understanding the current architecture:
 
-Elites are intended as difficulty spikes and higher-value targets.
+- `Four Peaks/ServerScriptService/Script/BlacksmithService.lua`
+- `Four Peaks/ServerScriptService/ModuleScript/CraftingService.lua`
+- `Four Peaks/ServerScriptService/ModuleScript/MissionService.lua`
+- `Four Peaks/ServerScriptService/Script/PortalToDungeon.lua`
+- `Level/ServerScriptService/Script/Model.model/WaveController.lua`
+- `Level/ServerScriptService/Script/ProgressService.lua`
+- `Level/ServerScriptService/Script/WeaponCombat.server.lua`
+- `Level/ServerScriptService/Script/SpellService.lua`
 
-Rewards During a Run
+## Development Notes
 
-While playing a run you earn:
+- `Four Peaks` and `Level` are separate place snapshots and should be treated as different sides of the same game
+- `src/` is not a full mirror of the live project
+- When making changes, verify that you are editing the correct side:
+  - `Four Peaks` for lobby and meta systems
+  - `Level` for combat and run logic
 
-Coins (main free-to-play currency)
+## Status
 
-Progress toward Daily and Weekly Missions
-
-Any run-based rewards configured for that level
-
-After the run ends, all earned rewards are reflected back in the Lobby.
-
-Weapons and Inventory
-Weapon Ownership
-
-Weapons are owned as instances (duplicates are allowed).
-
-Each instance can have:
-
-Rarity (up to Epic via Blacksmith forging)
-
-Level (capped by rarity)
-
-Prefix/Quality modifier that alters stats (e.g., weaker-than-base or stronger-than-base outcomes)
-
-Equipping
-
-You enter a run using your currently equipped weapon instance.
-
-Weapon access during a run is restricted to the equipped weapon (no mid-run weapon swapping unless explicitly implemented later).
-
-Blacksmith System (Forge & Upgrade)
-
-The Blacksmith is the main way to acquire and improve weapons.
-
-Forge
-
-Uses Coins (fixed cost per forge).
-
-Produces:
-
-A random weapon type
-
-A random rarity (limited to Epic)
-
-A random quality prefix that modifies all stats
-
-Forged weapons go directly into the player inventory as a new instance.
-
-Upgrade
-
-Upgrades apply to a selected owned weapon instance.
-
-Upgrading increases weapon level up to its rarity cap.
-
-The UI supports:
-
-Repeated upgrading without re-selecting the weapon
-
-Batch upgrade options (including +10)
-
-Missions (Daily / Weekly)
-Where Missions Are Claimed
-
-Missions are handled by the Knight NPC.
-
-Mission Structure
-
-The mission menu displays:
-
-6 Daily missions
-
-12 Weekly missions
-
-Missions progress is tracked automatically based on gameplay actions (kills, time, run completion, etc., depending on the mission definitions).
-
-Reset Rules
-
-Daily missions reset on a daily schedule.
-
-Weekly missions reset on a weekly schedule.
-
-After a reset:
-
-A fresh set of missions is selected for that player.
-
-Claim status and progress are cleared for that cycle.
-
-Rewards
-
-Missions reward currencies (primarily Coins and optionally premium currency depending on configuration).
-
-Claiming is only possible when the mission is marked Claimable (requirements met).
-
-Currency
-
-Coins: core free-to-play currency used for forging and other systems.
-
-Additional currencies may exist and can be used for other systems (e.g., premium/gacha), depending on current implementation.
-
-Saving and Persistence
-
-The game stores player progression persistently:
-
-Tutorial completion state
-
-Owned weapon instances and equipped weapon
-
-Mission selections, progress, and claim history
-
-Currency balances
-
-Progress earned during a run is applied back to the persistent profile when appropriate (end-of-run and periodic saves depending on implementation).
-
-Player Experience Summary
-
-Lobby: preparation, NPC systems, forging/upgrading, missions, portal selection
-
-Dungeon: combat session, scaling enemies, elite spikes every 5 minutes, boss at 20 minutes
-
-Return: rewards and progress feed back into the Lobby systems
+The Dungeon 2 is an active in-development Roblox project. The current codebase already contains the backbone for the lobby-to-run loop, and ongoing work is focused on combat pacing, progression depth, content expansion, and polish.
