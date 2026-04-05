@@ -398,16 +398,35 @@ local NORMAL_SOUL_DROP_CONFIG = RunSpawnConfig.NORMAL_SOUL_DROP or {}
 local LEVEL_SPAWN_BANDS = RunSpawnConfig.LEVEL_SPAWN_BANDS or {}
 local OVERTIME_SPAWN_CONFIG = RunSpawnConfig.OVERTIME or {}
 local SWARM_SPAWN_CONFIG = RunSpawnConfig.SWARM or {}
+local IMPORTANT_ENCOUNTER_SPAWN_CONFIG = RunSpawnConfig.IMPORTANT_ENCOUNTER or {}
 local DEFAULT_LEVEL_SPAWN_BAND = {
 	baseMaxAlive = 24,
 	alivePerMinute = 4,
 	spawnBurst = 1,
 	intervalMultiplier = 1,
 }
+local DEFAULT_IMPORTANT_ENCOUNTER_CONFIG = {
+	maxAliveMultiplier = 1,
+	intervalMultiplier = 1,
+	burstMultiplier = 1,
+	minNormalAlive = 0,
+	trimInterval = 0,
+	trimDistance = 0,
+}
 local NORMAL_ENEMY_COUNT_FILTER = {
 	includeNormal = true,
 	includeElite = false,
 	includeBoss = false,
+}
+local ELITE_ENEMY_COUNT_FILTER = {
+	includeNormal = false,
+	includeElite = true,
+	includeBoss = false,
+}
+local BOSS_ENEMY_COUNT_FILTER = {
+	includeNormal = false,
+	includeElite = false,
+	includeBoss = true,
 }
 
 local function getDebugNumber(name: string, defaultValue: number): number
@@ -534,9 +553,42 @@ local function activeNormalEnemiesCount()
 	return NpcService.GetActiveCount(NORMAL_ENEMY_COUNT_FILTER)
 end
 
+local function activeEliteEnemiesCount()
+	return NpcService.GetActiveCount(ELITE_ENEMY_COUNT_FILTER)
+end
+
+local function activeBossEnemiesCount()
+	return NpcService.GetActiveCount(BOSS_ENEMY_COUNT_FILTER)
+end
+
 local function hasEnemyCapacity(slotsNeeded: number?): boolean
 	local needed = math.max(1, math.floor(tonumber(slotsNeeded) or 1))
 	return (activeEnemiesCount() + needed) <= MAX_LIVING_ENEMIES
+end
+
+local function getImportantEncounterConfig(kind: string?)
+	local cfg = kind and IMPORTANT_ENCOUNTER_SPAWN_CONFIG[kind] or nil
+	if typeof(cfg) ~= "table" then
+		cfg = DEFAULT_IMPORTANT_ENCOUNTER_CONFIG
+	end
+	return {
+		maxAliveMultiplier = math.max(0.05, tonumber(cfg.maxAliveMultiplier) or DEFAULT_IMPORTANT_ENCOUNTER_CONFIG.maxAliveMultiplier),
+		intervalMultiplier = math.max(0.05, tonumber(cfg.intervalMultiplier) or DEFAULT_IMPORTANT_ENCOUNTER_CONFIG.intervalMultiplier),
+		burstMultiplier = math.max(0.05, tonumber(cfg.burstMultiplier) or DEFAULT_IMPORTANT_ENCOUNTER_CONFIG.burstMultiplier),
+		minNormalAlive = math.max(0, math.floor(tonumber(cfg.minNormalAlive) or DEFAULT_IMPORTANT_ENCOUNTER_CONFIG.minNormalAlive)),
+		trimInterval = math.max(0, tonumber(cfg.trimInterval) or DEFAULT_IMPORTANT_ENCOUNTER_CONFIG.trimInterval),
+		trimDistance = math.max(0, tonumber(cfg.trimDistance) or DEFAULT_IMPORTANT_ENCOUNTER_CONFIG.trimDistance),
+	}
+end
+
+local function getActiveImportantEncounter()
+	if activeBossEnemiesCount() > 0 then
+		return "boss", getImportantEncounterConfig("boss")
+	end
+	if activeEliteEnemiesCount() > 0 then
+		return "elite", getImportantEncounterConfig("elite")
+	end
+	return nil, getImportantEncounterConfig(nil)
 end
 
 local function cleanupTemplateScripts(mob: Model)
@@ -1694,6 +1746,7 @@ local swarmIndex = 1
 local nextSwarmAt = SWARM_EVENT_TIMES[swarmIndex] or math.huge
 local swarmActive = false
 local swarmActiveUntil = 0
+local nextEncounterTrimAt = 0
 
 local function isSwarmActiveAt(t: number): boolean
     return swarmActive and t < swarmActiveUntil
@@ -1713,7 +1766,12 @@ local function desiredMaxAlive(t: number)
 	end
 	local _, _, maxAliveScale = getSpawnStressConfig()
 	local scaled = math.max(base, math.floor((v * maxAliveScale) + 0.5))
-	return math.clamp(scaled, base, MAX_LIVING_ENEMIES)
+	local _, encounterConfig = getActiveImportantEncounter()
+	scaled = math.max(
+		encounterConfig.minNormalAlive,
+		math.floor((scaled * encounterConfig.maxAliveMultiplier) + 0.5)
+	)
+	return math.clamp(scaled, math.max(1, encounterConfig.minNormalAlive), MAX_LIVING_ENEMIES)
 end
 
 local function spawnInterval(t: number)
@@ -1732,7 +1790,8 @@ local function spawnInterval(t: number)
 		i = math.max(0.08, i * math.max(0.05, tonumber(SWARM_SPAWN_CONFIG.intervalMultiplier) or 0.33))
 	end
 	local _, intervalScale = getSpawnStressConfig()
-	return math.max(0.04, i * intervalScale)
+	local _, encounterConfig = getActiveImportantEncounter()
+	return math.max(0.04, i * intervalScale * encounterConfig.intervalMultiplier)
 end
 
 local function getNormalSpawnBurstSize(t: number): number
@@ -1746,7 +1805,9 @@ local function getNormalSpawnBurstSize(t: number): number
 		burst += math.max(0, math.floor(tonumber(OVERTIME_SPAWN_CONFIG.extraBurst) or 0))
 	end
 	local debugBurstSize = select(1, getSpawnStressConfig())
-	return math.max(1, burst * debugBurstSize)
+	local _, encounterConfig = getActiveImportantEncounter()
+	local scaledBurst = math.floor((burst * debugBurstSize * encounterConfig.burstMultiplier) + 0.5)
+	return math.max(1, scaledBurst)
 end
 
 local function buildEliteOrder(): {string}
@@ -2251,6 +2312,14 @@ RunService.Heartbeat:Connect(function()
 	local maxAlive = desiredMaxAlive(t)
 	local aliveNow = activeEnemiesCount()
 	local normalAliveNow = activeNormalEnemiesCount()
+	local encounterKind, encounterConfig = getActiveImportantEncounter()
+	if encounterKind and normalAliveNow > maxAlive and encounterConfig.trimInterval > 0 and t >= nextEncounterTrimAt then
+		nextEncounterTrimAt = t + encounterConfig.trimInterval
+		if NpcService.DespawnOldestFarNormal(encounterConfig.trimDistance) then
+			aliveNow = math.max(0, aliveNow - 1)
+			normalAliveNow = math.max(0, normalAliveNow - 1)
+		end
+	end
 	local spawnBurstSize = getNormalSpawnBurstSize(t)
 	local pool = getPool(t)
 	for _ = 1, spawnBurstSize do

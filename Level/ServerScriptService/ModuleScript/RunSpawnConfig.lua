@@ -48,4 +48,23 @@ RunSpawnConfig.SWARM = {
 	intervalMultiplier = 0.33,
 }
 
+RunSpawnConfig.IMPORTANT_ENCOUNTER = {
+	elite = {
+		maxAliveMultiplier = 0.58,
+		intervalMultiplier = 1.35,
+		burstMultiplier = 0.70,
+		minNormalAlive = 8,
+		trimInterval = 0.45,
+		trimDistance = 82,
+	},
+	boss = {
+		maxAliveMultiplier = 0.32,
+		intervalMultiplier = 1.85,
+		burstMultiplier = 0.45,
+		minNormalAlive = 4,
+		trimInterval = 0.22,
+		trimDistance = 64,
+	},
+}
+
 return RunSpawnConfig

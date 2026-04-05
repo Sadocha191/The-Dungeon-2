@@ -260,12 +260,21 @@ end
 local function getSortedEnemies(fromPos: Vector3, radius: number)
 	local enemies = getEnemiesInRadius(fromPos, radius)
 	table.sort(enemies, function(a, b)
-		local posA = NpcService.GetPosition(a)
-		local posB = NpcService.GetPosition(b)
-		if not posA or not posB then
+		local effectiveA, distA, priorityA = NpcService.GetTargetingMetrics(fromPos, a)
+		local effectiveB, distB, priorityB = NpcService.GetTargetingMetrics(fromPos, b)
+		if effectiveA == nil or effectiveB == nil or distA == nil or distB == nil or priorityA == nil or priorityB == nil then
 			return tostring(a) < tostring(b)
 		end
-		return (posA - fromPos).Magnitude < (posB - fromPos).Magnitude
+		if math.abs(effectiveA - effectiveB) > 1e-4 then
+			return effectiveA < effectiveB
+		end
+		if priorityA ~= priorityB then
+			return priorityA > priorityB
+		end
+		if math.abs(distA - distB) > 1e-4 then
+			return distA < distB
+		end
+		return tostring(a) < tostring(b)
 	end)
 	return enemies
 end

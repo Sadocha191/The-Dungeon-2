@@ -141,6 +141,8 @@ local NPC_FORMATION_RING_SPACING = 0.95
 local NPC_FORMATION_JITTER_SCALE = 0.22
 local NPC_FORMATION_COLLAPSE_BUFFER = 2.75
 local NPC_FORMATION_BLEND_DISTANCE = 7.5
+local TARGET_PRIORITY_ELITE_DISTANCE_BONUS = 12
+local TARGET_PRIORITY_BOSS_DISTANCE_BONUS = 24
 
 local function enemiesFolder(): Instance?
 	return workspace:FindFirstChild("Enemies") or workspace:FindFirstChild("Mobs")
@@ -522,6 +524,32 @@ local function matchesActiveCountFilter(npc: NpcRecord, filter: ActiveCountFilte
 		return includeElite == true
 	end
 	return includeNormal == true
+end
+
+local function getTargetPriority(npc: NpcRecord): number
+	if npc.isBoss then
+		return 3
+	end
+	if npc.isElite then
+		return 2
+	end
+	return 1
+end
+
+local function getTargetPriorityDistanceBonus(npc: NpcRecord): number
+	if npc.isBoss then
+		return TARGET_PRIORITY_BOSS_DISTANCE_BONUS
+	end
+	if npc.isElite then
+		return TARGET_PRIORITY_ELITE_DISTANCE_BONUS
+	end
+	return 0
+end
+
+local function computeTargetingMetrics(npc: NpcRecord, fromPos: Vector3): (number, number, number)
+	local actualDistance = (npc.position - fromPos).Magnitude
+	local effectiveDistance = math.max(0, actualDistance - getTargetPriorityDistanceBonus(npc))
+	return effectiveDistance, actualDistance, getTargetPriority(npc)
 end
 
 local function fireDamageIndicator(sourcePlayer: Player?, npc: NpcRecord, amount: number, crit: boolean?)
@@ -1020,14 +1048,25 @@ function NpcService.DespawnOldestFarNormal(minDistance: number): Model?
 end
 
 function NpcService.GetNearestEnemy(fromPos: Vector3, maxRange: number): (Model?, number)
+	local searchRange = maxRange or math.huge
 	local bestModel = nil
-	local bestDist = maxRange or math.huge
+	local bestDist = searchRange
+	local bestEffectiveDist = math.huge
+	local bestPriority = -math.huge
 	for _, npc in pairs(npcById) do
 		if not npc.dead and npc.model.Parent then
 			local dist = (npc.position - fromPos).Magnitude
-			if dist < bestDist then
-				bestDist = dist
-				bestModel = npc.model
+			if dist <= searchRange then
+				local effectiveDist, actualDist, priority = computeTargetingMetrics(npc, fromPos)
+				if effectiveDist < bestEffectiveDist
+					or (math.abs(effectiveDist - bestEffectiveDist) <= 1e-4 and priority > bestPriority)
+					or (math.abs(effectiveDist - bestEffectiveDist) <= 1e-4 and priority == bestPriority and actualDist < bestDist)
+				then
+					bestEffectiveDist = effectiveDist
+					bestDist = actualDist
+					bestPriority = priority
+					bestModel = npc.model
+				end
 			end
 		end
 	end
@@ -1037,11 +1076,51 @@ end
 function NpcService.GetEnemiesInRadius(fromPos: Vector3, radius: number): {Model}
 	local hits = {}
 	for _, npc in pairs(npcById) do
-		if not npc.dead and npc.model.Parent and (npc.position - fromPos).Magnitude <= radius then
-			table.insert(hits, npc.model)
+		if not npc.dead and npc.model.Parent then
+			local dist = (npc.position - fromPos).Magnitude
+			if dist <= radius then
+				local effectiveDist, actualDist, priority = computeTargetingMetrics(npc, fromPos)
+				table.insert(hits, {
+					model = npc.model,
+					effectiveDist = effectiveDist,
+					actualDist = actualDist,
+					priority = priority,
+				})
+			end
 		end
 	end
-	return hits
+
+	table.sort(hits, function(a, b)
+		if math.abs(a.effectiveDist - b.effectiveDist) > 1e-4 then
+			return a.effectiveDist < b.effectiveDist
+		end
+		if a.priority ~= b.priority then
+			return a.priority > b.priority
+		end
+		if math.abs(a.actualDist - b.actualDist) > 1e-4 then
+			return a.actualDist < b.actualDist
+		end
+		return tostring(a.model) < tostring(b.model)
+	end)
+
+	local models = {}
+	for _, hit in ipairs(hits) do
+		models[#models + 1] = hit.model
+	end
+	return models
+end
+
+function NpcService.GetTargetingMetrics(fromPos: Vector3, target: any): (number?, number?, number?)
+	if typeof(fromPos) ~= "Vector3" then
+		return nil, nil, nil
+	end
+
+	local npc = resolveNpc(target)
+	if not npc or npc.dead or not npc.model.Parent then
+		return nil, nil, nil
+	end
+
+	return computeTargetingMetrics(npc, fromPos)
 end
 
 function NpcService.ApplySlow(target: any, slowPct: number, duration: number)

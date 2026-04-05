@@ -56,7 +56,6 @@ end
 local pauseAccum = 0
 local pauseStart = nil
 local state = {}
-local rng = Random.new()
 
 local function isPaused()
 	return PauseState.Value == true
@@ -140,40 +139,30 @@ local function getAllEnemies()
 	return NpcService.GetLivingModels()
 end
 
-local function shuffleArray(items)
-	for index = #items, 2, -1 do
-		local swapIndex = rng:NextInteger(1, index)
-		items[index], items[swapIndex] = items[swapIndex], items[index]
-	end
-	return items
+local function getPrioritizedEnemiesInRange(pos, range)
+	return getEnemiesInRadius(pos, range or 10)
 end
 
-local function getRandomEnemiesInRange(pos, range)
-	return shuffleArray(getEnemiesInRadius(pos, range or 10))
-end
-
-local function pickRandomEnemy(pos, range)
-	local candidates = getRandomEnemiesInRange(pos, range)
+local function pickPriorityEnemy(pos, range)
+	local candidates = getPrioritizedEnemiesInRange(pos, range)
 	return candidates[1]
 end
 
-local function pickRandomEnemyList(pos, range, count)
+local function pickPriorityEnemyList(pos, range, count)
 	local desiredCount = math.max(1, math.floor(tonumber(count) or 1))
-	local candidates = getRandomEnemiesInRange(pos, range)
+	local candidates = getPrioritizedEnemiesInRange(pos, range)
 	if #candidates <= 0 then
 		return {}
 	end
 
 	local out = {}
+	local candidateCount = #candidates
+	local index = 1
 	while #out < desiredCount do
-		for _, enemy in ipairs(candidates) do
-			table.insert(out, enemy)
-			if #out >= desiredCount then
-				break
-			end
-		end
-		if #out < desiredCount and #candidates > 1 then
-			shuffleArray(candidates)
+		table.insert(out, candidates[index])
+		index += 1
+		if index > candidateCount then
+			index = 1
 		end
 	end
 	return out
@@ -931,7 +920,7 @@ local function runProjectile(plr, spellId, stats, hrp)
 	s.cds[spellId] = now + ((stats.cooldown or 1) * getCooldownMult(plr))
 	local origin = getCastOrigin(hrp)
 	local searchRange = stats.range or 60
-	local targets = pickRandomEnemyList(hrp.Position, searchRange, math.max(1, stats.count or 1))
+	local targets = pickPriorityEnemyList(hrp.Position, searchRange, math.max(1, stats.count or 1))
 	if #targets <= 0 then
 		return
 	end
@@ -944,7 +933,7 @@ local function runProjectile(plr, spellId, stats, hrp)
 			end
 			local target = assignedTarget
 			if not target or not enemyAlive(target) then
-				target = pickRandomEnemy(hrp.Position, searchRange)
+				target = pickPriorityEnemy(hrp.Position, searchRange)
 			end
 			local targetPos = target and getEnemyPosition(target)
 			if not targetPos then
@@ -1031,7 +1020,7 @@ local function runZone(plr, spellId, stats, hrp)
 	local origin = hrp.Position
 	local center = origin
 	if stats.spawnAtEnemy then
-		local target = pickRandomEnemy(origin, math.max(70, stats.range or 0))
+		local target = pickPriorityEnemy(origin, math.max(70, stats.range or 0))
 		local targetPos = target and getEnemyPosition(target)
 		if targetPos then
 			center = targetPos
@@ -1067,7 +1056,7 @@ local function runBeam(plr, spellId, stats, hrp)
 	s.cds[spellId] = now + ((stats.cooldown or 5) * getCooldownMult(plr))
 
 	local origin = getCastOrigin(hrp)
-	local target = pickRandomEnemy(hrp.Position, stats.range or 60)
+	local target = pickPriorityEnemy(hrp.Position, stats.range or 60)
 	local targetPos = target and getEnemyPosition(target)
 	local direction = targetPos and (targetPos - origin) or hrp.CFrame.LookVector
 	if direction.Magnitude <= 0.01 then

@@ -33,6 +33,7 @@ ensureRemoteEvent("ClientReady")          -- client -> server (loaded/preloaded)
 ensureRemoteEvent("ClientWorldLoaded")    -- client -> server (world streamed + textures preloaded)
 -- Pause menu
 ensureRemoteEvent("PauseMenuEvent")       -- client -> server (pause/resume toggle)
+ensureRemoteEvent("TeleportStatus")       -- server -> client (teleport overlay state)
 
 -- Weapon VFX swing (server -> client)
 ensureRemoteEvent("WeaponSwingVFX")

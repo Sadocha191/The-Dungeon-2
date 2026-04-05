@@ -8,6 +8,11 @@ local playerGui = player:WaitForChild("PlayerGui")
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local missionSummaryEvent = remotes:WaitForChild("MissionSummaryEvent")
 local returnToLobby = ReplicatedStorage:FindFirstChild("ReturnToLobby")
+local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
+local TeleportOverlayController = moduleFolder and require(moduleFolder:WaitForChild("TeleportOverlayController"))
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "MissionSummary"
@@ -333,6 +338,9 @@ end
 
 local function closeSummary()
 	if returnToLobby and returnToLobby:IsA("RemoteEvent") then
+		if TeleportOverlayController and TeleportOverlayController.Show then
+			TeleportOverlayController.Show("Teleporting...")
+		end
 		returnToLobby:FireServer()
 	else
 		gui.Enabled = false
