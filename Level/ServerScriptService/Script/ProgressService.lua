@@ -902,8 +902,8 @@ end)
 
 -- === Run stat growth (per level) ===
 local STAT_HP_PER_LEVEL = 6
-local STAT_SPEED_PER_LEVEL = 0.20
-local STAT_ATK_PCT_PER_LEVEL = 0.025 -- keep per-level growth meaningful without letting runs snowball too early
+local STAT_SPEED_PER_LEVEL = 0.30
+local STAT_ATK_PCT_PER_LEVEL = 0.04 -- slightly stronger per-level ramp so leveling feels more impactful
 
 local function applyRunStatsNow(plr: Player)
 	local char = plr.Character

@@ -21,8 +21,27 @@ if not WeaponConfigs or not WeaponConfigs.GetAll then
 	return
 end
 
+local function normalizeName(name: string): string
+	local normalized = name:gsub("’", "'")
+	normalized = normalized:gsub("%s+", " ")
+	normalized = normalized:match("^%s*(.-)%s*$") or normalized
+	return normalized:lower()
+end
+
 local function findTemplate(name: string): Instance?
-	return WeaponTemplates:FindFirstChild(name, true)
+	local exact = WeaponTemplates:FindFirstChild(name, true)
+	if exact then
+		return exact
+	end
+
+	local normalizedTarget = normalizeName(name)
+	for _, inst in ipairs(WeaponTemplates:GetDescendants()) do
+		if normalizeName(inst.Name) == normalizedTarget then
+			return inst
+		end
+	end
+
+	return nil
 end
 
 local function applyConfig(inst: Instance, def: any)

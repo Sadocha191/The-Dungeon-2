@@ -69,6 +69,76 @@ local function clearWeaponTools(container: Instance?)
 	end
 end
 
+local function disableLegacyScripts(tool: Tool)
+	for _, inst in ipairs(tool:GetDescendants()) do
+		if inst:IsA("Script") or inst:IsA("LocalScript") then
+			inst.Disabled = true
+		end
+	end
+end
+
+local function clearToolJoints(tool: Tool)
+	for _, inst in ipairs(tool:GetDescendants()) do
+		if inst:IsA("JointInstance") or inst:IsA("WeldConstraint") then
+			inst:Destroy()
+		elseif inst:IsA("CFrameValue") and inst.Name == "qRelativeCFrameWeldValue" then
+			inst:Destroy()
+		end
+	end
+end
+
+local function normalizeToolParts(tool: Tool)
+	clearToolJoints(tool)
+
+	local handle = tool:FindFirstChild("Handle", true)
+	local handlePart: BasePart? = nil
+	if handle and handle:IsA("BasePart") then
+		handlePart = handle
+	else
+		for _, inst in ipairs(tool:GetDescendants()) do
+			if inst:IsA("BasePart") then
+				handlePart = inst
+				inst.Name = "Handle"
+				break
+			end
+		end
+	end
+
+	if not handlePart then
+		return
+	end
+
+	handlePart.Name = "Handle"
+	handlePart.Parent = tool
+	handlePart.Anchored = false
+	handlePart.CanCollide = false
+	handlePart.CanQuery = false
+	handlePart.Massless = true
+
+	for _, inst in ipairs(tool:GetDescendants()) do
+		if inst:IsA("BasePart") then
+			inst.Anchored = false
+			inst.CanCollide = false
+			inst.CanQuery = false
+			inst.Massless = true
+			if inst ~= handlePart then
+				local weld = Instance.new("WeldConstraint")
+				weld.Part0 = handlePart
+				weld.Part1 = inst
+				weld.Parent = inst
+			end
+		end
+	end
+end
+
+local function prepareTool(tool: Tool, weaponId: string)
+	tool.Name = weaponId
+	tool.RequiresHandle = true
+	tool.CanBeDropped = false
+	disableLegacyScripts(tool)
+	normalizeToolParts(tool)
+end
+
 local function getWeaponConfig(weaponId: string)
 	if WeaponConfigs and WeaponConfigs.Get then
 		return WeaponConfigs.Get(weaponId)
@@ -240,7 +310,7 @@ local function cloneTemplate(weaponId: string): Tool?
 	local clone = template:Clone()
 	local tool = wrapAsTool(clone, weaponId)
 	if tool then
-		tool.Name = weaponId
+		prepareTool(tool, weaponId)
 		return tool
 	end
 
