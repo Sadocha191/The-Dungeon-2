@@ -912,7 +912,7 @@ local function applyRunStatsNow(plr: Player)
 	if not hum then return end
 
 	local baseHp = tonumber(plr:GetAttribute("BaseMaxHP")) or 100
-	local baseSpd = tonumber(plr:GetAttribute("BaseWalkSpeed")) or 16
+	local baseSpd = tonumber(plr:GetAttribute("BaseWalkSpeed")) or 21
 
 	local bonusHp = tonumber(plr:GetAttribute("RunBonusHP")) or 0
 	local bonusSpd = tonumber(plr:GetAttribute("RunBonusSpeed")) or 0

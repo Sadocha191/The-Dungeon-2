@@ -9,7 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
 local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions"))
 
-local BASE_WALKSPEED = 18
+local BASE_WALKSPEED = 21
 local BASE_MAX_HP = 120
 local TELEPORT_DATA_RETRIES = 120
 local TELEPORT_DATA_RETRY_DELAY = 0.05

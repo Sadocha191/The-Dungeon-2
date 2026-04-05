@@ -171,7 +171,7 @@ local function applyMovement(plr)
 	if not hum then
 		return
 	end
-	local baseSpeed = getNumAttr(plr, "BaseWalkSpeed", 18)
+	local baseSpeed = getNumAttr(plr, "BaseWalkSpeed", 21)
 	local runBonusSpeed = getNumAttr(plr, "RunBonusSpeed", 0)
 	hum.WalkSpeed = baseSpeed + runBonusSpeed
 end
@@ -431,7 +431,7 @@ local function applyReward(plr, reward)
 		setNumAttr(plr, "ShrineCritDamageBonus", getNumAttr(plr, "ShrineCritDamageBonus", 0) + scaled)
 
 	elseif reward.id == "move_15" then
-		local baseSpeed = getNumAttr(plr, "BaseWalkSpeed", 18)
+		local baseSpeed = getNumAttr(plr, "BaseWalkSpeed", 21)
 		local addSpeed = baseSpeed * scaled
 		setNumAttr(plr, "RunBonusSpeed", getNumAttr(plr, "RunBonusSpeed", 0) + addSpeed)
 		setNumAttr(plr, "ShrineMoveSpeedAdded", getNumAttr(plr, "ShrineMoveSpeedAdded", 0) + addSpeed)

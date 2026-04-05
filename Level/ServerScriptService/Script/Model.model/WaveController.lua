@@ -804,7 +804,7 @@ end
 
 local registerEliteController
 
-local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vector3?)
+local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vector3?, spawnSource: string?)
     local templateFolder = isElite and EliteFolder or NormalFolder
     local template = templateFolder:FindFirstChild(mobName)
     if not template or not template:IsA("Model") then
@@ -826,6 +826,7 @@ local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vecto
     cleanupTemplateScripts(mob)
     setMobGroup(mob)
     applyMobVisualScale(mob, isElite, false)
+    mob:SetAttribute("SpawnSource", spawnSource or (isElite and "Elite" or "RunAmbient"))
     mob.Parent = ENEMIES_FOLDER
     mob:PivotTo(cf)
 
@@ -860,7 +861,7 @@ end
 
 local elapsed: () -> number
 
-local function spawnBurst(count: number, anchorPos: Vector3?, poolTime: number?)
+local function spawnBurst(count: number, anchorPos: Vector3?, poolTime: number?, spawnSource: string?)
     local spawned = {}
     local targetCount = math.max(0, math.floor(tonumber(count) or 0))
     if targetCount <= 0 then
@@ -874,7 +875,7 @@ local function spawnBurst(count: number, anchorPos: Vector3?, poolTime: number?)
 			break
 		end
         local mobName = pickWeighted(pool)
-        local mob = spawnMob(mobName, false, anchorPos)
+        local mob = spawnMob(mobName, false, anchorPos, spawnSource or "Burst")
         if mob then
             table.insert(spawned, mob)
 			aliveNow += 1
@@ -884,8 +885,8 @@ local function spawnBurst(count: number, anchorPos: Vector3?, poolTime: number?)
     return spawned
 end
 
-_G.SpawnEnemyBurst = function(count: number, anchorPos: Vector3?, poolTime: number?)
-    return spawnBurst(count, anchorPos, poolTime)
+_G.SpawnEnemyBurst = function(count: number, anchorPos: Vector3?, poolTime: number?, spawnSource: string?)
+    return spawnBurst(count, anchorPos, poolTime, spawnSource)
 end
 
 local AbilityVfxFolder = workspace:FindFirstChild("EnemyAbilityVFX")
@@ -1341,7 +1342,7 @@ local function castSummon(controller, now, cfg)
 	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
 	scheduleGameplayDelay(cfg.telegraph or 0.6, function()
 		if controller.model.Parent and NpcService.IsAlive(controller.model) then
-			spawnBurst(cfg.count, bossPos, math.max(elapsed(), RUN_TIME_LIMIT - 60))
+			spawnBurst(cfg.count, bossPos, math.max(elapsed(), RUN_TIME_LIMIT - 60), "BossSummon")
 			burstMarker(bossPos, cfg.color, 6, 0.5)
 		end
 	end)
@@ -1742,14 +1743,18 @@ end
 local SWARM_EVENT_TIMES = { 240, 720 } -- 4:00, 12:00
 local SWARM_DURATION = 60
 
-local swarmIndex = 1
-local nextSwarmAt = SWARM_EVENT_TIMES[swarmIndex] or math.huge
-local swarmActive = false
-local swarmActiveUntil = 0
+local swarmState = {
+	index = 1,
+	nextAt = SWARM_EVENT_TIMES[1] or math.huge,
+	active = false,
+	activeUntil = 0,
+	queuedDuration = 0,
+	eliteSuppressionActive = false,
+}
 local nextEncounterTrimAt = 0
 
 local function isSwarmActiveAt(t: number): boolean
-    return swarmActive and t < swarmActiveUntil
+    return swarmState.active and t < swarmState.activeUntil
 end
 
 local function desiredMaxAlive(t: number)
@@ -1998,6 +2003,7 @@ local function ensurePortal()
 		cleanupTemplateScripts(mob)
 		setMobGroup(mob)
 		applyMobVisualScale(mob, true, true)
+		mob:SetAttribute("SpawnSource", "Boss")
 		mob.Parent = ENEMIES_FOLDER
 
 		pcall(function()
@@ -2285,22 +2291,53 @@ RunService.Heartbeat:Connect(function()
 		spawnBossNearPortal()
 	end
 
-    if (not swarmActive) and swarmIndex <= #SWARM_EVENT_TIMES and t >= nextSwarmAt then
-        local startedAt = nextSwarmAt
-        swarmActive = true
-        swarmActiveUntil = t + SWARM_DURATION
-        swarmIndex += 1
-        nextSwarmAt = SWARM_EVENT_TIMES[swarmIndex] or math.huge
-        broadcast({
-            type = "swarmStart",
-            duration = SWARM_DURATION,
-            startedAt = math.floor(startedAt),
-        })
-    elseif swarmActive and t >= swarmActiveUntil then
-        swarmActive = false
-        swarmActiveUntil = 0
-        broadcast({ type = "swarmEnd" })
-    end
+	local eliteEncounterActive = activeEliteEnemiesCount() > 0
+	while swarmState.index <= #SWARM_EVENT_TIMES and t >= swarmState.nextAt do
+		swarmState.queuedDuration += SWARM_DURATION
+		swarmState.index += 1
+		swarmState.nextAt = SWARM_EVENT_TIMES[swarmState.index] or math.huge
+	end
+	if eliteEncounterActive then
+		if swarmState.active then
+			swarmState.queuedDuration += math.max(0, swarmState.activeUntil - t)
+			swarmState.active = false
+			swarmState.activeUntil = 0
+			broadcast({ type = "swarmEnd" })
+		end
+		if not swarmState.eliteSuppressionActive then
+			swarmState.eliteSuppressionActive = true
+			for _, enemy in ipairs(ENEMIES_FOLDER:GetChildren()) do
+				if enemy:IsA("Model") and enemy:GetAttribute("IsElite") ~= true and enemy:GetAttribute("IsBoss") ~= true then
+					local source = enemy:GetAttribute("SpawnSource")
+					if source == nil or source == "RunAmbient" or source == "RunSwarm" then
+						NpcService.Despawn(enemy)
+					end
+				end
+			end
+		end
+	else
+		swarmState.eliteSuppressionActive = false
+		if swarmState.active and t >= swarmState.activeUntil then
+			swarmState.active = false
+			swarmState.activeUntil = 0
+			broadcast({ type = "swarmEnd" })
+		end
+		if (not swarmState.active) and swarmState.queuedDuration > 0 then
+			local swarmDuration = swarmState.queuedDuration
+			swarmState.queuedDuration = 0
+			swarmState.active = true
+			swarmState.activeUntil = t + swarmDuration
+			broadcast({
+				type = "swarmStart",
+				duration = math.max(1, math.ceil(swarmDuration)),
+				startedAt = math.floor(t),
+			})
+		end
+	end
+
+	if eliteEncounterActive then
+		return
+	end
 
     -- Normal spawns
 	local interval = spawnInterval(t)
@@ -2328,7 +2365,8 @@ RunService.Heartbeat:Connect(function()
 		end
 
 		local mobName = pickWeighted(pool)
-		local spawnedMob = spawnMob(mobName, false, nil)
+		local spawnSource = isSwarmActiveAt(t) and "RunSwarm" or "RunAmbient"
+		local spawnedMob = spawnMob(mobName, false, nil, spawnSource)
 		if spawnedMob then
 			aliveNow += 1
 			normalAliveNow += 1

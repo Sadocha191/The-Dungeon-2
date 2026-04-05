@@ -300,7 +300,7 @@ local function spawnChallengeBurst(monument, plr)
 		runSeconds = _G.GetRunSeconds()
 	end
 
-	spawnEnemyBurst(EXTRA_SPAWN_COUNT, anchorPos, runSeconds)
+	spawnEnemyBurst(EXTRA_SPAWN_COUNT, anchorPos, runSeconds, "HeroMonument")
 end
 
 local function finishChallenge(monument, success)
@@ -561,7 +561,7 @@ local function activateBattleStatue(statue, plr: Player)
 		runSeconds = _G.GetRunSeconds()
 	end
 
-	local spawned = spawnEnemyBurst(BATTLE_SPAWN_COUNT, statue.core.Position, runSeconds)
+	local spawned = spawnEnemyBurst(BATTLE_SPAWN_COUNT, statue.core.Position, runSeconds, "BattleStatue")
 	statue.remaining = #spawned
 	if statue.remaining <= 0 then
 		completeBattleStatue(statue)
