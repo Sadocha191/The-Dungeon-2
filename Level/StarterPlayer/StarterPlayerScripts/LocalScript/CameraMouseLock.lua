@@ -71,8 +71,21 @@ local function isPauseMenuOpen(): boolean
 	return menuOpen or (overlay and overlay:IsA("GuiObject") and overlay.Visible) == true
 end
 
+local function isDailyMissionsOpen(): boolean
+	local dailyMissionsGui = playerGui:FindFirstChild("DailyMissions")
+	if not dailyMissionsGui or not dailyMissionsGui:IsA("ScreenGui") then
+		return false
+	end
+
+	return dailyMissionsGui:GetAttribute("BoardShown") == true
+end
+
 local function isBlockingUIOpen(): boolean
 	if upgradesGui.Enabled and upgradesMain.Visible then
+		return true
+	end
+
+	if isDailyMissionsOpen() then
 		return true
 	end
 

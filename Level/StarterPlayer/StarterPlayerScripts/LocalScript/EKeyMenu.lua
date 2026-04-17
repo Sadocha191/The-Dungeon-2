@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local plr = Players.LocalPlayer
 local PauseState = ReplicatedStorage:WaitForChild("PauseState")
 local pauseMenuEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("PauseMenuEvent")
+local PAUSE_SOURCE = "EKeyMenu"
 
 local returnToLobby = ReplicatedStorage:WaitForChild("ReturnToLobby")
 
@@ -81,7 +82,10 @@ local function setOpen(open: boolean, notifyServer: boolean)
 
 	gui.Enabled = open
 	if notifyServer then
-		pauseMenuEvent:FireServer(open and "pause" or "resume")
+		pauseMenuEvent:FireServer({
+			action = open and "pause" or "resume",
+			source = PAUSE_SOURCE,
+		})
 	end
 end
 

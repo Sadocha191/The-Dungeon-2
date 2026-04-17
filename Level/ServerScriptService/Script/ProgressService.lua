@@ -97,7 +97,7 @@ local pending = {} -- [uid] = {token, offers}
 
 -- Party shared progression (Multi)
 local party = {} -- [partyId] = {level, xp, nextXp, pendingLevelUps, inLevelUp, waitingFor = {[uid]=true}}
-local manualPauseUsers = {} -- [uid] = true while a player has pause UI open
+local manualPauseUsers = {} -- [uid] = {[source]=true} while modal UIs request a pause
 
 local function hasActiveRunPlayers(): boolean
 	for _, candidate in ipairs(Players:GetPlayers()) do
@@ -165,9 +165,11 @@ local function syncPartyHud(partyId: string)
 end
 
 local function recomputePauseState()
-	for _ in pairs(manualPauseUsers) do
-		PauseState.Value = true
-		return
+	for _, sources in pairs(manualPauseUsers) do
+		if typeof(sources) == "table" and next(sources) ~= nil then
+			PauseState.Value = true
+			return
+		end
 	end
 
 	for _, r in pairs(run) do
@@ -178,6 +180,39 @@ local function recomputePauseState()
 	end
 
 	PauseState.Value = false
+end
+
+local function normalizePauseSource(source: any): string
+	if typeof(source) ~= "string" or source == "" then
+		return "PauseMenu"
+	end
+
+	return source
+end
+
+local function setManualPauseSource(plr: Player, source: string, active: boolean)
+	local userId = plr.UserId
+
+	if active then
+		local sources = manualPauseUsers[userId]
+		if typeof(sources) ~= "table" then
+			sources = {}
+			manualPauseUsers[userId] = sources
+		end
+
+		sources[source] = true
+		return
+	end
+
+	local sources = manualPauseUsers[userId]
+	if typeof(sources) ~= "table" then
+		return
+	end
+
+	sources[source] = nil
+	if next(sources) == nil then
+		manualPauseUsers[userId] = nil
+	end
 end
 
 
@@ -493,20 +528,28 @@ local function pauseEnd(plr: Player)
 	recomputePauseState()
 end
 
-PauseMenuEvent.OnServerEvent:Connect(function(plr: Player, action)
+PauseMenuEvent.OnServerEvent:Connect(function(plr: Player, payload)
 	if not plr or plr.Parent ~= Players then
 		return
 	end
 
+	local action = payload
+	local source = "PauseMenu"
+	if typeof(payload) == "table" then
+		action = payload.action or payload.type
+		source = normalizePauseSource(payload.source)
+	end
+
 	if action == "pause" then
 		if plr:GetAttribute("RunEnded") == true or RunStarted.Value ~= true then
-			manualPauseUsers[plr.UserId] = nil
+			setManualPauseSource(plr, source, false)
 			recomputePauseState()
 			return
 		end
-		manualPauseUsers[plr.UserId] = true
+
+		setManualPauseSource(plr, source, true)
 	elseif action == "resume" then
-		manualPauseUsers[plr.UserId] = nil
+		setManualPauseSource(plr, source, false)
 	else
 		return
 	end

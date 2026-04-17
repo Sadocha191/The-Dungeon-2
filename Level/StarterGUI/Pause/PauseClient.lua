@@ -13,6 +13,7 @@ local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local pauseMenuEvent = remotes:WaitForChild("PauseMenuEvent")
 local pauseState = ReplicatedStorage:WaitForChild("PauseState")
 local returnToLobby = ReplicatedStorage:WaitForChild("ReturnToLobby")
+local PAUSE_SOURCE = "PauseMenu"
 
 screenGui.ResetOnSpawn = false
 screenGui.DisplayOrder = 70
@@ -204,7 +205,10 @@ local function setMenuOpen(open: boolean, notifyServer: boolean)
 	overlay.Visible = open
 
 	if notifyServer then
-		pauseMenuEvent:FireServer(open and "pause" or "resume")
+		pauseMenuEvent:FireServer({
+			action = open and "pause" or "resume",
+			source = PAUSE_SOURCE,
+		})
 	end
 end
 

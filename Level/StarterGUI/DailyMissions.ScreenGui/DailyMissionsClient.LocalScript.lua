@@ -11,6 +11,8 @@ local interactionZones = boardContent:WaitForChild("Interaction_zones")
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local getDailyMissionsRemote = remotes:WaitForChild("GetDailyMissions", 10)
 local dailyMissionsUpdatedRemote = remotes:WaitForChild("DailyMissionsUpdated", 10)
+local pauseMenuEvent = remotes:WaitForChild("PauseMenuEvent", 10)
+local PAUSE_SOURCE = "DailyMissions"
 
 local BOARD_SHOWN_POSITION = UDim2.new(0.177, 0, 0.152, 0)
 local BOARD_HIDDEN_POSITION = UDim2.new(-0.604, 0, 0.152, 0)
@@ -76,6 +78,27 @@ local missionStates = {}
 local activeMissionName = nil
 local boardShown = false
 local boardTween = nil
+local boardPauseActive = false
+
+local function setUiInput()
+	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	UserInputService.MouseIconEnabled = true
+end
+
+local function setBoardPauseActive(active)
+	if boardPauseActive == active then
+		return
+	end
+
+	boardPauseActive = active
+
+	if pauseMenuEvent and pauseMenuEvent:IsA("RemoteEvent") then
+		pauseMenuEvent:FireServer({
+			action = active and "pause" or "resume",
+			source = PAUSE_SOURCE,
+		})
+	end
+end
 
 local function getMissionTextBox(note: Instance, sectionName: string): TextBox?
 	local section = note:FindFirstChild(sectionName)
@@ -278,11 +301,11 @@ local function toggleBoard()
 
 	local nextShown = not boardShown
 	if nextShown then
+		setBoardShown(true)
+		setBoardPauseActive(true)
+		setUiInput()
 		task.spawn(requestMissionData)
-	end
-
-	if not nextShown then
-		setBoardShown(false)
+	else
 		setActiveMission(nil, true)
 	end
 
@@ -297,11 +320,12 @@ local function toggleBoard()
 		end
 
 		boardTween = nil
-		setBoardShown(nextShown)
 
 		if nextShown then
 			updateHoveredMission(true)
 		else
+			setBoardPauseActive(false)
+			setBoardShown(false)
 			setActiveMission(nil, true)
 		end
 	end)
@@ -338,6 +362,10 @@ if dailyMissionsUpdatedRemote and dailyMissionsUpdatedRemote:IsA("RemoteEvent") 
 		renderMissionPayload(payload)
 	end)
 end
+
+script.Destroying:Connect(function()
+	setBoardPauseActive(false)
+end)
 
 task.spawn(requestMissionData)
 
