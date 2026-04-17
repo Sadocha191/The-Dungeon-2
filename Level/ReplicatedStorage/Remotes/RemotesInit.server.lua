@@ -28,6 +28,8 @@ ensureRemoteEvent("PartyXPUpdate")       -- server -> all clients (xp/level upda
 ensureRemoteEvent("DamageIndicatorEvent")  -- server -> all clients (pos, amount, crit)
 ensureRemoteEvent("PickupIndicatorEvent")  -- server -> client (kind, amount)
 ensureRemoteEvent("PickupToastEvent")      -- server -> client (bottom-left item toasts)
+ensureRemoteEvent("DropVisualEvent")       -- server -> all clients (drop spawn/update/remove sync)
+ensureRemoteEvent("DropSyncRequest")       -- client -> server (late join / respawn sync)
 -- Loading gate (client preload handshake)
 ensureRemoteEvent("ClientReady")          -- client -> server (loaded/preloaded)
 ensureRemoteEvent("ClientWorldLoaded")    -- client -> server (world streamed + textures preloaded)
@@ -37,6 +39,7 @@ ensureRemoteEvent("TeleportStatus")       -- server -> client (teleport overlay 
 
 -- Weapon VFX swing (server -> client)
 ensureRemoteEvent("WeaponSwingVFX")
+ensureRemoteEvent("SpellVFXEvent")        -- orbit + transient spell visuals
 -- WeaponEvent (client -> server) [legacy/manual]
 ensureRemoteEvent("WeaponEvent")
 -- NPC presentation batches (server -> client)

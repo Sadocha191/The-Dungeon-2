@@ -156,8 +156,7 @@ local function isEliteEnemy(enemyModel: Model): boolean
 end
 
 local function getHealthRatio(enemyModel: Model): number
-	local health = tonumber(enemyModel:GetAttribute("NpcHealth") or enemyModel:GetAttribute("Health")) or 0
-	local maxHealth = tonumber(enemyModel:GetAttribute("NpcMaxHealth") or enemyModel:GetAttribute("MaxHealth")) or 1
+	local health, maxHealth = NpcService.GetHealth(enemyModel)
 	return health / math.max(1, maxHealth)
 end
 

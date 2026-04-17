@@ -1,12 +1,16 @@
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local screenGui = script.Parent
 local boardContainer = screenGui:WaitForChild("Tablica")
 local boardContent = boardContainer:FindFirstChild("Tablica") or boardContainer
 local notesContainer = boardContent:WaitForChild("Kartki")
 local interactionZones = boardContent:WaitForChild("Interaction_zones")
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local getDailyMissionsRemote = remotes:WaitForChild("GetDailyMissions", 10)
+local dailyMissionsUpdatedRemote = remotes:WaitForChild("DailyMissionsUpdated", 10)
 
 local BOARD_SHOWN_POSITION = UDim2.new(0.177, 0, 0.152, 0)
 local BOARD_HIDDEN_POSITION = UDim2.new(-0.604, 0, 0.152, 0)
@@ -72,6 +76,58 @@ local missionStates = {}
 local activeMissionName = nil
 local boardShown = false
 local boardTween = nil
+
+local function getMissionTextBox(note: Instance, sectionName: string): TextBox?
+	local section = note:FindFirstChild(sectionName)
+	if not section then
+		return nil
+	end
+
+	local textBox = section:FindFirstChild("TextBox")
+	if not textBox or not textBox:IsA("TextBox") then
+		return nil
+	end
+
+	textBox.ClearTextOnFocus = false
+	pcall(function()
+		textBox.TextEditable = false
+	end)
+
+	return textBox
+end
+
+local function getMissionDescription(mission): string
+	if typeof(mission) ~= "table" then
+		return ""
+	end
+
+	local description = tostring(mission.Description or "")
+	if description ~= "" then
+		return description
+	end
+
+	return tostring(mission.Title or "")
+end
+
+local function getMissionProgressText(mission): string
+	if typeof(mission) ~= "table" then
+		return ""
+	end
+
+	local progress = mission.Progress
+	if typeof(progress) ~= "table" then
+		return ""
+	end
+
+	local current = math.max(0, math.floor(tonumber(progress.Current) or 0))
+	local target = math.max(0, math.floor(tonumber(progress.Target) or 0))
+
+	if target <= 0 then
+		return tostring(current)
+	end
+
+	return ("%d / %d"):format(math.min(current, target), target)
+end
 
 local function stopMissionTween(state)
 	if state.tween then
@@ -144,7 +200,7 @@ local function getHoveredMissionName()
 	local mousePosition = UserInputService:GetMouseLocation()
 	for _, config in ipairs(MISSION_CONFIG) do
 		local state = missionStates[config.missionName]
-		if state and isPointInsideZone(state.zone, mousePosition) then
+		if state and state.hasMission and state.note.Visible and isPointInsideZone(state.zone, mousePosition) then
 			return config.missionName
 		end
 	end
@@ -156,12 +212,75 @@ local function updateHoveredMission(force)
 	setActiveMission(getHoveredMissionName(), force)
 end
 
+local function applyMissionData(state, mission)
+	local hasMission = typeof(mission) == "table"
+	state.hasMission = hasMission
+	state.note.Visible = hasMission
+	state.zone.Active = hasMission
+
+	if state.descriptionBox then
+		state.descriptionBox.Text = hasMission and getMissionDescription(mission) or ""
+	end
+	if state.progressBox then
+		state.progressBox.Text = hasMission and getMissionProgressText(mission) or ""
+	end
+
+	if not hasMission then
+		setMissionInstant(state, false)
+	end
+end
+
+local function renderMissionPayload(payload)
+	local missions = {}
+	if typeof(payload) == "table" and typeof(payload.missions) == "table" then
+		missions = payload.missions
+	end
+
+	for index, config in ipairs(MISSION_CONFIG) do
+		local state = missionStates[config.missionName]
+		if state then
+			applyMissionData(state, missions[index])
+		end
+	end
+
+	if activeMissionName then
+		local activeState = missionStates[activeMissionName]
+		if activeState and not activeState.hasMission then
+			setActiveMission(nil, true)
+		end
+	end
+
+	updateHoveredMission(true)
+end
+
+local function requestMissionData()
+	if not getDailyMissionsRemote or not getDailyMissionsRemote:IsA("RemoteFunction") then
+		renderMissionPayload(nil)
+		return
+	end
+
+	local ok, payload = pcall(function()
+		return getDailyMissionsRemote:InvokeServer()
+	end)
+
+	if not ok then
+		warn("[DailyMissionsClient] Failed to fetch daily missions:", payload)
+		return
+	end
+
+	renderMissionPayload(payload)
+end
+
 local function toggleBoard()
 	if boardTween then
 		return
 	end
 
 	local nextShown = not boardShown
+	if nextShown then
+		task.spawn(requestMissionData)
+	end
+
 	if not nextShown then
 		setBoardShown(false)
 		setActiveMission(nil, true)
@@ -199,16 +318,28 @@ for _, config in ipairs(MISSION_CONFIG) do
 		config = config,
 		note = note,
 		zone = zone,
+		descriptionBox = getMissionTextBox(note, "MissionDescription"),
+		progressBox = getMissionTextBox(note, "Mission progress"),
+		hasMission = false,
 		tween = nil,
 	}
 
 	missionStates[config.missionName] = state
 	setMissionInstant(state, false)
+	applyMissionData(state, nil)
 end
 
 boardContainer.Position = BOARD_HIDDEN_POSITION
 setBoardShown(false)
 setActiveMission(nil, true)
+
+if dailyMissionsUpdatedRemote and dailyMissionsUpdatedRemote:IsA("RemoteEvent") then
+	dailyMissionsUpdatedRemote.OnClientEvent:Connect(function(payload)
+		renderMissionPayload(payload)
+	end)
+end
+
+task.spawn(requestMissionData)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
 	if gameProcessedEvent then

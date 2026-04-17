@@ -89,20 +89,8 @@ local function resolveDisplayName(target): string
 end
 
 local function resolveHealth(target): (number, number)
-	local model = target and target.model
 	local hp = tonumber(target and target.hp)
 	local maxHp = tonumber(target and target.maxHp)
-
-	if model then
-		if hp == nil then
-			hp = tonumber(model:GetAttribute(ATTR.Health))
-				or tonumber(model:GetAttribute(ATTR.LegacyHealth))
-		end
-		if maxHp == nil then
-			maxHp = tonumber(model:GetAttribute(ATTR.MaxHealth))
-				or tonumber(model:GetAttribute(ATTR.LegacyMaxHealth))
-		end
-	end
 
 	hp = math.max(0, hp or 0)
 	maxHp = math.max(1, maxHp or 1)

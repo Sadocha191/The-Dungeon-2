@@ -231,6 +231,32 @@ local function getVisualColors(stats)
 	return primary, secondary
 end
 
+local function extractVisualStats(stats)
+	if typeof(stats) ~= "table" then
+		return {}
+	end
+
+	return {
+		spellId = stats.spellId,
+		level = tonumber(stats.level) or 1,
+		basePower = tonumber(stats.basePower) or 0,
+		upgradePower = tonumber(stats.upgradePower) or 0,
+		element = stats.element,
+		spellType = stats.spellType,
+		radius = tonumber(stats.radius),
+		width = tonumber(stats.width),
+		visualColor = typeof(stats.visualColor) == "Color3" and stats.visualColor or nil,
+		visualSecondaryColor = typeof(stats.visualSecondaryColor) == "Color3" and stats.visualSecondaryColor or nil,
+	}
+end
+
+local function broadcastSpellVisual(action, payload)
+	payload = payload or {}
+	payload.action = action
+	payload.serverTime = workspace:GetServerTimeNow()
+	SpellVFXEvent:FireAllClients(payload)
+end
+
 local function ensureVfxPart(parent, name, size, color, transparency, material, shape)
 	local part = Instance.new("Part")
 	part.Name = name
@@ -565,7 +591,10 @@ local function hitEnemy(plr, enemy, damage, stats, sourcePos, impactPos)
 		if shouldSpawnImpact(plr, tostring(stats and stats.spellId or "Spell"), enemy) then
 			local hitPos = impactPos or getEnemyPosition(enemy) or sourcePos
 			if hitPos then
-				spawnImpactVisual(hitPos, stats or {})
+				broadcastSpellVisual("impact", {
+					pos = hitPos,
+					stats = extractVisualStats(stats),
+				})
 			end
 		end
 	end
@@ -863,7 +892,15 @@ local function destroyProjectileVisual(visual)
 end
 
 local function fireProjectile(plr, origin, dir, speed, range, damage, pierce, stats)
-	local visual = createProjectileVisual(stats, origin, dir)
+	broadcastSpellVisual("projectile", {
+		origin = origin,
+		dir = dir,
+		speed = speed,
+		range = range,
+		startTime = workspace:GetServerTimeNow(),
+		stats = extractVisualStats(stats),
+	})
+
 	local pos = origin
 	local traveled = 0
 	local remainingPierce = math.max(0, math.floor(pierce or 0))
@@ -871,13 +908,8 @@ local function fireProjectile(plr, origin, dir, speed, range, damage, pierce, st
 	local collisionRadius = stats.element == "Physical" and 3.6 or 3.3
 	local conn
 	conn = RunService.Heartbeat:Connect(function(dt)
-		if not visual or not visual.model or not visual.model.Parent then
-			conn:Disconnect()
-			return
-		end
 		if not isPlayerRunActive(plr) then
 			conn:Disconnect()
-			destroyProjectileVisual(visual)
 			return
 		end
 		if isPaused() then
@@ -887,8 +919,6 @@ local function fireProjectile(plr, origin, dir, speed, range, damage, pierce, st
 		local step = speed * dt
 		traveled += step
 		pos += dir * step
-		visual.spin += (visual.spinSpeed or 0) * dt
-		visual.model:PivotTo(CFrame.lookAt(pos, pos + dir) * CFrame.Angles(0, 0, visual.spin))
 
 		local enemy = getNearestEnemy(pos, collisionRadius)
 		local enemyPos = enemy and getEnemyPosition(enemy)
@@ -897,7 +927,6 @@ local function fireProjectile(plr, origin, dir, speed, range, damage, pierce, st
 			hitEnemy(plr, enemy, damage, stats, pos, pos)
 			if remainingPierce <= 0 then
 				conn:Disconnect()
-				destroyProjectileVisual(visual)
 				return
 			end
 			remainingPierce -= 1
@@ -905,7 +934,6 @@ local function fireProjectile(plr, origin, dir, speed, range, damage, pierce, st
 
 		if traveled >= range then
 			conn:Disconnect()
-			destroyProjectileVisual(visual)
 		end
 	end)
 end
@@ -1003,7 +1031,11 @@ local function runNova(plr, spellId, stats, hrp)
 	s.cds[spellId] = now + ((stats.cooldown or 3) * getCooldownMult(plr))
 
 	local radius = stats.radius or 8
-	spawnNovaVisual(hrp.Position, radius, stats)
+	broadcastSpellVisual("nova", {
+		pos = hrp.Position,
+		radius = radius,
+		stats = extractVisualStats(stats),
+	})
 	for _, enemy in ipairs(getEnemiesInRadius(hrp.Position, radius)) do
 		hitEnemy(plr, enemy, stats.damage, stats, hrp.Position, getEnemyPosition(enemy))
 	end
@@ -1031,7 +1063,12 @@ local function runZone(plr, spellId, stats, hrp)
 	local duration = (stats.duration or 3) * getDurationMult(plr)
 	local tickRate = stats.tickRate or 0.45
 	local tickDamage = stats.damage * math.max(0.3, tickRate)
-	spawnRingVisual(center, radius, duration, stats)
+	broadcastSpellVisual("ring", {
+		pos = center,
+		radius = radius,
+		duration = duration,
+		stats = extractVisualStats(stats),
+	})
 
 	local endAt = spellClock() + duration
 	task.spawn(function()
@@ -1069,7 +1106,14 @@ local function runBeam(plr, spellId, stats, hrp)
 	local duration = stats.duration or 1.5
 	local tickRate = stats.tickRate or 0.18
 	local beamDamage = stats.damage * math.max(0.6, tickRate * 4)
-	spawnBeamVisual(origin, direction, range, width, duration, stats)
+	broadcastSpellVisual("beam", {
+		origin = origin,
+		dir = direction,
+		range = range,
+		width = width,
+		duration = duration,
+		stats = extractVisualStats(stats),
+	})
 
 	local endAt = spellClock() + duration
 	task.spawn(function()

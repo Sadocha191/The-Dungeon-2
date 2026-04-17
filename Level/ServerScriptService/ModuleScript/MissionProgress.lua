@@ -8,70 +8,25 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 local PlayerData = require(serverModules:WaitForChild("PlayerData"))
+local MissionState = require(serverModules:WaitForChild("MissionState"))
+
+local DailyMissionService = nil
+do
+	local serviceModule = serverModules:FindFirstChild("DailyMissionService")
+	if serviceModule and serviceModule:IsA("ModuleScript") then
+		local ok, service = pcall(require, serviceModule)
+		if ok then
+			DailyMissionService = service
+		else
+			warn("[MissionProgress] Failed to load DailyMissionService:", service)
+		end
+	end
+end
 
 local MissionProgress = {}
-local SECONDS_PER_DAY = 24 * 60 * 60
-
-local function utcMidnightTimestamp(t: number?): number
-	local now = t or os.time()
-	local dt = os.date("!*t", now)
-	local secondsIntoDay = (((dt.hour or 0) * 60) + (dt.min or 0)) * 60 + (dt.sec or 0)
-	return now - secondsIntoDay
-end
-
-local function utcDayKey(t: number?): number
-	local dt = os.date("!*t", t or os.time())
-	return (dt.year * 1000) + (dt.yday or 0)
-end
-
-local function utcWeekKey(t: number?): number
-	local midnight = utcMidnightTimestamp(t)
-	local dt = os.date("!*t", midnight)
-	local daysSinceMonday = ((dt.wday or 1) + 5) % 7
-	local monday = os.date("!*t", midnight - (daysSinceMonday * SECONDS_PER_DAY))
-	return (monday.year * 10000) + (monday.month * 100) + (monday.day or 0)
-end
 
 local function ensureState(plr: Player)
-	local data = PlayerData.Get(plr)
-	data.Missions = data.Missions or {}
-
-	local m = data.Missions
-	m.DailyKey = tonumber(m.DailyKey) or 0
-	m.WeeklyKey = tonumber(m.WeeklyKey) or 0
-
-	m.SelectedDaily = (typeof(m.SelectedDaily) == "table") and m.SelectedDaily or {}
-	m.SelectedWeekly = (typeof(m.SelectedWeekly) == "table") and m.SelectedWeekly or {}
-
-	m.CountersDaily = (typeof(m.CountersDaily) == "table") and m.CountersDaily or {}
-	m.CountersWeekly = (typeof(m.CountersWeekly) == "table") and m.CountersWeekly or {}
-
-	m.ClaimsDaily = tonumber(m.ClaimsDaily) or 0
-	m.ClaimsWeekly = tonumber(m.ClaimsWeekly) or 0
-
-	m.LastClaimTsDaily = tonumber(m.LastClaimTsDaily) or 0
-	m.LastClaimTsWeekly = tonumber(m.LastClaimTsWeekly) or 0
-
-	-- reset UTC daily/weekly
-	local dKey = utcDayKey()
-	if m.DailyKey ~= dKey then
-		m.DailyKey = dKey
-		m.SelectedDaily = {}
-		m.CountersDaily = {}
-		m.ClaimsDaily = 0
-		m.LastClaimTsDaily = 0
-	end
-
-	local wKey = utcWeekKey()
-	if m.WeeklyKey ~= wKey then
-		m.WeeklyKey = wKey
-		m.SelectedWeekly = {}
-		m.CountersWeekly = {}
-		m.ClaimsWeekly = 0
-		m.LastClaimTsWeekly = 0
-	end
-
-	return m
+	return MissionState.Ensure(plr)
 end
 
 local function addCounter(tbl: {[string]: any}, key: string, amount: number)
@@ -86,6 +41,12 @@ local function setMax(tbl: {[string]: any}, key: string, value: number)
 	end
 end
 
+local function queueDailyMissionSync(plr: Player, key: string)
+	if DailyMissionService and DailyMissionService.QueueSync then
+		DailyMissionService.QueueSync(plr, key)
+	end
+end
+
 function MissionProgress.Add(plr: Player, key: string, amount: number)
 	if not plr or not plr.Parent then return end
 	if typeof(key) ~= "string" then return end
@@ -97,6 +58,7 @@ function MissionProgress.Add(plr: Player, key: string, amount: number)
 	addCounter(m.CountersWeekly, key, amount)
 
 	PlayerData.MarkDirty(plr)
+	queueDailyMissionSync(plr, key)
 end
 
 function MissionProgress.SetMax(plr: Player, key: string, value: number)
@@ -110,6 +72,7 @@ function MissionProgress.SetMax(plr: Player, key: string, value: number)
 	setMax(m.CountersWeekly, key, value)
 
 	PlayerData.MarkDirty(plr)
+	queueDailyMissionSync(plr, key)
 end
 
 function MissionProgress.OnReward(plr: Player, xp: number, coins: number)

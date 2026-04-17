@@ -125,6 +125,7 @@ type NpcRecord = {
 	lastGroundXZ: Vector3,
 	orbitSign: number,
 	orbitRadius: number,
+	runtimeAttrsCleared: boolean,
 	deathCallbacks: {((any, {[string]: any}) -> ())},
 }
 
@@ -143,6 +144,21 @@ local NPC_FORMATION_COLLAPSE_BUFFER = 2.75
 local NPC_FORMATION_BLEND_DISTANCE = 7.5
 local TARGET_PRIORITY_ELITE_DISTANCE_BONUS = 12
 local TARGET_PRIORITY_BOSS_DISTANCE_BONUS = 24
+local RUNTIME_ATTRIBUTE_NAMES = {
+	ATTR.State,
+	ATTR.LegacyState,
+	ATTR.AiState,
+	ATTR.Dead,
+	ATTR.LegacyDead,
+	ATTR.LegacyAttacking,
+	ATTR.Alive,
+	ATTR.Direction,
+	ATTR.Velocity,
+	ATTR.Health,
+	ATTR.LegacyHealth,
+	ATTR.MaxHealth,
+	ATTR.LegacyMaxHealth,
+}
 
 local function enemiesFolder(): Instance?
 	return workspace:FindFirstChild("Enemies") or workspace:FindFirstChild("Mobs")
@@ -152,6 +168,22 @@ local function setAttributeIfChanged(inst: Instance, name: string, value: any)
 	if inst:GetAttribute(name) ~= value then
 		inst:SetAttribute(name, value)
 	end
+end
+
+local function clearRuntimeAttributes(model: Model)
+	for _, name in ipairs(RUNTIME_ATTRIBUTE_NAMES) do
+		if model:GetAttribute(name) ~= nil then
+			model:SetAttribute(name, nil)
+		end
+	end
+end
+
+local function ensureRuntimeAttributesCleared(npc: NpcRecord)
+	if npc.runtimeAttrsCleared then
+		return
+	end
+	clearRuntimeAttributes(npc.model)
+	npc.runtimeAttrsCleared = true
 end
 
 local function resolveRoot(model: Model): BasePart?
@@ -455,28 +487,11 @@ local function buildEngagementSlots(alivePlayers: {AlivePlayerInfo}): {[string]:
 end
 
 local function writeStateAttributes(npc: NpcRecord)
-	local model = npc.model
-	local state = npc.state
-	local isDead = npc.dead
-	local isAttacking = state == STATE.Attacking
-
-	setAttributeIfChanged(model, ATTR.State, state)
-	setAttributeIfChanged(model, ATTR.LegacyState, state)
-	setAttributeIfChanged(model, ATTR.AiState, state)
-	setAttributeIfChanged(model, ATTR.Dead, isDead)
-	setAttributeIfChanged(model, ATTR.LegacyDead, isDead)
-	setAttributeIfChanged(model, ATTR.LegacyAttacking, isAttacking)
-	setAttributeIfChanged(model, ATTR.Alive, not isDead)
-	setAttributeIfChanged(model, ATTR.Direction, npc.look)
-	setAttributeIfChanged(model, ATTR.Velocity, npc.velocity)
+	ensureRuntimeAttributesCleared(npc)
 end
 
 local function writeHealthAttributes(npc: NpcRecord)
-	local model = npc.model
-	setAttributeIfChanged(model, ATTR.Health, npc.health)
-	setAttributeIfChanged(model, ATTR.LegacyHealth, npc.health)
-	setAttributeIfChanged(model, ATTR.MaxHealth, npc.maxHealth)
-	setAttributeIfChanged(model, ATTR.LegacyMaxHealth, npc.maxHealth)
+	ensureRuntimeAttributesCleared(npc)
 end
 
 local function setState(npc: NpcRecord, newState: string)
@@ -1324,6 +1339,7 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		lastGroundXZ = Vector3.new(root.Position.X, 0, root.Position.Z),
 		orbitSign = math.random() < 0.5 and -1 or 1,
 		orbitRadius = 0.8 + math.random() * 1.35,
+		runtimeAttrsCleared = false,
 		deathCallbacks = {},
 	}
 
@@ -1344,6 +1360,7 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 	setAttributeIfChanged(model, ATTR.Damage, npc.damage)
 	setAttributeIfChanged(model, ATTR.AttackRange, npc.attackRange)
 	setAttributeIfChanged(model, ATTR.AttackCooldown, npc.attackCooldown)
+	clearRuntimeAttributes(model)
 
 	writeHealthAttributes(npc)
 	writeStateAttributes(npc)
