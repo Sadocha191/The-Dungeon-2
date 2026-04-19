@@ -79,7 +79,6 @@ function MissionProgress.OnReward(plr: Player, xp: number, coins: number)
 	xp = math.floor(tonumber(xp) or 0)
 	coins = math.floor(tonumber(coins) or 0)
 	if xp > 0 then MissionProgress.Add(plr, "XP_EARNED", xp) end
-	if coins > 0 then MissionProgress.Add(plr, "COINS_EARNED", coins) end
 end
 
 function MissionProgress.OnDamage(plr: Player, amount: number, isCrit: boolean)
@@ -143,36 +142,12 @@ function MissionProgress.OnRunComplete(plr: Player, waves: number, seconds: numb
 		MissionProgress.Add(plr, "FAST_RUNS", 1)
 	end
 
-	-- Boss spawn reached (20:00)
-	if seconds >= 1200 then
-		MissionProgress.Add(plr, "BOSS_SPAWN_REACHED", 1)
-	end
-
 	-- Optional per-run derived stats
 	if typeof(extraStats) == "table" then
 		local runCoinsEarned = math.floor(tonumber(extraStats.runCoinsEarned) or tonumber(extraStats.coinsGained) or 0)
 		if runCoinsEarned > 0 then
 			MissionProgress.SetMax(plr, "COINS_RUN_MAX", runCoinsEarned)
 		end
-
-		local lowHp = math.floor(tonumber(extraStats.lowHpSeconds) or 0)
-		if lowHp > 0 then
-			MissionProgress.Add(plr, "LOW_HP_SECONDS", lowHp)
-		end
-
-		local dmgTaken = math.floor(tonumber(extraStats.damageTaken) or 0)
-		if dmgTaken > 0 then
-			MissionProgress.Add(plr, "DAMAGE_TAKEN", dmgTaken)
-		end
-
-		local healed = math.floor(tonumber(extraStats.healAmount) or 0)
-		if healed > 0 then
-			MissionProgress.Add(plr, "HEAL_AMOUNT", healed)
-		end
-
-		if extraStats.multikill30_5 then MissionProgress.Add(plr, "MULTIKILL_30_5", 1) end
-		if extraStats.multikill60_20 then MissionProgress.Add(plr, "MULTIKILL_60_20", 1) end
-		if extraStats.noDamage5min then MissionProgress.Add(plr, "NO_DAMAGE_5MIN", 1) end
 		if extraStats.bossNoHit20 then MissionProgress.Add(plr, "BOSS_NO_HIT_20S", 1) end
 		if extraStats.bossClutch then MissionProgress.Add(plr, "BOSS_CLUTCH", 1) end
 		if extraStats.burst90 then MissionProgress.Add(plr, "BOSS_BURST_90", 1) end
@@ -180,8 +155,6 @@ function MissionProgress.OnRunComplete(plr: Player, waves: number, seconds: numb
 		if extraStats.noRerollWin then MissionProgress.Add(plr, "NO_REROLL_WINS", 1) end
 		if extraStats.max1RerollWin then MissionProgress.Add(plr, "MAX1_REROLL_WINS", 1) end
 		if extraStats.max1SkipWin then MissionProgress.Add(plr, "MAX1_SKIP_WINS", 1) end
-		if extraStats.level10 then MissionProgress.Add(plr, "LEVEL10_RUNS", 1) end
-		if extraStats.spells3 then MissionProgress.Add(plr, "SPELLS_3", 1) end
 		if extraStats.hp50plusWin then MissionProgress.Add(plr, "HP50PLUS_WINS", 1) end
 		if extraStats.winStreak3 then MissionProgress.Add(plr, "WIN_STREAK_3", 1) end
 	end

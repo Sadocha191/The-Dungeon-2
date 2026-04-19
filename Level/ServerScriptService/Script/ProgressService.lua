@@ -67,6 +67,8 @@ local PlayerProgressEvent = ensureRemoteEvent(Remotes, "PlayerProgressEvent")
 local MissionSummaryEvent = ensureRemoteEvent(Remotes, "MissionSummaryEvent")
 local SpellEvent = ensureRemoteEvent(Remotes, "SpellEvent")
 local PauseMenuEvent = ensureRemoteEvent(Remotes, "PauseMenuEvent")
+local distinctOwnedCount
+local runSeconds
 
 -- PauseState (shared)
 local PauseState = ReplicatedStorage:FindFirstChild("PauseState")
@@ -293,6 +295,15 @@ local function getRun(plr: Player)
 			killTimes = {},
 			multikill30_5Done = false,
 			multikill60_20Done = false,
+			missionSecondsReported = 0,
+			missionLowHpSecondsReported = 0,
+			missionDamageTakenReported = 0,
+			missionHealAmountReported = 0,
+			missionCoinsEarnedReported = 0,
+			missionBossPhaseReported = false,
+			missionLevel10Reported = false,
+			missionSpells3Reported = false,
+			missionNoDamage5MinReported = false,
 			ended = false,
 			banished = {}, -- [spellId]=true
 			pendingLevelUps = 0,
@@ -300,6 +311,75 @@ local function getRun(plr: Player)
 		run[uid] = r
 	end
 	return r
+end
+
+local function missionAdd(plr: Player, key: string, amount: number)
+	if MissionProgress and MissionProgress.Add then
+		pcall(function()
+			MissionProgress.Add(plr, key, amount)
+		end)
+	end
+end
+
+local function missionSetMax(plr: Player, key: string, value: number)
+	if MissionProgress and MissionProgress.SetMax then
+		pcall(function()
+			MissionProgress.SetMax(plr, key, value)
+		end)
+	end
+end
+
+local function syncLiveMissionProgress(plr: Player, totalSecondsOverride: number?)
+	local r = getRun(plr)
+	local totalSeconds = math.max(0, math.floor(tonumber(totalSecondsOverride) or runSeconds(plr)))
+	local reportedSeconds = math.max(0, math.floor(tonumber(r.missionSecondsReported) or 0))
+	if totalSeconds > reportedSeconds then
+		local delta = totalSeconds - reportedSeconds
+		r.missionSecondsReported = totalSeconds
+		missionAdd(plr, "SECONDS", delta)
+	end
+
+	local lowHpWholeSeconds = math.max(0, math.floor(tonumber(r.lowHpSeconds) or 0))
+	local reportedLowHpSeconds = math.max(0, math.floor(tonumber(r.missionLowHpSecondsReported) or 0))
+	if lowHpWholeSeconds > reportedLowHpSeconds then
+		local delta = lowHpWholeSeconds - reportedLowHpSeconds
+		r.missionLowHpSecondsReported = lowHpWholeSeconds
+		missionAdd(plr, "LOW_HP_SECONDS", delta)
+	end
+
+	if r.missionBossPhaseReported ~= true and totalSeconds >= 1200 then
+		r.missionBossPhaseReported = true
+		missionAdd(plr, "BOSS_SPAWN_REACHED", 1)
+	end
+
+	local noDamageStreak = tonumber(r.maxNoDamageStreak) or 0
+	if totalSecondsOverride == nil then
+		local nowClock = os.clock()
+		local streakStart = tonumber(r.lastDamageClock) or tonumber(r.startClock) or nowClock
+		noDamageStreak = math.max(noDamageStreak, nowClock - streakStart)
+		r.maxNoDamageStreak = noDamageStreak
+	end
+
+	if r.missionNoDamage5MinReported ~= true and noDamageStreak >= 300 then
+		r.missionNoDamage5MinReported = true
+		missionAdd(plr, "NO_DAMAGE_5MIN", 1)
+	end
+end
+
+local function syncLevelMissionMilestones(plr: Player)
+	local r = getRun(plr)
+	if r.missionLevel10Reported ~= true and (tonumber(r.runLevel) or 0) >= 10 then
+		r.missionLevel10Reported = true
+		missionAdd(plr, "LEVEL10_RUNS", 1)
+	end
+end
+
+local function syncSpellMissionMilestones(plr: Player)
+	local r = getRun(plr)
+	if r.missionSpells3Reported ~= true and distinctOwnedCount(plr) >= 3 then
+		r.missionSpells3Reported = true
+		missionAdd(plr, "SPELLS_3", 1)
+	end
 end
 
 local function hookHealthForMissions(plr: Player)
@@ -323,6 +403,8 @@ local function hookHealthForMissions(plr: Player)
 			if delta < 0 then
 				local dmg = math.floor(-delta)
 				r.damageTaken = (r.damageTaken or 0) + dmg
+				r.missionDamageTakenReported = (r.missionDamageTakenReported or 0) + dmg
+				missionAdd(plr, "DAMAGE_TAKEN", dmg)
 				plr:SetAttribute("LastDamageClock", now)
 
 				local streakStart = r.lastDamageClock or (r.startClock or now)
@@ -334,7 +416,10 @@ local function hookHealthForMissions(plr: Player)
 					r.bossNoHit20Failed = true
 				end
 			elseif delta > 0 then
-				r.healAmount = (r.healAmount or 0) + math.floor(delta)
+				local heal = math.floor(delta)
+				r.healAmount = (r.healAmount or 0) + heal
+				r.missionHealAmountReported = (r.missionHealAmountReported or 0) + heal
+				missionAdd(plr, "HEAL_AMOUNT", heal)
 			end
 
 			lastHealth = newHealth
@@ -353,6 +438,7 @@ local function hookHealthForMissions(plr: Player)
 				if (hum.Health / maxH) < 0.30 then
 					rr.lowHpSeconds = (rr.lowHpSeconds or 0) + 0.25
 				end
+				syncLiveMissionProgress(plr)
 				task.wait(0.25)
 			end
 		end)
@@ -372,7 +458,7 @@ local function runSecondsPrecise(plr: Player): number
 	return math.max(0, t)
 end
 
-local function runSeconds(plr: Player): number
+runSeconds = function(plr: Player): number
 	return math.floor(runSecondsPrecise(plr))
 end
 
@@ -475,7 +561,7 @@ local function countOwnedByType(plr: Player, spellType: string): number
 	return count
 end
 
-local function distinctOwnedCount(plr: Player): number
+distinctOwnedCount = function(plr: Player): number
 	if not SpellDefs or not SpellDefs.SPELLS then return 0 end
 	local n = 0
 	for id, _ in pairs(SpellDefs.SPELLS) do
@@ -878,11 +964,10 @@ SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 		end
 
 		resolveSynergies(plr)
+		syncSpellMissionMilestones(plr)
 
 		-- Missions: count picked upgrades
-		if MissionProgress and MissionProgress.Add then
-			pcall(function() MissionProgress.Add(plr, "UPGRADES_CHOSEN", 1) end)
-		end
+		missionAdd(plr, "UPGRADES_CHOSEN", 1)
 
 		pending[plr.UserId] = nil
 		finishUpgrade(plr)
@@ -892,9 +977,7 @@ SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 	if t == "skip" then
 		local r = getRun(plr)
 		r.skipsUsed = (r.skipsUsed or 0) + 1
-		if MissionProgress and MissionProgress.Add then
-			pcall(function() MissionProgress.Add(plr, "SKIPS_USED", 1) end)
-		end
+		missionAdd(plr, "SKIPS_USED", 1)
 		pending[plr.UserId] = nil
 		finishUpgrade(plr)
 		return
@@ -907,9 +990,7 @@ SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 		end
 		r.rerollsUsed = (r.rerollsUsed or 0) + 1
 		plr:SetAttribute("RunRerollsUsed", r.rerollsUsed)
-		if MissionProgress and MissionProgress.Add then
-			pcall(function() MissionProgress.Add(plr, "REROLLS_USED", 1) end)
-		end
+		missionAdd(plr, "REROLLS_USED", 1)
 		local offers = rollOffers(plr)
 		if #offers == 0 then return end
 
@@ -1022,6 +1103,9 @@ local function addRunCoins(plr: Player, amount: number)
 
 	r.runSilver += amount
 	r.coinsEarned = math.max(0, math.floor(tonumber(r.coinsEarned) or 0)) + amount
+	r.missionCoinsEarnedReported = math.max(0, math.floor(tonumber(r.missionCoinsEarnedReported) or 0)) + amount
+	missionAdd(plr, "COINS_EARNED", amount)
+	missionSetMax(plr, "COINS_RUN_MAX", r.coinsEarned)
 end
 
 -- Public API for orbs (DropService calls _G.AwardPlayer)
@@ -1067,6 +1151,9 @@ function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 		end
 
 		syncPartyHud(pid)
+		for _, member in ipairs(getPartyPlayers(pid)) do
+			syncLevelMissionMilestones(member)
+		end
 		return
 	end
 
@@ -1087,6 +1174,7 @@ function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	end
 
 	syncHud(plr)
+	syncLevelMissionMilestones(plr)
 
 	if leveledCount > 0 then
 		r.pendingLevelUps = math.max(0, tonumber(r.pendingLevelUps) or 0) + leveledCount
@@ -1172,11 +1260,13 @@ function _G.RegisterEnemyKill(_pos: Vector3?, killer: Player?)
 		end
 		if c5 >= 30 then
 			r.multikill30_5Done = true
+			missionAdd(killer, "MULTIKILL_30_5", 1)
 		end
 	end
 
 	if not r.multikill60_20Done and #kt >= 60 then
 		r.multikill60_20Done = true
+		missionAdd(killer, "MULTIKILL_60_20", 1)
 	end
 
 	syncHud(killer)
@@ -1298,6 +1388,32 @@ local function endRunForPlayer(plr: Player, reason: string)
 		local nowClock = os.clock()
 		local streakStart = r.lastDamageClock or (r.startClock or nowClock)
 		r.maxNoDamageStreak = math.max(r.maxNoDamageStreak or 0, nowClock - streakStart)
+		syncLiveMissionProgress(plr, seconds)
+
+		local totalDamageTaken = math.max(0, math.floor(tonumber(r.damageTaken) or 0))
+		local reportedDamageTaken = math.max(0, math.floor(tonumber(r.missionDamageTakenReported) or 0))
+		if totalDamageTaken > reportedDamageTaken then
+			local delta = totalDamageTaken - reportedDamageTaken
+			r.missionDamageTakenReported = totalDamageTaken
+			missionAdd(plr, "DAMAGE_TAKEN", delta)
+		end
+
+		local totalHealAmount = math.max(0, math.floor(tonumber(r.healAmount) or 0))
+		local reportedHealAmount = math.max(0, math.floor(tonumber(r.missionHealAmountReported) or 0))
+		if totalHealAmount > reportedHealAmount then
+			local delta = totalHealAmount - reportedHealAmount
+			r.missionHealAmountReported = totalHealAmount
+			missionAdd(plr, "HEAL_AMOUNT", delta)
+		end
+
+		local totalCoinsEarned = math.max(0, math.floor(tonumber(r.coinsEarned) or 0))
+		local reportedCoinsEarned = math.max(0, math.floor(tonumber(r.missionCoinsEarnedReported) or 0))
+		if totalCoinsEarned > reportedCoinsEarned then
+			local delta = totalCoinsEarned - reportedCoinsEarned
+			r.missionCoinsEarnedReported = totalCoinsEarned
+			missionAdd(plr, "COINS_EARNED", delta)
+		end
+		missionSetMax(plr, "COINS_RUN_MAX", totalCoinsEarned)
 
 		local hum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
 		local maxH = (hum and hum.MaxHealth > 0) and hum.MaxHealth or 1
@@ -1311,6 +1427,10 @@ local function endRunForPlayer(plr: Player, reason: string)
 				if lv > 0 then spellsCount += 1 end
 			end
 		end
+		if spellsCount >= 3 then
+			syncSpellMissionMilestones(plr)
+		end
+		syncLevelMissionMilestones(plr)
 
 		-- win streak (simple server memory per session)
 		r.winStreak = r.winStreak or 0
@@ -1386,6 +1506,15 @@ Players.PlayerAdded:Connect(function(plr: Player)
 	r.killTimes = {}
 	r.multikill30_5Done = false
 	r.multikill60_20Done = false
+	r.missionSecondsReported = 0
+	r.missionLowHpSecondsReported = 0
+	r.missionDamageTakenReported = 0
+	r.missionHealAmountReported = 0
+	r.missionCoinsEarnedReported = 0
+	r.missionBossPhaseReported = false
+	r.missionLevel10Reported = false
+	r.missionSpells3Reported = false
+	r.missionNoDamage5MinReported = false
 	r.ended = false
 	r.banished = {}
 	r.pendingLevelUps = 0
