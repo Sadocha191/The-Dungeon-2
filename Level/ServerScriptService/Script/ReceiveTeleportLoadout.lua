@@ -11,6 +11,7 @@ local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions
 
 local BASE_WALKSPEED = 21
 local BASE_MAX_HP = 120
+local BASE_JUMPPOWER = 50
 local TELEPORT_DATA_RETRIES = 120
 local TELEPORT_DATA_RETRY_DELAY = 0.05
 
@@ -290,10 +291,17 @@ local function processPlayer(plr: Player)
 		if hum then
 			plr:SetAttribute("BaseWalkSpeed", BASE_WALKSPEED)
 			plr:SetAttribute("BaseMaxHP", BASE_MAX_HP)
+			plr:SetAttribute("BaseJumpPower", BASE_JUMPPOWER)
 			plr:SetAttribute("RunBonusHP", 0)
 			plr:SetAttribute("RunBonusSpeed", 0)
 			plr:SetAttribute("RunAtkMult", 1)
+			plr:SetAttribute("MoveSprintLevel", 0)
+			plr:SetAttribute("MoveExtraJumpBonus", 0)
+			plr:SetAttribute("MoveSlideLevel", 0)
+			plr:SetAttribute("MoveDashLevel", 0)
+			hum.UseJumpPower = true
 			hum.WalkSpeed = BASE_WALKSPEED
+			hum.JumpPower = BASE_JUMPPOWER
 			hum.MaxHealth = BASE_MAX_HP
 			hum.Health = BASE_MAX_HP
 		end

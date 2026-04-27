@@ -101,6 +101,10 @@ local NUM_DEFAULTS = {
 	ChestKeyStacks = 0,
 	ChestFreeChanceFlat = 0,
 	ChestCostMult = 1,
+	MoveSprintLevel = 0,
+	MoveExtraJumpBonus = 0,
+	MoveSlideLevel = 0,
+	MoveDashLevel = 0,
 }
 
 local REWARDS = {
@@ -109,13 +113,17 @@ local REWARDS = {
 	{ rarity = "Common", id = "pickup_20", label = "Attraction (+20% Pickup Range)", value = 0.20 },
 	{ rarity = "Common", id = "crit_dmg_10", label = "Crit Tonic (+10% Crit Damage)", value = 0.10 },
 	{ rarity = "Common", id = "move_15", label = "Turbo Socks (+15% Movement Speed)", value = 0.15 },
+	{ rarity = "Common", id = "sprint_1", label = "Runner's Crest (+12% Sprint Speed)", value = 1 },
 	{ rarity = "Common", id = "key_1", label = "Key (+1 stack)", value = 1 },
 	{ rarity = "Uncommon", id = "projectile_1", label = "Backpack (+1 Projectile)", value = 1 },
 	{ rarity = "Uncommon", id = "atkspd_8", label = "Battery (+8% Attack Speed)", value = 0.08 },
 	{ rarity = "Uncommon", id = "elite_15", label = "Boss Buster (+15% Elite Damage)", value = 0.15 },
+	{ rarity = "Uncommon", id = "airjump_1", label = "Feather Sigil (+1 Extra Jump)", value = 1 },
+	{ rarity = "Uncommon", id = "slide_1", label = "Knee Guards (+1 Slide Tier)", value = 1 },
 	{ rarity = "Rare", id = "lifesteal_10", label = "Demonic Blade (+10% Lifesteal)", value = 0.10 },
 	{ rarity = "Rare", id = "luck_8", label = "Clover (+8% Luck)", value = 0.08 },
 	{ rarity = "Rare", id = "powerup_15", label = "Anvil (+15% Powerup Mult)", value = 0.15 },
+	{ rarity = "Rare", id = "dash_1", label = "Blink Spurs (+1 Dash Tier)", value = 1 },
 	{ rarity = "Legendary", id = "damage_25", label = "Big Bonk (+25% Damage)", value = 0.25 },
 }
 
@@ -126,13 +134,17 @@ local REWARD_REVEAL_DESCRIPTIONS = {
 	pickup_20 = "Drops snap in from farther away.",
 	crit_dmg_10 = "Critical hits now deal more damage.",
 	move_15 = "Movement speed increases for the rest of the run.",
+	sprint_1 = "Your sprint gets faster for the rest of the run.",
 	key_1 = "Future chests are more likely to open for free.",
 	projectile_1 = "Projectile spells fire one extra projectile.",
 	atkspd_8 = "Attack speed rises and your swings come out faster.",
 	elite_15 = "Elites and bosses take extra damage from you.",
+	airjump_1 = "Gain one more mid-air jump for the rest of the run.",
+	slide_1 = "Your slide becomes faster and recovers quicker.",
 	lifesteal_10 = "A slice of your damage now returns as health.",
 	luck_8 = "Future reward rolls lean toward better rarities.",
 	powerup_15 = "All later shrine and chest bonuses become stronger.",
+	dash_1 = "Your dash travels farther and refreshes faster.",
 }
 
 local REWARDS_BY_RARITY = {
@@ -437,6 +449,9 @@ local function applyReward(plr, reward)
 		setNumAttr(plr, "ShrineMoveSpeedAdded", getNumAttr(plr, "ShrineMoveSpeedAdded", 0) + addSpeed)
 		applyMovement(plr)
 
+	elseif reward.id == "sprint_1" then
+		setNumAttr(plr, "MoveSprintLevel", getNumAttr(plr, "MoveSprintLevel", 0) + 1)
+
 	elseif reward.id == "key_1" then
 		setNumAttr(plr, "ChestKeyStacks", getNumAttr(plr, "ChestKeyStacks", 0) + 1)
 
@@ -449,6 +464,12 @@ local function applyReward(plr, reward)
 	elseif reward.id == "elite_15" then
 		setNumAttr(plr, "ShrineEliteDamageBonus", getNumAttr(plr, "ShrineEliteDamageBonus", 0) + scaled)
 
+	elseif reward.id == "airjump_1" then
+		setNumAttr(plr, "MoveExtraJumpBonus", getNumAttr(plr, "MoveExtraJumpBonus", 0) + math.max(1, math.floor(scaled + 0.5)))
+
+	elseif reward.id == "slide_1" then
+		setNumAttr(plr, "MoveSlideLevel", getNumAttr(plr, "MoveSlideLevel", 0) + 1)
+
 	elseif reward.id == "lifesteal_10" then
 		setNumAttr(plr, "ShrineLifestealPct", getNumAttr(plr, "ShrineLifestealPct", 0) + scaled)
 
@@ -457,6 +478,9 @@ local function applyReward(plr, reward)
 
 	elseif reward.id == "powerup_15" then
 		setNumAttr(plr, "ShrinePowerupMult", getNumAttr(plr, "ShrinePowerupMult", 1) * (1 + scaled))
+
+	elseif reward.id == "dash_1" then
+		setNumAttr(plr, "MoveDashLevel", getNumAttr(plr, "MoveDashLevel", 0) + 1)
 	end
 end
 
