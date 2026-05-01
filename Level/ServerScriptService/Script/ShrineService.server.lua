@@ -7,6 +7,7 @@ local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local WorldBounds = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WorldBounds"))
+local RunStatsService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("Stats"):WaitForChild("RunStatsService"))
 
 local MIN_SHRINES = 10
 local MAX_SHRINES = 20
@@ -153,8 +154,7 @@ local function applyJumpBonus(plr)
 	end
 
 	local baseJumpPower = getNumAttr(plr, "BaseJumpPower", 50)
-	local jumpBonus = getNumAttr(plr, "ShrineJumpHeightBonus", 0)
-	hum.JumpPower = baseJumpPower * (1 + jumpBonus)
+	hum.JumpPower = baseJumpPower * math.max(0.10, RunStatsService.GetStat(plr, "JumpHeight"))
 end
 
 applyMovementBonus = function(plr)
@@ -165,8 +165,7 @@ applyMovementBonus = function(plr)
 	end
 
 	local baseSpeed = getNumAttr(plr, "BaseWalkSpeed", 21)
-	local runBonusSpeed = getNumAttr(plr, "RunBonusSpeed", 0)
-	hum.WalkSpeed = baseSpeed + runBonusSpeed
+	hum.WalkSpeed = baseSpeed * math.max(0.25, RunStatsService.GetStat(plr, "MovementSpeed"))
 end
 
 local function broadcast(payload)
@@ -335,7 +334,7 @@ local function getAlivePlayers()
 end
 
 local function pickRarity(plr)
-	local luck = math.max(0, getNumAttr(plr, "ShrineLuckBonus", 0))
+	local luck = math.max(0, RunStatsService.GetStat(plr, "Luck"))
 	local commonW = math.max(10, 80 * (1 - luck * 0.9))
 	local uncommonW = 16 * (1 + luck * 1.8)
 	local rareW = 4 * (1 + luck * 2.4)
@@ -364,7 +363,7 @@ end
 local function applyBuff(plr, buff)
 	ensurePlayerDefaults(plr)
 
-	local powerMult = math.max(1, getNumAttr(plr, "ShrinePowerupMult", 1))
+	local powerMult = math.max(1, RunStatsService.GetStat(plr, "PowerupMultiplier"))
 	local scaled = buff.value
 	if buff.id ~= "powerup_10" then
 		scaled = scaled * powerMult
@@ -497,32 +496,8 @@ _G.PrepareRunShrines = function()
 	return #shrines
 end
 
-_G.ApplyDamageToPlayer = function(plr, amount)
-	if not plr or not plr.Parent then
-		return 0
-	end
-	local char = plr.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if not hum or hum.Health <= 0 then
-		return 0
-	end
-
-	ensurePlayerDefaults(plr)
-
-	local incoming = math.max(0, tonumber(amount) or 0)
-	incoming = incoming * (1 + getNumAttr(plr, "ShrineDifficultyPct", 0))
-
-	local shield = math.max(0, getNumAttr(plr, "ShrineShieldCurrent", 0))
-	if shield > 0 and incoming > 0 then
-		local absorbed = math.min(shield, incoming)
-		incoming -= absorbed
-		setNumAttr(plr, "ShrineShieldCurrent", shield - absorbed)
-	end
-
-	if incoming > 0 then
-		hum:TakeDamage(incoming)
-	end
-	return incoming
+_G.ApplyDamageToPlayer = function(plr, amount, source)
+	return RunStatsService.ApplyDamageToPlayer(plr, amount, source)
 end
 
 Players.PlayerAdded:Connect(function(plr)

@@ -643,13 +643,13 @@ local function killNpc(npc: NpcRecord, context: {[string]: any}?)
 	destroyNpcNow(npc, true)
 end
 
-local function applyPlayerDamage(player: Player, amount: number)
+local function applyPlayerDamage(player: Player, amount: number, sourceModel: Model?)
 	if amount <= 0 then
 		return
 	end
 
 	if _G.ApplyDamageToPlayer then
-		_G.ApplyDamageToPlayer(player, amount)
+		_G.ApplyDamageToPlayer(player, amount, sourceModel)
 		return
 	end
 
@@ -877,7 +877,7 @@ local function updateNpc(
 			npc.nextAttackAt = now + npc.attackCooldown
 			npc.attackUntil = now + npc.attackWindup
 			setState(npc, STATE.Attacking)
-			applyPlayerDamage(targetInfo.player, npc.damage)
+			applyPlayerDamage(targetInfo.player, npc.damage, npc.model)
 		else
 			setState(npc, STATE.Idle)
 		end

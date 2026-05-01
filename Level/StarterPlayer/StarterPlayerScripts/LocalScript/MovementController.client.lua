@@ -11,7 +11,7 @@ local pauseState = ReplicatedStorage:WaitForChild("PauseState")
 
 local BASE_SPRINT_BONUS = 0.18
 local SPRINT_BONUS_PER_LEVEL = 0.12
-local BASE_EXTRA_JUMPS = 1
+local BASE_EXTRA_JUMPS = 0
 
 local BASE_DASH_DISTANCE = 18
 local DASH_DISTANCE_PER_LEVEL = 3
@@ -79,6 +79,14 @@ local function getNumAttr(name: string, fallback: number): number
 	return fallback
 end
 
+local function getRunStat(name: string, fallback: number): number
+	local value = player:GetAttribute("RunStat_" .. name)
+	if typeof(value) == "number" then
+		return value
+	end
+	return fallback
+end
+
 local function isPauseMenuOpen(): boolean
 	local pauseGui = playerGui:FindFirstChild("Pause")
 	if not pauseGui or not pauseGui:IsA("ScreenGui") then
@@ -102,6 +110,11 @@ end
 local function isRewardRevealOpen(): boolean
 	local rewardRevealGui = playerGui:FindFirstChild("RewardRevealGui")
 	return rewardRevealGui ~= nil and rewardRevealGui:IsA("ScreenGui") and rewardRevealGui.Enabled
+end
+
+local function isChestRewardOpen(): boolean
+	local chestRewardGui = playerGui:FindFirstChild("ChestRewardGui")
+	return chestRewardGui ~= nil and chestRewardGui:IsA("ScreenGui") and chestRewardGui.Enabled
 end
 
 local function isBlockingUIOpen(): boolean
@@ -129,6 +142,10 @@ local function isBlockingUIOpen(): boolean
 		return true
 	end
 
+	if isChestRewardOpen() then
+		return true
+	end
+
 	return isPauseMenuOpen()
 end
 
@@ -145,7 +162,7 @@ local function isMovementSuppressed(): boolean
 end
 
 local function getBaseWalkSpeed(): number
-	return getNumAttr("BaseWalkSpeed", 21) + getNumAttr("RunBonusSpeed", 0)
+	return getNumAttr("BaseWalkSpeed", 21) * math.max(0.25, getRunStat("MovementSpeed", 1))
 end
 
 local function getSprintMultiplier(): number
@@ -153,7 +170,7 @@ local function getSprintMultiplier(): number
 end
 
 local function getTotalExtraJumps(): number
-	return BASE_EXTRA_JUMPS + math.max(0, math.floor(getNumAttr("MoveExtraJumpBonus", 0)))
+	return BASE_EXTRA_JUMPS + math.max(0, math.floor(getRunStat("ExtraJumps", 0)))
 end
 
 local function getDashDistance(): number

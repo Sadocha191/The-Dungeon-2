@@ -1,18 +1,20 @@
 local Workspace = game:GetService("Workspace")
 
-local IDLE_ANIMATION_ID = "rbxassetid://180435571"
+local DEFAULT_IDLE_ANIMATION_ID = "rbxassetid://180435571"
+local NPC_IDLE_ANIMATION_IDS = {
+	Blacksmith = "rbxassetid://82125789411976",
+}
 
 local npcFolder = Workspace:FindFirstChild("NPCs")
-if not npcFolder then
-	warn("[NpcIdleService] Missing workspace.NPCs")
-	return
-end
-
-local idleAnimation = Instance.new("Animation")
-idleAnimation.Name = "LobbyNpcIdle"
-idleAnimation.AnimationId = IDLE_ANIMATION_ID
+local EXTRA_IDLE_NPCS = {
+	Blacksmith = true,
+}
 
 local tracked = {}
+
+local function getIdleAnimationId(model)
+	return NPC_IDLE_ANIMATION_IDS[model.Name] or DEFAULT_IDLE_ANIMATION_ID
+end
 
 local function cleanup(model)
 	local state = tracked[model]
@@ -34,6 +36,9 @@ local function cleanup(model)
 			state.track:Stop(0.1)
 			state.track:Destroy()
 		end)
+	end
+	if state.animation then
+		state.animation:Destroy()
 	end
 
 	tracked[model] = nil
@@ -77,10 +82,15 @@ local function startIdle(model)
 		return
 	end
 
+	local idleAnimation = Instance.new("Animation")
+	idleAnimation.Name = string.format("%sIdleAnimation", model.Name)
+	idleAnimation.AnimationId = getIdleAnimationId(model)
+
 	local ok, track = pcall(function()
 		return animator:LoadAnimation(idleAnimation)
 	end)
 	if not ok or not track then
+		idleAnimation:Destroy()
 		warn(string.format("[NpcIdleService] Failed to load idle for %s", model:GetFullName()))
 		return
 	end
@@ -91,6 +101,7 @@ local function startIdle(model)
 	track:Play(0.15, 1, 1)
 
 	local state = {
+		animation = idleAnimation,
 		track = track,
 	}
 	tracked[model] = state
@@ -113,12 +124,29 @@ local function startIdle(model)
 	end)
 end
 
-for _, child in ipairs(npcFolder:GetChildren()) do
-	startIdle(child)
+if npcFolder then
+	for _, child in ipairs(npcFolder:GetChildren()) do
+		startIdle(child)
+	end
+
+	npcFolder.ChildAdded:Connect(function(child)
+		task.defer(startIdle, child)
+	end)
+else
+	warn("[NpcIdleService] Missing workspace.NPCs")
 end
 
-npcFolder.ChildAdded:Connect(function(child)
-	task.defer(startIdle, child)
+for modelName in pairs(EXTRA_IDLE_NPCS) do
+	local model = Workspace:FindFirstChild(modelName)
+	if model then
+		startIdle(model)
+	end
+end
+
+Workspace.ChildAdded:Connect(function(child)
+	if EXTRA_IDLE_NPCS[child.Name] then
+		task.defer(startIdle, child)
+	end
 end)
 
 print("[NpcIdleService] Ready")

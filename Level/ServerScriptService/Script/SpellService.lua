@@ -44,6 +44,7 @@ local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or Replicate
 local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions"))
 local NpcService = require(findServerModule("NpcService") or error("[SpellService] Missing NpcService"))
 local PlayerData = require(findServerModule("PlayerData") or error("[SpellService] Missing PlayerData"))
+local RunStatsService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("Stats"):WaitForChild("RunStatsService"))
 local WeaponConfigs = modFolder and require(modFolder:WaitForChild("WeaponConfigs"))
 
 local vfxRoot = workspace:FindFirstChild("SpellVFX")
@@ -410,24 +411,23 @@ local function getEquippedWeaponCombat(plr)
 end
 
 local function getAtkMult(plr)
-	local runAtkMult = tonumber(plr:GetAttribute("RunAtkMult")) or 1
-	local shrineDamageMult = tonumber(plr:GetAttribute("ShrineDamageMult")) or 1
+	local damageMult = RunStatsService.GetStat(plr, "Damage")
 	local spellDamageMult = tonumber(plr:GetAttribute("SpellDamageMult")) or 1
 	local weaponCombat = getEquippedWeaponCombat(plr)
 	local weaponSpellDamage = 1 + math.max(0, tonumber(weaponCombat and weaponCombat.spellDamageBonus) or 0)
-	return runAtkMult * shrineDamageMult * spellDamageMult * weaponSpellDamage
+	return damageMult * spellDamageMult * weaponSpellDamage
 end
 
 local function getDurationMult(plr)
 	local weaponCombat = getEquippedWeaponCombat(plr)
 	local weaponEffectBonus = math.max(0, tonumber(weaponCombat and weaponCombat.spellEffectBonus) or 0)
-	return math.max(0.1, (1 + (tonumber(plr:GetAttribute("ShrineDurationBonus")) or 0)) * (1 + weaponEffectBonus))
+	return math.max(0.1, RunStatsService.GetStat(plr, "Duration") * (1 + weaponEffectBonus))
 end
 
 local function getCooldownMult(plr)
 	local weaponCombat = getEquippedWeaponCombat(plr)
 	local weaponCooldownBonus = math.max(0, tonumber(weaponCombat and weaponCombat.spellCooldownBonus) or 0)
-	return math.max(0.72, 1 - weaponCooldownBonus)
+	return math.max(0.10, (1 / math.max(0.25, RunStatsService.GetStat(plr, "AttackSpeed"))) * math.max(0.72, 1 - weaponCooldownBonus))
 end
 
 local function isBossEnemy(model)
@@ -438,12 +438,13 @@ local function isEliteEnemy(model)
 	return model and (model:GetAttribute("IsElite") == true or isBossEnemy(model))
 end
 
-local function getTargetDamageMultiplier(enemy, stats)
+local function getTargetDamageMultiplier(plr, enemy, stats)
+	local eliteDamageMult = RunStatsService.GetStat(plr, "DamageToElites")
 	if isBossEnemy(enemy) then
-		return tonumber(stats and stats.bossDamageMultiplier) or 1
+		return (tonumber(stats and stats.bossDamageMultiplier) or 1) * eliteDamageMult
 	end
 	if isEliteEnemy(enemy) then
-		return tonumber(stats and stats.eliteDamageMultiplier) or 1
+		return (tonumber(stats and stats.eliteDamageMultiplier) or 1) * eliteDamageMult
 	end
 	return 1
 end
@@ -497,6 +498,7 @@ local function applyEffects(plr, enemy, stats, sourcePos)
 	local durationMult = getDurationMult(plr)
 	local enemyPos = getEnemyPosition(enemy)
 	local resist = getEffectResistance(enemy)
+	local knockbackMult = math.max(0, RunStatsService.GetStat(plr, "Knockback"))
 
 	if effects.dot then
 		applyTimedDot(
@@ -519,7 +521,7 @@ local function applyEffects(plr, enemy, stats, sourcePos)
 	if enemyPos and sourcePos and effects.knockback then
 		local direction = enemyPos - sourcePos
 		if direction.Magnitude > 0.01 then
-			addImpulse(enemy, direction.Unit * (effects.knockback.force or 0) * (0.8 + (effectPower * 0.2)))
+			addImpulse(enemy, direction.Unit * (effects.knockback.force or 0) * knockbackMult * (0.8 + (effectPower * 0.2)))
 		end
 	end
 	if enemyPos and sourcePos and effects.pull then
@@ -534,6 +536,29 @@ local function applyEffects(plr, enemy, stats, sourcePos)
 			addImpulse(enemy, direction.Unit * 10 * tonumber(stats.pullStrength) * (0.8 + (effectPower * 0.2)))
 		end
 	end
+end
+
+local function applyRunStatScaling(plr, stats)
+	if typeof(stats) ~= "table" then
+		return stats
+	end
+
+	local sizeMult = RunStatsService.GetStat(plr, "Size")
+	local projectileSpeedMult = RunStatsService.GetStat(plr, "ProjectileSpeed")
+	local projectileCount = math.max(0, math.floor(RunStatsService.GetStat(plr, "ProjectileCount")))
+	local projectileBounces = math.max(0, math.floor(RunStatsService.GetStat(plr, "ProjectileBounces")))
+	local archetype = tostring(stats.archetype or stats.attackType or "")
+
+	stats.radius = (stats.radius or 0) * sizeMult
+	stats.width = (stats.width or 0) * sizeMult
+	stats.projectileSpeed = (stats.projectileSpeed or 0) * projectileSpeedMult
+
+	if archetype == "Projectile" then
+		stats.count = math.max(1, (stats.count or 1) + projectileCount)
+		stats.bounces = projectileBounces
+	end
+
+	return stats
 end
 
 local function shouldSpawnImpact(plr, spellId, enemy)
@@ -579,14 +604,24 @@ local function hitEnemy(plr, enemy, damage, stats, sourcePos, impactPos)
 	if not enemy or not enemyAlive(enemy) then
 		return
 	end
-	local dealt = damage * getAtkMult(plr) * getTargetDamageMultiplier(enemy, stats)
+	local dealt = damage * getAtkMult(plr) * getTargetDamageMultiplier(plr, enemy, stats)
+	local critChance = math.clamp(RunStatsService.GetStat(plr, "CritChance"), 0, 1)
+	local critDamage = math.max(1, RunStatsService.GetStat(plr, "CritDamage"))
+	local isCrit = critChance > 0 and math.random() < critChance
+	if isCrit then
+		dealt *= critDamage
+	end
 	local vulnUntil = tonumber(enemy:GetAttribute("VulnerableUntil")) or 0
 	local vulnPct = tonumber(enemy:GetAttribute("VulnerablePct")) or 0
 	if vulnUntil > spellClock() and vulnPct > 0 then
 		dealt *= (1 + vulnPct)
 	end
-	local applied = safeDamage(enemy, dealt, { player = plr })
+	local applied = safeDamage(enemy, dealt, { player = plr, crit = isCrit })
 	if applied > 0 then
+		local lifesteal = math.max(0, RunStatsService.GetStat(plr, "Lifesteal"))
+		if lifesteal > 0 then
+			RunStatsService.HealPlayer(plr, applied * lifesteal)
+		end
 		applyEffects(plr, enemy, stats, sourcePos)
 		if shouldSpawnImpact(plr, tostring(stats and stats.spellId or "Spell"), enemy) then
 			local hitPos = impactPos or getEnemyPosition(enemy) or sourcePos
@@ -904,6 +939,7 @@ local function fireProjectile(plr, origin, dir, speed, range, damage, pierce, st
 	local pos = origin
 	local traveled = 0
 	local remainingPierce = math.max(0, math.floor(pierce or 0))
+	local remainingBounces = math.max(0, math.floor(stats and stats.bounces or 0))
 	local hit = {}
 	local collisionRadius = stats.element == "Physical" and 3.6 or 3.3
 	local conn
@@ -925,11 +961,22 @@ local function fireProjectile(plr, origin, dir, speed, range, damage, pierce, st
 		if enemy and enemyPos and (enemyPos - pos).Magnitude <= collisionRadius and not hit[enemy] then
 			hit[enemy] = true
 			hitEnemy(plr, enemy, damage, stats, pos, pos)
-			if remainingPierce <= 0 then
+			if remainingPierce > 0 then
+				remainingPierce -= 1
+			elseif remainingBounces > 0 then
+				local bounceTarget = pickPriorityEnemy(pos, 24)
+				local bouncePos = bounceTarget and getEnemyPosition(bounceTarget)
+				if bounceTarget and bounceTarget ~= enemy and bouncePos and (bouncePos - pos).Magnitude > 0.1 then
+					dir = (bouncePos - pos).Unit
+					remainingBounces -= 1
+				else
+					conn:Disconnect()
+					return
+				end
+			else
 				conn:Disconnect()
 				return
 			end
-			remainingPierce -= 1
 		end
 
 		if traveled >= range then
@@ -956,7 +1003,7 @@ local function runProjectile(plr, spellId, stats, hrp)
 	for index = 1, math.max(1, stats.count or 1) do
 		local assignedTarget = targets[index]
 		task.delay((index - 1) * 0.05, function()
-			if not isPlayerRunActive(plr) then
+			if not isPlayerRunActive(plr) or isPaused() then
 				return
 			end
 			local target = assignedTarget
@@ -1171,6 +1218,7 @@ local function stepPlayer(plr, dt)
 		if spellState.level > 0 then
 			local def = SpellDefs.GetSpell(spellId)
 			local stats = SpellDefs.ComputeRuntimeStats(def, spellState)
+			applyRunStatScaling(plr, stats)
 			local archetype = stats and stats.archetype
 			if archetype == "Projectile" then
 				runProjectile(plr, spellId, stats, hrp)

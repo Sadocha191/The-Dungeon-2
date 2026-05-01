@@ -67,11 +67,11 @@ local function firePickupIndicator(plr: Player, kind: string, amount: number)
 end
 
 local function getPickupRangeMult(plr: Player): number
-	local bonus = plr and plr:GetAttribute("ShrinePickupRangeBonus")
-	if typeof(bonus) ~= "number" then
+	local pickupRange = plr and plr:GetAttribute("RunStat_PickupRange")
+	if typeof(pickupRange) ~= "number" then
 		return 1
 	end
-	return math.max(0.1, 1 + bonus)
+	return math.max(0.1, pickupRange / 8)
 end
 
 local function getGroundedPosition(pos: Vector3): Vector3

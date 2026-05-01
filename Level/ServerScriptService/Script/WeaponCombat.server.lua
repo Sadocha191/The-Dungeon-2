@@ -23,6 +23,7 @@ end
 
 local PlayerData = require(findModule("PlayerData") or error("[WeaponCombat] Missing PlayerData"))
 local NpcService = require(findModule("NpcService") or error("[WeaponCombat] Missing NpcService"))
+local RunStatsService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("Stats"):WaitForChild("RunStatsService"))
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
 local WeaponConfigs = moduleFolder and moduleFolder:FindFirstChild("WeaponConfigs") and require(moduleFolder.WeaponConfigs) or nil
 
@@ -207,19 +208,15 @@ local function calcAttackStats(plr: Player, entry)
 	perLvl += getEntryStat(entry, { "ATKPerLevel", "atkPerLevel" })
 
 	local pdata = PlayerData.Get(plr) or {}
-	local damageMult = getAttrNum(plr, "ShrineDamageMult", 1)
-	local runAtkMult = getAttrNum(plr, "RunAtkMult", 1)
-	local attackSpeedBonus = getAttrNum(plr, "ShrineAttackSpeedBonus", 0)
-	local critDamageBonus = getAttrNum(plr, "ShrineCritDamageBonus", 0)
-	local lifestealBonus = getAttrNum(plr, "ShrineLifestealPct", 0)
-	local eliteBonus = getAttrNum(plr, "ShrineEliteDamageBonus", 0)
-	local knockbackMult = math.max(0, getAttrNum(plr, "ShrineKnockbackMult", 1))
+	local damageMult = RunStatsService.GetStat(plr, "Damage")
+	local attackSpeedStat = RunStatsService.GetStat(plr, "AttackSpeed")
+	local critChance = RunStatsService.GetStat(plr, "CritChance") + math.max(0, (tonumber(pdata.baseCritRate) or 0.05) - 0.05) + (tonumber(pdata.critChance) or 0)
+	local critMult = math.max(RunStatsService.GetStat(plr, "CritDamage"), tonumber(pdata.baseCritDmg) or 1.5) + (tonumber(pdata.critMult) or 0)
+	local lifesteal = RunStatsService.GetStat(plr, "Lifesteal") + (tonumber(pdata.baseLifesteal) or 0) + (tonumber(pdata.lifesteal) or 0)
+	local eliteMult = RunStatsService.GetStat(plr, "DamageToElites")
+	local knockbackMult = math.max(0, RunStatsService.GetStat(plr, "Knockback"))
 
-	local baseDamage = (base + ((level - 1) * perLvl)) * runAtkMult * damageMult
-
-	local critChance = (tonumber(pdata.baseCritRate) or 0.05) + (tonumber(pdata.critChance) or 0)
-	local critMult = (tonumber(pdata.baseCritDmg) or 1.5) + (tonumber(pdata.critMult) or 0)
-	local lifesteal = (tonumber(pdata.baseLifesteal) or 0) + (tonumber(pdata.lifesteal) or 0)
+	local baseDamage = (base + ((level - 1) * perLvl)) * damageMult
 
 	if combat then
 		critChance += tonumber(combat.bonusCritRate) or 0
@@ -230,12 +227,11 @@ local function calcAttackStats(plr: Player, entry)
 	critMult += getEntryStat(entry, { "BonusCritDmg", "bonusCritDmg" })
 	lifesteal += getEntryStat(entry, { "BonusLifesteal", "bonusLifesteal" })
 
-	critChance = math.clamp(critChance, 0, 0.95)
-	critMult = math.max(1.1, critMult + critDamageBonus)
-	lifesteal = math.clamp(lifesteal + lifestealBonus, 0, 0.9)
+	critChance = math.clamp(critChance, 0, 1)
+	critMult = math.max(1.1, critMult)
+	lifesteal = math.clamp(lifesteal, 0, 1)
 
-	local attackSpeedMult = math.max(0.1, (tonumber(pdata.attackSpeed) or 1) * (1 + attackSpeedBonus))
-	local eliteMult = 1 + math.max(0, eliteBonus)
+	local attackSpeedMult = math.max(0.25, (tonumber(pdata.attackSpeed) or 1) * attackSpeedStat)
 
 	return {
 		baseDamage = baseDamage,
@@ -279,10 +275,8 @@ local function getSortedEnemies(fromPos: Vector3, radius: number)
 end
 
 local function healPlayer(plr: Player, amount: number)
-	local char = plr.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if hum and hum.Health > 0 and amount > 0 then
-		hum.Health = math.min(hum.MaxHealth, hum.Health + amount)
+	if amount > 0 then
+		RunStatsService.HealPlayer(plr, amount)
 	end
 end
 

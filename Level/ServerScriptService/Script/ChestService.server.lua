@@ -8,6 +8,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local PlayerData = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerData"))
 local PickupToastService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PickupToastService"))
 local WorldBounds = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WorldBounds"))
+local ChestItemService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("Items"):WaitForChild("ChestItemService"))
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:FindFirstChild("ModuleScript")
 	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
@@ -624,6 +625,7 @@ handleOpen = function(chest, plr)
 		return
 	end
 
+	print(string.format("[ChestService] Chest open requested by %s", plr.Name))
 	ensureDefaults(plr)
 
 	local cost = getChestCost(plr)
@@ -670,9 +672,20 @@ handleOpen = function(chest, plr)
 		rarity = chest.recipeRarity or (recipeDef and recipeDef.rarity) or "Common"
 		rewardName = chest.rewardLabel or ((recipeDef and recipeDef.weaponId) or foundRecipeId or "Recipe")
 	else
-		reward, rarity = pickReward(plr)
-		applyReward(plr, reward)
-		rewardName = reward.label
+		local rewardDefinition, rewardDetail = ChestItemService.OpenReward(plr, {
+			SourceName = getChestSourceName(chest),
+		})
+		if not rewardDefinition or not rewardDetail then
+			chest.opened = false
+			if chest.prompt then
+				chest.prompt.Enabled = true
+			end
+			return
+		end
+		reward = rewardDefinition
+		rarity = rewardDetail.Rarity or rewardDefinition.Rarity or "Common"
+		rewardName = rewardDefinition.Name or rewardDefinition.label or "Reward"
+		print(string.format("[ChestService] Chest paused run for %s", plr.Name))
 	end
 
 	if chest.countsForScaling ~= false then
@@ -715,19 +728,7 @@ handleOpen = function(chest, plr)
 			rarity = recipeDef and recipeDef.rarity or chest.recipeRarity,
 		})
 	elseif reward then
-		WaveStatusEvent:FireClient(plr, {
-			type = "rewardReveal",
-			revealKind = "chest",
-			headerText = "Chest Draw",
-			sourceName = getChestSourceName(chest),
-			itemName = rewardName,
-			rarity = rarity,
-			description = getChestRewardDescription(reward),
-			detailText = getRewardDetailText(chest, openedForFree, chest.forceFree == true and 0 or cost),
-			rollDuration = 0.95,
-			holdDuration = 1.75,
-			candidates = buildRewardRevealCandidates(reward),
-		})
+		print(string.format("[ChestService] Rolled chest item %s (%s) for %s", rewardName, rarity, plr.Name))
 	end
 
 	task.delay(1.8, function()

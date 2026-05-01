@@ -10,7 +10,7 @@ local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or Replicate
 local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions"))
 
 local BASE_WALKSPEED = 21
-local BASE_MAX_HP = 120
+local BASE_MAX_HP = 47
 local BASE_JUMPPOWER = 50
 local TELEPORT_DATA_RETRIES = 120
 local TELEPORT_DATA_RETRY_DELAY = 0.05

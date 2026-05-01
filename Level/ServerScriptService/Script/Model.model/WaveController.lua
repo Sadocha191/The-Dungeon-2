@@ -65,6 +65,7 @@ local NpcService = require(ServerScriptService:WaitForChild("ModuleScript"):Wait
 local PlayerData = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerData"))
 local PickupToastService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PickupToastService"))
 local RunSpawnConfig = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunSpawnConfig"))
+local RunStatsService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("Stats"):WaitForChild("RunStatsService"))
 local WorldBounds = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WorldBounds"))
 local CraftingConfig = require((ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5)):WaitForChild("CraftingConfig"))
 
@@ -480,6 +481,14 @@ local function getAverageRunLevel(): number
 	return math.max(0, tonumber(value) or 0)
 end
 
+local function getAverageRunDifficulty(): number
+	return math.max(0, tonumber(RunStatsService.GetAverageStat("Difficulty")) or 0)
+end
+
+local function getAverageEliteSpawnIncrease(): number
+	return math.max(1, tonumber(RunStatsService.GetAverageStat("EliteSpawnIncrease")) or 1)
+end
+
 local function getRunPressure(elapsedSeconds: number)
 	local minutes = math.floor(math.max(0, elapsedSeconds) / 60)
 	local avgRunLevel = getAverageRunLevel()
@@ -501,10 +510,15 @@ end
 
 local function timeScaleMult(elapsed: number)
 	local minutes, _, levelPressure = getRunPressure(elapsed)
+	local difficulty = getAverageRunDifficulty()
 	local hpMult = (1.07) ^ minutes * (1.14 ^ levelPressure)
 	local dmgMult = (1.045) ^ minutes * (1.09 ^ levelPressure)
 	local speedMult = math.min(1.35, 1 + (minutes * 0.015) + (levelPressure * 0.035))
 	local cooldownMult = math.max(0.78, 1 - (minutes * 0.01) - (levelPressure * 0.025))
+	hpMult *= (1 + (difficulty * 0.55))
+	dmgMult *= (1 + (difficulty * 0.45))
+	speedMult = math.min(1.65, speedMult + (difficulty * 0.08))
+	cooldownMult = math.max(0.68, cooldownMult - (difficulty * 0.08))
 	return hpMult, dmgMult, speedMult, cooldownMult
 end
 
@@ -1770,7 +1784,9 @@ local function desiredMaxAlive(t: number)
 		v += overtimeBase + (math.floor((t - RUN_TIME_LIMIT) / overtimeStepSeconds) * overtimeStepAmount)
 	end
 	local _, _, maxAliveScale = getSpawnStressConfig()
+	local difficulty = getAverageRunDifficulty()
 	local scaled = math.max(base, math.floor((v * maxAliveScale) + 0.5))
+	scaled = math.floor((scaled * (1 + (difficulty * 0.35))) + 0.5)
 	local _, encounterConfig = getActiveImportantEncounter()
 	scaled = math.max(
 		encounterConfig.minNormalAlive,
@@ -1794,6 +1810,7 @@ local function spawnInterval(t: number)
 	if isSwarmActiveAt(t) then
 		i = math.max(0.08, i * math.max(0.05, tonumber(SWARM_SPAWN_CONFIG.intervalMultiplier) or 0.33))
 	end
+	i *= math.max(0.60, 1 - (getAverageRunDifficulty() * 0.22))
 	local _, intervalScale = getSpawnStressConfig()
 	local _, encounterConfig = getActiveImportantEncounter()
 	return math.max(0.04, i * intervalScale * encounterConfig.intervalMultiplier)
@@ -1847,6 +1864,23 @@ local eliteOrder = buildEliteOrder()
 local eliteTotal = (#eliteOrder > 0) and math.max(1, math.floor(RUN_TIME_LIMIT / ELITE_INTERVAL_SECONDS)) or 0
 local eliteIndex = 1 -- next elite to spawn
 local nextEliteAt = eliteTotal > 0 and ELITE_INTERVAL_SECONDS or math.huge
+
+local function maybeSpawnBonusElite()
+	if #eliteOrder <= 0 or activeEliteEnemiesCount() > 0 or not hasEnemyCapacity(1) then
+		return
+	end
+
+	local chance = math.clamp((getAverageEliteSpawnIncrease() - 1) * 0.25, 0, 0.12)
+	if chance <= 0 or math.random() >= chance then
+		return
+	end
+
+	local eliteName = eliteOrder[math.random(1, #eliteOrder)]
+	local elite = spawnMob(eliteName, true, nil, "RunBonusElite")
+	if elite then
+		print(string.format("[WaveController] Spawned bonus elite %s from EliteSpawnIncrease", eliteName))
+	end
+end
 -- === Portal + Boss end condition ===
 local portalModel: Model? = nil
 local portalActivated = false
@@ -2372,6 +2406,8 @@ RunService.Heartbeat:Connect(function()
 			normalAliveNow += 1
 		end
 	end
+
+	maybeSpawnBonusElite()
 end)
 
 print("[HordeController] Ready (time-based)")
