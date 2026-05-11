@@ -61,6 +61,18 @@ local OpenBlacksmithUI = remoteEvents:WaitForChild("OpenBlacksmithUI")
 local BlacksmithSync = remoteEvents:WaitForChild("BlacksmithSync")
 local BlacksmithAction = remoteEvents:WaitForChild("BlacksmithAction")
 
+local WEAPON_ICON_FOLDER_NAME = "WeaponIcons"
+local ELEMENT_ICON_FOLDER_NAME = "ElementIcons"
+local CATEGORY_DEFAULT_ICONS = {
+	Sword = "Knight's Oath",
+	Scythe = "Reaper's Crescent",
+	Halberd = "Warden's Halberd",
+	Bow = "Hunter's Longbow",
+	Staff = "Apprentice Arcstaff",
+	Pistol = "Blackpowder Flintlock",
+}
+local CURLY_APOSTROPHE = utf8.char(8217)
+
 local function clampInt(value, minValue)
 	value = math.floor(tonumber(value) or 0)
 	if minValue ~= nil and value < minValue then
@@ -83,6 +95,64 @@ end
 
 local function getElementColor(element)
 	return BlacksmithTheme.GetElementColor(element)
+end
+
+local function normalizeElementName(element)
+	local value = tostring(element or "")
+	if value == "Electricity" then
+		return "Electric"
+	end
+	if value == "" then
+		return "Physical"
+	end
+	return value
+end
+
+local function readAssetReference(iconObject)
+	if not iconObject then
+		return nil
+	end
+
+	local value = nil
+	if iconObject:IsA("StringValue") then
+		value = iconObject.Value
+	elseif iconObject:IsA("ImageLabel") or iconObject:IsA("ImageButton") then
+		value = iconObject.Image
+	elseif iconObject:IsA("Decal") or iconObject:IsA("Texture") then
+		value = iconObject.Texture
+	end
+
+	if typeof(value) == "string" and value ~= "" then
+		return value
+	end
+	return nil
+end
+
+local function pushUnique(listRef, seen, value)
+	if typeof(value) ~= "string" or value == "" or seen[value] then
+		return
+	end
+	seen[value] = true
+	table.insert(listRef, value)
+end
+
+local function buildTypographyVariants(value)
+	local variants = {}
+	local seen = {}
+
+	local function push(valueToPush)
+		pushUnique(variants, seen, valueToPush)
+	end
+
+	push(value)
+	if typeof(value) ~= "string" or value == "" then
+		return variants
+	end
+
+	push(value:gsub("'", CURLY_APOSTROPHE))
+	push(value:gsub(CURLY_APOSTROPHE, "'"))
+
+	return variants
 end
 
 local function getNamedChildOfClass(parent, name, className)
@@ -143,7 +213,11 @@ gui:SetAttribute("Modal", true)
 
 local cameraPoint = gui:WaitForChild("BlacksmithCameraPoint")
 local mainFrame = gui:WaitForChild("BlacksmithGui")
+local backButton = mainFrame:WaitForChild("BackButton"):WaitForChild("BackButton")
 local silverLabel = gui:WaitForChild("Silver"):WaitForChild("Frame"):WaitForChild("TextLabel")
+
+backButton.Active = true
+backButton.Visible = true
 
 local bottomFrame = mainFrame:WaitForChild("Bottom")
 local forgeButton = bottomFrame:WaitForChild("Forge_button")
@@ -353,6 +427,15 @@ local characterAddedConnection = nil
 local characterDescendantAddedConnection = nil
 local hiddenCharacterParts = {}
 local hiddenCharacterEffects = {}
+local hiddenBlacksmithPromptStates = {}
+local blacksmithPromptWatcher = nil
+local savedMovementState = nil
+local folderCache = {
+	WeaponIcons = nil,
+	ElementIcons = nil,
+}
+local missingWeaponIconWarnings = {}
+local missingElementIconWarnings = {}
 local refresh
 
 local function tutorialComplete()
@@ -649,6 +732,178 @@ local function restoreLocalCharacter()
 	table.clear(hiddenCharacterEffects)
 end
 
+local function resetFolderCache()
+	folderCache.WeaponIcons = nil
+	folderCache.ElementIcons = nil
+end
+
+local function getFolder(folderName)
+	local cached = folderCache[folderName]
+	if cached and cached.Parent then
+		return cached
+	end
+	local folder = ReplicatedStorage:FindFirstChild(folderName)
+	folderCache[folderName] = folder
+	return folder
+end
+
+local function resolveIconAsset(folderName, rawCandidates)
+	local folder = getFolder(folderName)
+	if not folder then
+		return nil
+	end
+
+	local seen = {}
+	local candidates = {}
+	for _, candidate in ipairs(rawCandidates or {}) do
+		for _, variant in ipairs(buildTypographyVariants(candidate)) do
+			pushUnique(candidates, seen, variant)
+		end
+	end
+
+	for _, candidate in ipairs(candidates) do
+		local iconObject = folder:FindFirstChild(candidate)
+		local assetRef = readAssetReference(iconObject)
+		if assetRef then
+			return assetRef
+		end
+	end
+
+	return nil
+end
+
+local function resolveWeaponIconAsset(weaponDef, weaponId, weaponType)
+	if not weaponDef then
+		return nil
+	end
+
+	local candidates = {}
+	local seen = {}
+	pushUnique(candidates, seen, weaponDef.iconName)
+	for _, fallbackName in ipairs(weaponDef.iconFallbackNames or {}) do
+		pushUnique(candidates, seen, fallbackName)
+	end
+	pushUnique(candidates, seen, weaponDef.categoryIconName)
+	pushUnique(candidates, seen, CATEGORY_DEFAULT_ICONS[tostring(weaponType or weaponDef.weaponType or "")])
+
+	local assetRef = resolveIconAsset(WEAPON_ICON_FOLDER_NAME, candidates)
+	if assetRef then
+		missingWeaponIconWarnings[weaponId] = nil
+		return assetRef
+	end
+
+	if weaponId and not missingWeaponIconWarnings[weaponId] then
+		warn("Missing weapon icon:", weaponId, tostring(weaponDef.iconName or ""))
+		missingWeaponIconWarnings[weaponId] = true
+	end
+
+	return nil
+end
+
+local function resolveElementIconAsset(elementName)
+	local normalizedElement = normalizeElementName(elementName)
+	local assetRef = resolveIconAsset(ELEMENT_ICON_FOLDER_NAME, { normalizedElement })
+	if assetRef then
+		missingElementIconWarnings[normalizedElement] = nil
+		return assetRef
+	end
+
+	if not missingElementIconWarnings[normalizedElement] then
+		warn("Missing element icon:", normalizedElement)
+		missingElementIconWarnings[normalizedElement] = true
+	end
+
+	return nil
+end
+
+local function snapshotMovementState()
+	if savedMovementState then
+		return
+	end
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+
+	savedMovementState = {
+		humanoid = humanoid,
+		walkSpeed = humanoid.WalkSpeed,
+		jumpPower = humanoid.JumpPower,
+		autoRotate = humanoid.AutoRotate,
+		platformStand = humanoid.PlatformStand,
+	}
+end
+
+local function restoreMovementState()
+	if not savedMovementState then
+		return
+	end
+
+	local humanoid = savedMovementState.humanoid
+	if humanoid and humanoid.Parent then
+		humanoid.WalkSpeed = savedMovementState.walkSpeed
+		humanoid.JumpPower = savedMovementState.jumpPower
+		humanoid.AutoRotate = savedMovementState.autoRotate
+		humanoid.PlatformStand = savedMovementState.platformStand
+	end
+
+	savedMovementState = nil
+end
+
+local function getBlacksmithModel()
+	local npcs = Workspace:FindFirstChild("NPCs")
+	return npcs and (npcs:FindFirstChild("Blacksmith") or npcs:FindFirstChild("BlacksmithNPC")) or nil
+end
+
+local function setPromptHidden(prompt)
+	if not prompt or not prompt:IsA("ProximityPrompt") then
+		return
+	end
+	if hiddenBlacksmithPromptStates[prompt] == nil then
+		hiddenBlacksmithPromptStates[prompt] = prompt.Enabled
+	end
+	prompt.Enabled = false
+end
+
+local function hideBlacksmithPrompts()
+	if blacksmithPromptWatcher then
+		return
+	end
+
+	local smith = getBlacksmithModel()
+	if not smith then
+		return
+	end
+
+	for _, descendant in ipairs(smith:GetDescendants()) do
+		if descendant:IsA("ProximityPrompt") then
+			setPromptHidden(descendant)
+		end
+	end
+
+	blacksmithPromptWatcher = smith.DescendantAdded:Connect(function(descendant)
+		if gui.Enabled and descendant:IsA("ProximityPrompt") then
+			setPromptHidden(descendant)
+		end
+	end)
+end
+
+local function restoreBlacksmithPrompts()
+	if blacksmithPromptWatcher then
+		blacksmithPromptWatcher:Disconnect()
+		blacksmithPromptWatcher = nil
+	end
+
+	for prompt, wasEnabled in pairs(hiddenBlacksmithPromptStates) do
+		if prompt and prompt.Parent then
+			prompt.Enabled = wasEnabled
+		end
+	end
+	table.clear(hiddenBlacksmithPromptStates)
+end
+
 local function getCraftEntries()
 	return snapshot and snapshot.craftEntries or {}
 end
@@ -799,6 +1054,28 @@ local function buildStatLines(weaponDef)
 	return lines
 end
 
+local function getWeaponDisplayName(weaponDef, entry)
+	local value = (weaponDef and (weaponDef.weaponName or weaponDef.name or weaponDef.displayName))
+		or (entry and (entry.name or entry.weaponId))
+		or ""
+	return tostring(value)
+end
+
+local function getWeaponTypeLabel(weaponDef, entry, normalizedElement)
+	local value = weaponDef and weaponDef.weaponTypeLabel or nil
+	if typeof(value) == "string" and value ~= "" then
+		return value
+	end
+
+	local category = (weaponDef and (weaponDef.category or weaponDef.weaponType)) or (entry and entry.weaponType) or ""
+	category = tostring(category or "")
+	if category == "" then
+		return tostring(normalizedElement or "")
+	end
+
+	return string.format("%s %s", tostring(normalizedElement or ""), category)
+end
+
 local function bindMaterialTooltip(slotFrame)
 	if slotFrame:GetAttribute("TooltipBound") == true then
 		return
@@ -837,9 +1114,11 @@ local function setMaterialSlot(slotFrame, textLabel, materialEntry)
 		textLabel.Text = ""
 		textLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
 		slotFrame.Visible = false
+		textLabel.Visible = false
 		slotFrame:SetAttribute("MaterialId", "")
 		if icon and icon:IsA("ImageLabel") then
 			icon.Visible = false
+			icon.Image = ""
 		end
 		return
 	end
@@ -852,17 +1131,18 @@ local function setMaterialSlot(slotFrame, textLabel, materialEntry)
 
 	textLabel.Text = string.format("%d/%d", owned, required)
 	textLabel.TextColor3 = missing > 0 and Color3.fromRGB(255, 152, 152) or Color3.fromRGB(214, 255, 214)
+	textLabel.Visible = true
+	slotFrame.Visible = true
 	slotFrame:SetAttribute("MaterialId", materialDef and materialDef.id or tostring(materialEntry.id or ""))
 
 	if icon and icon:IsA("ImageLabel") and typeof(assetRef) == "string" and assetRef ~= "" then
 		icon.Image = assetRef
 		icon.Visible = true
-		slotFrame.Visible = true
 	else
 		if icon and icon:IsA("ImageLabel") then
+			icon.Image = ""
 			icon.Visible = false
 		end
-		slotFrame.Visible = false
 	end
 end
 
@@ -890,10 +1170,10 @@ local function renderDetails()
 
 	local weaponDef = WeaponConfigs.Get(entry.weaponId)
 	local rarityColor = getRarityColor(entry.rarity)
-	local element = tostring((weaponDef and weaponDef.element) or "Physical")
+	local element = normalizeElementName((weaponDef and weaponDef.element) or "Physical")
 
 	silverLabel.Text = tostring(clampInt(snapshot and snapshot.silver, 0))
-	weaponNameLabel.Text = tostring(entry.name or entry.weaponId)
+	weaponNameLabel.Text = getWeaponDisplayName(weaponDef, entry)
 	weaponNameLabel.TextColor3 = rarityColor
 	elementTypeLabel.Text = string.format("Element type: %s", element)
 	elementTypeLabel.TextColor3 = getElementColor(element)
@@ -950,7 +1230,7 @@ local function renderEntryButtons()
 		local button = template:Clone()
 		local weaponDef = WeaponConfigs.Get(entry.weaponId)
 		local accent = getRarityColor(entry.rarity)
-		local element = tostring((weaponDef and weaponDef.element) or "Physical")
+		local element = normalizeElementName((weaponDef and weaponDef.element) or "Physical")
 		local selected = selectedEntry and selectedEntry.recipeId == entry.recipeId
 
 		button.Name = "WeaponBackground"
@@ -963,21 +1243,28 @@ local function renderEntryButtons()
 
 		local weaponIcon = button:FindFirstChild("WeaponIcon")
 		if weaponIcon and weaponIcon:IsA("ImageLabel") then
-			local weaponIconId = weaponDef and weaponDef.icon
-			if typeof(weaponIconId) == "string" and weaponIconId ~= "" then
-				weaponIcon.Image = weaponIconId
+			local weaponIconAsset = resolveWeaponIconAsset(
+				weaponDef,
+				tostring(entry.weaponId or ""),
+				tostring(entry.weaponType or (weaponDef and weaponDef.weaponType) or "")
+			)
+			if typeof(weaponIconAsset) == "string" and weaponIconAsset ~= "" then
+				weaponIcon.Image = weaponIconAsset
+				weaponIcon.Visible = true
+			else
+				weaponIcon.Image = ""
+				weaponIcon.Visible = false
 			end
-			weaponIcon.Visible = true
 		end
 
 		local weaponName = button:FindFirstChild("WeaponName")
 		if weaponName and weaponName:IsA("TextLabel") then
-			weaponName.Text = tostring(entry.name or entry.weaponId)
+			weaponName.Text = getWeaponDisplayName(weaponDef, entry)
 		end
 
 		local weaponType = button:FindFirstChild("WeaponType")
 		if weaponType and weaponType:IsA("TextLabel") then
-			weaponType.Text = tostring(entry.weaponType or (weaponDef and weaponDef.weaponType) or "")
+			weaponType.Text = getWeaponTypeLabel(weaponDef, entry, element)
 		end
 
 		local weaponStat = button:FindFirstChild("WeaponStat")
@@ -994,8 +1281,15 @@ local function renderEntryButtons()
 
 		local elementIcon = button:FindFirstChild("ElementType")
 		if elementIcon and elementIcon:IsA("ImageLabel") then
-			elementIcon.Visible = true
-			elementIcon.ImageColor3 = getElementColor(element)
+			local elementIconAsset = resolveElementIconAsset((weaponDef and weaponDef.elementIconName) or element)
+			if typeof(elementIconAsset) == "string" and elementIconAsset ~= "" then
+				elementIcon.Image = elementIconAsset
+				elementIcon.Visible = true
+				elementIcon.ImageColor3 = getElementColor(element)
+			else
+				elementIcon.Image = ""
+				elementIcon.Visible = false
+			end
 		end
 
 		local forgable = button:FindFirstChild("Forgable")
@@ -1160,12 +1454,18 @@ local function closeUI()
 		return
 	end
 
+	print("[BlacksmithUI] Closing blacksmith UI")
+	snapshot = nil
 	selectedRecipeId = nil
+	selectedCategory = nil
 	hideMaterialTooltip()
 	closePopup()
+	refresh()
 	stopBlacksmithCamera()
+	restoreMovementState()
 	restoreLobbyUi()
 	restoreLocalCharacter()
+	restoreBlacksmithPrompts()
 	gui.Enabled = false
 end
 
@@ -1178,10 +1478,14 @@ local function openUI()
 	end
 
 	MaterialDefinitions.RefreshAssetRefs()
+	resetFolderCache()
 	snapshot = nil
 	selectedRecipeId = nil
+	selectedCategory = nil
 	hideMaterialTooltip()
+	snapshotMovementState()
 	gui.Enabled = true
+	hideBlacksmithPrompts()
 	hideLobbyUi()
 	hideLocalCharacter()
 	startBlacksmithCamera()
@@ -1221,7 +1525,11 @@ local function requestCraftAction(entry)
 
 	showPopup({
 		title = "Confirm Forge",
-		body = string.format("Forge %s for %d silver?", tostring(entry.name or entry.weaponId), clampInt(entry.craftSilverCost, 0)),
+		body = string.format(
+			"Forge %s for %d silver?",
+			getWeaponDisplayName(WeaponConfigs.Get(entry.weaponId), entry),
+			clampInt(entry.craftSilverCost, 0)
+		),
 		primaryText = "Confirm",
 		secondaryText = "Cancel",
 		primaryCallback = function()
@@ -1254,8 +1562,7 @@ for index, button in ipairs(categoryButtons) do
 end
 
 local function isPromptInsideBlacksmith(prompt)
-	local npcs = Workspace:FindFirstChild("NPCs")
-	local smith = npcs and (npcs:FindFirstChild("Blacksmith") or npcs:FindFirstChild("BlacksmithNPC"))
+	local smith = getBlacksmithModel()
 	if not smith then
 		return false
 	end
@@ -1315,10 +1622,17 @@ closeRequested.Event:Connect(function()
 	closeUI()
 end)
 
+backButton.Activated:Connect(function()
+	print("[BlacksmithUI] BackButton clicked")
+	closeUI()
+end)
+
 script.Destroying:Connect(function()
 	hideMaterialTooltip()
 	closePopup()
 	stopBlacksmithCamera()
+	restoreMovementState()
 	restoreLobbyUi()
 	restoreLocalCharacter()
+	restoreBlacksmithPrompts()
 end)

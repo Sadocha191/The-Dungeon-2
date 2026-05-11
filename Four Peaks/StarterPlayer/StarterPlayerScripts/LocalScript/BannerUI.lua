@@ -791,12 +791,34 @@ end
 local function renderViewport(viewport, fallback, weaponId)
 	clearContainer(viewport)
 	local weaponIdString = tostring(weaponId or "")
+	local iconWrap = fallback.Parent
+	local imageIcon = iconWrap and iconWrap:FindFirstChild("WeaponIconImage")
+	if not imageIcon and iconWrap then
+		imageIcon = Instance.new("ImageLabel")
+		imageIcon.Name = "WeaponIconImage"
+		imageIcon.BackgroundTransparency = 1
+		imageIcon.Size = UDim2.fromScale(1, 1)
+		imageIcon.Visible = false
+		imageIcon.Parent = iconWrap
+	end
+	if imageIcon and imageIcon:IsA("ImageLabel") then
+		imageIcon.Visible = false
+		imageIcon.Image = ""
+	end
 	if weaponIdString == "" then
 		fallback.Visible = true
 		fallback.Text = "?"
 		return
 	end
 	local source = weaponIcons and weaponIcons:FindFirstChild(weaponIdString)
+	if source and source:IsA("StringValue") and source.Value ~= "" then
+		fallback.Visible = false
+		if imageIcon and imageIcon:IsA("ImageLabel") then
+			imageIcon.Image = source.Value
+			imageIcon.Visible = true
+		end
+		return
+	end
 	if not source or not source:IsA("Model") then
 		local def = getWeaponDef(weaponIdString)
 		fallback.Visible = true

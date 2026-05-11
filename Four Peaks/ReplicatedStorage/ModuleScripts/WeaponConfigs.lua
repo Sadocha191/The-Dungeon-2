@@ -26,6 +26,142 @@ local RARITY_ATK_PER_LEVEL = {
 	Mythical = 0.16,
 }
 
+local TYPE_DISPLAY_NAMES = {
+	Sword = "Sword",
+	Scythe = "Scythe",
+	Halberd = "Halberd",
+	Bow = "Bow",
+	Staff = "Staff",
+	Pistol = "Pistol",
+}
+
+local CATEGORY_DEFAULT_ICONS = {
+	Sword = "Knight's Oath",
+	Scythe = "Reaper's Crescent",
+	Halberd = "Warden's Halberd",
+	Bow = "Hunter's Longbow",
+	Staff = "Apprentice Arcstaff",
+	Pistol = "Blackpowder Flintlock",
+}
+
+local ICON_FALLBACKS_BY_TYPE_AND_ELEMENT = {
+	Sword = {
+		Physical = { "Knight's Oath" },
+		Fire = { "Emberfang Blade", "Excalion, Blade of Kings", "Knight's Oath" },
+		Water = { "Frostbite Blade", "Knight's Oath" },
+		Earth = { "Verdant Saber", "Knight's Oath" },
+		Electric = { "Windglass Blade", "Knight's Oath" },
+		Air = { "Windglass Blade", "Knight's Oath" },
+		Light = { "Excalion, Blade of Kings", "Knight's Oath" },
+		Void = { "Voidpiercer", "Shadowthorn Sword", "Knight's Oath" },
+	},
+	Scythe = {
+		Physical = { "Farmer's Scythe", "Reaper's Crescent" },
+		Fire = { "Bloodfire Scythe", "Reaper's Crescent" },
+		Water = { "Frost Reaper", "Reaper's Crescent" },
+		Earth = { "Thorn Reaper", "Reaper's Crescent" },
+		Electric = { "Golden Crescent", "Reaper's Crescent" },
+		Air = { "Pale Harvest", "Reaper's Crescent" },
+		Light = { "Golden Crescent", "Reaper's Crescent" },
+		Void = { "Void Reaper", "Reaper's Crescent", "Harvest of the End" },
+	},
+	Halberd = {
+		Physical = { "Iron Halberd", "Warden's Halberd" },
+		Fire = { "Infernal Halberd", "Dragonspear Halberd", "Warden's Halberd" },
+		Water = { "Glacier Halberd", "Warden's Halberd" },
+		Earth = { "Earthsplitter Halberd", "Grovekeeper Halberd", "Warden's Halberd" },
+		Electric = { "Royal Halberd", "Warden's Halberd" },
+		Air = { "Royal Halberd", "Warden's Halberd" },
+		Light = { "Royal Halberd", "Warden's Halberd" },
+		Void = { "Voidguard Halberd", "Nightfang Halberd", "Warden's Halberd" },
+	},
+	Bow = {
+		Physical = { "Hunter's Longbow" },
+		Fire = { "Emberthorn Bow", "Stormwind Recurve", "Hunter's Longbow" },
+		Water = { "Frostbranch Bow", "Hunter's Longbow" },
+		Earth = { "Forestbone Bow", "Mossfang Bow", "Hunter's Longbow" },
+		Electric = { "Stormwind Recurve", "Hunter's Longbow" },
+		Air = { "Dawnfeather Bow", "Stormwind Recurve", "Hunter's Longbow" },
+		Light = { "Sunpiercer", "Hunter's Longbow" },
+		Void = { "Voidstring Bow", "Shadowcurve Bow", "Stormwind Recurve" },
+	},
+	Staff = {
+		Physical = { "Apprentice Staff", "Archmage's Worldstaff", "Apprentice Arcstaff" },
+		Fire = { "Flamecore Staff", "Inferno Warstaff", "Archmage's Worldstaff" },
+		Water = { "Frostgem Wand", "Archmage's Worldstaff" },
+		Earth = { "Emerald Staff", "Nature's Grasp Staff", "Ironwood Wand", "Archmage's Worldstaff" },
+		Electric = { "Apprentice Arcstaff", "Archmage's Worldstaff" },
+		Air = { "Solar Mace Staff", "Archmage's Worldstaff" },
+		Light = { "Solar Mace Staff", "Archmage's Worldstaff" },
+		Void = { "Void Crystal Staff", "Void Crescent Staff", "Eclipse Staff", "Archmage's Worldstaff" },
+	},
+	Pistol = {
+		Physical = { "Blackpowder Flintlock", "Kingslayer Handcannon" },
+		Fire = { "Kingslayer Handcannon", "Blackpowder Flintlock" },
+		Water = { "Blackpowder Flintlock", "Kingslayer Handcannon" },
+		Earth = { "Rustlock Pistol", "Blackpowder Flintlock" },
+		Electric = { "Royal Handcannon", "Kingslayer Handcannon", "Blackpowder Flintlock" },
+		Air = { "Blackpowder Flintlock", "Kingslayer Handcannon" },
+		Light = { "Royal Handcannon", "Kingslayer Handcannon", "Blackpowder Flintlock" },
+		Void = { "Voidlock Handcannon", "Kingslayer Handcannon", "Blackpowder Flintlock" },
+	},
+}
+
+local function normalizeElementName(element)
+	local value = tostring(element or "")
+	if value == "Electricity" then
+		return "Electric"
+	end
+	if value == "" then
+		return "Physical"
+	end
+	return value
+end
+
+local function appendUnique(listRef, seen, value)
+	if typeof(value) ~= "string" or value == "" or seen[value] then
+		return
+	end
+	seen[value] = true
+	table.insert(listRef, value)
+end
+
+local function buildDisplayName(def)
+	local element = normalizeElementName(def.element)
+	local weaponType = TYPE_DISPLAY_NAMES[def.weaponType] or tostring(def.weaponType or "Weapon")
+	return string.format("%s %s", element, weaponType)
+end
+
+local function buildIconFallbackNames(def)
+	local weaponType = tostring(def.weaponType or "")
+	local element = normalizeElementName(def.element)
+	local fallbacks = {}
+	local seen = {}
+
+	for _, value in ipairs(def.iconFallbackNames or {}) do
+		appendUnique(fallbacks, seen, value)
+	end
+
+	local typeFallbacks = ICON_FALLBACKS_BY_TYPE_AND_ELEMENT[weaponType]
+	local elementFallbacks = typeFallbacks and typeFallbacks[element] or nil
+	for _, value in ipairs(elementFallbacks or {}) do
+		appendUnique(fallbacks, seen, value)
+	end
+
+	appendUnique(fallbacks, seen, CATEGORY_DEFAULT_ICONS[weaponType])
+	if def.iconName then
+		seen[def.iconName] = nil
+	end
+
+	local filtered = {}
+	for _, value in ipairs(fallbacks) do
+		if value ~= def.iconName then
+			table.insert(filtered, value)
+		end
+	end
+	return filtered
+end
+
 local function add(def)
 	def.rarityColor = def.rarityColor or RARITY_COLORS[def.rarity]
 	def.combat = def.combat or {}
@@ -34,6 +170,15 @@ local function add(def)
 		local baseAtk = def.combat.baseAtk or def.baseDamage or 0
 		def.combat.atkPerLevel = baseAtk * scaling
 	end
+	def.element = normalizeElementName(def.element)
+	def.weaponName = def.weaponName or def.name or def.id
+	def.displayName = def.displayName or def.weaponName
+	def.weaponTypeLabel = def.weaponTypeLabel or buildDisplayName(def)
+	def.category = def.category or def.weaponType
+	def.iconName = def.iconName or def.id
+	def.elementIconName = def.elementIconName or def.element
+	def.categoryIconName = def.categoryIconName or CATEGORY_DEFAULT_ICONS[def.weaponType]
+	def.iconFallbackNames = buildIconFallbackNames(def)
 	defs[def.id] = def
 	table.insert(list, def)
 end

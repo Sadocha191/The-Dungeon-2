@@ -711,7 +711,7 @@ local function buildCraftEntries(data, progress, balances, craftedCounts, instan
 			table.insert(craftEntries, {
 				recipeId = recipeId,
 				weaponId = recipe.weaponId,
-				name = def and def.name or recipe.weaponId,
+				name = (def and (def.displayName or def.name)) or recipe.weaponId,
 				weaponType = def and def.weaponType or nil,
 				rarity = recipe.rarity,
 				requiredLevel = recipe.requiredLevel,
@@ -757,7 +757,7 @@ local function buildCraftEntries(data, progress, balances, craftedCounts, instan
 		if rarityA ~= rarityB then
 			return rarityA < rarityB
 		end
-		return tostring(a.name) < tostring(b.name)
+		return tostring(a.weaponId) < tostring(b.weaponId)
 	end)
 
 	return craftEntries

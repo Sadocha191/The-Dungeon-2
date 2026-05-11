@@ -1022,3 +1022,151 @@ This file tracks AI-made repo changes and the intended rollback path.
 - Revert `Four Peaks/ReplicatedStorage/ModuleScripts/WeaponConfigs.lua`, `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/BlacksmithUI.lua`, and this changelog entry in the repo.
 - In live Studio, restore the previous source of `game.ReplicatedStorage.ModuleScripts.WeaponConfigs` and `game.StarterPlayer.StarterPlayerScripts.BlacksmithUI`.
 - If needed, restore the previous blacksmith camera offset in the live local script to the earlier value.
+## 2026-05-11 - Cztery szczyty blacksmith icon contracts, display names, prompt hiding, and close flow sync
+
+### Scope
+
+- Updated live `Cztery szczyty` and mirrored repo changes for the Four Peaks blacksmith pass that fixes weapon tile icon wiring, element icon wiring, simple blacksmith-facing names, prompt hiding, and close behavior.
+- Extended `WeaponConfigs` with blacksmith presentation fields without changing `weaponId`, `recipeId`, inventory keys, or save keys:
+  - `displayName`
+  - `iconName`
+  - `iconFallbackNames`
+  - `elementIconName`
+- Normalized blacksmith element presentation so `Electricity` is exposed to the UI as `Electric`.
+- Updated `CraftingService` so blacksmith snapshot entries use `def.displayName` when present and sort ties by `weaponId` instead of display text.
+- Replaced the old `WeaponIconReplicator` model-replication behavior with icon-contract setup for:
+  - `ReplicatedStorage.WeaponIcons`
+  - `ReplicatedStorage.ElementIcons`
+  - `ReplicatedStorage.MaterialIcons`
+- Populated the live icon folders with `StringValue` children keyed by asset names and defaulted missing values to `rbxgameasset://Images/<name>` so the UI can resolve imported Asset Manager images by name without guessing numeric ids.
+- Updated `BlacksmithUI` so:
+  - left weapon tiles resolve weapon icons from `ReplicatedStorage.WeaponIcons`
+  - left weapon tiles resolve element icons from `ReplicatedStorage.ElementIcons`
+  - right info panel stays text-only
+  - selected weapon names use simplified `displayName`
+  - bottom material slot frames stay visible even when an icon is missing
+  - only `Material_Icon` hides when no material icon resolves
+  - blacksmith prompts under the NPC are disabled locally while the UI is open and restored on close
+  - `closeUI()` restores camera, tooltip state, local character visibility, prompt state, and selection state
+  - `closeUI()` now logs `print("[BlacksmithUI] Closing blacksmith UI")`
+- Updated `BackButtonClient` to log `print("[BlacksmithUI] BackButton clicked")` before firing the shared close bindable.
+- Updated `BannerUI` to tolerate the new `ReplicatedStorage.WeaponIcons` `StringValue` contract so the banner system does not depend on replicated icon models anymore.
+
+### Files updated
+
+- `Four Peaks/ReplicatedStorage/ModuleScripts/WeaponConfigs.lua`
+- `Four Peaks/ServerScriptService/ModuleScript/CraftingService.lua`
+- `Four Peaks/ServerScriptService/Script/WeaponIconReplicator.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/BlacksmithUI.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/BannerUI.lua`
+- `Four Peaks/StarterGui/BlacksmithGui/BlacksmithGui/BackButton/BackButton/BackButtonClient.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `game.ReplicatedStorage.ModuleScripts.WeaponConfigs`
+- `game.ServerScriptService.ModuleScript.CraftingService`
+- `game.ServerScriptService.Script.WeaponIconReplicator`
+- `game.StarterPlayer.StarterPlayerScripts.BlacksmithUI`
+- `game.StarterPlayer.StarterPlayerScripts.BannerUI`
+- `game.StarterGui.BlacksmithGui.BlacksmithGui.BackButton.BackButton.BackButtonClient`
+- `game.ReplicatedStorage.WeaponIcons`
+- `game.ReplicatedStorage.ElementIcons`
+- `game.ReplicatedStorage.MaterialIcons`
+
+### Verification
+
+- Confirmed the active Studio instance was `Cztery szczyty` and re-set it active before live edits.
+- Synced the live `WeaponConfigs`, `CraftingService`, `WeaponIconReplicator`, `BlacksmithUI`, `BannerUI`, and `BackButtonClient` sources to the new behavior.
+- Verified via Luau execution that:
+  - `ReplicatedStorage.MaterialIcons` exists with `49` children
+  - `ReplicatedStorage.ElementIcons` exists with `8` children
+  - `ReplicatedStorage.WeaponIcons` exists with `59` children
+  - all three icon folders contain only `StringValue` children
+- Verified syntax compilation with `loadstring(script.Source)` for:
+  - `ReplicatedStorage.ModuleScripts.WeaponConfigs`
+  - `ServerScriptService.ModuleScript.CraftingService`
+  - `StarterPlayer.StarterPlayerScripts.BlacksmithUI`
+  - `StarterPlayer.StarterPlayerScripts.BannerUI`
+  - `ServerScriptService.Script.WeaponIconReplicator`
+  - `StarterGui.BlacksmithGui.BlacksmithGui.BackButton.BackButton.BackButtonClient`
+- Verified sample blacksmith presentation data in live `WeaponConfigs`, including:
+  - `Knight's Oath` -> `Physical Sword`
+  - `Excalion, Blade of Kings` -> `Light Sword`
+  - `Voidpiercer` -> `Void Sword`
+  - `Apprentice Arcstaff` -> `Electric Staff`
+  - `Kingslayer Handcannon` -> `Physical Pistol`
+- Ran `git diff --check` in the repo; the only output was LF/CRLF conversion warnings on touched files and no patch-format or trailing-whitespace errors.
+
+### Risks
+
+- The live icon contract now uses `rbxgameasset://Images/<name>` values so Roblox can resolve Asset Manager images by imported name in the current experience; if the imported asset names differ from the expected keys, the folder values will need a small manual rename/value pass.
+- MCP verification in this pass confirmed source sync, folder structure, and compile success, but did not run a full in-session click-through with visible hover/camera behavior from an active player runtime.
+- `BannerUI` is now compatible with `StringValue` weapon icons, but if any other future UI still assumes `ReplicatedStorage.WeaponIcons` contains `Model` children, it will need the same compatibility treatment.
+
+### Rollback
+
+- Revert `Four Peaks/ReplicatedStorage/ModuleScripts/WeaponConfigs.lua`, `Four Peaks/ServerScriptService/ModuleScript/CraftingService.lua`, `Four Peaks/ServerScriptService/Script/WeaponIconReplicator.lua`, `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/BlacksmithUI.lua`, `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/BannerUI.lua`, `Four Peaks/StarterGui/BlacksmithGui/BlacksmithGui/BackButton/BackButton/BackButtonClient.lua`, and this changelog entry in the repo.
+- In live Studio, restore the previous sources of the updated scripts/modules and remove or reset `ReplicatedStorage.WeaponIcons`, `ReplicatedStorage.ElementIcons`, and `ReplicatedStorage.MaterialIcons` if you want to return to the old contract.
+
+## 2026-05-11 - Cztery szczyty blacksmith original weapon names and direct BackButton close flow
+
+### Scope
+
+- Restored original weapon names as the primary blacksmith-facing name source so `WeaponName` on the left tiles and `Info.WeaponName` on the right panel show the authored weapon names again.
+- Kept the simplified blacksmith label as a separate presentation field by adding:
+  - `weaponName`
+  - `weaponTypeLabel`
+  - `category`
+- Left `weaponId`, `recipeId`, save keys, and inventory keys unchanged.
+- Updated `WeaponConfigs` so:
+  - `displayName` falls back to the original weapon name for compatibility with existing readers
+  - `weaponTypeLabel` stays the simplified `<Element> <Type>` text used only for the `WeaponType` field
+  - `category` is preserved explicitly for filtering
+- Updated `BlacksmithUI` so:
+  - left tile `WeaponName` uses the original weapon name
+  - left tile `WeaponType` uses `weaponTypeLabel`
+  - right panel `Info.WeaponName` uses the original weapon name
+  - forge confirmation popup uses the original weapon name
+  - `closeUI()` clears the current blacksmith snapshot and rerenders an empty state before hiding the GUI so selection state and `Forge_button` reset cleanly
+  - the existing `BackButton` `ImageButton` is bound directly in `BlacksmithUI` through `Activated`, with `Active` and `Visible` asserted on init
+- Reduced `BackButtonClient` to a passive legacy stub so there is no second close path targeting the wrong ancestor `BlacksmithGui`.
+
+### Files updated
+
+- `Four Peaks/ReplicatedStorage/ModuleScripts/WeaponConfigs.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/BlacksmithUI.lua`
+- `Four Peaks/StarterGui/BlacksmithGui/BlacksmithGui/BackButton/BackButton/BackButtonClient.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `game.ReplicatedStorage.ModuleScripts.WeaponConfigs`
+- `game.StarterPlayer.StarterPlayerScripts.BlacksmithUI`
+- `game.StarterGui.BlacksmithGui.BlacksmithGui.BackButton.BackButton.BackButtonClient`
+
+### Verification
+
+- Confirmed the active Studio instance was `Cztery szczyty` and re-set it active before the live sanity pass.
+- Verified the live `BlacksmithUI` source contains:
+  - `getWeaponDisplayName(...)`
+  - tile and right-panel name assignment through `getWeaponDisplayName(...)`
+  - tile `WeaponType` assignment through `getWeaponTypeLabel(...)`
+  - direct `backButton.Activated:Connect(...)`
+  - `snapshot = nil` inside `closeUI()`
+- Verified the live `BackButtonClient` source is a passive legacy stub and no longer owns the click behavior.
+- Required a fresh clone of the live `WeaponConfigs` module and confirmed:
+  - `Reaper's Crescent` -> `weaponName = Reaper's Crescent`, `displayName = Reaper's Crescent`, `weaponTypeLabel = Void Scythe`
+  - `Excalion, Blade of Kings` -> `weaponName = Excalion, Blade of Kings`, `displayName = Excalion, Blade of Kings`, `weaponTypeLabel = Light Sword`
+  - `Knight's Oath` -> `weaponName = Knight's Oath`, `displayName = Knight's Oath`, `weaponTypeLabel = Physical Sword`
+- Confirmed the live back button path `StarterGui.BlacksmithGui.BlacksmithGui.BackButton.BackButton` exists as an `ImageButton` and the client source asserts `Active = true` and `Visible = true`.
+
+### Risks
+
+- This pass verified source state and fresh module output, but it did not complete a full interactive click-through inside an active player session, so final visual confirmation of the button path and tile text still benefits from one live playtest.
+- Because Studio may cache required modules by instance, a stale server/client session can still reflect pre-change data until the updated source is re-required in a fresh runtime context.
+
+### Rollback
+
+- Revert `Four Peaks/ReplicatedStorage/ModuleScripts/WeaponConfigs.lua`, `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/BlacksmithUI.lua`, `Four Peaks/StarterGui/BlacksmithGui/BlacksmithGui/BackButton/BackButton/BackButtonClient.lua`, and this changelog entry in the repo.
+- In live Studio, restore the previous source of `game.ReplicatedStorage.ModuleScripts.WeaponConfigs`, `game.StarterPlayer.StarterPlayerScripts.BlacksmithUI`, and `game.StarterGui.BlacksmithGui.BlacksmithGui.BackButton.BackButton.BackButtonClient`.

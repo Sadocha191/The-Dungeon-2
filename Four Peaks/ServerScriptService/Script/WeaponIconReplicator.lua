@@ -1,83 +1,141 @@
--- WeaponIconReplicator.server.lua
--- Tworzy lekkie modele ikon broni w ReplicatedStorage, żeby klient mógł robić ViewportFrame.
--- Klient NIE ma dostępu do ServerStorage, więc ikony muszą być zreplikowane.
-
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ServerScriptService = game:GetService("ServerScriptService")
 
-local serverModules = ServerScriptService:WaitForChild("ModuleScript")
-local WeaponCatalog = require(serverModules:WaitForChild("WeaponCatalog"))
+local moduleRoot = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
 
-local WeaponConfigs = require((ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5)):WaitForChild("WeaponConfigs"))
+local WeaponConfigs = require(moduleRoot:WaitForChild("WeaponConfigs"))
 
-local iconsFolder = ReplicatedStorage:FindFirstChild("WeaponIcons")
-if not iconsFolder then
-	iconsFolder = Instance.new("Folder")
-	iconsFolder.Name = "WeaponIcons"
-	iconsFolder.Parent = ReplicatedStorage
+local IMAGE_CATEGORY = "Images"
+local ELEMENT_ICON_NAMES = {
+	"Air",
+	"Earth",
+	"Electric",
+	"Fire",
+	"Light",
+	"Physical",
+	"Void",
+	"Water",
+}
+
+local function buildAssetReference(iconName)
+	return string.format("rbxgameasset://%s/%s", IMAGE_CATEGORY, tostring(iconName))
 end
 
-local function clearOld()
-	for _, ch in ipairs(iconsFolder:GetChildren()) do
-		ch:Destroy()
+local function ensureFolder(folderName)
+	local folder = ReplicatedStorage:FindFirstChild(folderName)
+	if folder and folder:IsA("Folder") then
+		return folder
 	end
+	if folder and not folder:IsA("Folder") then
+		warn(("[WeaponIconReplicator] %s exists but is not a Folder"):format(folderName))
+		return nil
+	end
+	folder = Instance.new("Folder")
+	folder.Name = folderName
+	folder.Parent = ReplicatedStorage
+	return folder
 end
 
-local function stripToIconModel(templateTool: Tool, weaponId: string): Model
-	local iconModel = Instance.new("Model")
-	iconModel.Name = weaponId
-	iconModel:SetAttribute("WeaponId", weaponId)
+local function ensureStringValue(folder, valueName, defaultValue)
+	if not folder or typeof(valueName) ~= "string" or valueName == "" then
+		return false
+	end
 
-	-- kopiujemy tylko części wizualne (BaseParty z meshem/texture zostają)
-	local anyPart: BasePart? = nil
-	for _, d in ipairs(templateTool:GetDescendants()) do
-		if d:IsA("BasePart") then
-			local p = d:Clone()
-			p.Anchored = true
-			p.CanCollide = false
-			p.Massless = true
-			p.Parent = iconModel
-			anyPart = anyPart or p
+	local existing = folder:FindFirstChild(valueName)
+	if existing and not existing:IsA("StringValue") then
+		warn(("[WeaponIconReplicator] %s.%s exists but is not a StringValue"):format(folder.Name, valueName))
+		return false
+	end
+
+	if not existing then
+		existing = Instance.new("StringValue")
+		existing.Name = valueName
+		existing.Value = defaultValue
+		existing.Parent = folder
+		return true
+	end
+
+	if existing.Value == "" and typeof(defaultValue) == "string" and defaultValue ~= "" then
+		existing.Value = defaultValue
+		return true
+	end
+
+	return false
+end
+
+local function collectWeaponIconNames()
+	local names = {}
+	local seen = {}
+
+	local function push(value)
+		if typeof(value) ~= "string" or value == "" or seen[value] then
+			return
 		end
+		seen[value] = true
+		table.insert(names, value)
 	end
 
-	if anyPart then
-		iconModel.PrimaryPart = anyPart
-	end
-
-	-- wycentruj model wokół (0,0,0) żeby kamera w ViewportFrame była stabilna
-	local cf, _ = iconModel:GetBoundingBox()
-	iconModel:PivotTo(CFrame.new(-cf.Position))
-
-	return iconModel
-end
-
-local function buildAll()
-	clearOld()
-
-	local count = 0
 	for _, def in ipairs(WeaponConfigs.GetAll()) do
-		local weaponId = def.id
-		if typeof(weaponId) == "string" and weaponId ~= "" then
-			local template = WeaponCatalog.FindTemplate(weaponId)
-			if template then
-				local toolClone = template:Clone()
-				-- skrypty w klonie niepotrzebne w ikonie
-				for _, inst in ipairs(toolClone:GetDescendants()) do
-					if inst:IsA("Script") or inst:IsA("LocalScript") then
-						inst:Destroy()
-					end
-				end
-
-				local model = stripToIconModel(toolClone, weaponId)
-				model.Parent = iconsFolder
-				toolClone:Destroy()
-				count += 1
-			end
+		push(def.iconName)
+		push(def.categoryIconName)
+		for _, fallbackName in ipairs(def.iconFallbackNames or {}) do
+			push(fallbackName)
 		end
 	end
 
-	print(("[WeaponIconReplicator] Built %d icons in ReplicatedStorage.WeaponIcons"):format(count))
+	return names
 end
 
-buildAll()
+local function ensureWeaponIcons()
+	local folder = ensureFolder("WeaponIcons")
+	local created = 0
+	for _, iconName in ipairs(collectWeaponIconNames()) do
+		if ensureStringValue(folder, iconName, buildAssetReference(iconName)) then
+			created += 1
+		end
+	end
+	return created
+end
+
+local function ensureElementIcons()
+	local folder = ensureFolder("ElementIcons")
+	local created = 0
+	for _, iconName in ipairs(ELEMENT_ICON_NAMES) do
+		if ensureStringValue(folder, iconName, buildAssetReference(iconName)) then
+			created += 1
+		end
+	end
+	return created
+end
+
+local function ensureMaterialIcons()
+	local folder = ensureFolder("MaterialIcons")
+	if not folder then
+		return 0
+	end
+
+	local created = 0
+	for index = 1, 48 do
+		local iconName = string.format("Material_%02d", index)
+		if ensureStringValue(folder, iconName, buildAssetReference(iconName)) then
+			created += 1
+		end
+	end
+
+	if ensureStringValue(folder, "materials_icon", buildAssetReference("materials_icon")) then
+		created += 1
+	end
+
+	return created
+end
+
+local weaponCount = ensureWeaponIcons()
+local elementCount = ensureElementIcons()
+local materialCount = ensureMaterialIcons()
+
+print(
+	("[WeaponIconReplicator] Ensured icon contracts (WeaponIcons +%d, ElementIcons +%d, MaterialIcons +%d)")
+		:format(weaponCount, elementCount, materialCount)
+)
