@@ -46,6 +46,7 @@ local RUN_ANIM_STOP_SPEED = 0.75
 local RUN_ANIM_HOLD_TIME = 0.18
 local PROCEDURAL_VISUAL_ATTR = "NpcLightweight"
 local VISUAL_SCALE_ATTR = "NpcVisualScale"
+local FACING_YAW_ATTR = "NpcFacingYawDegrees"
 local PROCEDURAL_IDLE_SWAY_SPEED = 1.8
 local PROCEDURAL_MOVE_BOUNCE_SPEED = 8
 local NAME_COLOR_NORMAL = Color3.fromRGB(242, 246, 252)
@@ -149,6 +150,14 @@ local function computeRootToPivot(model: Model, root: BasePart): CFrame?
 	return root.CFrame:ToObjectSpace(pivot)
 end
 
+local function getFacingYawOffset(model: Model): CFrame
+	local yawDegrees = model:GetAttribute(FACING_YAW_ATTR)
+	if typeof(yawDegrees) ~= "number" or math.abs(yawDegrees) <= 1e-4 then
+		return CFrame.identity
+	end
+	return CFrame.Angles(0, math.rad(yawDegrees), 0)
+end
+
 local function isProceduralVisualModel(model: Model?): boolean
 	return model ~= nil and model:GetAttribute(PROCEDURAL_VISUAL_ATTR) == true
 end
@@ -182,7 +191,12 @@ local function refreshRigBinding(entry)
 
 	if entry.boundRoot ~= root or not entry.rootToPivot then
 		entry.boundRoot = root
-		entry.rootToPivot = computeRootToPivot(model, root)
+		local rootToPivot = computeRootToPivot(model, root)
+		if rootToPivot then
+			entry.rootToPivot = getFacingYawOffset(model) * rootToPivot
+		else
+			entry.rootToPivot = nil
+		end
 	end
 
 	return root

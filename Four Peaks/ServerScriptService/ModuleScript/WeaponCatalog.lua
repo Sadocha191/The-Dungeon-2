@@ -7,6 +7,7 @@ local weaponConfigsModule = ReplicatedStorage:FindFirstChild("ModuleScripts")
 local WeaponConfigs = weaponConfigsModule and require(weaponConfigsModule) or nil
 
 local WeaponCatalog = {}
+local warnedPlaceholders = {}
 
 local function normalizeName(name: string): string
 	local normalized = name:gsub("’", "'")
@@ -43,6 +44,32 @@ local function wrapAsTool(container: Instance): Tool?
 	container:Destroy()
 
 	return tool
+end
+
+local function hasVisualPart(container: Instance): boolean
+	for _, inst in ipairs(container:GetDescendants()) do
+		if inst:IsA("BasePart") then
+			return true
+		end
+	end
+	return false
+end
+
+local function findPlaceholderTemplate(weaponType: string): Instance?
+	local categoryFolder = templates:FindFirstChild(weaponType)
+	if categoryFolder then
+		for _, child in ipairs(categoryFolder:GetChildren()) do
+			if child.Name ~= weaponType and (child:IsA("Tool") or child:IsA("Folder") or child:IsA("Model")) and hasVisualPart(child) then
+				return child
+			end
+		end
+	end
+	for _, inst in ipairs(templates:GetDescendants()) do
+		if inst.Name ~= weaponType and (inst:IsA("Tool") or inst:IsA("Folder") or inst:IsA("Model")) and hasVisualPart(inst) then
+			return inst
+		end
+	end
+	return nil
 end
 
 local function disableLegacyScripts(tool: Tool)
@@ -134,6 +161,9 @@ local function applyWeaponConfig(tool: Tool, weaponName: string)
 end
 
 function WeaponCatalog.PrepareTool(tool: Tool, weaponName: string?)
+	if weaponName and weaponName ~= "" then
+		tool.Name = weaponName
+	end
 	tool.RequiresHandle = true
 	disableLegacyScripts(tool)
 	normalizeToolParts(tool)
@@ -162,8 +192,12 @@ function WeaponCatalog.FindTemplate(weaponName: string): Tool?
 	local def = WeaponConfigs and WeaponConfigs.Get and WeaponConfigs.Get(weaponName) or nil
 	local weaponType = def and def.weaponType or nil
 	if weaponType then
-		local fallbackTemplate = findTemplateByName(weaponType)
+		local fallbackTemplate = findPlaceholderTemplate(weaponType)
 		if fallbackTemplate then
+			if not warnedPlaceholders[weaponName] then
+				warn("[WeaponCatalog] Using placeholder template", weaponName, weaponType, fallbackTemplate.Name)
+				warnedPlaceholders[weaponName] = true
+			end
 			if fallbackTemplate:IsA("Tool") then
 				WeaponCatalog.PrepareTool(fallbackTemplate, weaponName)
 				return fallbackTemplate

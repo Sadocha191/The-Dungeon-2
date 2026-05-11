@@ -1,5 +1,7 @@
 local CraftingConfig = {}
 
+local MaterialDefinitions = require(script.Parent:WaitForChild("MaterialDefinitions"))
+
 CraftingConfig.RECIPE_DROP_CHANCE = 0.10
 CraftingConfig.RECIPE_DUPLICATE_THRESHOLDS = { 1, 3, 6 }
 CraftingConfig.RECIPE_TIER_MULTIPLIERS = { 1.00, 1.45, 1.90 }
@@ -19,9 +21,11 @@ CraftingConfig.BOSS_SPECIAL_ID = "Boss Core"
 
 CraftingConfig.UPGRADE_COSTS = {
 	Common = { silverBase = 50, silverPerLevel = 22, crystalsBase = 1, crystalsPer10 = 1 },
+	Uncommon = { silverBase = 64, silverPerLevel = 28, crystalsBase = 1, crystalsPer10 = 1 },
 	Rare = { silverBase = 80, silverPerLevel = 34, crystalsBase = 2, crystalsPer10 = 1 },
 	Epic = { silverBase = 115, silverPerLevel = 48, crystalsBase = 3, crystalsPer10 = 1 },
 	Legendary = { silverBase = 160, silverPerLevel = 64, crystalsBase = 4, crystalsPer10 = 2 },
+	Mythic = { silverBase = 220, silverPerLevel = 86, crystalsBase = 5, crystalsPer10 = 2 },
 	Mythical = { silverBase = 220, silverPerLevel = 86, crystalsBase = 5, crystalsPer10 = 2 },
 }
 
@@ -221,13 +225,11 @@ local recipeList = {
 		requiredLevel = 1,
 		unlockSilverCost = 150,
 		craftSilverCost = 120,
-		mobMaterials = {
+		unique = true,
+		materials = {
 			{ id = "Slime Gem", amount = 4 },
 			{ id = "Bone Core", amount = 2 },
-		},
-		mineResources = {
 			{ id = "Iron Ore", amount = 6 },
-			{ id = "Coal Chunk", amount = 3 },
 		},
 	},
 	{
@@ -237,13 +239,11 @@ local recipeList = {
 		requiredLevel = 1,
 		unlockSilverCost = 150,
 		craftSilverCost = 120,
-		mobMaterials = {
+		unique = true,
+		materials = {
 			{ id = "Raider Fang", amount = 4 },
 			{ id = "Slime Gem", amount = 2 },
-		},
-		mineResources = {
 			{ id = "Iron Ore", amount = 5 },
-			{ id = "Emberstone", amount = 2 },
 		},
 	},
 	{
@@ -253,12 +253,10 @@ local recipeList = {
 		requiredLevel = 5,
 		unlockSilverCost = 300,
 		craftSilverCost = 260,
-		mobMaterials = {
+		unique = true,
+		materials = {
 			{ id = "Rotbone", amount = 5 },
 			{ id = "Knight Emblem", amount = 3 },
-		},
-		mineResources = {
-			{ id = "Iron Ore", amount = 6 },
 			{ id = "Emberstone", amount = 4 },
 		},
 	},
@@ -269,12 +267,10 @@ local recipeList = {
 		requiredLevel = 7,
 		unlockSilverCost = 340,
 		craftSilverCost = 280,
-		mobMaterials = {
+		unique = true,
+		materials = {
 			{ id = "Siren Feather", amount = 4 },
 			{ id = "Bone Core", amount = 3 },
-		},
-		mineResources = {
-			{ id = "Coal Chunk", amount = 4 },
 			{ id = "Moonsteel Ore", amount = 3 },
 		},
 	},
@@ -285,12 +281,10 @@ local recipeList = {
 		requiredLevel = 9,
 		unlockSilverCost = 360,
 		craftSilverCost = 320,
-		mobMaterials = {
+		unique = true,
+		materials = {
 			{ id = "Raider Fang", amount = 4 },
 			{ id = "Burrow Fin", amount = 2 },
-		},
-		mineResources = {
-			{ id = "Iron Ore", amount = 5 },
 			{ id = "Emberstone", amount = 5 },
 		},
 	},
@@ -301,12 +295,10 @@ local recipeList = {
 		requiredLevel = 12,
 		unlockSilverCost = 520,
 		craftSilverCost = 480,
-		mobMaterials = {
+		unique = true,
+		materials = {
 			{ id = "Moon Claw", amount = 5 },
 			{ id = "Ancient Bark", amount = 3 },
-		},
-		mineResources = {
-			{ id = "Moonsteel Ore", amount = 5 },
 			{ id = "Void Crystal", amount = 2 },
 		},
 	},
@@ -317,12 +309,10 @@ local recipeList = {
 		requiredLevel = 14,
 		unlockSilverCost = 560,
 		craftSilverCost = 520,
-		mobMaterials = {
+		unique = true,
+		materials = {
 			{ id = "Inferno Shard", amount = 5 },
 			{ id = "Golem Heart", amount = 2 },
-		},
-		mineResources = {
-			{ id = "Moonsteel Ore", amount = 4 },
 			{ id = "Void Crystal", amount = 3 },
 		},
 	},
@@ -333,12 +323,10 @@ local recipeList = {
 		requiredLevel = 15,
 		unlockSilverCost = 580,
 		craftSilverCost = 540,
-		mobMaterials = {
+		unique = true,
+		materials = {
 			{ id = "Siren Feather", amount = 5 },
 			{ id = "Moon Claw", amount = 3 },
-		},
-		mineResources = {
-			{ id = "Emberstone", amount = 5 },
 			{ id = "Moonsteel Ore", amount = 4 },
 		},
 	},
@@ -349,12 +337,10 @@ local recipeList = {
 		requiredLevel = 20,
 		unlockSilverCost = 850,
 		craftSilverCost = 800,
-		mobMaterials = {
+		unique = true,
+		materials = {
 			{ id = "Knight Emblem", amount = 6 },
 			{ id = "Golem Heart", amount = 4 },
-		},
-		mineResources = {
-			{ id = "Void Crystal", amount = 4 },
 			{ id = "Astral Core", amount = 1 },
 		},
 	},
@@ -365,12 +351,10 @@ local recipeList = {
 		requiredLevel = 22,
 		unlockSilverCost = 900,
 		craftSilverCost = 860,
-		mobMaterials = {
+		unique = true,
+		materials = {
 			{ id = "Ancient Bark", amount = 6 },
 			{ id = "Moon Claw", amount = 4 },
-		},
-		mineResources = {
-			{ id = "Moonsteel Ore", amount = 6 },
 			{ id = "Astral Core", amount = 1 },
 		},
 	},
@@ -381,13 +365,11 @@ local recipeList = {
 		requiredLevel = 24,
 		unlockSilverCost = 940,
 		craftSilverCost = 900,
-		mobMaterials = {
+		unique = true,
+		materials = {
 			{ id = "Inferno Shard", amount = 6 },
 			{ id = "Burrow Fin", amount = 4 },
-		},
-		mineResources = {
 			{ id = "Void Crystal", amount = 4 },
-			{ id = "Astral Core", amount = 1 },
 		},
 	},
 	{
@@ -397,17 +379,94 @@ local recipeList = {
 		requiredLevel = 30,
 		unlockSilverCost = 1400,
 		craftSilverCost = 1300,
-		mobMaterials = {
+		unique = true,
+		materials = {
 			{ id = "Inferno Shard", amount = 7 },
 			{ id = "Golem Heart", amount = 5 },
-			{ id = "Ancient Bark", amount = 5 },
-		},
-		mineResources = {
-			{ id = "Void Crystal", amount = 6 },
 			{ id = "Astral Core", amount = 2 },
 		},
 	},
 }
+
+local function addRecipe(def)
+	table.insert(recipeList, def)
+end
+
+local function mat(id, amount)
+	return { id = id, amount = amount }
+end
+
+local function addWeaponRecipe(name, rarity, requiredLevel, unlockSilverCost, craftSilverCost, materials)
+	addRecipe({
+		recipeId = name,
+		weaponId = name,
+		rarity = rarity,
+		requiredLevel = requiredLevel,
+		unlockSilverCost = unlockSilverCost,
+		craftSilverCost = craftSilverCost,
+		unique = true,
+		materials = materials,
+	})
+end
+
+-- Bow catalog additions
+addWeaponRecipe("Dawnfeather Bow", "Uncommon", 4, 220, 180, { mat("Material_39", 3), mat("Material_21", 4), mat("Material_05", 1) })
+addWeaponRecipe("Emberthorn Bow", "Rare", 8, 340, 300, { mat("Material_08", 4), mat("Material_22", 4), mat("Material_02", 2) })
+addWeaponRecipe("Forestbone Bow", "Common", 2, 160, 130, { mat("Material_21", 3), mat("Material_09", 3), mat("Material_20", 2) })
+addWeaponRecipe("Frostbranch Bow", "Rare", 10, 380, 330, { mat("Material_03", 3), mat("Material_21", 5), mat("Material_43", 2) })
+addWeaponRecipe("Mossfang Bow", "Uncommon", 6, 260, 220, { mat("Material_12", 3), mat("Material_23", 4), mat("Material_04", 2) })
+addWeaponRecipe("Shadowcurve Bow", "Epic", 16, 600, 560, { mat("Material_10", 4), mat("Material_32", 3), mat("Material_45", 2) })
+addWeaponRecipe("Sunpiercer", "Legendary", 24, 980, 920, { mat("Material_05", 4), mat("Material_37", 2), mat("Material_47", 1) })
+addWeaponRecipe("Voidstring Bow", "Epic", 18, 660, 620, { mat("Material_06", 3), mat("Material_28", 3), mat("Material_45", 3) })
+
+-- Halberd catalog additions
+addWeaponRecipe("Earthsplitter Halberd", "Epic", 16, 620, 580, { mat("Material_36", 3), mat("Material_14", 8), mat("Material_04", 3) })
+addWeaponRecipe("Glacier Halberd", "Rare", 11, 400, 360, { mat("Material_03", 4), mat("Material_16", 4), mat("Material_30", 3) })
+addWeaponRecipe("Grovekeeper Halberd", "Rare", 9, 360, 320, { mat("Material_21", 5), mat("Material_22", 5), mat("Material_04", 2) })
+addWeaponRecipe("Infernal Halberd", "Epic", 17, 640, 600, { mat("Material_40", 3), mat("Material_08", 5), mat("Material_44", 2) })
+addWeaponRecipe("Iron Halberd", "Common", 3, 180, 150, { mat("Material_14", 8), mat("Material_20", 2), mat("Material_34", 3) })
+addWeaponRecipe("Nightfang Halberd", "Epic", 18, 680, 630, { mat("Material_10", 4), mat("Material_12", 5), mat("Material_38", 2) })
+addWeaponRecipe("Royal Halberd", "Legendary", 23, 940, 880, { mat("Material_46", 3), mat("Material_15", 4), mat("Material_37", 1) })
+addWeaponRecipe("Voidguard Halberd", "Epic", 20, 720, 680, { mat("Material_06", 4), mat("Material_45", 3), mat("Material_16", 5) })
+
+-- Pistol / handcannon catalog additions
+addWeaponRecipe("Royal Handcannon", "Epic", 18, 680, 630, { mat("Material_46", 2), mat("Material_15", 4), mat("Material_34", 5) })
+addWeaponRecipe("Rustlock Pistol", "Common", 4, 200, 160, { mat("Material_33", 5), mat("Material_14", 5), mat("Material_34", 4) })
+addWeaponRecipe("Voidlock Handcannon", "Epic", 20, 740, 700, { mat("Material_45", 4), mat("Material_28", 3), mat("Material_34", 6) })
+
+-- Scythe catalog additions
+addWeaponRecipe("Bloodfire Scythe", "Epic", 17, 650, 610, { mat("Material_27", 4), mat("Material_40", 3), mat("Material_02", 3) })
+addWeaponRecipe("Farmer's Scythe", "Common", 2, 150, 120, { mat("Material_14", 4), mat("Material_21", 3), mat("Material_20", 2) })
+addWeaponRecipe("Frost Reaper", "Rare", 12, 430, 390, { mat("Material_03", 4), mat("Material_43", 3), mat("Material_16", 4) })
+addWeaponRecipe("Golden Crescent", "Legendary", 22, 900, 850, { mat("Material_15", 5), mat("Material_37", 2), mat("Material_05", 2) })
+addWeaponRecipe("Pale Harvest", "Rare", 10, 390, 350, { mat("Material_09", 5), mat("Material_19", 4), mat("Material_30", 3) })
+addWeaponRecipe("Plague Crescent", "Epic", 16, 610, 570, { mat("Material_25", 3), mat("Material_23", 5), mat("Material_38", 2) })
+addWeaponRecipe("Thorn Reaper", "Rare", 9, 360, 320, { mat("Material_22", 5), mat("Material_13", 3), mat("Material_04", 2) })
+addWeaponRecipe("Void Reaper", "Epic", 19, 700, 660, { mat("Material_06", 4), mat("Material_45", 3), mat("Material_48", 1) })
+
+-- Staff / wand catalog additions
+addWeaponRecipe("Apprentice Staff", "Common", 3, 180, 150, { mat("Material_26", 3), mat("Material_21", 3), mat("Material_35", 1) })
+addWeaponRecipe("Bonecaller Staff", "Rare", 9, 360, 320, { mat("Material_09", 6), mat("Material_38", 2), mat("Material_35", 2) })
+addWeaponRecipe("Eclipse Staff", "Epic", 17, 650, 610, { mat("Material_32", 4), mat("Material_05", 2), mat("Material_45", 3) })
+addWeaponRecipe("Emerald Staff", "Rare", 8, 330, 290, { mat("Material_04", 4), mat("Material_25", 3), mat("Material_21", 4) })
+addWeaponRecipe("Flamecore Staff", "Rare", 11, 420, 380, { mat("Material_08", 4), mat("Material_40", 2), mat("Material_02", 3) })
+addWeaponRecipe("Frostgem Wand", "Rare", 10, 390, 350, { mat("Material_03", 4), mat("Material_43", 2), mat("Material_26", 3) })
+addWeaponRecipe("Inferno Warstaff", "Epic", 18, 680, 640, { mat("Material_40", 4), mat("Material_44", 2), mat("Material_08", 5) })
+addWeaponRecipe("Ironwood Wand", "Uncommon", 5, 240, 200, { mat("Material_21", 4), mat("Material_14", 4), mat("Material_26", 2) })
+addWeaponRecipe("Nature's Grasp Staff", "Epic", 16, 600, 560, { mat("Material_24", 4), mat("Material_22", 5), mat("Material_04", 3) })
+addWeaponRecipe("Solar Mace Staff", "Legendary", 24, 960, 900, { mat("Material_05", 4), mat("Material_47", 1), mat("Material_15", 5) })
+addWeaponRecipe("Void Crescent Staff", "Epic", 19, 700, 660, { mat("Material_06", 4), mat("Material_28", 3), mat("Material_45", 3) })
+addWeaponRecipe("Void Crystal Staff", "Epic", 20, 740, 700, { mat("Material_45", 5), mat("Material_48", 1), mat("Material_35", 3) })
+
+-- Sword catalog additions
+addWeaponRecipe("Dawnwarden Sword", "Uncommon", 5, 240, 200, { mat("Material_05", 2), mat("Material_14", 5), mat("Material_46", 1) })
+addWeaponRecipe("Emberfang Blade", "Rare", 9, 360, 320, { mat("Material_08", 4), mat("Material_12", 4), mat("Material_02", 2) })
+addWeaponRecipe("Frostbite Blade", "Rare", 10, 390, 350, { mat("Material_03", 4), mat("Material_16", 4), mat("Material_43", 2) })
+addWeaponRecipe("Knights Oath", "Common", 1, 150, 120, { mat("Material_14", 6), mat("Material_09", 2), mat("Material_46", 1) })
+addWeaponRecipe("Shadowthorn Sword", "Epic", 16, 620, 580, { mat("Material_10", 4), mat("Material_22", 4), mat("Material_38", 2) })
+addWeaponRecipe("Verdant Saber", "Rare", 8, 330, 290, { mat("Material_04", 4), mat("Material_23", 4), mat("Material_14", 5) })
+addWeaponRecipe("Voidpiercer", "Epic", 18, 680, 640, { mat("Material_06", 4), mat("Material_45", 3), mat("Material_16", 4) })
+addWeaponRecipe("Windglass Blade", "Rare", 11, 410, 360, { mat("Material_07", 2), mat("Material_39", 3), mat("Material_16", 4) })
 
 local recipesById = {}
 local mobMaterialsByMobType = {}
@@ -416,34 +475,121 @@ local mineResourcesById = {}
 local mineDefsById = {}
 local materialDefsById = {}
 local materialList = {}
+local materialListById = {}
 
 for _, def in ipairs(CraftingConfig.MOB_MATERIAL_DEFS) do
 	mobMaterialsByMobType[def.mobType] = def.id
 	mobMaterialsById[def.id] = def
+	local canonicalId = MaterialDefinitions.ResolveId(def.id)
 	materialDefsById[def.id] = {
-		id = def.id,
-		name = def.id,
+		id = canonicalId,
+		name = (MaterialDefinitions.Get(canonicalId) and MaterialDefinitions.Get(canonicalId).displayName) or def.id,
 		bucket = "mobMaterials",
 		source = "Mob Drop",
 		mobType = def.mobType,
 		rarity = def.rarity,
+		legacyId = def.id,
 	}
-	table.insert(materialList, materialDefsById[def.id])
 end
 
 for _, def in ipairs(CraftingConfig.MINE_RESOURCE_DEFS) do
 	mineResourcesById[def.id] = def
+	local canonicalId = MaterialDefinitions.ResolveId(def.id)
 	materialDefsById[def.id] = {
-		id = def.id,
-		name = def.id,
+		id = canonicalId,
+		name = (MaterialDefinitions.Get(canonicalId) and MaterialDefinitions.Get(canonicalId).displayName) or def.id,
 		bucket = "mineResources",
 		source = "Mining",
 		rarity = def.rarity,
+		legacyId = def.id,
 	}
-	table.insert(materialList, materialDefsById[def.id])
+end
+
+local MINE_MATERIAL_IDS = {
+	Material_01 = true,
+	Material_02 = true,
+	Material_03 = true,
+	Material_04 = true,
+	Material_05 = true,
+	Material_06 = true,
+	Material_07 = true,
+	Material_08 = true,
+	Material_14 = true,
+	Material_15 = true,
+	Material_16 = true,
+	Material_29 = true,
+	Material_33 = true,
+	Material_34 = true,
+	Material_35 = true,
+	Material_36 = true,
+	Material_37 = true,
+	Material_38 = true,
+	Material_45 = true,
+}
+
+for _, def in ipairs(MaterialDefinitions.GetAll()) do
+	if def.id ~= "Materials" then
+		local bucket = MINE_MATERIAL_IDS[def.id] and "mineResources" or "mobMaterials"
+		local entry = {
+			id = def.id,
+			name = def.displayName,
+			displayName = def.displayName,
+			filename = def.filename,
+			icon = def.icon,
+			bucket = bucket,
+			source = bucket == "mineResources" and "Mining" or "Material Drop",
+			rarity = def.rarity,
+			legacyAliases = def.legacyAliases,
+		}
+		materialDefsById[def.id] = entry
+		materialListById[def.id] = entry
+		for _, alias in ipairs(def.legacyAliases or {}) do
+			materialDefsById[alias] = entry
+		end
+	end
+end
+
+for _, def in ipairs(MaterialDefinitions.GetAll()) do
+	if materialListById[def.id] then
+		table.insert(materialList, materialListById[def.id])
+	end
 end
 
 for _, recipe in ipairs(recipeList) do
+	local normalizedMaterials = {}
+	for _, entry in ipairs(recipe.materials or {}) do
+		local materialId = MaterialDefinitions.ResolveId(entry.id)
+		local materialDef = materialDefsById[materialId] or materialDefsById[entry.id]
+		local amount = math.max(1, math.floor(tonumber(entry.amount) or 0))
+		if materialDef and amount > 0 then
+			table.insert(normalizedMaterials, {
+				id = materialId,
+				name = entry.name or materialDef.name or materialDef.displayName or materialId,
+				amount = amount,
+			})
+		end
+	end
+	recipe.unique = recipe.unique ~= false
+	recipe.materials = normalizedMaterials
+	recipe.mobMaterials = {}
+	recipe.mineResources = {}
+	for _, entry in ipairs(recipe.materials) do
+		local materialDef = materialDefsById[entry.id]
+		local bucket = materialDef and materialDef.bucket or nil
+		if bucket == "mineResources" then
+			table.insert(recipe.mineResources, {
+				id = entry.id,
+				name = entry.name,
+				amount = entry.amount,
+			})
+		else
+			table.insert(recipe.mobMaterials, {
+				id = entry.id,
+				name = entry.name,
+				amount = entry.amount,
+			})
+		end
+	end
 	recipesById[recipe.recipeId] = recipe
 end
 
@@ -468,6 +614,7 @@ local function scaleRequirementList(list, multiplier)
 		local amount = math.max(1, math.floor((tonumber(entry.amount) or 0) * multiplier + 0.5))
 		table.insert(out, {
 			id = entry.id,
+			name = entry.name,
 			amount = amount,
 		})
 	end
@@ -565,16 +712,26 @@ function CraftingConfig.GetMobMaterial(materialId)
 end
 
 function CraftingConfig.GetMaterialDef(materialId)
-	return materialDefsById[materialId]
+	local canonicalId = MaterialDefinitions.ResolveId(materialId)
+	return materialDefsById[canonicalId] or materialDefsById[materialId]
 end
 
 function CraftingConfig.GetMaterialBucket(materialId)
-	local def = materialDefsById[materialId]
+	local def = CraftingConfig.GetMaterialDef(materialId)
 	return def and def.bucket or nil
 end
 
 function CraftingConfig.GetAllMaterials()
 	return materialList
+end
+
+function CraftingConfig.ResolveMaterialId(materialId)
+	return MaterialDefinitions.ResolveId(materialId)
+end
+
+function CraftingConfig.GetMaterialAliases(materialId)
+	local def = MaterialDefinitions.Get(materialId)
+	return def and def.legacyAliases or {}
 end
 
 function CraftingConfig.GetRecipeTierFromCopies(copies)
@@ -612,17 +769,33 @@ function CraftingConfig.BuildRecipeRequirements(recipeId, tier)
 	end
 
 	local multiplier = CraftingConfig.GetRecipeTierMultiplier(tier)
+	local materials = scaleRequirementList(recipe.materials, multiplier)
+	local mineResources = {}
+	local mobMaterials = {}
+	for _, entry in ipairs(materials) do
+		local bucket = CraftingConfig.GetMaterialBucket(entry.id)
+		if bucket == "mineResources" then
+			table.insert(mineResources, entry)
+		else
+			table.insert(mobMaterials, entry)
+		end
+	end
 	return {
 		unlockSilverCost = math.max(0, math.floor(tonumber(recipe.unlockSilverCost) or 0)),
 		craftSilverCost = math.max(0, math.floor((tonumber(recipe.craftSilverCost) or 0) * multiplier + 0.5)),
-		mobMaterials = scaleRequirementList(recipe.mobMaterials, multiplier),
-		mineResources = scaleRequirementList(recipe.mineResources, multiplier),
+		materials = materials,
+		mobMaterials = mobMaterials,
+		mineResources = mineResources,
+		unique = recipe.unique == true,
 	}
 end
 
 local function getRecipeDropWeight(rarity)
 	if rarity == "Common" then
 		return 55
+	end
+	if rarity == "Uncommon" then
+		return 36
 	end
 	if rarity == "Rare" then
 		return 25
@@ -633,7 +806,7 @@ local function getRecipeDropWeight(rarity)
 	if rarity == "Legendary" then
 		return 6
 	end
-	if rarity == "Mythical" then
+	if rarity == "Mythical" or rarity == "Mythic" then
 		return 2
 	end
 	return 1

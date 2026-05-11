@@ -1,28 +1,73 @@
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ProximityPromptService = game:GetService("ProximityPromptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+local CameraOffset = Vector3.new(0, 2.5, -8)
+local CameraFieldOfView = 45
+local CameraRenderStepName = "BlacksmithCameraView"
+
+local HiddenLobbyGuiNames = {
+	"Settings",
+	"ScreenGuiButtons",
+}
+
+local CategoryOrder = {
+	"Sword",
+	"Scythe",
+	"Halberd",
+	"Bow",
+	"Staff",
+	"Pistol",
+}
+
+local CategoryLabels = {
+	Sword = "Swords",
+	Scythe = "Scythes",
+	Halberd = "Halberds",
+	Bow = "Bows",
+	Staff = "Staves",
+	Pistol = "Pistols",
+}
+
+local TemplateRequiredChildren = {
+	"ElementType",
+	"Forgable",
+	"Locked",
+	"RarityName",
+	"WeaponIcon",
+	"WeaponName",
+	"WeaponStat",
+	"WeaponType",
+}
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+
 local moduleRoot = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:FindFirstChild("ModuleScript")
 	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
 	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
-local UiResponsive = require(moduleRoot:WaitForChild("UiResponsive"))
+
+local WeaponConfigs = require(moduleRoot:WaitForChild("WeaponConfigs"))
+local MaterialDefinitions = require(moduleRoot:WaitForChild("MaterialDefinitions"))
+local BlacksmithTheme = require(moduleRoot:WaitForChild("BlacksmithTheme"))
 
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local OpenBlacksmithUI = remoteEvents:WaitForChild("OpenBlacksmithUI")
 local BlacksmithSync = remoteEvents:WaitForChild("BlacksmithSync")
 local BlacksmithAction = remoteEvents:WaitForChild("BlacksmithAction")
 
-local rarityColors = {
-	Common = Color3.fromRGB(176, 184, 198),
-	Rare = Color3.fromRGB(100, 165, 255),
-	Epic = Color3.fromRGB(190, 120, 255),
-	Legendary = Color3.fromRGB(255, 196, 96),
-	Mythical = Color3.fromRGB(255, 110, 118),
-}
+local function clampInt(value, minValue)
+	value = math.floor(tonumber(value) or 0)
+	if minValue ~= nil and value < minValue then
+		return minValue
+	end
+	return value
+end
 
 local function blendColor(fromColor, toColor, alpha)
 	return Color3.new(
@@ -33,898 +78,1188 @@ local function blendColor(fromColor, toColor, alpha)
 end
 
 local function getRarityColor(rarity)
-	return rarityColors[tostring(rarity or "")] or rarityColors.Common
+	return BlacksmithTheme.GetRarityColor(rarity)
 end
 
-local function clampInt(value, minValue)
-	value = math.floor(tonumber(value) or 0)
-	if minValue ~= nil and value < minValue then
-		return minValue
+local function getElementColor(element)
+	return BlacksmithTheme.GetElementColor(element)
+end
+
+local function getNamedChildOfClass(parent, name, className)
+	for _, child in ipairs(parent:GetChildren()) do
+		if child.Name == name and child.ClassName == className then
+			return child
+		end
 	end
-	return value
+	return nil
+end
+
+local function collectChildrenOfClass(parent, className)
+	local out = {}
+	for _, child in ipairs(parent:GetChildren()) do
+		if child.ClassName == className then
+			table.insert(out, child)
+		end
+	end
+	table.sort(out, function(a, b)
+		return a.Name < b.Name
+	end)
+	return out
+end
+
+local function ensureTextLabel(parent, name, props)
+	local label = parent:FindFirstChild(name)
+	if label and label:IsA("TextLabel") then
+		return label
+	end
+
+	label = Instance.new("TextLabel")
+	label.Name = name
+	label.BackgroundTransparency = 1
+	label.BorderSizePixel = 0
+	label.TextWrapped = props.TextWrapped == true
+	label.TextScaled = false
+	label.TextXAlignment = props.TextXAlignment or Enum.TextXAlignment.Center
+	label.TextYAlignment = props.TextYAlignment or Enum.TextYAlignment.Center
+	label.Font = props.Font or Enum.Font.GothamBold
+	label.TextSize = props.TextSize or 14
+	label.TextColor3 = props.TextColor3 or Color3.fromRGB(255, 255, 255)
+	label.Position = props.Position or UDim2.fromScale(0, 0)
+	label.Size = props.Size or UDim2.fromScale(1, 1)
+	label.ZIndex = props.ZIndex or ((parent:IsA("GuiObject") and parent.ZIndex or 1) + 1)
+	label.Parent = parent
+	return label
 end
 
 local gui = playerGui:WaitForChild("BlacksmithGui")
+local legacyOverlay = gui:FindFirstChild("overlay")
+if legacyOverlay then
+	legacyOverlay:Destroy()
+end
+
 gui.ResetOnSpawn = false
 gui.Enabled = false
 gui:SetAttribute("Modal", true)
 
-local overlay = gui:WaitForChild("overlay")
-overlay.Size = UDim2.fromScale(1, 1)
-overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-overlay.BackgroundTransparency = 0.4
-overlay.BorderSizePixel = 0
-overlay.Parent = gui
+local cameraPoint = gui:WaitForChild("BlacksmithCameraPoint")
+local mainFrame = gui:WaitForChild("BlacksmithGui")
+local silverLabel = gui:WaitForChild("Silver"):WaitForChild("Frame"):WaitForChild("TextLabel")
 
-local panel = overlay:WaitForChild("panel")
-panel.AnchorPoint = Vector2.new(0.5, 0.5)
-panel.Position = UDim2.fromScale(0.5, 0.5)
-panel.Size = UDim2.fromScale(0.9, 0.9)
-panel.BackgroundColor3 = Color3.fromRGB(16, 18, 24)
-panel.BorderSizePixel = 0
-panel.Parent = overlay
-Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 18)
-local panelSizeConstraint = Instance.new("UISizeConstraint", panel)
-panelSizeConstraint.MaxSize = Vector2.new(1100, 640)
-local panelAspect = Instance.new("UIAspectRatioConstraint", panel)
-panelAspect.AspectRatio = 1100 / 640
-panelAspect.DominantAxis = Enum.DominantAxis.Height
-local panelStroke = Instance.new("UIStroke", panel)
-panelStroke.Color = Color3.fromRGB(46, 54, 70)
-panelStroke.Thickness = 1
-UiResponsive.attachCenteredPanel(panel, Vector2.new(1100, 640))
+local bottomFrame = mainFrame:WaitForChild("Bottom")
+local forgeButton = bottomFrame:WaitForChild("Forge_button")
+local forgeButtonText = ensureTextLabel(forgeButton, "ForgeText", {
+	Font = Enum.Font.GothamBold,
+	TextSize = 16,
+	TextColor3 = Color3.fromRGB(255, 255, 255),
+	Size = UDim2.fromScale(1, 1),
+	ZIndex = forgeButton.ZIndex + 1,
+})
 
-local title = Instance.new("TextLabel")
-title.BackgroundTransparency = 1
-title.Position = UDim2.fromOffset(24, 18)
-title.Size = UDim2.fromOffset(400, 28)
-title.Font = Enum.Font.GothamBlack
-title.TextSize = 22
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.TextColor3 = Color3.fromRGB(245, 245, 245)
-title.Text = "Blacksmith"
-title.Parent = panel
-
-local subTitle = Instance.new("TextLabel")
-subTitle.BackgroundTransparency = 1
-subTitle.Position = UDim2.fromOffset(24, 48)
-subTitle.Size = UDim2.fromOffset(520, 20)
-subTitle.Font = Enum.Font.Gotham
-subTitle.TextSize = 12
-subTitle.TextXAlignment = Enum.TextXAlignment.Left
-subTitle.TextColor3 = Color3.fromRGB(190, 190, 190)
-subTitle.Text = "Found recipes only. Mine resources and mob materials are tracked separately."
-subTitle.Parent = panel
-
-local closeBtn = Instance.new("TextButton")
-closeBtn.AnchorPoint = Vector2.new(1, 0)
-closeBtn.Position = UDim2.new(1, -18, 0, 18)
-closeBtn.Size = UDim2.fromOffset(34, 34)
-closeBtn.BackgroundColor3 = Color3.fromRGB(34, 36, 44)
-closeBtn.BorderSizePixel = 0
-closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 14
-closeBtn.TextColor3 = Color3.fromRGB(235, 235, 235)
-closeBtn.Text = "X"
-closeBtn.Parent = panel
-Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 10)
-
-local summary = Instance.new("Frame")
-summary.Position = UDim2.fromOffset(24, 82)
-summary.Size = UDim2.new(1, -48, 0, 96)
-summary.BackgroundColor3 = Color3.fromRGB(24, 26, 34)
-summary.BorderSizePixel = 0
-summary.Parent = panel
-Instance.new("UICorner", summary).CornerRadius = UDim.new(0, 14)
-local summaryStroke = Instance.new("UIStroke", summary)
-summaryStroke.Color = Color3.fromRGB(46, 54, 70)
-summaryStroke.Thickness = 1
-
-local topInfo = Instance.new("TextLabel")
-topInfo.BackgroundTransparency = 1
-topInfo.Position = UDim2.fromOffset(16, 10)
-topInfo.Size = UDim2.new(1, -32, 0, 18)
-topInfo.Font = Enum.Font.GothamBold
-topInfo.TextSize = 13
-topInfo.TextXAlignment = Enum.TextXAlignment.Left
-topInfo.TextColor3 = Color3.fromRGB(240, 240, 240)
-topInfo.Text = "Account Lv 1 | Silver 0"
-topInfo.Parent = summary
-
-local mineLabel = Instance.new("TextLabel")
-mineLabel.BackgroundTransparency = 1
-mineLabel.Position = UDim2.fromOffset(16, 34)
-mineLabel.Size = UDim2.new(0.32, -12, 1, -44)
-mineLabel.Font = Enum.Font.Gotham
-mineLabel.TextSize = 12
-mineLabel.TextWrapped = true
-mineLabel.TextXAlignment = Enum.TextXAlignment.Left
-mineLabel.TextYAlignment = Enum.TextYAlignment.Top
-mineLabel.TextColor3 = Color3.fromRGB(214, 214, 214)
-mineLabel.Text = "Mine Resources:\n-"
-mineLabel.Parent = summary
-
-local mobLabel = Instance.new("TextLabel")
-mobLabel.BackgroundTransparency = 1
-mobLabel.Position = UDim2.new(0.34, 0, 0, 34)
-mobLabel.Size = UDim2.new(0.32, -12, 1, -44)
-mobLabel.Font = Enum.Font.Gotham
-mobLabel.TextSize = 12
-mobLabel.TextWrapped = true
-mobLabel.TextXAlignment = Enum.TextXAlignment.Left
-mobLabel.TextYAlignment = Enum.TextYAlignment.Top
-mobLabel.TextColor3 = Color3.fromRGB(214, 214, 214)
-mobLabel.Text = "Mob Materials:\n-"
-mobLabel.Parent = summary
-
-local upgradeMatLabel = Instance.new("TextLabel")
-upgradeMatLabel.BackgroundTransparency = 1
-upgradeMatLabel.Position = UDim2.new(0.68, 0, 0, 34)
-upgradeMatLabel.Size = UDim2.new(0.32, -16, 1, -44)
-upgradeMatLabel.Font = Enum.Font.Gotham
-upgradeMatLabel.TextSize = 12
-upgradeMatLabel.TextWrapped = true
-upgradeMatLabel.TextXAlignment = Enum.TextXAlignment.Left
-upgradeMatLabel.TextYAlignment = Enum.TextYAlignment.Top
-upgradeMatLabel.TextColor3 = Color3.fromRGB(214, 214, 214)
-upgradeMatLabel.Text = "Upgrade Materials:\n-"
-upgradeMatLabel.Parent = summary
-
-local tabBar = Instance.new("Frame")
-tabBar.Position = UDim2.fromOffset(24, 194)
-tabBar.Size = UDim2.fromOffset(360, 42)
-tabBar.BackgroundTransparency = 1
-tabBar.Parent = panel
-
-local tabLayout = Instance.new("UIListLayout")
-tabLayout.FillDirection = Enum.FillDirection.Horizontal
-tabLayout.Padding = UDim.new(0, 10)
-tabLayout.Parent = tabBar
-
-local function createTabButton(text)
-	local button = Instance.new("TextButton")
-	button.Size = UDim2.fromOffset(110, 42)
-	button.BackgroundColor3 = Color3.fromRGB(32, 34, 42)
-	button.BorderSizePixel = 0
-	button.Font = Enum.Font.GothamBold
-	button.TextSize = 13
-	button.TextColor3 = Color3.fromRGB(226, 226, 226)
-	button.Text = text
-	button.Parent = tabBar
-	Instance.new("UICorner", button).CornerRadius = UDim.new(0, 12)
-	return button
-end
-
-local tabButtons = {
-	Craft = createTabButton("Craft"),
-	Upgrade = createTabButton("Upgrade"),
-	Sell = createTabButton("Sell"),
+local materialAmountLabels = {
+	bottomFrame:WaitForChild("MaterialAmount1"),
+	bottomFrame:WaitForChild("MaterialAmount2"),
+	bottomFrame:WaitForChild("MaterialAmount3"),
 }
 
-local listFrame = Instance.new("ScrollingFrame")
-listFrame.Position = UDim2.fromOffset(24, 246)
-listFrame.Size = UDim2.fromOffset(420, 330)
-listFrame.BackgroundColor3 = Color3.fromRGB(24, 26, 34)
-listFrame.BorderSizePixel = 0
-listFrame.ScrollBarThickness = 6
-listFrame.Parent = panel
-Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 14)
-local listStroke = Instance.new("UIStroke", listFrame)
-listStroke.Color = Color3.fromRGB(46, 54, 70)
-listStroke.Thickness = 1
+local materialsFrame = bottomFrame:WaitForChild("Materials")
+local materialSlots = {
+	materialsFrame:WaitForChild("Material_required1"),
+	materialsFrame:WaitForChild("Material_required2"),
+	materialsFrame:WaitForChild("Material_required3"),
+}
 
-local listLayout = Instance.new("UIListLayout")
-listLayout.Padding = UDim.new(0, 8)
-listLayout.Parent = listFrame
+local infoInner = mainFrame:WaitForChild("Info"):WaitForChild("Info")
+local weaponNameLabel = infoInner:WaitForChild("WeaponName")
+local elementTypeLabel = infoInner:WaitForChild("ElementType")
+local descriptionLabel = infoInner:WaitForChild("Description")
+local passiveLabel = infoInner:WaitForChild("Passive")
+local passiveDescLabel = infoInner:WaitForChild("PassiveDesc")
+local statLabels = {
+	infoInner:WaitForChild("StatName1"),
+	infoInner:WaitForChild("StatName2"),
+	infoInner:WaitForChild("StatName3"),
+	infoInner:WaitForChild("StatName4"),
+}
 
-local emptyLabel = Instance.new("TextLabel")
-emptyLabel.BackgroundTransparency = 1
-emptyLabel.Position = UDim2.fromOffset(16, 14)
-emptyLabel.Size = UDim2.new(1, -32, 1, -28)
-emptyLabel.Font = Enum.Font.Gotham
-emptyLabel.TextSize = 14
-emptyLabel.TextWrapped = true
-emptyLabel.TextColor3 = Color3.fromRGB(160, 160, 160)
-emptyLabel.Text = "Nothing to show in this tab yet."
-emptyLabel.Visible = false
-emptyLabel.Parent = listFrame
+local listRoot = mainFrame:WaitForChild("List")
+local categoriesFrame = listRoot:WaitForChild("Categories")
+local categoryScroll = getNamedChildOfClass(categoriesFrame, "CategoryList", "ScrollingFrame")
+local categoryButtons = categoryScroll and collectChildrenOfClass(categoryScroll, "ImageButton") or {}
 
-local details = Instance.new("Frame")
-details.Position = UDim2.fromOffset(460, 246)
-details.Size = UDim2.new(1, -484, 0, 330)
-details.BackgroundColor3 = Color3.fromRGB(24, 26, 34)
-details.BorderSizePixel = 0
-details.Parent = panel
-Instance.new("UICorner", details).CornerRadius = UDim.new(0, 14)
-local detailsStroke = Instance.new("UIStroke", details)
-detailsStroke.Color = Color3.fromRGB(46, 54, 70)
-detailsStroke.Thickness = 1
-local detailAccent = Instance.new("Frame")
-detailAccent.Size = UDim2.new(1, 0, 0, 4)
-detailAccent.BackgroundColor3 = Color3.fromRGB(96, 165, 250)
-detailAccent.BorderSizePixel = 0
-detailAccent.Parent = details
-Instance.new("UICorner", detailAccent).CornerRadius = UDim.new(0, 10)
+local entryScroll = listRoot:WaitForChild("List"):WaitForChild("ScrollingFrame")
+local entryLayout = entryScroll:FindFirstChildOfClass("UIListLayout")
 
-local detailTitle = Instance.new("TextLabel")
-detailTitle.BackgroundTransparency = 1
-detailTitle.Position = UDim2.fromOffset(18, 14)
-detailTitle.Size = UDim2.new(1, -36, 0, 22)
-detailTitle.Font = Enum.Font.GothamBold
-detailTitle.TextSize = 17
-detailTitle.TextXAlignment = Enum.TextXAlignment.Left
-detailTitle.TextColor3 = Color3.fromRGB(245, 245, 245)
-detailTitle.Text = "Select an entry"
-detailTitle.Parent = details
-
-local detailBody = Instance.new("TextLabel")
-detailBody.BackgroundTransparency = 1
-detailBody.Position = UDim2.fromOffset(18, 46)
-detailBody.Size = UDim2.new(1, -36, 1, -132)
-detailBody.Font = Enum.Font.Gotham
-detailBody.TextSize = 12
-detailBody.TextWrapped = true
-detailBody.TextXAlignment = Enum.TextXAlignment.Left
-detailBody.TextYAlignment = Enum.TextYAlignment.Top
-detailBody.TextColor3 = Color3.fromRGB(220, 220, 220)
-detailBody.Text = "Select an entry from the list."
-detailBody.Parent = details
-
-local statusLabel = Instance.new("TextLabel")
-statusLabel.BackgroundTransparency = 1
-statusLabel.Position = UDim2.fromOffset(18, 248)
-statusLabel.Size = UDim2.new(1, -36, 0, 36)
-statusLabel.Font = Enum.Font.Gotham
-statusLabel.TextSize = 11
-statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-statusLabel.TextYAlignment = Enum.TextYAlignment.Top
-statusLabel.TextWrapped = true
-statusLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
-statusLabel.Text = ""
-statusLabel.Parent = details
-
-local function createActionButton(text, x)
-	local button = Instance.new("TextButton")
-	button.Position = UDim2.fromOffset(x, 290)
-	button.Size = UDim2.fromOffset(180, 38)
-	button.BackgroundColor3 = Color3.fromRGB(42, 44, 54)
-	button.BorderSizePixel = 0
-	button.AutoButtonColor = false
-	button.Font = Enum.Font.GothamBold
-	button.TextSize = 13
-	button.TextColor3 = Color3.fromRGB(240, 240, 240)
-	button.Text = text
-	button.Parent = details
-	Instance.new("UICorner", button).CornerRadius = UDim.new(0, 12)
-	local stroke = Instance.new("UIStroke", button)
-	stroke.Name = "ButtonStroke"
-	stroke.Color = Color3.fromRGB(56, 64, 82)
-	stroke.Thickness = 1
-	return button
+local runtimeFolder = gui:FindFirstChild("BlacksmithRuntime")
+if not runtimeFolder then
+	runtimeFolder = Instance.new("Folder")
+	runtimeFolder.Name = "BlacksmithRuntime"
+	runtimeFolder.Parent = gui
 end
 
-local primaryButton = createActionButton("Action", 18)
-local secondaryButton = createActionButton("Action", 210)
+local closeRequested = gui:FindFirstChild("BlacksmithCloseRequested")
+if not closeRequested then
+	closeRequested = Instance.new("BindableEvent")
+	closeRequested.Name = "BlacksmithCloseRequested"
+	closeRequested.Parent = gui
+end
 
-local footer = Instance.new("TextLabel")
-footer.BackgroundTransparency = 1
-footer.Position = UDim2.fromOffset(24, 590)
-footer.Size = UDim2.new(1, -48, 0, 20)
-footer.Font = Enum.Font.Gotham
-footer.TextSize = 12
-footer.TextXAlignment = Enum.TextXAlignment.Left
-footer.TextColor3 = Color3.fromRGB(158, 158, 158)
-footer.Text = "Crafting uses recipes + mob materials + mine resources. Upgrading uses Silver + upgrade materials."
-footer.Parent = panel
+local popupOverlay = Instance.new("Frame")
+popupOverlay.Name = "BlacksmithPopupOverlay"
+popupOverlay.Size = UDim2.fromScale(1, 1)
+popupOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+popupOverlay.BackgroundTransparency = 0.35
+popupOverlay.BorderSizePixel = 0
+popupOverlay.Visible = false
+popupOverlay.ZIndex = 30
+popupOverlay.Parent = gui
 
+local popupCard = Instance.new("Frame")
+popupCard.Name = "Card"
+popupCard.AnchorPoint = Vector2.new(0.5, 0.5)
+popupCard.Position = UDim2.fromScale(0.5, 0.5)
+popupCard.Size = UDim2.fromOffset(420, 220)
+popupCard.BackgroundColor3 = Color3.fromRGB(18, 22, 29)
+popupCard.BorderSizePixel = 0
+popupCard.ZIndex = 31
+popupCard.Parent = popupOverlay
+Instance.new("UICorner", popupCard).CornerRadius = UDim.new(0, 18)
+
+local popupStroke = Instance.new("UIStroke")
+popupStroke.Color = Color3.fromRGB(54, 66, 86)
+popupStroke.Thickness = 1
+popupStroke.Parent = popupCard
+
+local popupTitle = ensureTextLabel(popupCard, "Title", {
+	Font = Enum.Font.GothamBold,
+	TextSize = 22,
+	TextColor3 = Color3.fromRGB(246, 246, 246),
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Position = UDim2.fromOffset(24, 20),
+	Size = UDim2.new(1, -48, 0, 28),
+	ZIndex = 32,
+})
+
+local popupBody = ensureTextLabel(popupCard, "Body", {
+	Font = Enum.Font.Gotham,
+	TextSize = 14,
+	TextColor3 = Color3.fromRGB(220, 220, 220),
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Top,
+	TextWrapped = true,
+	Position = UDim2.fromOffset(24, 60),
+	Size = UDim2.new(1, -48, 0, 88),
+	ZIndex = 32,
+})
+
+local popupPrimaryButton = Instance.new("TextButton")
+popupPrimaryButton.Name = "PrimaryButton"
+popupPrimaryButton.Position = UDim2.new(0, 24, 1, -58)
+popupPrimaryButton.Size = UDim2.new(0.5, -30, 0, 38)
+popupPrimaryButton.BackgroundColor3 = Color3.fromRGB(76, 130, 255)
+popupPrimaryButton.BorderSizePixel = 0
+popupPrimaryButton.AutoButtonColor = true
+popupPrimaryButton.Font = Enum.Font.GothamBold
+popupPrimaryButton.TextSize = 14
+popupPrimaryButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+popupPrimaryButton.ZIndex = 32
+popupPrimaryButton.Parent = popupCard
+Instance.new("UICorner", popupPrimaryButton).CornerRadius = UDim.new(0, 12)
+
+local popupSecondaryButton = Instance.new("TextButton")
+popupSecondaryButton.Name = "SecondaryButton"
+popupSecondaryButton.AnchorPoint = Vector2.new(1, 0)
+popupSecondaryButton.Position = UDim2.new(1, -24, 1, -58)
+popupSecondaryButton.Size = UDim2.new(0.5, -30, 0, 38)
+popupSecondaryButton.BackgroundColor3 = Color3.fromRGB(44, 50, 62)
+popupSecondaryButton.BorderSizePixel = 0
+popupSecondaryButton.AutoButtonColor = true
+popupSecondaryButton.Font = Enum.Font.GothamBold
+popupSecondaryButton.TextSize = 14
+popupSecondaryButton.TextColor3 = Color3.fromRGB(238, 238, 238)
+popupSecondaryButton.ZIndex = 32
+popupSecondaryButton.Parent = popupCard
+Instance.new("UICorner", popupSecondaryButton).CornerRadius = UDim.new(0, 12)
+
+local materialTooltip = Instance.new("Frame")
+materialTooltip.Name = "MaterialTooltip"
+materialTooltip.BackgroundColor3 = Color3.fromRGB(17, 21, 27)
+materialTooltip.BackgroundTransparency = 0.06
+materialTooltip.BorderSizePixel = 0
+materialTooltip.Size = UDim2.fromOffset(260, 116)
+materialTooltip.Visible = false
+materialTooltip.ZIndex = 40
+materialTooltip.Parent = gui
+Instance.new("UICorner", materialTooltip).CornerRadius = UDim.new(0, 10)
+
+local tooltipStroke = Instance.new("UIStroke")
+tooltipStroke.Color = Color3.fromRGB(69, 76, 89)
+tooltipStroke.Thickness = 1
+tooltipStroke.Parent = materialTooltip
+
+local tooltipPadding = Instance.new("UIPadding")
+tooltipPadding.PaddingTop = UDim.new(0, 12)
+tooltipPadding.PaddingBottom = UDim.new(0, 12)
+tooltipPadding.PaddingLeft = UDim.new(0, 12)
+tooltipPadding.PaddingRight = UDim.new(0, 12)
+tooltipPadding.Parent = materialTooltip
+
+local tooltipTitle = ensureTextLabel(materialTooltip, "Title", {
+	Font = Enum.Font.GothamBold,
+	TextSize = 15,
+	TextColor3 = Color3.fromRGB(236, 231, 217),
+	TextWrapped = true,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Top,
+	Position = UDim2.fromOffset(0, 0),
+	Size = UDim2.new(1, 0, 0, 24),
+	ZIndex = 41,
+})
+
+local tooltipDescription = ensureTextLabel(materialTooltip, "Description", {
+	Font = Enum.Font.Gotham,
+	TextSize = 13,
+	TextColor3 = Color3.fromRGB(208, 204, 194),
+	TextWrapped = true,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Top,
+	Position = UDim2.fromOffset(0, 28),
+	Size = UDim2.new(1, 0, 0, 40),
+	ZIndex = 41,
+})
+
+local tooltipSource = ensureTextLabel(materialTooltip, "Source", {
+	Font = Enum.Font.Gotham,
+	TextSize = 12,
+	TextColor3 = Color3.fromRGB(163, 169, 180),
+	TextWrapped = true,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Top,
+	Position = UDim2.fromOffset(0, 74),
+	Size = UDim2.new(1, 0, 0, 28),
+	ZIndex = 41,
+})
+
+local popupConfig = nil
 local snapshot = nil
-local activeTab = "Craft"
-local lastActionResult = nil
-local selectedKeys = {
-	Craft = nil,
-	Upgrade = nil,
-	Sell = nil,
-}
+local selectedCategory = nil
+local selectedRecipeId = nil
+local hiddenLobbyGuiStates = nil
+local savedCameraState = nil
+local cameraActive = false
+local entryTemplate = nil
+local runtimeEntryButtons = {}
+local hoveredMaterialId = nil
+local characterAddedConnection = nil
+local characterDescendantAddedConnection = nil
+local hiddenCharacterParts = {}
+local hiddenCharacterEffects = {}
+local refresh
 
 local function tutorialComplete()
 	return player:GetAttribute("TutorialComplete") == true
 end
 
-local function getEntryRarity(entry)
-	if typeof(entry) ~= "table" then
-		return "Common"
+local function closePopup()
+	popupConfig = nil
+	popupOverlay.Visible = false
+end
+
+local function showPopup(config)
+	popupConfig = config
+	popupTitle.Text = tostring(config.title or "")
+	popupBody.Text = tostring(config.body or "")
+	popupPrimaryButton.Text = tostring(config.primaryText or "OK")
+	popupPrimaryButton.Visible = config.primaryText ~= nil or config.secondaryText == nil
+	popupSecondaryButton.Text = tostring(config.secondaryText or "")
+	popupSecondaryButton.Visible = config.secondaryText ~= nil
+	if popupSecondaryButton.Visible then
+		popupPrimaryButton.Position = UDim2.new(0, 24, 1, -58)
+		popupPrimaryButton.Size = UDim2.new(0.5, -30, 0, 38)
+	else
+		popupPrimaryButton.Position = UDim2.new(0, 24, 1, -58)
+		popupPrimaryButton.Size = UDim2.new(1, -48, 0, 38)
 	end
-	return tostring(entry.rarity or "Common")
+	popupOverlay.Visible = true
 end
 
-local function applyEntryTheme(entry)
-	local accent = entry and getRarityColor(getEntryRarity(entry)) or Color3.fromRGB(96, 165, 250)
-	detailAccent.BackgroundColor3 = accent
-	detailsStroke.Color = blendColor(Color3.fromRGB(46, 54, 70), accent, 0.45)
-	listStroke.Color = blendColor(Color3.fromRGB(46, 54, 70), accent, 0.28)
-	summaryStroke.Color = blendColor(Color3.fromRGB(46, 54, 70), accent, 0.22)
-	detailTitle.TextColor3 = entry and accent or Color3.fromRGB(245, 245, 245)
-end
-
-local function setButtonState(button, enabled, text, accent)
-	local color = accent or Color3.fromRGB(96, 165, 250)
-	button.Active = enabled
-	button.AutoButtonColor = false
-	button.BackgroundColor3 = enabled and blendColor(Color3.fromRGB(42, 44, 54), color, 0.45) or Color3.fromRGB(42, 44, 54)
-	button.TextColor3 = enabled and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 150, 150)
-	button.Text = text
-	local stroke = button:FindFirstChild("ButtonStroke")
-	if stroke and stroke:IsA("UIStroke") then
-		stroke.Color = enabled and blendColor(Color3.fromRGB(56, 64, 82), color, 0.7) or Color3.fromRGB(56, 64, 82)
+popupPrimaryButton.MouseButton1Click:Connect(function()
+	if not popupConfig then
+		return
 	end
-end
+	local callback = popupConfig.primaryCallback
+	closePopup()
+	if typeof(callback) == "function" then
+		callback()
+	end
+end)
 
-local function formatResourceLines(label, list)
-	if typeof(list) ~= "table" or #list == 0 then
-		if label == "" then
-			return "-"
+popupSecondaryButton.MouseButton1Click:Connect(function()
+	if not popupConfig then
+		return
+	end
+	local callback = popupConfig.secondaryCallback
+	closePopup()
+	if typeof(callback) == "function" then
+		callback()
+	end
+end)
+
+local function hideLobbyUi()
+	if hiddenLobbyGuiStates then
+		return
+	end
+
+	hiddenLobbyGuiStates = {}
+	for _, guiName in ipairs(HiddenLobbyGuiNames) do
+		local lobbyGui = playerGui:FindFirstChild(guiName)
+		if lobbyGui and lobbyGui:IsA("ScreenGui") then
+			hiddenLobbyGuiStates[guiName] = lobbyGui.Enabled
+			lobbyGui.Enabled = false
 		end
-		return label .. ":\n-"
 	end
-	local parts = {}
-	for index, entry in ipairs(list) do
-		parts[index] = string.format("%s x%d", tostring(entry.id), tonumber(entry.amount) or 0)
-	end
-	if label == "" then
-		return table.concat(parts, ", ")
-	end
-	return label .. ":\n" .. table.concat(parts, ", ")
 end
 
-local function formatProgressLines(list)
-	if typeof(list) ~= "table" or #list == 0 then
-		return "-"
+local function restoreLobbyUi()
+	if not hiddenLobbyGuiStates then
+		return
 	end
 
-	local lines = {}
-	for index, entry in ipairs(list) do
-		local owned = math.min(clampInt(entry.owned, 0), clampInt(entry.amount, 0))
-		local required = clampInt(entry.amount, 0)
-		local missing = math.max(0, clampInt(entry.missing, 0))
-		local status = missing > 0 and string.format("missing %d", missing) or "ready"
-		lines[index] = string.format("- %s: %d / %d (%s)", tostring(entry.id), owned, required, status)
-	end
-
-	return table.concat(lines, "\n")
-end
-
-local function formatMissingList(list, maxItems)
-	if typeof(list) ~= "table" or #list == 0 then
-		return "-"
-	end
-
-	local parts = {}
-	local limit = math.max(1, clampInt(maxItems, 1))
-	for index, entry in ipairs(list) do
-		if index > limit then
-			break
+	for guiName, wasEnabled in pairs(hiddenLobbyGuiStates) do
+		local lobbyGui = playerGui:FindFirstChild(guiName)
+		if lobbyGui and lobbyGui:IsA("ScreenGui") then
+			lobbyGui.Enabled = wasEnabled
 		end
-		parts[#parts + 1] = string.format("%s x%d", tostring(entry.id), clampInt(entry.amount, 0))
 	end
-	if #list > limit then
-		parts[#parts + 1] = string.format("+%d more", #list - limit)
-	end
-	return table.concat(parts, ", ")
+
+	hiddenLobbyGuiStates = nil
 end
 
-local function buildCraftNeedSummary(entry)
-	if typeof(entry) ~= "table" then
-		return "-"
+local function computeBlacksmithCameraCFrame()
+	local targetPosition = cameraPoint.WorldPosition
+	local cameraPosition = targetPosition + CameraOffset
+	return CFrame.lookAt(cameraPosition, targetPosition)
+end
+
+local function applyBlacksmithCamera()
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return
 	end
 
-	local chunks = {
-		string.format("Req Lv %d", clampInt(entry.requiredLevel, 1)),
-		string.format("Tier %d", clampInt(entry.tier, 1)),
-		string.format("Copies %d", clampInt(entry.copies, 0)),
+	camera.CameraType = Enum.CameraType.Scriptable
+	camera.FieldOfView = CameraFieldOfView
+	camera.CFrame = computeBlacksmithCameraCFrame()
+end
+
+local function startBlacksmithCamera()
+	if cameraActive then
+		return
+	end
+
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return
+	end
+
+	savedCameraState = {
+		CameraType = camera.CameraType,
+		CFrame = camera.CFrame,
+		CameraSubject = camera.CameraSubject,
+		FieldOfView = camera.FieldOfView,
 	}
 
-	if entry.unlocked then
-		local craftSilverMissing = clampInt(entry.craftSilverMissing, 0)
-		local mineMissing = entry.missingMineResources and #entry.missingMineResources or 0
-		local mobMissing = entry.missingMobMaterials and #entry.missingMobMaterials or 0
-		if entry.canCraft == true then
-			chunks[#chunks + 1] = "Ready now"
-		else
-			if craftSilverMissing > 0 then
-				chunks[#chunks + 1] = string.format("%d Silver", craftSilverMissing)
-			end
-			if mineMissing > 0 then
-				chunks[#chunks + 1] = string.format("%d mine mats", mineMissing)
-			end
-			if mobMissing > 0 then
-				chunks[#chunks + 1] = string.format("%d mob mats", mobMissing)
-			end
+	cameraActive = true
+	RunService:UnbindFromRenderStep(CameraRenderStepName)
+	RunService:BindToRenderStep(CameraRenderStepName, Enum.RenderPriority.Camera.Value + 2, applyBlacksmithCamera)
+	applyBlacksmithCamera()
+end
+
+local function stopBlacksmithCamera()
+	if not cameraActive then
+		return
+	end
+
+	cameraActive = false
+	RunService:UnbindFromRenderStep(CameraRenderStepName)
+
+	local camera = Workspace.CurrentCamera
+	if camera and savedCameraState then
+		camera.CameraType = savedCameraState.CameraType
+		camera.CFrame = savedCameraState.CFrame
+		camera.CameraSubject = savedCameraState.CameraSubject
+		camera.FieldOfView = savedCameraState.FieldOfView
+	end
+
+	savedCameraState = nil
+end
+
+local function getTooltipViewportSize()
+	local camera = Workspace.CurrentCamera
+	return camera and camera.ViewportSize or Vector2.new(1920, 1080)
+end
+
+local function getMouseGuiPosition()
+	local topLeftInset = select(1, GuiService:GetGuiInset())
+	local mousePosition = UserInputService:GetMouseLocation()
+	return Vector2.new(mousePosition.X - topLeftInset.X, mousePosition.Y - topLeftInset.Y)
+end
+
+local function positionTooltip()
+	if not materialTooltip.Visible then
+		return
+	end
+
+	local viewportSize = getTooltipViewportSize()
+	local mousePosition = getMouseGuiPosition() + Vector2.new(18, 18)
+	local tooltipSize = materialTooltip.AbsoluteSize
+	local maxX = math.max(8, viewportSize.X - tooltipSize.X - 8)
+	local maxY = math.max(8, viewportSize.Y - tooltipSize.Y - 8)
+	local clampedX = math.clamp(mousePosition.X, 8, maxX)
+	local clampedY = math.clamp(mousePosition.Y, 8, maxY)
+	materialTooltip.Position = UDim2.fromOffset(math.floor(clampedX), math.floor(clampedY))
+end
+
+local function hideMaterialTooltip()
+	hoveredMaterialId = nil
+	materialTooltip.Visible = false
+end
+
+local function showMaterialTooltip(materialDef)
+	if not materialDef then
+		hideMaterialTooltip()
+		return
+	end
+
+	hoveredMaterialId = materialDef.id
+	tooltipTitle.Text = tostring(materialDef.displayName or materialDef.id)
+	tooltipDescription.Text = tostring(materialDef.description or "")
+	tooltipSource.Text = "Source: " .. tostring(materialDef.source or "Unknown")
+	materialTooltip.Visible = true
+	task.defer(positionTooltip)
+end
+
+UserInputService.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		positionTooltip()
+	end
+end)
+
+local function disconnectCharacterVisibilityConnections()
+	if characterDescendantAddedConnection then
+		characterDescendantAddedConnection:Disconnect()
+		characterDescendantAddedConnection = nil
+	end
+	if characterAddedConnection then
+		characterAddedConnection:Disconnect()
+		characterAddedConnection = nil
+	end
+end
+
+local function trackHiddenCharacterPart(part)
+	if hiddenCharacterParts[part] == nil then
+		hiddenCharacterParts[part] = part.LocalTransparencyModifier
+	end
+	part.LocalTransparencyModifier = 1
+end
+
+local function trackHiddenCharacterEffect(effect)
+	local enabled = nil
+	if effect:IsA("ParticleEmitter") or effect:IsA("Trail") or effect:IsA("Beam") or effect:IsA("Highlight") then
+		enabled = effect.Enabled
+	elseif effect:IsA("BillboardGui") or effect:IsA("SurfaceGui") then
+		enabled = effect.Enabled
+	end
+
+	if enabled == nil then
+		return
+	end
+
+	if hiddenCharacterEffects[effect] == nil then
+		hiddenCharacterEffects[effect] = enabled
+	end
+	effect.Enabled = false
+end
+
+local function hideCharacterDescendant(descendant)
+	if descendant:IsA("BasePart") then
+		trackHiddenCharacterPart(descendant)
+	elseif descendant:IsA("ParticleEmitter")
+		or descendant:IsA("Trail")
+		or descendant:IsA("Beam")
+		or descendant:IsA("Highlight")
+		or descendant:IsA("BillboardGui")
+		or descendant:IsA("SurfaceGui")
+	then
+		trackHiddenCharacterEffect(descendant)
+	end
+end
+
+local function applyLocalCharacterHidden(character)
+	if not character then
+		return
+	end
+
+	for _, descendant in ipairs(character:GetDescendants()) do
+		hideCharacterDescendant(descendant)
+	end
+
+	if characterDescendantAddedConnection then
+		characterDescendantAddedConnection:Disconnect()
+	end
+	characterDescendantAddedConnection = character.DescendantAdded:Connect(function(descendant)
+		if gui.Enabled then
+			hideCharacterDescendant(descendant)
 		end
+	end)
+end
+
+local function hideLocalCharacter()
+	if characterAddedConnection then
+		return
+	end
+
+	applyLocalCharacterHidden(player.Character)
+	characterAddedConnection = player.CharacterAdded:Connect(function(character)
+		if not gui.Enabled then
+			return
+		end
+		task.defer(function()
+			if gui.Enabled then
+				applyLocalCharacterHidden(character)
+			end
+		end)
+	end)
+end
+
+local function restoreLocalCharacter()
+	disconnectCharacterVisibilityConnections()
+
+	for part, originalTransparency in pairs(hiddenCharacterParts) do
+		if part and part.Parent then
+			part.LocalTransparencyModifier = originalTransparency
+		end
+	end
+	table.clear(hiddenCharacterParts)
+
+	for effect, originalEnabled in pairs(hiddenCharacterEffects) do
+		if effect and effect.Parent and effect.Enabled ~= originalEnabled then
+			effect.Enabled = originalEnabled
+		end
+	end
+	table.clear(hiddenCharacterEffects)
+end
+
+local function getCraftEntries()
+	return snapshot and snapshot.craftEntries or {}
+end
+
+local function isFullTemplate(button)
+	if not button or not button:IsA("ImageButton") or button.Name ~= "WeaponBackground" then
+		return false
+	end
+
+	for _, childName in ipairs(TemplateRequiredChildren) do
+		if not button:FindFirstChild(childName) then
+			return false
+		end
+	end
+
+	return true
+end
+
+local function initializeEntryTemplate()
+	if entryTemplate and entryTemplate.Parent then
+		return entryTemplate
+	end
+
+	local sourceTemplate = nil
+	local firstSpacer = nil
+	for _, child in ipairs(entryScroll:GetChildren()) do
+		if not firstSpacer and child.Name == "WeaponBackgroundSpacer" and child:IsA("GuiObject") then
+			firstSpacer = child
+		end
+		if isFullTemplate(child) then
+			sourceTemplate = child
+			break
+		end
+	end
+
+	if not sourceTemplate then
+		warn("[BlacksmithUI] Missing authored WeaponBackground template")
+		return nil
+	end
+
+	if entryLayout and firstSpacer then
+		entryLayout.Padding = UDim.new(firstSpacer.Size.Y.Scale, firstSpacer.Size.Y.Offset)
+	end
+
+	local storedTemplate = runtimeFolder:FindFirstChild("WeaponBackgroundTemplate")
+	if storedTemplate and storedTemplate:IsA("ImageButton") then
+		entryTemplate = storedTemplate
 	else
-		local unlockSilverMissing = clampInt(entry.unlockSilverMissing, 0)
-		if entry.canUnlock == true then
-			chunks[#chunks + 1] = "Ready to unlock"
-		elseif entry.levelMet == false then
-			chunks[#chunks + 1] = string.format("Reach Lv %d", clampInt(entry.requiredLevel, 1))
-		elseif unlockSilverMissing > 0 then
-			chunks[#chunks + 1] = string.format("%d Silver to unlock", unlockSilverMissing)
-		else
-			chunks[#chunks + 1] = "Unlock blocked"
+		entryTemplate = sourceTemplate:Clone()
+		entryTemplate.Name = "WeaponBackgroundTemplate"
+		entryTemplate.Visible = false
+		entryTemplate.Parent = runtimeFolder
+	end
+
+	for _, child in ipairs(entryScroll:GetChildren()) do
+		if child ~= entryLayout and (child.Name == "WeaponBackground" or child.Name == "WeaponBackgroundSpacer") then
+			child:Destroy()
 		end
 	end
 
-	return table.concat(chunks, " | ")
+	return entryTemplate
 end
 
-local function buildCraftMissingMessage(entry, mode)
-	if typeof(entry) ~= "table" then
-		return "Select a recipe first."
-	end
-
-	local lines = {}
-	if entry.levelMet == false then
-		lines[#lines + 1] = string.format("Reach account level %d first.", clampInt(entry.requiredLevel, 1))
-	end
-
-	if mode == "unlock" or entry.unlocked ~= true then
-		local unlockSilverMissing = clampInt(entry.unlockSilverMissing, 0)
-		if unlockSilverMissing > 0 then
-			lines[#lines + 1] = string.format("Need %d more Silver to unlock the recipe.", unlockSilverMissing)
+local function clearRuntimeEntryButtons()
+	for _, button in ipairs(runtimeEntryButtons) do
+		if button and button.Parent then
+			button:Destroy()
 		end
-		if #lines == 0 then
-			lines[#lines + 1] = "Recipe is ready to unlock."
-		end
-		return table.concat(lines, "\n")
 	end
-
-	local craftSilverMissing = clampInt(entry.craftSilverMissing, 0)
-	if craftSilverMissing > 0 then
-		lines[#lines + 1] = string.format("Need %d more Silver for crafting.", craftSilverMissing)
-	end
-	if typeof(entry.missingMineResources) == "table" and #entry.missingMineResources > 0 then
-		lines[#lines + 1] = "Missing mine materials: " .. formatMissingList(entry.missingMineResources, 4)
-	end
-	if typeof(entry.missingMobMaterials) == "table" and #entry.missingMobMaterials > 0 then
-		lines[#lines + 1] = "Missing mob materials: " .. formatMissingList(entry.missingMobMaterials, 4)
-	end
-	if #lines == 0 then
-		lines[#lines + 1] = "Recipe is ready to craft."
-	end
-
-	return table.concat(lines, "\n")
+	table.clear(runtimeEntryButtons)
 end
 
-local function buildActionMessage(entry, actionResult)
-	if typeof(actionResult) ~= "table" then
-		return nil, nil
+local function buildEntriesByCategory()
+	local byCategory = {}
+	for _, category in ipairs(CategoryOrder) do
+		byCategory[category] = {}
 	end
 
-	if actionResult.ok == true then
-		if activeTab == "Craft" then
-			if actionResult.type == "unlockRecipe" then
-				return true, "Recipe unlocked."
+	for _, entry in ipairs(getCraftEntries()) do
+		local weaponDef = WeaponConfigs.Get(entry.weaponId)
+		local category = tostring(entry.weaponType or (weaponDef and weaponDef.weaponType) or "")
+		if byCategory[category] then
+			table.insert(byCategory[category], entry)
+		end
+	end
+
+	return byCategory
+end
+
+local function getSelectedCategoryEntries()
+	local byCategory = buildEntriesByCategory()
+	if not byCategory[selectedCategory] or #byCategory[selectedCategory] == 0 then
+		for _, category in ipairs(CategoryOrder) do
+			if byCategory[category] and #byCategory[category] > 0 then
+				selectedCategory = category
+				break
 			end
-			if actionResult.type == "craft" then
-				return true, "Weapon crafted."
-			end
-		elseif activeTab == "Upgrade" and actionResult.type == "upgrade" then
-			local upgraded = clampInt(actionResult.details, 0)
-			return true, upgraded > 0 and string.format("Upgraded %d level(s).", upgraded) or "Upgrade completed."
-		elseif activeTab == "Sell" and actionResult.type == "sell" then
-			local silverRefund = clampInt(actionResult.details and actionResult.details.silver, 0)
-			return true, silverRefund > 0 and string.format("Sold for %d Silver.", silverRefund) or "Weapon sold."
-		end
-		return nil, nil
-	end
-
-	local details = actionResult.details
-	if typeof(details) == "table" and typeof(details.message) == "string" and details.message ~= "" then
-		return false, details.message
-	end
-
-	local reason = tostring(actionResult.reason or "")
-	if activeTab == "Craft" and (actionResult.type == "craft" or actionResult.type == "unlockRecipe") then
-		if reason == "MissingMineResources" or reason == "MissingMobMaterials" or reason == "NotEnoughSilver" or reason == "LevelLocked" then
-			return false, buildCraftMissingMessage(entry, actionResult.type == "unlockRecipe" and "unlock" or "craft")
-		end
-		if reason ~= "" then
-			return false, "Craft action failed: " .. reason
-		end
-	elseif activeTab == "Upgrade" and actionResult.type == "upgrade" then
-		if reason ~= "" then
-			return false, "Upgrade failed: " .. reason
-		end
-	elseif activeTab == "Sell" and actionResult.type == "sell" then
-		if reason ~= "" then
-			return false, "Sell failed: " .. reason
 		end
 	end
-
-	return nil, nil
-end
-
-local function getEntriesForTab()
-	if not snapshot then
-		return {}
-	end
-	if activeTab == "Craft" then
-		return snapshot.craftEntries or {}
-	end
-	if activeTab == "Upgrade" then
-		return snapshot.upgradeEntries or {}
-	end
-	return snapshot.sellEntries or {}
-end
-
-local function getEntryKey(entry)
-	if activeTab == "Craft" then
-		return entry.recipeId
-	end
-	return entry.instanceId
+	return byCategory[selectedCategory] or {}
 end
 
 local function getSelectedEntry()
-	local entries = getEntriesForTab()
-	local selectedKey = selectedKeys[activeTab]
+	local entries = getSelectedCategoryEntries()
 	for _, entry in ipairs(entries) do
-		if getEntryKey(entry) == selectedKey then
+		if entry.recipeId == selectedRecipeId then
 			return entry
 		end
+	end
+	if entries[1] then
+		selectedRecipeId = entries[1].recipeId
 	end
 	return entries[1]
 end
 
-local function setTabVisuals()
-	local accent = getRarityColor(getEntryRarity(getSelectedEntry()))
-	for tabName, button in pairs(tabButtons) do
-		local isActive = tabName == activeTab
-		button.BackgroundColor3 = isActive and blendColor(Color3.fromRGB(32, 34, 42), accent, 0.45) or Color3.fromRGB(32, 34, 42)
-		button.TextColor3 = isActive and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(226, 226, 226)
+local function buildStatLines(weaponDef)
+	local lines = {}
+	if not weaponDef then
+		return { "-", "-", "-", "-" }
+	end
+
+	local stats = weaponDef.stats or {}
+	local combat = weaponDef.combat or {}
+	lines[#lines + 1] = string.format("ATK %d", clampInt(combat.baseAtk or weaponDef.baseDamage, 0))
+
+	local candidates = {
+		{ label = "HP", value = clampInt(stats.HP, 0), suffix = "" },
+		{ label = "DEF", value = clampInt(stats.DEF, 0), suffix = "" },
+		{ label = "SPD", value = clampInt(stats.SPD, 0), suffix = "%" },
+		{ label = "CRIT", value = clampInt(stats.CRIT_RATE, 0), suffix = "%" },
+		{ label = "CRIT DMG", value = clampInt(stats.CRIT_DMG, 0), suffix = "%" },
+		{ label = "LIFESTEAL", value = clampInt(stats.LIFESTEAL, 0), suffix = "%" },
+	}
+
+	for _, candidate in ipairs(candidates) do
+		if candidate.value > 0 then
+			lines[#lines + 1] = string.format("%s +%d%s", candidate.label, candidate.value, candidate.suffix)
+		end
+		if #lines >= 4 then
+			break
+		end
+	end
+
+	while #lines < 4 do
+		lines[#lines + 1] = "-"
+	end
+
+	return lines
+end
+
+local function bindMaterialTooltip(slotFrame)
+	if slotFrame:GetAttribute("TooltipBound") == true then
+		return
+	end
+
+	slotFrame:SetAttribute("TooltipBound", true)
+	slotFrame.Active = true
+
+	slotFrame.MouseEnter:Connect(function()
+		if not gui.Enabled or not slotFrame.Visible then
+			return
+		end
+		local materialId = slotFrame:GetAttribute("MaterialId")
+		if typeof(materialId) ~= "string" or materialId == "" then
+			return
+		end
+		showMaterialTooltip(MaterialDefinitions.Get(materialId))
+	end)
+
+	slotFrame.MouseLeave:Connect(function()
+		local materialId = slotFrame:GetAttribute("MaterialId")
+		if hoveredMaterialId == materialId then
+			hideMaterialTooltip()
+		end
+	end)
+end
+
+for _, slotFrame in ipairs(materialSlots) do
+	bindMaterialTooltip(slotFrame)
+end
+
+local function setMaterialSlot(slotFrame, textLabel, materialEntry)
+	local icon = slotFrame:FindFirstChild("Material_Icon")
+
+	if not materialEntry then
+		textLabel.Text = ""
+		textLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+		slotFrame.Visible = false
+		slotFrame:SetAttribute("MaterialId", "")
+		if icon and icon:IsA("ImageLabel") then
+			icon.Visible = false
+		end
+		return
+	end
+
+	local owned = clampInt(materialEntry.owned, 0)
+	local required = clampInt(materialEntry.amount, 0)
+	local missing = clampInt(materialEntry.missing, 0)
+	local materialDef = MaterialDefinitions.Get(materialEntry.id)
+	local assetRef = materialDef and MaterialDefinitions.GetAssetRef(materialEntry.id) or nil
+
+	textLabel.Text = string.format("%d/%d", owned, required)
+	textLabel.TextColor3 = missing > 0 and Color3.fromRGB(255, 152, 152) or Color3.fromRGB(214, 255, 214)
+	slotFrame:SetAttribute("MaterialId", materialDef and materialDef.id or tostring(materialEntry.id or ""))
+
+	if icon and icon:IsA("ImageLabel") and typeof(assetRef) == "string" and assetRef ~= "" then
+		icon.Image = assetRef
+		icon.Visible = true
+		slotFrame.Visible = true
+	else
+		if icon and icon:IsA("ImageLabel") then
+			icon.Visible = false
+		end
+		slotFrame.Visible = false
 	end
 end
 
-local function updateDetailPanel()
+local function renderDetails()
 	local entry = getSelectedEntry()
 	if not entry then
-		applyEntryTheme(nil)
-		detailTitle.Text = "Select an entry"
-		detailBody.Text = "Select an entry from the list."
-		local actionOk, actionMessage = buildActionMessage(nil, lastActionResult)
-		statusLabel.Text = actionMessage or ""
-		if actionOk == false then
-			statusLabel.TextColor3 = Color3.fromRGB(232, 144, 144)
-		else
-			statusLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
+		silverLabel.Text = snapshot and tostring(clampInt(snapshot.silver, 0)) or "0"
+		weaponNameLabel.Text = ""
+		elementTypeLabel.Text = ""
+		descriptionLabel.Text = ""
+		passiveLabel.Text = ""
+		passiveDescLabel.Text = ""
+		for index = 1, 4 do
+			statLabels[index].Text = ""
 		end
-		setButtonState(primaryButton, false, "Action", nil)
-		setButtonState(secondaryButton, false, "Action", nil)
-		secondaryButton.Visible = false
+		for index = 1, 3 do
+			setMaterialSlot(materialSlots[index], materialAmountLabels[index], nil)
+		end
+		forgeButtonText.Text = "Forge"
+		forgeButton.Active = false
+		forgeButton.AutoButtonColor = false
+		forgeButton.ImageColor3 = Color3.fromRGB(110, 110, 110)
 		return
 	end
 
-	selectedKeys[activeTab] = getEntryKey(entry)
-	local accent = getRarityColor(getEntryRarity(entry))
-	applyEntryTheme(entry)
+	local weaponDef = WeaponConfigs.Get(entry.weaponId)
+	local rarityColor = getRarityColor(entry.rarity)
+	local element = tostring((weaponDef and weaponDef.element) or "Physical")
 
-	if activeTab == "Craft" then
-		detailTitle.Text = string.format("%s [%s]", tostring(entry.name), tostring(entry.status))
-		detailBody.Text = table.concat({
-			string.format("Weapon: %s", tostring(entry.name)),
-			string.format("Rarity: %s", tostring(entry.rarity)),
-			string.format("Required Account Level: %d", tonumber(entry.requiredLevel) or 0),
-			string.format("Recipe Tier: %d", tonumber(entry.tier) or 1),
-			string.format("Recipe Copies: %d", tonumber(entry.copies) or 0),
-			string.format("Crafted Copies: %d", tonumber(entry.craftedCount) or 0),
-			entry.nextTierCopies and string.format("Next Tier At: %d copies", tonumber(entry.nextTierCopies) or 0) or "Recipe Tier Maxed",
-			"",
-			string.format(
-				"Unlock Cost: %d Silver%s",
-				tonumber(entry.unlockSilverCost) or 0,
-				clampInt(entry.unlockSilverMissing, 0) > 0 and string.format(" (%d missing)", clampInt(entry.unlockSilverMissing, 0)) or " (ready)"
-			),
-			string.format(
-				"Craft Cost: %d Silver%s",
-				tonumber(entry.craftSilverCost) or 0,
-				clampInt(entry.craftSilverMissing, 0) > 0 and string.format(" (%d missing)", clampInt(entry.craftSilverMissing, 0)) or " (ready)"
-			),
-			"",
-			"Mob Materials Progress:",
-			formatProgressLines(entry.mobMaterialProgress),
-			"",
-			"Mine Materials Progress:",
-			formatProgressLines(entry.mineResourceProgress),
-		}, "\n")
-		if not entry.unlocked then
-			local unlockText = entry.canUnlock == true
-				and string.format("Buy Recipe (%d)", tonumber(entry.unlockSilverCost) or 0)
-				or string.format("Buy Recipe (%d) - Show Needs", tonumber(entry.unlockSilverCost) or 0)
-			setButtonState(primaryButton, true, unlockText, accent)
-		else
-			local craftText = entry.canCraft == true
-				and string.format("Craft (%d)", tonumber(entry.craftSilverCost) or 0)
-				or string.format("Craft (%d) - Show Needs", tonumber(entry.craftSilverCost) or 0)
-			setButtonState(primaryButton, true, craftText, accent)
-		end
-		setButtonState(secondaryButton, false, "", accent)
-		secondaryButton.Visible = false
-	elseif activeTab == "Upgrade" then
-		local cost = entry.upgradeCost
-		local upgradeLines = {
-			string.format("Weapon: %s", tostring(entry.name)),
-			string.format("Rarity: %s", tostring(entry.rarity)),
-			string.format("Level: %d / %d", tonumber(entry.level) or 1, tonumber(entry.maxLevel) or 1),
-			"",
-			string.format("ATK: %s", tostring(entry.stats and entry.stats.ATK or "-")),
-			string.format("HP: %s", tostring(entry.stats and entry.stats.HP or "-")),
-			string.format("DEF: %s", tostring(entry.stats and entry.stats.DEF or "-")),
-			string.format("SPD: %s%%", tostring(entry.stats and entry.stats.SPD or 0)),
-			string.format("CRIT: %s%%", tostring(entry.stats and entry.stats.CRIT_RATE or 0)),
-			string.format("CRIT DMG: %s%%", tostring(entry.stats and entry.stats.CRIT_DMG or 0)),
-			string.format("LIFESTEAL: %s%%", tostring(entry.stats and entry.stats.LIFESTEAL or 0)),
-		}
-		if cost then
-			table.insert(upgradeLines, "")
-			table.insert(upgradeLines, "Next Upgrade Cost:")
-			table.insert(upgradeLines, string.format("Silver: %d", tonumber(cost.silver) or 0))
-			table.insert(upgradeLines, string.format("%s: %d", "Upgrade Crystal", tonumber(cost.crystals) or 0))
-			if cost.special then
-				table.insert(upgradeLines, string.format("%s: %d", tostring(cost.special.id), tonumber(cost.special.amount) or 0))
-			end
-		else
-			table.insert(upgradeLines, "")
-			table.insert(upgradeLines, "This weapon reached its max level.")
-		end
-		detailTitle.Text = tostring(entry.name)
-		detailBody.Text = table.concat(upgradeLines, "\n")
-		statusLabel.Text = entry.canUpgrade and ((entry.canAfford and "Ready to upgrade.") or "Missing Silver or upgrade materials.") or "Weapon already maxed."
-		setButtonState(primaryButton, entry.canUpgrade == true and entry.canAfford == true, "Upgrade +1", accent)
-		setButtonState(secondaryButton, entry.canUpgrade == true and entry.canAfford == true, "Upgrade +10", accent)
-		secondaryButton.Visible = true
+	silverLabel.Text = tostring(clampInt(snapshot and snapshot.silver, 0))
+	weaponNameLabel.Text = tostring(entry.name or entry.weaponId)
+	weaponNameLabel.TextColor3 = rarityColor
+	elementTypeLabel.Text = string.format("Element type: %s", element)
+	elementTypeLabel.TextColor3 = getElementColor(element)
+
+	if weaponDef then
+		descriptionLabel.Text = weaponDef.description ~= "" and tostring(weaponDef.description) or "No description."
+		local passiveName = weaponDef.passiveName ~= "" and tostring(weaponDef.passiveName)
+			or (weaponDef.abilityName ~= "" and tostring(weaponDef.abilityName) or "-")
+		passiveLabel.Text = "Passive: " .. passiveName
+		passiveDescLabel.Text = weaponDef.passiveDescription ~= "" and tostring(weaponDef.passiveDescription)
+			or (weaponDef.abilityDescription ~= "" and tostring(weaponDef.abilityDescription) or "No passive description.")
 	else
-		detailTitle.Text = tostring(entry.name)
-		detailBody.Text = table.concat({
-			string.format("Weapon: %s", tostring(entry.name)),
-			string.format("Rarity: %s", tostring(entry.rarity)),
-			string.format("Level: %d / %d", tonumber(entry.level) or 1, tonumber(entry.maxLevel) or 1),
-			"",
-			string.format("Silver Refund: %d", tonumber(entry.silverRefund) or 0),
-			"",
-			"Mine Resource Refunds:",
-			formatResourceLines("", entry.mineResources),
-			"",
-			"Mob Material Refunds:",
-			formatResourceLines("", entry.mobMaterials),
-		}, "\n")
-		statusLabel.Text = "Selling returns Silver and part of the crafting materials."
-		setButtonState(primaryButton, true, "Sell Weapon", accent)
-		setButtonState(secondaryButton, false, "", accent)
-		secondaryButton.Visible = false
+		descriptionLabel.Text = "Weapon definition missing."
+		passiveLabel.Text = "Passive: -"
+		passiveDescLabel.Text = "-"
 	end
 
-	local defaultStatus
-	if activeTab == "Craft" then
-		defaultStatus = buildCraftNeedSummary(entry)
-	elseif activeTab == "Upgrade" then
-		defaultStatus = entry.canUpgrade and ((entry.canAfford and "Ready to upgrade.") or "Missing Silver or upgrade materials.") or "Weapon already maxed."
-	else
-		defaultStatus = "Selling returns Silver and part of the crafting materials."
+	local statLines = buildStatLines(weaponDef)
+	for index = 1, 4 do
+		statLabels[index].Text = statLines[index] ~= "-" and statLines[index] or ""
 	end
 
-	local actionOk, actionMessage = buildActionMessage(entry, lastActionResult)
-	statusLabel.Text = actionMessage or defaultStatus
-	if actionOk == true then
-		statusLabel.TextColor3 = Color3.fromRGB(156, 220, 170)
-	elseif actionOk == false then
-		statusLabel.TextColor3 = Color3.fromRGB(232, 144, 144)
+	local materials = entry.materials or {}
+	for index = 1, 3 do
+		setMaterialSlot(materialSlots[index], materialAmountLabels[index], materials[index])
+	end
+
+	forgeButton.Active = true
+	forgeButton.AutoButtonColor = true
+	forgeButton.ImageColor3 = rarityColor
+
+	if entry.unlocked ~= true then
+		forgeButtonText.Text = "Locked"
+	elseif entry.unique == true and entry.alreadyOwned == true then
+		forgeButtonText.Text = "Owned"
 	else
-		statusLabel.TextColor3 = blendColor(Color3.fromRGB(170, 170, 170), accent, 0.3)
+		forgeButtonText.Text = "Forge"
 	end
 end
 
-local function clearList()
-	for _, child in ipairs(listFrame:GetChildren()) do
-		if child:IsA("GuiObject") and child ~= emptyLabel and not child:IsA("UIListLayout") then
-			child:Destroy()
-		end
+local function renderEntryButtons()
+	clearRuntimeEntryButtons()
+
+	local template = initializeEntryTemplate()
+	if not template then
+		return
 	end
-end
 
-local function rebuildList()
-	clearList()
-	local entries = getEntriesForTab()
-	local currentKey = selectedKeys[activeTab] or (entries[1] and getEntryKey(entries[1]))
-	emptyLabel.Visible = #entries == 0
+	local entries = getSelectedCategoryEntries()
+	local selectedEntry = getSelectedEntry()
+	local summaryIcon = MaterialDefinitions.GetSummaryIcon()
 
-	for _, entry in ipairs(entries) do
-		local key = getEntryKey(entry)
-		local accent = getRarityColor(getEntryRarity(entry))
-		local selected = currentKey == key
-		local baseColor = blendColor(Color3.fromRGB(30, 34, 44), accent, selected and 0.2 or 0.1)
-		local isCraftTab = activeTab == "Craft"
-		local cardHeight = isCraftTab and 80 or 62
-		local button = Instance.new("TextButton")
-		button.Size = UDim2.new(1, -16, 0, cardHeight)
-		button.Position = UDim2.fromOffset(8, 0)
-		button.BackgroundColor3 = baseColor
-		button.BorderSizePixel = 0
-		button.AutoButtonColor = false
-		button.Text = ""
-		button.Parent = listFrame
-		Instance.new("UICorner", button).CornerRadius = UDim.new(0, 12)
-		local stroke = Instance.new("UIStroke", button)
-		stroke.Color = selected and accent or blendColor(Color3.fromRGB(56, 64, 82), accent, 0.4)
-		stroke.Thickness = selected and 2 or 1
+	for index, entry in ipairs(entries) do
+		local button = template:Clone()
+		local weaponDef = WeaponConfigs.Get(entry.weaponId)
+		local accent = getRarityColor(entry.rarity)
+		local element = tostring((weaponDef and weaponDef.element) or "Physical")
+		local selected = selectedEntry and selectedEntry.recipeId == entry.recipeId
 
-		local line1 = ""
-		local line2 = ""
+		button.Name = "WeaponBackground"
+		button.Visible = true
+		button.LayoutOrder = index
+		button.Active = true
+		button.AutoButtonColor = true
+		button.ImageColor3 = selected and blendColor(Color3.fromRGB(255, 255, 255), accent, 0.35) or Color3.fromRGB(255, 255, 255)
+		button.Parent = entryScroll
 
-		if activeTab == "Craft" then
-			line1 = string.format("%s [%s]", tostring(entry.name), tostring(entry.status))
-			line2 = buildCraftNeedSummary(entry)
-		elseif activeTab == "Upgrade" then
-			line1 = string.format("%s [Lv %d/%d]", tostring(entry.name), tonumber(entry.level) or 1, tonumber(entry.maxLevel) or 1)
-			if entry.upgradeCost then
-				line2 = string.format("Next: %d Silver | %d Upgrade Crystal", tonumber(entry.upgradeCost.silver) or 0, tonumber(entry.upgradeCost.crystals) or 0)
-			else
-				line2 = "Max level reached"
+		local weaponIcon = button:FindFirstChild("WeaponIcon")
+		if weaponIcon and weaponIcon:IsA("ImageLabel") then
+			local weaponIconId = weaponDef and weaponDef.icon
+			if typeof(weaponIconId) == "string" and weaponIconId ~= "" then
+				weaponIcon.Image = weaponIconId
 			end
-		else
-			line1 = string.format("%s [Lv %d/%d]", tostring(entry.name), tonumber(entry.level) or 1, tonumber(entry.maxLevel) or 1)
-			line2 = string.format("Refund: %d Silver", tonumber(entry.silverRefund) or 0)
+			weaponIcon.Visible = true
 		end
 
-		local accentBar = Instance.new("Frame")
-		accentBar.Size = UDim2.fromOffset(4, cardHeight - 16)
-		accentBar.Position = UDim2.fromOffset(10, 8)
-		accentBar.BackgroundColor3 = accent
-		accentBar.BorderSizePixel = 0
-		accentBar.Parent = button
-		Instance.new("UICorner", accentBar).CornerRadius = UDim.new(0, 10)
+		local weaponName = button:FindFirstChild("WeaponName")
+		if weaponName and weaponName:IsA("TextLabel") then
+			weaponName.Text = tostring(entry.name or entry.weaponId)
+		end
 
-		local titleLabel = Instance.new("TextLabel")
-		titleLabel.BackgroundTransparency = 1
-		titleLabel.Position = UDim2.fromOffset(24, 10)
-		titleLabel.Size = UDim2.new(1, -32, 0, 20)
-		titleLabel.Font = Enum.Font.GothamBold
-		titleLabel.TextSize = 13
-		titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-		titleLabel.TextColor3 = accent
-		titleLabel.Text = line1
-		titleLabel.Parent = button
+		local weaponType = button:FindFirstChild("WeaponType")
+		if weaponType and weaponType:IsA("TextLabel") then
+			weaponType.Text = tostring(entry.weaponType or (weaponDef and weaponDef.weaponType) or "")
+		end
 
-		local metaLabel = Instance.new("TextLabel")
-		metaLabel.BackgroundTransparency = 1
-		metaLabel.Position = UDim2.fromOffset(24, 31)
-		metaLabel.Size = UDim2.new(1, -32, 0, isCraftTab and 34 or 16)
-		metaLabel.Font = Enum.Font.Gotham
-		metaLabel.TextSize = isCraftTab and 10 or 11
-		metaLabel.TextWrapped = isCraftTab
-		metaLabel.TextYAlignment = isCraftTab and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center
-		metaLabel.TextXAlignment = Enum.TextXAlignment.Left
-		metaLabel.TextColor3 = Color3.fromRGB(214, 220, 232)
-		metaLabel.Text = line2
-		metaLabel.Parent = button
+		local weaponStat = button:FindFirstChild("WeaponStat")
+		if weaponStat and weaponStat:IsA("TextLabel") then
+			local combat = weaponDef and weaponDef.combat or {}
+			weaponStat.Text = string.format("ATK %d", clampInt(combat.baseAtk or (weaponDef and weaponDef.baseDamage), 0))
+		end
+
+		local rarityName = button:FindFirstChild("RarityName")
+		if rarityName and rarityName:IsA("TextLabel") then
+			rarityName.Text = tostring(entry.rarity or "")
+			rarityName.TextColor3 = accent
+		end
+
+		local elementIcon = button:FindFirstChild("ElementType")
+		if elementIcon and elementIcon:IsA("ImageLabel") then
+			elementIcon.Visible = true
+			elementIcon.ImageColor3 = getElementColor(element)
+		end
+
+		local forgable = button:FindFirstChild("Forgable")
+		if forgable and forgable:IsA("Frame") then
+			forgable.Visible = entry.unlocked == true
+
+			local materialText = forgable:FindFirstChild("MaterialText")
+			if materialText and materialText:IsA("TextLabel") then
+				local summary = entry.materialProgressSummary or {}
+				materialText.Text = string.format(
+					"%d/%d materials",
+					clampInt(summary.owned, 0),
+					clampInt(summary.required, 0)
+				)
+				materialText.TextColor3 = clampInt(summary.missing, 0) > 0
+					and Color3.fromRGB(228, 128, 118)
+					or Color3.fromRGB(184, 218, 166)
+			end
+
+			local silverText = forgable:FindFirstChild("SilverText")
+			if silverText and silverText:IsA("TextLabel") then
+				silverText.Text = string.format("%d silver", clampInt(entry.craftSilverCost, 0))
+				silverText.TextColor3 = clampInt(entry.craftSilverMissing, 0) > 0
+					and Color3.fromRGB(228, 128, 118)
+					or Color3.fromRGB(224, 198, 120)
+			end
+
+			local materialIcon = forgable:FindFirstChild("MaterialIcon")
+			if materialIcon and materialIcon:IsA("ImageLabel") then
+				if typeof(summaryIcon) == "string" and summaryIcon ~= "" then
+					materialIcon.Image = summaryIcon
+					materialIcon.Visible = true
+				else
+					materialIcon.Visible = false
+				end
+			end
+		end
+
+		local locked = button:FindFirstChild("Locked")
+		if locked and locked:IsA("Frame") then
+			locked.Visible = entry.unlocked ~= true
+			local lockedText = locked:FindFirstChild("LockedText")
+			if lockedText and lockedText:IsA("TextLabel") then
+				lockedText.Text = "Locked"
+			end
+		end
 
 		button.MouseButton1Click:Connect(function()
-			selectedKeys[activeTab] = key
-			lastActionResult = nil
-			rebuildList()
+			selectedRecipeId = entry.recipeId
+			refresh()
 		end)
-	end
 
-	task.defer(function()
-		listFrame.CanvasSize = UDim2.fromOffset(0, listLayout.AbsoluteContentSize.Y + 16)
-	end)
-	updateDetailPanel()
-	setTabVisuals()
+		table.insert(runtimeEntryButtons, button)
+	end
 end
 
-local function renderSummary()
-	if not snapshot then
-		topInfo.Text = "Account Lv - | Silver -"
-		mineLabel.Text = "Mine Resources:\n-"
-		mobLabel.Text = "Mob Materials:\n-"
-		upgradeMatLabel.Text = "Upgrade Materials:\n-"
+local function renderCategoryButtons()
+	local byCategory = buildEntriesByCategory()
+	if not selectedCategory then
+		for _, category in ipairs(CategoryOrder) do
+			if byCategory[category] and #byCategory[category] > 0 then
+				selectedCategory = category
+				break
+			end
+		end
+	end
+
+	for index, button in ipairs(categoryButtons) do
+		local category = CategoryOrder[index]
+		local label = ensureTextLabel(button, "CategoryText", {
+			Font = Enum.Font.GothamBold,
+			TextSize = 13,
+			TextColor3 = Color3.fromRGB(255, 255, 255),
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = button.ZIndex + 1,
+		})
+
+		if not category then
+			button.Visible = false
+			continue
+		end
+
+		local entryCount = byCategory[category] and #byCategory[category] or 0
+		local active = selectedCategory == category
+		button.Visible = true
+		button.Active = entryCount > 0
+		button.AutoButtonColor = entryCount > 0
+		button.ImageColor3 = active and Color3.fromRGB(255, 212, 111)
+			or (entryCount > 0 and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(120, 120, 120))
+		label.Text = string.format("%s\n(%d)", tostring(CategoryLabels[category] or category), entryCount)
+		label.TextColor3 = active and Color3.fromRGB(24, 28, 34)
+			or (entryCount > 0 and Color3.fromRGB(248, 248, 248) or Color3.fromRGB(180, 180, 180))
+	end
+end
+
+refresh = function()
+	renderCategoryButtons()
+	renderEntryButtons()
+	renderDetails()
+end
+
+local function buildMissingMaterialLines(missingMaterials)
+	if typeof(missingMaterials) ~= "table" or #missingMaterials == 0 then
+		return "You are missing required materials."
+	end
+
+	local lines = { "You are missing required materials.", "", "Missing:" }
+	for _, entry in ipairs(missingMaterials) do
+		lines[#lines + 1] = string.format("%s x%d", tostring(entry.name or entry.id), clampInt(entry.amount, 0))
+	end
+	return table.concat(lines, "\n")
+end
+
+local function showMissingSilverPopup(missingSilver)
+	showPopup({
+		title = "Not Enough Silver",
+		body = string.format("Missing %d silver.", clampInt(missingSilver, 0)),
+		primaryText = "OK",
+	})
+end
+
+local function showMissingMaterialsPopup(missingMaterials)
+	showPopup({
+		title = "Missing Materials",
+		body = buildMissingMaterialLines(missingMaterials),
+		primaryText = "OK",
+	})
+end
+
+local function showGenericPopup(title, body)
+	showPopup({
+		title = title,
+		body = body,
+		primaryText = "OK",
+	})
+end
+
+local function handleServerFailure(result)
+	if typeof(result) ~= "table" or result.ok == true then
 		return
 	end
 
-	topInfo.Text = string.format("Account Lv %d | Silver %d", tonumber(snapshot.accountLevel) or 1, tonumber(snapshot.silver) or 0)
-	mineLabel.Text = formatResourceLines("Mine Resources", snapshot.mineResources)
-	mobLabel.Text = formatResourceLines("Mob Materials", snapshot.mobMaterials)
-	upgradeMatLabel.Text = formatResourceLines("Upgrade Materials", snapshot.upgradeMaterials)
+	local reason = tostring(result.reason or "")
+	local details = typeof(result.details) == "table" and result.details or nil
+	if reason == "NotEnoughSilver" then
+		showMissingSilverPopup(details and details.missingSilver or 0)
+	elseif reason == "MissingMaterials" or reason == "MissingMineResources" or reason == "MissingMobMaterials" then
+		showMissingMaterialsPopup(details and details.missingMaterials or nil)
+	elseif reason == "AlreadyOwned" then
+		showGenericPopup("Already Owned", "You already own this weapon.")
+	elseif reason == "LevelLocked" then
+		showGenericPopup("Level Locked", "Your account level is too low for this recipe.")
+	elseif reason == "RecipeLocked" then
+		showGenericPopup("Recipe Locked", "Unlock this recipe before forging the weapon.")
+	else
+		showGenericPopup("Action Failed", reason ~= "" and ("Blacksmith action failed: " .. reason) or "Blacksmith action failed.")
+	end
 end
 
-local function refresh()
-	setTabVisuals()
-	renderSummary()
-	rebuildList()
+local function closeUI()
+	if not gui.Enabled then
+		return
+	end
+
+	selectedRecipeId = nil
+	hideMaterialTooltip()
+	closePopup()
+	stopBlacksmithCamera()
+	restoreLobbyUi()
+	restoreLocalCharacter()
+	gui.Enabled = false
 end
 
 local function openUI()
 	if not tutorialComplete() then
 		return
 	end
-	gui.Enabled = true
-	BlacksmithAction:FireServer({ type = "request" })
-end
-
-local function closeUI()
-	gui.Enabled = false
-end
-
-closeBtn.MouseButton1Click:Connect(closeUI)
-
-UserInputService.InputBegan:Connect(function(input, processed)
-	if processed then
+	if gui.Enabled then
 		return
 	end
-	if input.KeyCode == Enum.KeyCode.Escape and gui.Enabled then
-		closeUI()
+
+	MaterialDefinitions.RefreshAssetRefs()
+	snapshot = nil
+	selectedRecipeId = nil
+	hideMaterialTooltip()
+	gui.Enabled = true
+	hideLobbyUi()
+	hideLocalCharacter()
+	startBlacksmithCamera()
+	BlacksmithAction:FireServer({ type = "request" })
+	refresh()
+end
+
+local function requestCraftAction(entry)
+	if not entry then
+		return
 	end
+
+	if entry.levelMet == false then
+		showGenericPopup("Level Locked", string.format("Reach account level %d first.", clampInt(entry.requiredLevel, 1)))
+		return
+	end
+
+	if entry.unlocked ~= true then
+		showGenericPopup("Recipe Locked", "Find and unlock this weapon recipe before forging it.")
+		return
+	end
+
+	if entry.unique == true and entry.alreadyOwned == true then
+		showGenericPopup("Already Owned", "You already own this weapon.")
+		return
+	end
+
+	if clampInt(entry.craftSilverMissing, 0) > 0 then
+		showMissingSilverPopup(entry.craftSilverMissing)
+		return
+	end
+
+	if typeof(entry.missingMaterials) == "table" and #entry.missingMaterials > 0 then
+		showMissingMaterialsPopup(entry.missingMaterials)
+		return
+	end
+
+	showPopup({
+		title = "Confirm Forge",
+		body = string.format("Forge %s for %d silver?", tostring(entry.name or entry.weaponId), clampInt(entry.craftSilverCost, 0)),
+		primaryText = "Confirm",
+		secondaryText = "Cancel",
+		primaryCallback = function()
+			BlacksmithAction:FireServer({
+				type = "craft",
+				recipeId = entry.recipeId,
+			})
+		end,
+	})
+end
+
+forgeButton.MouseButton1Click:Connect(function()
+	requestCraftAction(getSelectedEntry())
 end)
 
-for tabName, button in pairs(tabButtons) do
+for index, button in ipairs(categoryButtons) do
+	local category = CategoryOrder[index]
 	button.MouseButton1Click:Connect(function()
-		activeTab = tabName
-		lastActionResult = nil
+		if not category then
+			return
+		end
+		local entriesByCategory = buildEntriesByCategory()
+		if not entriesByCategory[category] or #entriesByCategory[category] == 0 then
+			return
+		end
+		selectedCategory = category
+		selectedRecipeId = nil
 		refresh()
 	end)
 end
 
-primaryButton.MouseButton1Click:Connect(function()
-	local entry = getSelectedEntry()
-	if not entry then
-		return
-	end
-	if activeTab == "Craft" then
-		if entry.unlocked then
-			if entry.canCraft == true then
-				BlacksmithAction:FireServer({ type = "craft", recipeId = entry.recipeId })
-			else
-				lastActionResult = {
-					type = "craft",
-					ok = false,
-					details = {
-						message = buildCraftMissingMessage(entry, "craft"),
-					},
-				}
-				updateDetailPanel()
-			end
-		else
-			if entry.canUnlock == true then
-				BlacksmithAction:FireServer({ type = "unlockRecipe", recipeId = entry.recipeId })
-			else
-				lastActionResult = {
-					type = "unlockRecipe",
-					ok = false,
-					details = {
-						message = buildCraftMissingMessage(entry, "unlock"),
-					},
-				}
-				updateDetailPanel()
-			end
-		end
-	elseif activeTab == "Upgrade" then
-		BlacksmithAction:FireServer({ type = "upgrade", instanceId = entry.instanceId, steps = 1 })
-	elseif activeTab == "Sell" then
-		BlacksmithAction:FireServer({ type = "sell", instanceId = entry.instanceId })
-	end
-end)
-
-secondaryButton.MouseButton1Click:Connect(function()
-	local entry = getSelectedEntry()
-	if not entry or activeTab ~= "Upgrade" then
-		return
-	end
-	BlacksmithAction:FireServer({ type = "upgrade", instanceId = entry.instanceId, steps = 10 })
-end)
-
 local function isPromptInsideBlacksmith(prompt)
-	local npcs = workspace:FindFirstChild("NPCs")
+	local npcs = Workspace:FindFirstChild("NPCs")
 	local smith = npcs and (npcs:FindFirstChild("Blacksmith") or npcs:FindFirstChild("BlacksmithNPC"))
 	if not smith then
 		return false
 	end
+
 	local current = prompt and prompt.Parent
 	while current do
 		if current == smith then
@@ -932,8 +1267,26 @@ local function isPromptInsideBlacksmith(prompt)
 		end
 		current = current.Parent
 	end
+
 	return false
 end
+
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then
+		return
+	end
+	if not gui.Enabled then
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.Escape then
+		if popupOverlay.Visible then
+			closePopup()
+		else
+			closeUI()
+		end
+	end
+end)
 
 ProximityPromptService.PromptTriggered:Connect(function(prompt, localPlayer)
 	if localPlayer ~= player or gui.Enabled then
@@ -945,16 +1298,27 @@ ProximityPromptService.PromptTriggered:Connect(function(prompt, localPlayer)
 end)
 
 OpenBlacksmithUI.OnClientEvent:Connect(function()
-	if not gui.Enabled then
-		openUI()
-	end
+	openUI()
 end)
 
 BlacksmithSync.OnClientEvent:Connect(function(data)
 	if typeof(data) ~= "table" then
 		return
 	end
+
 	snapshot = data
-	lastActionResult = typeof(data.lastResult) == "table" and data.lastResult or nil
+	handleServerFailure(data.lastResult)
 	refresh()
+end)
+
+closeRequested.Event:Connect(function()
+	closeUI()
+end)
+
+script.Destroying:Connect(function()
+	hideMaterialTooltip()
+	closePopup()
+	stopBlacksmithCamera()
+	restoreLobbyUi()
+	restoreLocalCharacter()
 end)

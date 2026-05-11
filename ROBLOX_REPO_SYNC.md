@@ -105,6 +105,15 @@ Each `MANIFEST.md` should describe:
 - critical tags
 - notes about whether the object is mirrored fully or only described
 
+For this project, one `MANIFEST.md` placed at the boundary of a critical live structure is an acceptable first safe step toward `full object parity`, even if not every non-script descendant has its own separate file representation yet.
+
+Each manifest should also state:
+
+- the exact `Roblox path`
+- the exact repo path
+- whether the structure is `COMPLETE`, `PARTIAL`, or `UNKNOWN` at the object-parity level
+- whether a canonical file mirror is standing in for a duplicate-instance Studio edge case
+
 ## Repo-only status labels
 
 ### `active`

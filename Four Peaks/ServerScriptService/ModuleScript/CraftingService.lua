@@ -46,6 +46,7 @@ local function copyRequirementList(list)
 		if typeof(entry.id) == "string" and entry.id ~= "" and amount > 0 then
 			table.insert(out, {
 				id = entry.id,
+				name = entry.name,
 				amount = amount,
 			})
 		end
@@ -72,10 +73,12 @@ end
 
 local RARITY_RANK = {
 	Common = 1,
-	Rare = 2,
-	Epic = 3,
-	Legendary = 4,
-	Mythical = 5,
+	Uncommon = 2,
+	Rare = 3,
+	Epic = 4,
+	Legendary = 5,
+	Mythical = 6,
+	Mythic = 6,
 }
 
 local function getPlayerProgress(player)
@@ -215,6 +218,11 @@ local function buildRequirementProgress(resourceMap, list)
 		local amount = clampInt(entry.amount, 0)
 		if typeof(entry.id) == "string" and entry.id ~= "" and amount > 0 then
 			local owned = clampInt(resourceMap and resourceMap[entry.id], 0)
+			if typeof(CraftingConfig.GetMaterialAliases) == "function" then
+				for _, alias in ipairs(CraftingConfig.GetMaterialAliases(entry.id) or {}) do
+					owned += clampInt(resourceMap and resourceMap[alias], 0)
+				end
+			end
 			local missing = math.max(0, amount - owned)
 			totals.required += amount
 			totals.owned += math.min(owned, amount)
@@ -312,6 +320,62 @@ local function getMaterialResourceMap(progress, materialId)
 	return nil, nil
 end
 
+local function getOwnedMaterialCount(progress, materialId)
+	local resourceMap = select(1, getMaterialResourceMap(progress, materialId))
+	local owned = clampInt(resourceMap and resourceMap[materialId], 0)
+	if typeof(CraftingConfig.GetMaterialAliases) == "function" then
+		for _, alias in ipairs(CraftingConfig.GetMaterialAliases(materialId) or {}) do
+			owned += clampInt(resourceMap and resourceMap[alias], 0)
+		end
+	end
+	return owned
+end
+
+local function buildCombinedMaterialProgress(progress, list)
+	local progressEntries = {}
+	local missingEntries = {}
+	local totals = {
+		required = 0,
+		owned = 0,
+		missing = 0,
+	}
+
+	for _, entry in ipairs(list or {}) do
+		local amount = clampInt(entry.amount, 0)
+		if typeof(entry.id) == "string" and entry.id ~= "" and amount > 0 then
+			local materialDef = CraftingConfig.GetMaterialDef(entry.id) or {}
+			local owned = getOwnedMaterialCount(progress, entry.id)
+			local missing = math.max(0, amount - owned)
+			local name = entry.name or materialDef.name or entry.id
+			local bucket = materialDef.bucket
+			totals.required += amount
+			totals.owned += math.min(owned, amount)
+			totals.missing += missing
+			table.insert(progressEntries, {
+				id = entry.id,
+				name = name,
+				amount = amount,
+				owned = owned,
+				missing = missing,
+				ready = missing <= 0,
+				bucket = bucket,
+			})
+			if missing > 0 then
+				table.insert(missingEntries, {
+					id = entry.id,
+					name = name,
+					amount = missing,
+					owned = owned,
+					required = amount,
+					bucket = bucket,
+				})
+			end
+		end
+	end
+
+	return progressEntries, missingEntries, totals
+end
+
 local function buildMaterialSnapshotFromProgress(progress)
 	local materials = {}
 	for _, def in ipairs(CraftingConfig.GetAllMaterials() or {}) do
@@ -380,20 +444,55 @@ local function spendCount(resourceMap, resourceId, amount)
 	end
 	local current = clampInt(resourceMap[resourceId], 0)
 	if current < amount then
-		return false
+		local remaining = amount
+		local aliases = typeof(CraftingConfig.GetMaterialAliases) == "function" and CraftingConfig.GetMaterialAliases(resourceId) or {}
+		for _, alias in ipairs(aliases or {}) do
+			remaining -= clampInt(resourceMap[alias], 0)
+			if remaining <= 0 then
+				break
+			end
+		end
+		if remaining > current then
+			return false
+		end
 	end
-	current -= amount
+	local remainingToSpend = amount
+	local canonicalSpend = math.min(current, remainingToSpend)
+	current -= canonicalSpend
+	remainingToSpend -= canonicalSpend
 	if current > 0 then
 		resourceMap[resourceId] = current
 	else
 		resourceMap[resourceId] = nil
+	end
+	if remainingToSpend > 0 and typeof(CraftingConfig.GetMaterialAliases) == "function" then
+		for _, alias in ipairs(CraftingConfig.GetMaterialAliases(resourceId) or {}) do
+			local aliasCurrent = clampInt(resourceMap[alias], 0)
+			local aliasSpend = math.min(aliasCurrent, remainingToSpend)
+			aliasCurrent -= aliasSpend
+			remainingToSpend -= aliasSpend
+			if aliasCurrent > 0 then
+				resourceMap[alias] = aliasCurrent
+			else
+				resourceMap[alias] = nil
+			end
+			if remainingToSpend <= 0 then
+				break
+			end
+		end
 	end
 	return true
 end
 
 local function hasAllRequirements(resourceMap, list)
 	for _, entry in ipairs(list or {}) do
-		if clampInt(resourceMap[entry.id], 0) < clampInt(entry.amount, 0) then
+		local owned = clampInt(resourceMap[entry.id], 0)
+		if typeof(CraftingConfig.GetMaterialAliases) == "function" then
+			for _, alias in ipairs(CraftingConfig.GetMaterialAliases(entry.id) or {}) do
+				owned += clampInt(resourceMap[alias], 0)
+			end
+		end
+		if owned < clampInt(entry.amount, 0) then
 			return false
 		end
 	end
@@ -532,6 +631,18 @@ local function countCraftedWeaponsById(instances)
 	return counts
 end
 
+local function playerHasWeaponInstance(instances, weaponId)
+	if typeof(weaponId) ~= "string" or weaponId == "" then
+		return false
+	end
+	for _, inst in ipairs(instances or {}) do
+		if typeof(inst) == "table" and inst.weaponId == weaponId then
+			return true
+		end
+	end
+	return false
+end
+
 local function normalizeFocusRecipeId(progress, recipeId)
 	if typeof(recipeId) ~= "string" or recipeId == "" then
 		return nil
@@ -548,31 +659,48 @@ local function normalizeFocusRecipeId(progress, recipeId)
 	return recipeId
 end
 
-local function buildCraftEntries(data, progress, balances, craftedCounts)
+local function buildCraftEntries(data, progress, balances, craftedCounts, instances)
 	local silverBalance = clampInt(balances and balances.Silver, 0)
 	local craftEntries = {}
 
-	for recipeId, recipeState in pairs(progress.recipes or {}) do
-		local recipe = CraftingConfig.GetRecipe(recipeId)
+	for _, recipe in ipairs(CraftingConfig.GetAllRecipes() or {}) do
+		local recipeId = recipe.recipeId
 		local stateEntry = getRecipeState(progress, recipeId)
-		if recipe and recipeState and stateEntry and stateEntry.found then
-			local tier = CraftingConfig.GetRecipeTierFromCopies(stateEntry.copies)
+		local found = stateEntry ~= nil and stateEntry.found == true
+		local unlocked = found and stateEntry.unlocked == true
+		local tier = found and CraftingConfig.GetRecipeTierFromCopies(stateEntry.copies) or 1
+		if stateEntry then
 			stateEntry.tier = tier
+		end
+		if recipe and typeof(recipeId) == "string" and recipeId ~= "" then
 			local requirements = CraftingConfig.BuildRecipeRequirements(recipeId, tier)
+			local def = WeaponConfigs.Get(recipe.weaponId)
 			local craftedCount = clampInt(craftedCounts[recipe.weaponId], 0)
 			local hasMine = hasAllRequirements(progress.mineResources, requirements.mineResources)
 			local hasMob = hasAllRequirements(progress.mobMaterials, requirements.mobMaterials)
+			local materialProgress, missingMaterials, materialProgressSummary =
+				buildCombinedMaterialProgress(progress, requirements.materials)
 			local levelOk = clampInt(data.level, 1) >= clampInt(recipe.requiredLevel, 1)
 			local silverForCraft = silverBalance >= clampInt(requirements.craftSilverCost, 0)
 			local silverForUnlock = silverBalance >= clampInt(requirements.unlockSilverCost, 0)
-			local canCraft = stateEntry.unlocked and levelOk and hasMine and hasMob and silverForCraft
-			local status = "Found"
-			if craftedCount > 0 then
+			local alreadyOwned = requirements.unique == true and playerHasWeaponInstance(instances, recipe.weaponId)
+			local canCraft = unlocked
+				and levelOk
+				and hasMine
+				and hasMob
+				and silverForCraft
+				and not alreadyOwned
+			local status = "Locked"
+			if alreadyOwned then
+				status = "Owned"
+			elseif craftedCount > 0 then
 				status = "Crafted"
 			elseif canCraft then
 				status = "Craftable"
-			elseif stateEntry.unlocked then
+			elseif unlocked then
 				status = "Unlocked"
+			elseif found then
+				status = "Found"
 			end
 
 			local mineResourceProgress, missingMineResources, mineProgressSummary =
@@ -583,31 +711,38 @@ local function buildCraftEntries(data, progress, balances, craftedCounts)
 			table.insert(craftEntries, {
 				recipeId = recipeId,
 				weaponId = recipe.weaponId,
-				name = recipe.weaponId,
+				name = def and def.name or recipe.weaponId,
+				weaponType = def and def.weaponType or nil,
 				rarity = recipe.rarity,
 				requiredLevel = recipe.requiredLevel,
 				status = status,
-				copies = stateEntry.copies,
+				found = found,
+				copies = found and stateEntry.copies or 0,
 				tier = tier,
 				nextTierCopies = CraftingConfig.GetNextTierCopyTarget(tier),
-				unlocked = stateEntry.unlocked,
+				unlocked = unlocked,
 				craftedCount = craftedCount,
 				unlockSilverCost = requirements.unlockSilverCost,
 				craftSilverCost = requirements.craftSilverCost,
 				unlockSilverMissing = math.max(0, clampInt(requirements.unlockSilverCost, 0) - silverBalance),
 				craftSilverMissing = math.max(0, clampInt(requirements.craftSilverCost, 0) - silverBalance),
+				materials = materialProgress,
 				mineResources = copyRequirementList(requirements.mineResources),
 				mobMaterials = copyRequirementList(requirements.mobMaterials),
 				mineResourceProgress = mineResourceProgress,
 				mobMaterialProgress = mobMaterialProgress,
+				missingMaterials = missingMaterials,
 				missingMineResources = missingMineResources,
 				missingMobMaterials = missingMobMaterials,
+				materialProgressSummary = materialProgressSummary,
 				mineProgressSummary = mineProgressSummary,
 				mobProgressSummary = mobProgressSummary,
-				canUnlock = (not stateEntry.unlocked) and levelOk and silverForUnlock,
+				canUnlock = found and (not unlocked) and levelOk and silverForUnlock,
 				canCraft = canCraft,
 				hasMineResources = hasMine,
 				hasMobMaterials = hasMob,
+				unique = requirements.unique == true,
+				alreadyOwned = alreadyOwned,
 				levelMet = levelOk,
 			})
 		end
@@ -660,9 +795,11 @@ local function getSellPreview(inst, def)
 		local rarity = (inst.rarity ~= "" and inst.rarity) or def.rarity or "Common"
 		local multiplier = ({
 			Common = 1.0,
+			Uncommon = 1.18,
 			Rare = 1.4,
 			Epic = 1.9,
 			Legendary = 2.6,
+			Mythic = 3.3,
 			Mythical = 3.3,
 		})[rarity] or 1.0
 		baseSilver = math.max(1, math.floor((tonumber(def.baseDamage) or 1) * 6 * multiplier))
@@ -863,7 +1000,8 @@ function CraftingService.GetMiningSnapshot(player)
 	local data, progress = getPlayerProgress(player)
 	local balances = CurrencyService.GetBalances(player)
 	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
-	local craftedCounts = countCraftedWeaponsById(state and state.WeaponInstances or {})
+	local instances = state and state.WeaponInstances or {}
+	local craftedCounts = countCraftedWeaponsById(instances)
 
 	return {
 		silver = clampInt(balances.Silver, 0),
@@ -874,7 +1012,19 @@ function CraftingService.GetMiningSnapshot(player)
 		durationOptions = CraftingConfig.MINE_DURATION_OPTIONS,
 		defaultPriority = normalizePriorityList(nil, nil),
 		defaultMineId = normalizeMineId(nil),
-		craftEntries = buildCraftEntries(data, progress, balances, craftedCounts),
+		craftEntries = buildCraftEntries(data, progress, balances, craftedCounts, instances),
+	}
+end
+
+local function buildCraftFailurePayload(player, progress, recipe, requirements, reason)
+	local _, missingMaterials = buildCombinedMaterialProgress(progress, requirements and requirements.materials or {})
+	local silverCost = requirements and clampInt(requirements.craftSilverCost, 0) or 0
+	local silverOwned = clampInt(CurrencyService.GetSilver(player), 0)
+	return {
+		reason = reason,
+		weaponId = recipe and recipe.weaponId or nil,
+		missingSilver = math.max(0, silverCost - silverOwned),
+		missingMaterials = missingMaterials,
 	}
 end
 
@@ -894,13 +1044,20 @@ function CraftingService.UnlockRecipe(player, recipeId)
 		return false, "AlreadyUnlocked"
 	end
 	if clampInt(data.level, 1) < clampInt(recipe.requiredLevel, 1) then
-		return false, "LevelLocked"
+		return false, {
+			reason = "LevelLocked",
+			weaponId = recipe.weaponId,
+		}
 	end
 
 	local requirements = CraftingConfig.BuildRecipeRequirements(recipeId, state.tier)
 	local unlockCost = requirements and clampInt(requirements.unlockSilverCost, 0) or 0
 	if not CurrencyService.RemoveCurrency(player, "Silver", unlockCost) then
-		return false, "NotEnoughSilver"
+		return false, {
+			reason = "NotEnoughSilver",
+			weaponId = recipe.weaponId,
+			missingSilver = math.max(0, unlockCost - clampInt(CurrencyService.GetSilver(player), 0)),
+		}
 	end
 
 	state.unlocked = true
@@ -915,6 +1072,7 @@ function CraftingService.CraftRecipe(player, recipeId)
 	end
 
 	local data, progress = getPlayerProgress(player)
+	local stateSnapshot = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
 	local state = getRecipeState(progress, recipeId)
 	if not state or not state.found then
 		return false, "RecipeHidden"
@@ -931,25 +1089,46 @@ function CraftingService.CraftRecipe(player, recipeId)
 	if not requirements then
 		return false, "BadRecipeConfig"
 	end
-	if not hasAllRequirements(progress.mineResources, requirements.mineResources) then
-		return false, "MissingMineResources"
-	end
-	if not hasAllRequirements(progress.mobMaterials, requirements.mobMaterials) then
-		return false, "MissingMobMaterials"
-	end
-	if not CurrencyService.RemoveCurrency(player, "Silver", requirements.craftSilverCost) then
-		return false, "NotEnoughSilver"
-	end
-
-	spendRequirementList(progress.mineResources, requirements.mineResources)
-	spendRequirementList(progress.mobMaterials, requirements.mobMaterials)
-	markPlayerDataDirty(player)
 
 	local def = WeaponConfigs.Get(recipe.weaponId)
 	if not def then
-		CurrencyService.AddSilver(player, requirements.craftSilverCost)
 		return false, "MissingWeaponDef"
 	end
+
+	if requirements.unique == true and playerHasWeaponInstance(stateSnapshot and stateSnapshot.WeaponInstances or {}, recipe.weaponId) then
+		return false, buildCraftFailurePayload(player, progress, recipe, requirements, "AlreadyOwned")
+	end
+
+	if not hasAllRequirements(progress.mineResources, requirements.mineResources)
+		or not hasAllRequirements(progress.mobMaterials, requirements.mobMaterials)
+	then
+		return false, buildCraftFailurePayload(player, progress, recipe, requirements, "MissingMaterials")
+	end
+
+	if clampInt(CurrencyService.GetSilver(player), 0) < clampInt(requirements.craftSilverCost, 0) then
+		return false, buildCraftFailurePayload(player, progress, recipe, requirements, "NotEnoughSilver")
+	end
+
+	if not CurrencyService.RemoveCurrency(player, "Silver", requirements.craftSilverCost) then
+		return false, buildCraftFailurePayload(player, progress, recipe, requirements, "NotEnoughSilver")
+	end
+
+	local spentMine = spendRequirementList(progress.mineResources, requirements.mineResources)
+	if not spentMine then
+		CurrencyService.AddSilver(player, requirements.craftSilverCost)
+		return false, buildCraftFailurePayload(player, progress, recipe, requirements, "MissingMaterials")
+	end
+
+	local spentMob = spendRequirementList(progress.mobMaterials, requirements.mobMaterials)
+	if not spentMob then
+		CurrencyService.AddSilver(player, requirements.craftSilverCost)
+		for _, entry in ipairs(requirements.mineResources) do
+			addCount(progress.mineResources, entry.id, entry.amount)
+		end
+		return false, buildCraftFailurePayload(player, progress, recipe, requirements, "MissingMaterials")
+	end
+
+	markPlayerDataDirty(player)
 
 	local tier = math.max(1, clampInt(state.tier, 1))
 	local prefix = CraftingConfig.GetRecipeTierPrefix(tier)
@@ -957,6 +1136,13 @@ function CraftingService.CraftRecipe(player, recipeId)
 	local created = PlayerStateStore.AddWeaponInstance(player, recipe.weaponId, def.rarity, 1, prefix, rollStats)
 	if not created then
 		CurrencyService.AddSilver(player, requirements.craftSilverCost)
+		for _, entry in ipairs(requirements.mineResources) do
+			addCount(progress.mineResources, entry.id, entry.amount)
+		end
+		for _, entry in ipairs(requirements.mobMaterials) do
+			addCount(progress.mobMaterials, entry.id, entry.amount)
+		end
+		markPlayerDataDirty(player)
 		return false, "CreateFailed"
 	end
 
@@ -1074,7 +1260,7 @@ function CraftingService.BuildBlacksmithSnapshot(player)
 	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
 	local instances = state.WeaponInstances or {}
 	local craftedCounts = countCraftedWeaponsById(instances)
-	local craftEntries = buildCraftEntries(data, progress, balances, craftedCounts)
+	local craftEntries = buildCraftEntries(data, progress, balances, craftedCounts, instances)
 
 	local upgradeEntries = {}
 	local sellEntries = {}

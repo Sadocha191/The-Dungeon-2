@@ -24,6 +24,18 @@ Canonical target paths below use the proposed future mirror root `roblox/`. The 
 - Full object parity status:
   - `PARTIAL` because non-script hierarchy, manifests, duplicate-instance handling, and repo-only snapshot decisions are still pending.
 - Completed in parity batches:
+  - `Full object parity` manifest layer started on `2026-05-02` for:
+    - `roblox/Poziom/ReplicatedStorage/Remotes`
+    - `roblox/Poziom/StarterGui`
+    - `roblox/Poziom/ServerStorage/WeaponTemplates`
+    - `roblox/CzterySzczyty/ReplicatedStorage/RemoteEvents`
+    - `roblox/CzterySzczyty/ReplicatedStorage/RemoteFunctions`
+    - `roblox/CzterySzczyty/StarterGui`
+    - `roblox/CzterySzczyty/Workspace/NPCs`
+    - `roblox/CzterySzczyty/Workspace/Rig`
+    - `roblox/CzterySzczyty/Workspace/Budynki/Portal`
+    - `roblox/CzterySzczyty/ServerStorage/WeaponTemplates`
+    - `roblox/CzterySzczyty/ServerStorage/Modele/Rig`
   - `Poziom/ReplicatedStorage`: `ClientLoadingOverlay`, `CraftingConfig`, `NpcShared`, `SpellDefinitions`, `WeaponConfigs`, `EventDefinitions`
   - `Poziom/StarterPlayer/StarterCharacter`: `Animate`
   - `Poziom/ServerStorage/EnemyRigBackup`: exact mirrors created for `Elite/{Ent,Golem,Knight}/Animate` and `Normal/{Demon,Goblin,Harp,LandShark,Skeleton,Slime,Warewolf,Zombie}/Animate`
@@ -41,9 +53,10 @@ Canonical target paths below use the proposed future mirror root `roblox/`. The 
   - `Cztery szczyty/ServerStorage/WeaponTemplates/Staff/Archmage’s Worldstaff/StaffMain`: exact mirrors created for `BigBulletScript`, `MeteorStormScript`, and `MeteorStormScript/BulletScript`
   - `Cztery szczyty/ServerStorage/WeaponTemplates/Sword/Excalion, Blade of Kings`: exact mirrors created for `DeathSouls/SoulScript`, `Fireball/Despawn`, `Handle/Light/Fire_Effect`, `Server/AfterImageScript`, `Server/AfterImageScript/Decimate`, `Server/AfterImageScript/SlowScript`, `Server/Decimate`, `Server/SoulHunt`, `Server/SoulHunt/SoulHunt_Client`, `Server/SoulHunt/SoulHunt_Seeker`, `Server/SoulScript`, and `Server/SoulScript/Decimate`
 - Remaining before full object parity:
-  - add `MANIFEST.md` coverage for critical non-script `Tool`, `Model`, `Folder`, `RemoteEvent`, `RemoteFunction`, UI, and portal structures
+  - add deeper `MANIFEST.md` coverage only where a future migration batch needs more than the current structure-root manifests
   - resolve repo-only snapshot decisions under `Level/Workspace` and `Four Peaks/Workspace/NPCs`
   - document the `Workspace.Rig.Animate` duplicate/collision history in a stable manifest policy
+  - decide whether `Poziom` has any live workspace-side NPC or portal structures that should be represented under `roblox/Poziom/Workspace`; a targeted recheck on `2026-05-02` did not find matching descendants in the current session
   - decide whether the long-term canonical mirror should remain split across historical `Level/` and `Four Peaks/` plus `roblox/`, or whether the full live hierarchy should eventually be mirrored under `roblox/`
 - Special note:
   - `Cztery szczyty` currently contains two live `Workspace.Rig.Animate` instances with the same Studio path text and identical source. The repo can mirror the source file once at `roblox/CzterySzczyty/Workspace/Rig/Animate.lua`, but cannot represent duplicate sibling instance count 1:1 on disk without a separate manifest policy.
@@ -112,6 +125,7 @@ After missing Studio scripts are copied into the repo:
 - update `ROBLOX_REPO_SYNC.md`
 - update `CHANGELOG_AI.md`
 - add `MANIFEST.md` files for important non-script objects and containers
+- keep manifest scope selective; add deeper child manifests only where later migration work needs them
 - document repo-only status for old snapshots
 
 ## Etap 4 - Dopiero potem reorganizacja po systemach

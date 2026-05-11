@@ -31,6 +31,9 @@ local BlacksmithSync = ensureRemote("BlacksmithSync")
 local BlacksmithAction = ensureRemote("BlacksmithAction")
 
 local WeaponTemplates = ServerStorage:FindFirstChild("WeaponTemplates")
+local blacksmithPrompt: ProximityPrompt? = nil
+local blacksmithPromptConnection: RBXScriptConnection? = nil
+local promptEnsureScheduled = false
 
 local function tutorialComplete(player: Player): boolean
 	return player:GetAttribute("TutorialComplete") == true
@@ -52,18 +55,35 @@ local function findAnyBasePart(model)
 	return nil
 end
 
-local function setupBlacksmithPrompt()
+local function bindBlacksmithPrompt(prompt: ProximityPrompt)
+	if blacksmithPrompt == prompt and blacksmithPromptConnection and blacksmithPromptConnection.Connected then
+		return
+	end
+
+	if blacksmithPromptConnection then
+		blacksmithPromptConnection:Disconnect()
+		blacksmithPromptConnection = nil
+	end
+
+	blacksmithPrompt = prompt
+	blacksmithPromptConnection = prompt.Triggered:Connect(function(player)
+		if not tutorialComplete(player) then
+			return
+		end
+		OpenBlacksmithUI:FireClient(player)
+	end)
+end
+
+local function ensureBlacksmithPrompt()
 	local npcs = workspace:FindFirstChild("NPCs")
 	local blacksmith = npcs and npcs:FindFirstChild("Blacksmith")
 	if not (blacksmith and blacksmith:IsA("Model")) then
-		warn("[BlacksmithService] Missing workspace.NPCs.Blacksmith")
-		return
+		return nil
 	end
 
 	local part = findAnyBasePart(blacksmith)
 	if not part then
-		warn("[BlacksmithService] Blacksmith has no BasePart")
-		return
+		return nil
 	end
 
 	local prompt = part:FindFirstChildOfClass("ProximityPrompt")
@@ -77,12 +97,46 @@ local function setupBlacksmithPrompt()
 
 	prompt.ObjectText = "Blacksmith"
 	prompt.ActionText = "Craft / Upgrade"
+	bindBlacksmithPrompt(prompt)
+	return prompt
+end
 
-	prompt.Triggered:Connect(function(player)
-		if not tutorialComplete(player) then
-			return
+local function scheduleBlacksmithPromptEnsure()
+	if promptEnsureScheduled then
+		return
+	end
+
+	promptEnsureScheduled = true
+	task.defer(function()
+		promptEnsureScheduled = false
+		ensureBlacksmithPrompt()
+	end)
+end
+
+local function watchBlacksmithPrompt()
+	scheduleBlacksmithPromptEnsure()
+
+	workspace.ChildAdded:Connect(function(child)
+		if child.Name == "NPCs" then
+			scheduleBlacksmithPromptEnsure()
 		end
-		OpenBlacksmithUI:FireClient(player)
+	end)
+
+	workspace.DescendantAdded:Connect(function(descendant)
+		if descendant.Name == "Blacksmith" or descendant:IsA("ProximityPrompt") then
+			scheduleBlacksmithPromptEnsure()
+		end
+	end)
+
+	workspace.DescendantRemoving:Connect(function(descendant)
+		if descendant == blacksmithPrompt then
+			if blacksmithPromptConnection then
+				blacksmithPromptConnection:Disconnect()
+				blacksmithPromptConnection = nil
+			end
+			blacksmithPrompt = nil
+			scheduleBlacksmithPromptEnsure()
+		end
 	end)
 end
 
@@ -165,7 +219,7 @@ local function sync(player, result)
 	BlacksmithSync:FireClient(player, snapshot)
 end
 
-setupBlacksmithPrompt()
+watchBlacksmithPrompt()
 
 BlacksmithAction.OnServerEvent:Connect(function(player, payload)
 	if typeof(payload) ~= "table" then
@@ -183,6 +237,7 @@ BlacksmithAction.OnServerEvent:Connect(function(player, payload)
 
 	local ok = false
 	local details = nil
+	local resultDetails = nil
 	local reason = nil
 	local equippedBefore = nil
 	local playerState = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
@@ -193,12 +248,22 @@ BlacksmithAction.OnServerEvent:Connect(function(player, payload)
 	if actionType == "unlockRecipe" then
 		ok, details = CraftingService.UnlockRecipe(player, tostring(payload.recipeId or ""))
 		if ok ~= true then
-			reason = details
+			if typeof(details) == "table" then
+				reason = tostring(details.reason or "UnlockFailed")
+				resultDetails = details
+			else
+				reason = details
+			end
 		end
 	elseif actionType == "craft" then
 		ok, details = CraftingService.CraftRecipe(player, tostring(payload.recipeId or ""))
 		if ok ~= true then
-			reason = details
+			if typeof(details) == "table" then
+				reason = tostring(details.reason or "CraftFailed")
+				resultDetails = details
+			else
+				reason = details
+			end
 		elseif not (typeof(equippedBefore) == "string" and equippedBefore ~= "") and typeof(details.instanceId) == "string" then
 			equipWeaponInstance(player, details.instanceId)
 		end
@@ -232,7 +297,7 @@ BlacksmithAction.OnServerEvent:Connect(function(player, payload)
 		type = actionType,
 		ok = ok == true,
 		reason = reason,
-		details = ok == true and details or nil,
+		details = ok == true and details or resultDetails,
 	})
 end)
 

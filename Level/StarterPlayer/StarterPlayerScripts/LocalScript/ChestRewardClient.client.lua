@@ -1,10 +1,21 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:WaitForChild("ModuleScripts")
+local ChestItemConfig = require(moduleFolder:WaitForChild("Items"):WaitForChild("ChestItemConfig"))
+local StatsConfig = require(moduleFolder:WaitForChild("Stats"):WaitForChild("StatsConfig"))
+
 local chestItemEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ChestItemEvent")
+
+local ROLL_DURATION = 5
+local ROLL_MIN_STEP = 0.05
+local ROLL_MAX_STEP = 0.22
+
+local rng = Random.new()
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "ChestRewardGui"
@@ -17,7 +28,7 @@ gui.Parent = playerGui
 local dim = Instance.new("Frame")
 dim.Size = UDim2.fromScale(1, 1)
 dim.BackgroundColor3 = Color3.fromRGB(6, 8, 12)
-dim.BackgroundTransparency = 0.28
+dim.BackgroundTransparency = 1
 dim.BorderSizePixel = 0
 dim.Parent = gui
 
@@ -84,6 +95,15 @@ iconText.TextSize = 42
 iconText.TextColor3 = Color3.fromRGB(96, 168, 255)
 iconText.Text = "IT"
 iconText.Parent = iconFrame
+
+local iconImage = Instance.new("ImageLabel")
+iconImage.BackgroundTransparency = 1
+iconImage.Position = UDim2.fromOffset(12, 12)
+iconImage.Size = UDim2.new(1, -24, 1, -24)
+iconImage.Image = ""
+iconImage.ScaleType = Enum.ScaleType.Fit
+iconImage.Visible = false
+iconImage.Parent = iconFrame
 
 local titleText = Instance.new("TextLabel")
 titleText.BackgroundTransparency = 1
@@ -152,17 +172,22 @@ takeCorner.Parent = takeButton
 
 local statusText = Instance.new("TextLabel")
 statusText.BackgroundTransparency = 1
-statusText.Position = UDim2.fromOffset(28, 358)
-statusText.Size = UDim2.new(1, -220, 0, 18)
+statusText.Position = UDim2.fromOffset(28, 350)
+statusText.Size = UDim2.new(1, -220, 0, 28)
 statusText.Font = Enum.Font.Gotham
 statusText.TextSize = 12
+statusText.TextWrapped = true
 statusText.TextXAlignment = Enum.TextXAlignment.Left
+statusText.TextYAlignment = Enum.TextYAlignment.Top
 statusText.TextColor3 = Color3.fromRGB(140, 152, 175)
 statusText.Text = "Take the reward to resume the run."
 statusText.Parent = card
 
 local currentToken = nil
 local takePending = false
+local uiState = "hidden"
+local skipRoll = false
+local activeRollSession = 0
 
 local function clearModifierLines()
 	for _, child in ipairs(modifierList:GetChildren()) do
@@ -200,54 +225,352 @@ local function setTakeEnabled(enabled)
 	takeButton.BackgroundTransparency = enabled and 0 or 0.35
 end
 
-local function showReward(payload)
-	local accent = typeof(payload.color) == "Color3" and payload.color or Color3.fromRGB(96, 168, 255)
-	local rewardData = payload.item or payload.fallback or {}
-	local modifierLines = rewardData.ModifierLines or {}
+local function buildModifierDisplay(statName, delta)
+	local definition = StatsConfig.Get(statName)
+	if not definition then
+		return string.format("%s %+0.2f", tostring(statName), tonumber(delta) or 0)
+	end
 
-	currentToken = payload.token
-	takePending = false
-	setTakeEnabled(true)
-	takeButton.Text = "TAKE"
+	local numericDelta = tonumber(delta) or 0
+	local sign = numericDelta >= 0 and "+" or "-"
+	local absDelta = math.abs(numericDelta)
+	local label = definition.Label or statName
 
-	gui.Enabled = true
-	cardStroke.Color = accent
-	rarityPill.BackgroundColor3 = accent
-	rarityPill.Text = string.upper(tostring(payload.rarity or "Reward"))
-	iconText.TextColor3 = accent
-	sourceText.Text = tostring(payload.sourceName or "Treasure Chest")
-	titleText.Text = tostring(rewardData.Name or "Reward")
-	descriptionText.Text = tostring(rewardData.Description or "Take this reward to continue the run.")
-	iconText.Text = string.upper(string.sub(tostring(rewardData.Name or "IT"), 1, 2))
-	statusText.Text = payload.rewardType == "Fallback"
-		and "Take the fallback reward to resume the run."
-		or "Take the item to add it to this run and resume play."
+	if definition.Format == "percent" then
+		return string.format("%s %s%d%%", label, sign, math.floor(absDelta * 100 + 0.5))
+	end
+	if definition.Format == "multiplier" then
+		return string.format("%s %s%.2fx", label, sign, absDelta)
+	end
 
-	clearModifierLines()
-	for _, entry in ipairs(modifierLines) do
-		addModifierLine(entry.Text or entry.text or "")
+	local decimals = math.max(0, math.floor(tonumber(definition.Decimals) or 0))
+	return string.format("%s %s%." .. decimals .. "f", label, sign, absDelta)
+end
+
+local function buildModifierLinesFromModifiers(modifiers)
+	local entries = {}
+	for statName, delta in pairs(modifiers or {}) do
+		entries[#entries + 1] = {
+			StatName = statName,
+			Text = buildModifierDisplay(statName, delta),
+		}
+	end
+
+	table.sort(entries, function(a, b)
+		local orderA = table.find(StatsConfig.DisplayOrder, a.StatName) or math.huge
+		local orderB = table.find(StatsConfig.DisplayOrder, b.StatName) or math.huge
+		if orderA ~= orderB then
+			return orderA < orderB
+		end
+		return tostring(a.StatName) < tostring(b.StatName)
+	end)
+
+	return entries
+end
+
+local function shuffleInPlace(list)
+	for index = #list, 2, -1 do
+		local swapIndex = rng:NextInteger(1, index)
+		list[index], list[swapIndex] = list[swapIndex], list[index]
 	end
 end
 
-local function hideReward()
-	currentToken = nil
-	takePending = false
-	gui.Enabled = false
-	clearModifierLines()
+local function buildItemPreview(itemDefinition)
+	return {
+		Id = itemDefinition.Id,
+		Name = itemDefinition.Name,
+		Description = itemDefinition.Description,
+		Rarity = itemDefinition.Rarity,
+		ModifierLines = buildModifierLinesFromModifiers(itemDefinition.Modifiers),
+	}
 end
 
-takeButton.MouseButton1Click:Connect(function()
-	if not currentToken or takePending then
+local function buildFallbackPreview(rewardDefinition)
+	return {
+		Id = rewardDefinition.Id,
+		Name = rewardDefinition.Name,
+		Description = rewardDefinition.Description,
+		Rarity = "Common",
+		ModifierLines = {
+			{
+				Text = string.format("+%d %s", tonumber(rewardDefinition.Amount) or 0, tostring(rewardDefinition.Kind or "Reward")),
+			},
+		},
+	}
+end
+
+local function buildPayloadPreview(payload)
+	local rewardData = payload.item or payload.fallback or {}
+	return {
+		Id = rewardData.Id,
+		Name = tostring(rewardData.Name or "Reward"),
+		Description = tostring(rewardData.Description or "Take this reward to continue the run."),
+		Rarity = tostring(payload.rarity or rewardData.Rarity or "Common"),
+		ModifierLines = rewardData.ModifierLines or {},
+	}
+end
+
+local function buildMixedItemRollPreviews(excludedItemId)
+	local rarityBuckets = {}
+	local totalCandidates = 0
+
+	for _, rarity in ipairs(ChestItemConfig.RarityOrder or {}) do
+		local bucket = {}
+		for _, itemDefinition in ipairs(ChestItemConfig.GetItemsForRarity(rarity)) do
+			if itemDefinition.Id ~= excludedItemId then
+				bucket[#bucket + 1] = buildItemPreview(itemDefinition)
+			end
+		end
+		shuffleInPlace(bucket)
+		rarityBuckets[rarity] = bucket
+		totalCandidates += #bucket
+	end
+
+	if totalCandidates <= 0 then
+		return {}
+	end
+
+	local sequence = {}
+	while #sequence < math.min(6, totalCandidates) do
+		local addedInPass = false
+		for _, rarity in ipairs(ChestItemConfig.RarityOrder or {}) do
+			local bucket = rarityBuckets[rarity]
+			if bucket and #bucket > 0 then
+				sequence[#sequence + 1] = table.remove(bucket, 1)
+				addedInPass = true
+				if #sequence >= math.min(6, totalCandidates) then
+					break
+				end
+			end
+		end
+
+		if not addedInPass then
+			break
+		end
+	end
+
+	shuffleInPlace(sequence)
+	return sequence
+end
+
+local function buildRollSequence(payload)
+	local finalPreview = buildPayloadPreview(payload)
+	local sequence = {}
+
+	if payload.rewardType == "Item" and payload.item then
+		sequence = buildMixedItemRollPreviews(payload.item.Id)
+	elseif payload.rewardType == "Fallback" and payload.fallback then
+		local candidates = {}
+		for _, fallbackDefinition in ipairs(ChestItemConfig.FallbackRewards or {}) do
+			if fallbackDefinition.Id ~= payload.fallback.Id then
+				candidates[#candidates + 1] = buildFallbackPreview(fallbackDefinition)
+			end
+		end
+		shuffleInPlace(candidates)
+		for index = 1, math.min(3, #candidates) do
+			sequence[#sequence + 1] = candidates[index]
+		end
+	end
+
+	if #sequence == 0 then
+		sequence[1] = finalPreview
+	end
+
+	return sequence, finalPreview
+end
+
+local function getItemIconImage(rarity, itemName)
+	if typeof(rarity) ~= "string" or typeof(itemName) ~= "string" or itemName == "" then
+		return nil
+	end
+
+	local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
+	if not assetsFolder then
+		return nil
+	end
+
+	local itemsFolder = assetsFolder:FindFirstChild("Items")
+	if not itemsFolder then
+		return nil
+	end
+
+	local rarityFolder = itemsFolder:FindFirstChild(rarity)
+	if not rarityFolder then
+		return nil
+	end
+
+	local candidateNames = {
+		itemName,
+		string.gsub(itemName, "'", "’"),
+		string.gsub(itemName, "’", "'"),
+	}
+
+	for _, candidateName in ipairs(candidateNames) do
+		local iconSource = rarityFolder:FindFirstChild(candidateName)
+		if iconSource and iconSource:IsA("ImageLabel") and iconSource.Image ~= "" then
+			return iconSource.Image
+		end
+	end
+
+	return nil
+end
+
+local function setPreviewIcon(previewData, payload)
+	local initials = string.upper(string.sub(tostring(previewData.Name or "IT"), 1, 2))
+	local iconImageId = nil
+
+	if payload.rewardType == "Item" then
+		iconImageId = getItemIconImage(previewData.Rarity, previewData.Name)
+	end
+
+	iconText.Text = initials
+
+	if iconImageId then
+		iconImage.Image = iconImageId
+		iconImage.Visible = true
+		iconText.Visible = false
 		return
 	end
 
+	iconImage.Image = ""
+	iconImage.Visible = false
+	iconText.Visible = true
+end
+
+local function setPreview(previewData, payload, isFinal)
+	local accent = ChestItemConfig.RarityColors[previewData.Rarity] or (typeof(payload.color) == "Color3" and payload.color) or Color3.fromRGB(96, 168, 255)
+	local modifierLines = previewData.ModifierLines or {}
+
+	cardStroke.Color = accent
+	rarityPill.BackgroundColor3 = accent
+	rarityPill.Text = string.upper(tostring(previewData.Rarity or payload.rarity or "Reward"))
+	iconText.TextColor3 = accent
+	sourceText.Text = tostring(payload.sourceName or "Treasure Chest")
+	titleText.Text = tostring(previewData.Name or "Reward")
+	descriptionText.Text = tostring(previewData.Description or "Take this reward to continue the run.")
+	setPreviewIcon(previewData, payload)
+
+	clearModifierLines()
+	if #modifierLines > 0 then
+		for _, entry in ipairs(modifierLines) do
+			addModifierLine(entry.Text or entry.text or entry)
+		end
+	elseif isFinal then
+		addModifierLine("No additional stat changes.")
+	else
+		addModifierLine("Scanning chest reward...")
+	end
+end
+
+local function getRevealInstruction(payload)
+	if payload.rewardType == "Fallback" then
+		return "Press Space or click TAKE to accept the fallback reward."
+	end
+	return "Press Space or click TAKE to accept the item."
+end
+
+local function setRollingState()
+	uiState = "rolling"
+	takePending = false
+	setTakeEnabled(false)
+	takeButton.Text = "ROLLING..."
+	statusText.Text = "Press Space to skip the chest draw."
+end
+
+local function setRevealState(payload)
+	uiState = "revealed"
+	takePending = false
+	setTakeEnabled(true)
+	takeButton.Text = "TAKE"
+	statusText.Text = getRevealInstruction(payload)
+end
+
+local function attemptTakeReward()
+	if uiState ~= "revealed" or not currentToken or takePending then
+		return
+	end
+
+	uiState = "taking"
 	takePending = true
 	setTakeEnabled(false)
 	takeButton.Text = "TAKING..."
+	statusText.Text = "Taking reward..."
 	chestItemEvent:FireServer({
 		type = "takeReward",
 		token = currentToken,
 	})
+end
+
+local function hideReward()
+	activeRollSession += 1
+	currentToken = nil
+	takePending = false
+	uiState = "hidden"
+	skipRoll = false
+	gui.Enabled = false
+	takeButton.Text = "TAKE"
+	statusText.Text = "Take the reward to resume the run."
+	clearModifierLines()
+end
+
+local function startRollAnimation(sessionId, payload)
+	local sequence, finalPreview = buildRollSequence(payload)
+	local startedAt = os.clock()
+	local index = 1
+
+	while activeRollSession == sessionId and not skipRoll and (os.clock() - startedAt) < ROLL_DURATION do
+		local preview = sequence[((index - 1) % #sequence) + 1]
+		setPreview(preview, payload, false)
+		index += 1
+
+		local alpha = math.clamp((os.clock() - startedAt) / ROLL_DURATION, 0, 1)
+		task.wait(ROLL_MIN_STEP + ((ROLL_MAX_STEP - ROLL_MIN_STEP) * alpha))
+	end
+
+	if activeRollSession ~= sessionId then
+		return
+	end
+
+	setPreview(finalPreview, payload, true)
+	setRevealState(payload)
+end
+
+local function showReward(payload)
+	activeRollSession += 1
+	local sessionId = activeRollSession
+
+	currentToken = payload.token
+	skipRoll = false
+	gui.Enabled = true
+	setRollingState()
+
+	local initialSequence = buildRollSequence(payload)
+	setPreview(initialSequence[1], payload, false)
+
+	task.spawn(startRollAnimation, sessionId, payload)
+end
+
+takeButton.MouseButton1Click:Connect(function()
+	attemptTakeReward()
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+	if not gui.Enabled then
+		return
+	end
+	if input.KeyCode ~= Enum.KeyCode.Space then
+		return
+	end
+	if UserInputService:GetFocusedTextBox() then
+		return
+	end
+
+	if uiState == "rolling" then
+		skipRoll = true
+		statusText.Text = "Skipping chest draw..."
+	elseif uiState == "revealed" then
+		attemptTakeReward()
+	end
 end)
 
 chestItemEvent.OnClientEvent:Connect(function(payload)

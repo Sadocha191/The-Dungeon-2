@@ -80,6 +80,11 @@ local function isDailyMissionsOpen(): boolean
 	return dailyMissionsGui:GetAttribute("BoardShown") == true
 end
 
+local function isChestRewardOpen(): boolean
+	local chestRewardGui = playerGui:FindFirstChild("ChestRewardGui")
+	return chestRewardGui ~= nil and chestRewardGui:IsA("ScreenGui") and chestRewardGui.Enabled
+end
+
 local function isBlockingUIOpen(): boolean
 	if upgradesGui.Enabled and upgradesMain.Visible then
 		return true
@@ -96,6 +101,10 @@ local function isBlockingUIOpen(): boolean
 
 	local ekeyMenu = playerGui:FindFirstChild("EKeyMenu")
 	if ekeyMenu and ekeyMenu:IsA("ScreenGui") and ekeyMenu.Enabled then
+		return true
+	end
+
+	if isChestRewardOpen() then
 		return true
 	end
 
