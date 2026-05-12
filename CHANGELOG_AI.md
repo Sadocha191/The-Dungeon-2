@@ -2,6 +2,268 @@
 
 This file tracks AI-made repo changes and the intended rollback path.
 
+## 2026-05-12 - Poziom WindBlade persistent audio emitter pool
+
+### Scope
+
+- Replaced the `WindBlade` cast audio playback path with a persistent client-side emitter pool after cloned-per-cast sounds still clipped intermittently.
+- Created six reusable invisible spatial audio emitters per slash variant under `workspace.SpellVFX`; each cast moves an available emitter to the visual effect position and plays its already-created `Sound` from `TimePosition = 0`.
+- Decoupled audio lifetime from the `WindBlade` visual clone, so `Debris:AddItem()` can clean up particles without cutting off the slash sound.
+- Kept the embedded authored sounds in the cloned `WindBlade` visual stopped/reset so the cast still plays only the selected variant.
+- Normalized playback rolloff on pooled sounds with a minimum `RollOffMaxDistance` because the live asset had `Wind Slash1` at `10000` and `Wind Slash2` at `20`, which could make the second alternating hit sound clipped or effectively silent with the combat camera.
+- Kept the server-side per-caster `1 / 2 / 1 / 2` alternation and all `WindBlade` damage, cooldown, hitbox, scaling, targeting, and visual particle behavior unchanged.
+
+### Files updated
+
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SpellVFXClient.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `game.StarterPlayer.StarterPlayerScripts.LocalScript.SpellVFXClient`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Poziom`.
+- Verified the live `WindBlade` asset still contains `Wind Slash1` and `Wind Slash2`, and confirmed their authored `TimeLength` values are short (`~0.31s` and `~0.48s`), so the remaining clipping was not caused by a long sample exceeding the visual cleanup buffer.
+- Confirmed the live asset has mismatched rolloff (`Wind Slash1` max distance `10000`, `Wind Slash2` max distance `20`), and the pooled playback now raises the minimum playback rolloff to keep both variants audible during normal combat camera distance.
+- Synced the updated `SpellVFXClient` source into live Studio and ran `loadstring(script.Source)` successfully.
+- Ran `git diff --check`; it reported only LF/CRLF normalization warnings and no patch-format errors.
+
+### Risks
+
+- This changes the client audio implementation from clone-local playback to persistent local spatial emitters positioned at the effect, which is intentionally different from the first approach because the previous clone-bound playback still clipped.
+- Full repeated combat testing is still recommended to confirm the subjective timing/volume under real run load.
+
+### Rollback
+
+- Revert `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SpellVFXClient.lua` and this changelog entry in the repo.
+- In live Studio, restore the previous source of `game.StarterPlayer.StarterPlayerScripts.LocalScript.SpellVFXClient`.
+
+## 2026-05-12 - Poziom WindBlade audio preload retry for replicated sounds
+
+### Scope
+
+- Tightened the `Poziom` `WindBlade` client audio preload path again after the alternating slash sounds could still clip and leave the following cast silent.
+- Fixed a preload race where the `WindBlade` template part could exist on the client before its child `Sound` instances were fully replicated, causing the client to mark preload as already attempted too early and never build the stronger cloned playback templates later.
+- Changed `SpellVFXClient` so it now re-scans the `ReplicatedStorage.Assets.Animations.WindBlade` template for missing slash sounds on later casts until the playback templates are actually captured and preloaded.
+- Kept the stronger cloned playback path, delayed retry, late-load retry, spatial playback location, and per-caster `1 / 2 / 1 / 2` alternation unchanged.
+- Did not change damage, cooldown, hitboxes, scaling, targeting, or any server combat flow.
+
+### Files updated
+
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SpellVFXClient.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `game.StarterPlayer.StarterPlayerScripts.LocalScript.SpellVFXClient`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Poziom` before the sync.
+- Verified the local `SpellVFXClient` source now no longer uses a one-shot `windBladeAudioPreloadStarted` gate and instead keeps trying to capture and preload missing `WindBlade` sound templates until they exist on the client.
+- Synced the updated source into live Studio and re-ran a compile check with `loadstring(script.Source)`.
+- Re-checked the live source for the new retryable preload state:
+  - `windBladeSoundPreloaded`
+  - `windBladeAudioPreloadInFlight`
+  - `queueWindBladeAudioPreload`
+- Ran `git diff --check`; it reported only LF/CRLF normalization warnings and no patch-format errors.
+
+### Risks
+
+- This specifically addresses client replication timing around the `WindBlade` sound children and should remove the path where the stronger playback templates never become available, but it still does not replace a full repeated live combat run under real load.
+- If any remaining clipping still survives after this pass, the next step should be lightweight runtime telemetry around which exact sound object path played on each cast so we can prove whether the miss is asset replication, playback state, or event delivery.
+
+### Rollback
+
+- Revert `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SpellVFXClient.lua` and this changelog entry in the repo.
+- In live Studio, restore the previous source of `game.StarterPlayer.StarterPlayerScripts.LocalScript.SpellVFXClient`.
+
+## 2026-05-12 - Poziom WindBlade cloned playback templates and retry
+
+### Scope
+
+- Strengthened the `Poziom` `WindBlade` client audio path again after the first preload/buffer fix still allowed occasional clipped casts followed by one silent cast.
+- Switched `WindBlade` cast playback to use preloaded cloned sound templates as the playback source, instead of relying only on the sound instances embedded in each freshly cloned visual effect.
+- Kept the sound spatial by parenting the selected playback sound clone onto the cast effect clone in `workspace`.
+- Added a short retry path: if the selected cast sound is not actually `Playing` shortly after `Play()`, the client resets and starts it once more, and also retries once when `Loaded` fires late.
+- Increased the cleanup margin again so delayed playback has more time before the effect clone is removed by `Debris`.
+- Kept the existing per-caster `1 / 2 / 1 / 2` alternation, `Wind Slash 1/2` plus `Wind Slash1/2` name compatibility, and all spell combat behavior unchanged.
+
+### Files updated
+
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SpellVFXClient.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `game.StarterPlayer.StarterPlayerScripts.LocalScript.SpellVFXClient`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Poziom` before patching.
+- Synced the updated `SpellVFXClient` source to live Studio and verified the source now contains:
+  - `windBladeSoundTemplates`
+  - clone-side `WindBladePlaybackSound1/2`
+  - delayed retry through `task.delay(...)`
+  - late-load retry through `Sound.Loaded`
+  - the larger cleanup buffer
+- Ran `loadstring(script.Source)` on the live `SpellVFXClient`; it compiled successfully after sync.
+- Ran `git diff --check`; it reported only LF/CRLF normalization warnings and no whitespace or patch-format errors.
+
+### Risks
+
+- This is a stronger mitigation aimed at Roblox audio start timing on cloned effects, but it still does not replace a full repeated live combat run with real `WindBlade` casts under load.
+- The cast effect still contains the embedded authored sounds for compatibility, but the actual playback path now prefers the separately preloaded sound templates to avoid stale or delayed state on the fresh effect clone.
+
+### Rollback
+
+- Revert `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SpellVFXClient.lua` and this changelog entry in the repo.
+- In live Studio, restore the previous source of `game.StarterPlayer.StarterPlayerScripts.LocalScript.SpellVFXClient`.
+
+## 2026-05-12 - Poziom WindBlade audio preload and cleanup buffer
+
+### Scope
+
+- Tightened the `Poziom` `WindBlade` client audio path to reduce intermittent cast sound clipping and silent follow-up casts after a hitch.
+- Added background preload for the authored `WindBlade` sound assets through `ContentProvider:PreloadAsync` as soon as `SpellVFXClient` starts and the template is available.
+- Increased the `WindBlade` clone cleanup buffer so the cloned visual stays alive longer than the longer of its particle or sound lengths, giving delayed audio playback extra room before `Debris` cleanup.
+- Kept the existing `1 / 2 / 1 / 2` per-caster server toggle, sound lookup names, spatial playback source, and all combat behavior unchanged.
+
+### Files updated
+
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SpellVFXClient.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `game.StarterPlayer.StarterPlayerScripts.LocalScript.SpellVFXClient`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Poziom` before patching.
+- Re-verified the live `WindBlade` template contains the existing `Wind Slash1` and `Wind Slash2` sound assets.
+- Synced the updated `SpellVFXClient` source to live Studio and verified the source now contains:
+  - `ContentProvider` preload usage
+  - `ensureWindBladeAudioPreloaded(...)`
+  - a larger `WIND_BLADE_AUDIO_CLEANUP_BUFFER`
+- Ran `loadstring(script.Source)` on the live `SpellVFXClient`; it compiled successfully after sync.
+- Ran `git diff --check`; it reported only LF/CRLF normalization warnings and no whitespace or patch-format errors.
+
+### Risks
+
+- This pass reduces the most likely timing issue by preloading and extending clone lifetime, but it does not add a full telemetry/debug layer for missed playback events.
+- If the remaining hitch turns out to come from a deeper Roblox audio engine quirk rather than delayed asset readiness or early cleanup, the next pass would likely need targeted runtime instrumentation around `Sound.Playing` / `IsLoaded` during real repeated casts.
+
+### Rollback
+
+- Revert `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SpellVFXClient.lua` and this changelog entry in the repo.
+- In live Studio, restore the previous source of `game.StarterPlayer.StarterPlayerScripts.LocalScript.SpellVFXClient`.
+
+## 2026-05-12 - Poziom WindBlade alternating cast audio
+
+### Scope
+
+- Extended the existing `Poziom` `WindBlade` cast VFX follow-up so the cloned `ReplicatedStorage.Assets.Animations.WindBlade` effect now also plays one authored spatial slash sound per cast.
+- Added a per-caster `1 / 2 / 1 / 2` sound toggle on the server and included the selected variant in the existing transient `SpellVFXEvent` nova payload for `WindBlade`.
+- Updated the client `WindBlade` cast visual path to resolve both spaced and unspaced sound names (`Wind Slash 1` / `Wind Slash1`, `Wind Slash 2` / `Wind Slash2`), stop/reset both sounds on the clone, and play only the selected one.
+- Extended the `WindBlade` clone lifetime helper so it keeps the effect alive long enough for either particle or sound playback before `Debris` cleanup.
+- Kept `WindBlade` damage, cooldown, radius, targeting, hitboxes, and the rest of the spell logic unchanged.
+
+### Files updated
+
+- `Level/ServerScriptService/Script/SpellService.lua`
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SpellVFXClient.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `game.ServerScriptService.Script.SpellService`
+- `game.StarterPlayer.StarterPlayerScripts.LocalScript.SpellVFXClient`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Poziom` before patching.
+- Verified the live asset currently contains the unspaced sound names `Wind Slash1` and `Wind Slash2`, and kept code compatibility for both spaced and unspaced variants.
+- Ran `loadstring(script.Source)` checks for the live `SpellService` and `SpellVFXClient`; both compiled successfully after sync.
+- Verified the synced live sources now contain:
+  - `windBladeSoundToggle`
+  - `windBladeSoundVariant`
+  - dual-name sound lookup for `Wind Slash 1/2` and `Wind Slash1/2`
+  - clone-side `playWindBladeSound(...)`
+- Started Play in `Poziom` and ran a runtime clone test that mirrored the new client helper behavior:
+  - variant `1` played only `Wind Slash1`
+  - variant `2` played only `Wind Slash2`
+  - the non-selected sound stayed stopped in both cases
+- Re-checked the Studio console after the new sync and test; no new `WindBlade` script errors were produced by this pass.
+- Ran `git diff --check`; it reported only LF/CRLF normalization warnings and no whitespace or patch-format errors.
+
+### Risks
+
+- This pass validated the server toggle path by source inspection and compile success, and validated the client playback behavior with a runtime clone test; it did not complete a full organic combat run where `SpellService` auto-casts `WindBlade` repeatedly against live enemies.
+- The live asset still uses `Wind Slash1` / `Wind Slash2` naming today, so keeping both name variants in code is intentional compatibility rather than dead code.
+
+### Rollback
+
+- Revert `Level/ServerScriptService/Script/SpellService.lua`, `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SpellVFXClient.lua`, and this changelog entry in the repo.
+- In live Studio, restore the previous source of `game.ServerScriptService.Script.SpellService` and `game.StarterPlayer.StarterPlayerScripts.LocalScript.SpellVFXClient`.
+
+## 2026-05-12 - Poziom WindBlade visual hookup and GustBurst compatibility
+
+### Scope
+
+- Synced the historical `GustBurst` air nova spell in the `Level` repo mirror to the current live `WindBlade` name while preserving the same spell archetype, damage, cooldown, radius, scaling, targeting, and hit behavior.
+- Added a narrow legacy alias layer in `SpellDefinitions` so old `GustBurst` spell ids and `GustBurst_{Standard,Amplified}` unlock product ids resolve to `WindBlade` without breaking current `WindBlade` lookups.
+- Added unlock-input normalization in `ReceiveTeleportLoadout` and `ProgressService` so stale teleport payloads or cached `UnlockedSpellsCSV` entries using the old `GustBurst` naming still unlock and offer `WindBlade`.
+- Extended `SpellService.runNova` to send forward-facing `dir` and `effectPos` metadata over the existing `SpellVFXEvent` payload without changing the nova damage application or cooldown flow.
+- Hooked `StarterPlayerScripts/LocalScript/SpellVFXClient` so `WindBlade` casts now clone the authored `ReplicatedStorage.Assets.Animations.WindBlade` part, orient it in front of the player toward the current attack direction, emit its authored particle set, and clean it up through `Debris:AddItem()`.
+- Kept the fallback behavior silent: if `ReplicatedStorage.Assets.Animations.WindBlade` is missing, the spell keeps functioning and the custom cast visual simply does not spawn.
+- Did not touch lobby/Four Peaks, did not rebalance the spell, and did not rename remotes or reorganize combat systems.
+
+### Files updated
+
+- `Level/ReplicatedStorage/ModuleScripts/SpellDefinitions.lua`
+- `Level/ServerScriptService/Script/ReceiveTeleportLoadout.lua`
+- `Level/ServerScriptService/Script/ProgressService.lua`
+- `Level/ServerScriptService/Script/SpellService.lua`
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SpellVFXClient.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `game.ReplicatedStorage.ModuleScripts.SpellDefinitions`
+- `game.ServerScriptService.Script.ReceiveTeleportLoadout`
+- `game.ServerScriptService.Script.ProgressService`
+- `game.ServerScriptService.Script.SpellService`
+- `game.StarterPlayer.StarterPlayerScripts.LocalScript.SpellVFXClient`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Poziom` before inspection and sync.
+- Verified live `ReplicatedStorage.ModuleScripts.SpellDefinitions` already used `WindBlade` and patched both live Studio and repo to add legacy `GustBurst` alias compatibility.
+- Ran compile checks with `loadstring(script.Source)` on the live `SpellDefinitions`, `SpellService`, `ProgressService`, `ReceiveTeleportLoadout`, and `SpellVFXClient` sources; all compiled successfully after the patch.
+- Required a fresh live clone of `SpellDefinitions` and confirmed:
+  - `GetSpell("GustBurst")` resolves to `WindBlade`
+  - `GetProduct("GustBurst_Standard")` resolves to `WindBlade_Standard`
+  - `GetProduct("GustBurst_Amplified")` resolves to `WindBlade_Amplified`
+- Verified the live asset `ReplicatedStorage.Assets.Animations.WindBlade` exists and is a `Part`.
+- Verified the live `SpellService` source now includes directional `effectPos` / `dir` data for nova payloads, and the live `SpellVFXClient` source now routes `WindBlade` nova payloads into the template-clone visual path.
+- Started Play in the live `Poziom` place, spawned a local preview loop from the same `ReplicatedStorage.Assets.Animations.WindBlade` template in front of the player, captured the result on screen, and confirmed the slash particles were visible in runtime and later cleaned up (`Workspace.WindBladePreview` count returned `0` after Debris expiry).
+- Ran `git diff --check`; it reported only existing LF/CRLF conversion warnings and no whitespace or patch-format errors.
+
+### Risks
+
+- The runtime preview confirmed the authored `WindBlade` asset is visible, oriented, and cleaned up in Play, but this pass did not force a full end-to-end combat cast from the live auto-cast loop with an organically earned `WindBlade` upgrade during a run.
+- A manual verification attempt through the MCP execute tool produced one plugin-side console message (`FireAllClients can only be called from the server`) while probing the runtime context; this came from the failed test command itself, not from the patched game scripts.
+- The `WindBlade` particle burst counts are name-based heuristics because the template does not carry authored emit-count metadata; if the effect reads too faint or too dense in a real combat run, the next tweak is only in `SpellVFXClient` emit counts.
+
+### Rollback
+
+- Revert the five `Level/...` source files listed above and this changelog entry in the repo.
+- In live Studio, restore the previous sources of `SpellDefinitions`, `ReceiveTeleportLoadout`, `ProgressService`, `SpellService`, and `SpellVFXClient`.
+- If you want to remove legacy compatibility as part of a later cleanup, delete the `GustBurst` alias mapping only after confirming no teleport payloads, saved unlock csv strings, or external tools still reference the old ids.
+
 ## 2026-05-11 - Four Peaks blacksmith template list, tooltips, and local character hide
 
 ### Scope

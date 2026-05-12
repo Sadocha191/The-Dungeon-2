@@ -553,9 +553,32 @@ local function parseUnlocked(plr: Player): {string}
 	local csv = plr:GetAttribute("UnlockedSpellsCSV")
 	if typeof(csv) ~= "string" or csv == "" then return {} end
 	local out = {}
+
+	local function normalizeUnlockedId(id: any): any
+		if typeof(id) ~= "string" or id == "" or not SpellDefs then
+			return id
+		end
+
+		local normalized = SpellDefs.NormalizeProductId and SpellDefs.NormalizeProductId(id) or id
+		if normalized ~= id then
+			return normalized
+		end
+
+		local familyId = SpellDefs.NormalizeSpellId and SpellDefs.NormalizeSpellId(id) or id
+		if familyId ~= id and SpellDefs.GetProduct then
+			local standardProductId = string.format("%s_Standard", familyId)
+			if SpellDefs.GetProduct(standardProductId) then
+				return standardProductId
+			end
+		end
+
+		return id
+	end
+
 	for tok in string.gmatch(csv, "([^,]+)") do
 		tok = string.gsub(tok, "^%s+", "")
 		tok = string.gsub(tok, "%s+$", "")
+		tok = normalizeUnlockedId(tok)
 		if tok ~= "" then table.insert(out, tok) end
 	end
 	return out

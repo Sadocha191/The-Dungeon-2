@@ -212,6 +212,27 @@ local function applyUnlockedSpells(plr: Player, unlocked: any)
 	local merged = {}
 	local seen = {}
 
+	local function normalizeUnlockedId(id: any): any
+		if typeof(id) ~= "string" or id == "" or not SpellDefs then
+			return id
+		end
+
+		local normalized = SpellDefs.NormalizeProductId and SpellDefs.NormalizeProductId(id) or id
+		if normalized ~= id then
+			return normalized
+		end
+
+		local familyId = SpellDefs.NormalizeSpellId and SpellDefs.NormalizeSpellId(id) or id
+		if familyId ~= id and SpellDefs.GetProduct then
+			local standardProductId = string.format("%s_Standard", familyId)
+			if SpellDefs.GetProduct(standardProductId) then
+				return standardProductId
+			end
+		end
+
+		return id
+	end
+
 	if SpellDefs and SpellDefs.BASE_STARTER then
 		for _, id in ipairs(SpellDefs.BASE_STARTER) do
 			if typeof(id) == "string" and id ~= "" and not seen[id] then
@@ -223,9 +244,10 @@ local function applyUnlockedSpells(plr: Player, unlocked: any)
 
 	if typeof(unlocked) == "table" then
 		for _, id in ipairs(unlocked) do
-			if typeof(id) == "string" and id ~= "" and not seen[id] then
-				seen[id] = true
-				table.insert(merged, id)
+			local normalizedId = normalizeUnlockedId(id)
+			if typeof(normalizedId) == "string" and normalizedId ~= "" and not seen[normalizedId] then
+				seen[normalizedId] = true
+				table.insert(merged, normalizedId)
 			end
 		end
 	end

@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
+local ContentProvider = game:GetService("ContentProvider")
 
 local player = Players.LocalPlayer
 
@@ -24,6 +25,30 @@ end
 
 local activeOrbits = {}
 local activeProjectiles = {}
+local WIND_BLADE_EMIT_COUNTS = {
+	Debris = 10,
+	Dot = 8,
+	Mist = 3,
+	Slash = 1,
+	Smoke = 10,
+	Whirl = 2,
+	Wind = 1,
+}
+local WIND_BLADE_SOUND_NAMES = {
+	[1] = { "Wind Slash 1", "Wind Slash1" },
+	[2] = { "Wind Slash 2", "Wind Slash2" },
+}
+local WIND_BLADE_AUDIO_CLEANUP_BUFFER = 1.25
+local WIND_BLADE_AUDIO_RETRY_DELAY = 0.08
+local WIND_BLADE_AUDIO_POOL_SIZE = 6
+local WIND_BLADE_AUDIO_ROLLOFF_MAX_DISTANCE = 120
+local WIND_BLADE_AUDIO_STOP_BUFFER = 0.25
+local windBladeSoundTemplates = {}
+local windBladeAudioPools = {}
+local windBladeAudioPoolCursor = {}
+local windBladeAudioPreloadInFlight = false
+local windBladeAudioPreloadGeneration = 0
+local windBladeAudioPreloadedGeneration = 0
 
 local function isPaused(): boolean
 	return PauseState ~= nil and PauseState.Value == true
@@ -196,6 +221,332 @@ local function addAmbientEmitter(parent, primary, secondary, rate, scale)
 	})
 	emitter.Parent = attachment
 	return emitter
+end
+
+local function getWindBladeTemplate()
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local animations = assets and assets:FindFirstChild("Animations")
+	local template = animations and animations:FindFirstChild("WindBlade")
+	if template and template:IsA("BasePart") then
+		return template
+	end
+	return nil
+end
+
+local function findWindBladeSoundByNames(root, candidates)
+	if not root or type(candidates) ~= "table" then
+		return nil
+	end
+
+	for _, name in ipairs(candidates) do
+		local sound = root:FindFirstChild(name, true)
+		if sound and sound:IsA("Sound") then
+			return sound
+		end
+	end
+
+	return nil
+end
+
+local queueWindBladeAudioPreload
+
+local function markWindBladeAudioNeedsPreload()
+	windBladeAudioPreloadGeneration += 1
+end
+
+local function normalizeWindBladeSound(sound)
+	sound.Looped = false
+	sound.PlayOnRemove = false
+	sound.TimePosition = 0
+	sound.RollOffMaxDistance = math.max(sound.RollOffMaxDistance, WIND_BLADE_AUDIO_ROLLOFF_MAX_DISTANCE)
+	sound.RollOffMinDistance = math.max(sound.RollOffMinDistance, 10)
+end
+
+local function createWindBladeAudioEmitter(variant, index, soundTemplate)
+	local emitter = Instance.new("Part")
+	emitter.Name = ("WindBladeAudioEmitter%d_%d"):format(variant, index)
+	emitter.Size = Vector3.new(0.2, 0.2, 0.2)
+	emitter.Transparency = 1
+	applyPartDefaults(emitter)
+	emitter.Parent = vfxRoot
+
+	local sound = soundTemplate:Clone()
+	sound.Name = ("WindBladePoolSound%d"):format(variant)
+	normalizeWindBladeSound(sound)
+	sound.Parent = emitter
+
+	return {
+		emitter = emitter,
+		sound = sound,
+	}
+end
+
+local function ensureWindBladeAudioPool(template)
+	if not template then
+		return
+	end
+
+	for variant, candidateNames in pairs(WIND_BLADE_SOUND_NAMES) do
+		local soundTemplate = windBladeSoundTemplates[variant]
+		if soundTemplate and soundTemplate.Parent ~= script then
+			soundTemplate = nil
+			windBladeSoundTemplates[variant] = nil
+		end
+
+		if not soundTemplate then
+			local sourceSound = findWindBladeSoundByNames(template, candidateNames)
+			if sourceSound then
+				soundTemplate = sourceSound:Clone()
+				soundTemplate.Name = ("WindBladeSoundTemplate%d"):format(variant)
+				normalizeWindBladeSound(soundTemplate)
+				soundTemplate.Parent = script
+				windBladeSoundTemplates[variant] = soundTemplate
+				markWindBladeAudioNeedsPreload()
+			end
+		end
+
+		if soundTemplate then
+			local pool = windBladeAudioPools[variant]
+			if not pool then
+				pool = {}
+				windBladeAudioPools[variant] = pool
+				windBladeAudioPoolCursor[variant] = 1
+			end
+
+			while #pool < WIND_BLADE_AUDIO_POOL_SIZE do
+				pool[#pool + 1] = createWindBladeAudioEmitter(variant, #pool + 1, soundTemplate)
+				markWindBladeAudioNeedsPreload()
+			end
+		end
+	end
+
+	queueWindBladeAudioPreload()
+end
+
+queueWindBladeAudioPreload = function()
+	if windBladeAudioPreloadInFlight or windBladeAudioPreloadedGeneration >= windBladeAudioPreloadGeneration then
+		return
+	end
+
+	local sounds = {}
+	for _, soundTemplate in pairs(windBladeSoundTemplates) do
+		if soundTemplate and soundTemplate.Parent then
+			sounds[#sounds + 1] = soundTemplate
+		end
+	end
+	for _, pool in pairs(windBladeAudioPools) do
+		for _, entry in ipairs(pool) do
+			if entry.sound and entry.sound.Parent then
+				sounds[#sounds + 1] = entry.sound
+			end
+		end
+	end
+
+	if #sounds <= 0 then
+		return
+	end
+
+	local preloadGeneration = windBladeAudioPreloadGeneration
+	windBladeAudioPreloadInFlight = true
+	task.spawn(function()
+		local ok = pcall(function()
+			ContentProvider:PreloadAsync(sounds)
+		end)
+		if ok then
+			windBladeAudioPreloadedGeneration = math.max(windBladeAudioPreloadedGeneration, preloadGeneration)
+		end
+		windBladeAudioPreloadInFlight = false
+		queueWindBladeAudioPreload()
+	end)
+end
+
+ensureWindBladeAudioPool(getWindBladeTemplate())
+
+local function getFlatDirection(dir)
+	if typeof(dir) ~= "Vector3" then
+		return Vector3.new(0, 0, -1)
+	end
+
+	local flat = Vector3.new(dir.X, 0, dir.Z)
+	if flat.Magnitude <= 0.01 then
+		return Vector3.new(0, 0, -1)
+	end
+
+	return flat.Unit
+end
+
+local function getWindBladeEmitCount(emitterName)
+	for prefix, count in pairs(WIND_BLADE_EMIT_COUNTS) do
+		if string.sub(emitterName, 1, #prefix) == prefix then
+			return count
+		end
+	end
+	return 2
+end
+
+local function findWindBladeSound(effect, variant)
+	local candidates = WIND_BLADE_SOUND_NAMES[variant]
+	return findWindBladeSoundByNames(effect, candidates)
+end
+
+local function prepareWindBladeEffect(effect)
+	if effect:IsA("BasePart") then
+		applyPartDefaults(effect)
+		effect.Anchored = true
+	end
+
+	for _, descendant in ipairs(effect:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			applyPartDefaults(descendant)
+			descendant.Anchored = true
+		elseif descendant:IsA("ParticleEmitter") then
+			descendant.Enabled = false
+		end
+	end
+end
+
+local function getWindBladeLifetime(effect)
+	local maxLifetime = 0.35
+	for _, descendant in ipairs(effect:GetDescendants()) do
+		if descendant:IsA("ParticleEmitter") then
+			maxLifetime = math.max(maxLifetime, descendant.Lifetime.Max)
+		elseif descendant:IsA("Sound") then
+			maxLifetime = math.max(maxLifetime, tonumber(descendant.TimeLength) or 0)
+		end
+	end
+	return maxLifetime + WIND_BLADE_AUDIO_CLEANUP_BUFFER
+end
+
+local function emitWindBladeParticles(effect)
+	for _, descendant in ipairs(effect:GetDescendants()) do
+		if descendant:IsA("ParticleEmitter") then
+			descendant:Emit(getWindBladeEmitCount(descendant.Name))
+		end
+	end
+end
+
+local function startWindBladePlayback(sound)
+	if not sound or not sound.Parent then
+		return
+	end
+
+	sound:Stop()
+	sound.TimePosition = 0
+	sound:Play()
+end
+
+local function getWindBladeAudioPoolEntry(variant)
+	local pool = windBladeAudioPools[variant]
+	if not pool or #pool <= 0 then
+		return nil
+	end
+
+	local startIndex = windBladeAudioPoolCursor[variant] or 1
+	for offset = 0, #pool - 1 do
+		local index = ((startIndex + offset - 1) % #pool) + 1
+		local entry = pool[index]
+		if entry and entry.sound and not entry.sound.Playing then
+			windBladeAudioPoolCursor[variant] = (index % #pool) + 1
+			return entry
+		end
+	end
+
+	local entry = pool[startIndex]
+	windBladeAudioPoolCursor[variant] = (startIndex % #pool) + 1
+	return entry
+end
+
+local function getWindBladeSoundDuration(sound)
+	if not sound then
+		return 0.5
+	end
+
+	local speed = math.max(0.05, tonumber(sound.PlaybackSpeed) or 1)
+	return math.max(0.5, (tonumber(sound.TimeLength) or 0) / speed)
+end
+
+local function stopWindBladeEmbeddedSounds(effect)
+	local sound1 = findWindBladeSound(effect, 1)
+	local sound2 = findWindBladeSound(effect, 2)
+
+	for _, sound in ipairs({ sound1, sound2 }) do
+		if sound then
+			sound:Stop()
+			sound.TimePosition = 0
+		end
+	end
+end
+
+local function playWindBladeSound(effect, variant)
+	stopWindBladeEmbeddedSounds(effect)
+
+	if variant ~= 1 and variant ~= 2 then
+		return
+	end
+
+	local entry = getWindBladeAudioPoolEntry(variant)
+	if not entry or not entry.emitter or not entry.sound then
+		return
+	end
+
+	entry.emitter.CFrame = effect.CFrame
+	local playbackSound = entry.sound
+	startWindBladePlayback(playbackSound)
+	task.delay(WIND_BLADE_AUDIO_RETRY_DELAY, function()
+		if playbackSound.Parent and not playbackSound.Playing then
+			startWindBladePlayback(playbackSound)
+		end
+	end)
+	if not playbackSound.IsLoaded then
+		local loadedConnection
+		loadedConnection = playbackSound.Loaded:Connect(function()
+			if loadedConnection then
+				loadedConnection:Disconnect()
+				loadedConnection = nil
+			end
+			if playbackSound.Parent and not playbackSound.Playing then
+				startWindBladePlayback(playbackSound)
+			end
+		end)
+	end
+
+	task.delay(getWindBladeSoundDuration(playbackSound) + WIND_BLADE_AUDIO_STOP_BUFFER, function()
+		if playbackSound.Parent and not playbackSound.Playing then
+			playbackSound.TimePosition = 0
+		end
+	end)
+end
+
+local function isWindBladeSpellId(spellId)
+	return spellId == "WindBlade" or spellId == "GustBurst"
+end
+
+local function spawnWindBladeCastVisual(payload)
+	local template = getWindBladeTemplate()
+	if not template then
+		return
+	end
+	ensureWindBladeAudioPool(template)
+
+	local direction = getFlatDirection(payload.dir)
+	local effectPos = payload.effectPos
+	if typeof(effectPos) ~= "Vector3" then
+		local basePos = payload.pos
+		if typeof(basePos) ~= "Vector3" then
+			return
+		end
+		local radius = math.max(0.1, tonumber(payload.radius) or tonumber(payload.stats and payload.stats.radius) or 1)
+		effectPos = basePos + Vector3.new(0, 1.2, 0) + (direction * math.clamp(radius * 0.45, 2.75, 6.0))
+	end
+
+	local effect = template:Clone()
+	effect.Name = "WindBladeCast"
+	prepareWindBladeEffect(effect)
+	effect.CFrame = CFrame.lookAt(effectPos, effectPos + direction)
+	effect.Parent = vfxRoot
+	playWindBladeSound(effect, tonumber(payload.windBladeSoundVariant))
+	emitWindBladeParticles(effect)
+	Debris:AddItem(effect, getWindBladeLifetime(effect))
 end
 
 local function playTween(instance, duration, props, style, direction)
@@ -710,7 +1061,10 @@ local function handlePayload(payload)
 			)
 		end
 	elseif action == "nova" then
-		if typeof(payload.pos) == "Vector3" then
+		local spellId = tostring(payload.stats and payload.stats.spellId or "")
+		if isWindBladeSpellId(spellId) then
+			spawnWindBladeCastVisual(payload)
+		elseif typeof(payload.pos) == "Vector3" then
 			spawnNovaVisual(
 				payload.pos,
 				math.max(0.1, tonumber(payload.radius) or tonumber(payload.stats and payload.stats.radius) or 1),

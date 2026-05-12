@@ -44,9 +44,33 @@ SpellDefs.SHOP_PRODUCTS = {}
 SpellDefs.SPELL_ORDER = {}
 SpellDefs.SHOP_ORDER = {}
 SpellDefs.SYNERGIES = {}
+SpellDefs.LEGACY_SPELL_IDS = {
+	GustBurst = "WindBlade",
+}
+SpellDefs.LEGACY_PRODUCT_IDS = {
+	GustBurst_Standard = "WindBlade_Standard",
+	GustBurst_Amplified = "WindBlade_Amplified",
+}
 
 local BASE_VARIANT_ORDER = { "Standard", "Amplified" }
 local QUALITY_ORDER = { "Common", "Uncommon", "Rare", "Epic" }
+
+local function normalizeSpellId(id)
+	if typeof(id) ~= "string" or id == "" then
+		return id
+	end
+	return SpellDefs.LEGACY_SPELL_IDS[id] or id
+end
+
+local function normalizeProductId(id)
+	if typeof(id) ~= "string" or id == "" then
+		return id
+	end
+	return SpellDefs.LEGACY_PRODUCT_IDS[id] or id
+end
+
+SpellDefs.NormalizeSpellId = normalizeSpellId
+SpellDefs.NormalizeProductId = normalizeProductId
 
 local EFFECTS = {
 	Fire = { dot = { kind = "Burn", dps = 4.5, duration = 2.2 }, note = "Applies burn damage over time." },
@@ -319,7 +343,7 @@ for _, spec in ipairs({
 	{ "ThunderRay", "Thunder Ray", "Magic", "Electricity", "Beam", 280, { archetype = "Beam", baseDamage = 8.0, cooldown = 4.9, duration = 1.45, tickRate = 0.16, range = 54, width = 4.0 } },
 	{ "GaleKnife", "Gale Knife", "Magic", "Air", "Projectile", 180, { archetype = "Projectile", baseDamage = 16, cooldown = 1.00, projectileSpeed = 102, range = 70, baseCount = 1, countPerThreeLevels = 1, pierce = 1 } },
 	{ "WindRing", "Wind Ring", "Magic", "Air", "Orbit", 220, { archetype = "Orbit", baseDamage = 10, hitCooldown = 0.32, baseRadius = 6.2, baseCount = 2, countPerThreeLevels = 1, orbitSpeed = 3.2 } },
-	{ "GustBurst", "Gust Burst", "Magic", "Air", "Nova", 230, { archetype = "Nova", baseDamage = 22, cooldown = 2.8, baseRadius = 9.6 } },
+	{ "WindBlade", "Wind Blade", "Magic", "Air", "Nova", 230, { archetype = "Nova", baseDamage = 22, cooldown = 2.8, baseRadius = 9.6 } },
 	{ "Tornado", "Tornado", "Magic", "Air", "Zone", 260, { archetype = "Zone", baseDamage = 7.8, cooldown = 4.2, baseRadius = 6.8, duration = 4.2, tickRate = 0.42, spawnAtEnemy = true, pullStrength = 1.1 } },
 	{ "Jetstream", "Jetstream", "Magic", "Air", "Beam", 280, { archetype = "Beam", baseDamage = 7.6, cooldown = 4.6, duration = 1.7, tickRate = 0.17, range = 58, width = 4.6 } },
 	{ "WaterShard", "Water Shard", "Magic", "Water", "Projectile", 180, { archetype = "Projectile", baseDamage = 17, cooldown = 1.08, projectileSpeed = 92, range = 67, baseCount = 1, countPerThreeLevels = 1, pierce = 0 } },
@@ -375,15 +399,19 @@ for _, synergy in ipairs(SpellDefs.SYNERGIES) do
 end
 
 function SpellDefs.Get(id)
-	return SpellDefs.SPELLS[id] or SpellDefs.SHOP_PRODUCTS[id]
+	local spellId = normalizeSpellId(id)
+	if SpellDefs.SPELLS[spellId] then
+		return SpellDefs.SPELLS[spellId]
+	end
+	return SpellDefs.SHOP_PRODUCTS[normalizeProductId(id)]
 end
 
 function SpellDefs.GetSpell(id)
-	return SpellDefs.SPELLS[id]
+	return SpellDefs.SPELLS[normalizeSpellId(id)]
 end
 
 function SpellDefs.GetProduct(id)
-	return SpellDefs.SHOP_PRODUCTS[id]
+	return SpellDefs.SHOP_PRODUCTS[normalizeProductId(id)]
 end
 
 function SpellDefs.IsValid(id)
@@ -423,7 +451,7 @@ end
 function SpellDefs.ResolveUnlockedProducts(unlockedIds)
 	local strongest = {}
 	for _, id in ipairs(unlockedIds or {}) do
-		local product = SpellDefs.SHOP_PRODUCTS[id]
+		local product = SpellDefs.GetProduct(id)
 		if product then
 			local current = strongest[product.familyId]
 			if not current or (SpellDefs.BASE_VARIANT_QUALITIES[product.baseQuality].basePower > SpellDefs.BASE_VARIANT_QUALITIES[current.baseQuality].basePower) then
@@ -435,6 +463,8 @@ function SpellDefs.ResolveUnlockedProducts(unlockedIds)
 end
 
 function SpellDefs.GetSynergyResult(a, b)
+	a = normalizeSpellId(a)
+	b = normalizeSpellId(b)
 	if typeof(a) ~= "string" or typeof(b) ~= "string" or a == "" or b == "" then
 		return nil
 	end
@@ -444,6 +474,7 @@ function SpellDefs.GetSynergyResult(a, b)
 end
 
 function SpellDefs.GetSynergiesFor(spellId)
+	spellId = normalizeSpellId(spellId)
 	local out = {}
 	for _, synergy in ipairs(SYNERGY_BY_INGREDIENT[spellId] or {}) do
 		table.insert(out, synergy)
@@ -452,6 +483,7 @@ function SpellDefs.GetSynergiesFor(spellId)
 end
 
 function SpellDefs.IsIngredientBlockedByCombo(spellId, activeSet)
+	spellId = normalizeSpellId(spellId)
 	for _, synergy in ipairs(SYNERGY_BY_INGREDIENT[spellId] or {}) do
 		if activeSet[synergy.resultId] then
 			return true
@@ -461,6 +493,7 @@ function SpellDefs.IsIngredientBlockedByCombo(spellId, activeSet)
 end
 
 function SpellDefs.GetSynergyHint(spellId, activeSet)
+	spellId = normalizeSpellId(spellId)
 	for _, synergy in ipairs(SYNERGY_BY_INGREDIENT[spellId] or {}) do
 		local other = synergy.ingredients[1] == spellId and synergy.ingredients[2] or synergy.ingredients[1]
 		if activeSet[other] then

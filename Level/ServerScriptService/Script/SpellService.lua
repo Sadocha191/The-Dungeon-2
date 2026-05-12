@@ -80,7 +80,7 @@ end
 local function getState(plr)
 	local s = state[plr.UserId]
 	if not s then
-		s = { cds = {}, orbit = {}, vfx = {}, impact = {} }
+		s = { cds = {}, orbit = {}, vfx = {}, impact = {}, windBladeSoundToggle = 1 }
 		state[plr.UserId] = s
 	end
 	return s
@@ -639,6 +639,44 @@ local function getCastOrigin(hrp)
 	return hrp.Position + Vector3.new(0, 1.2, 0)
 end
 
+local function flattenDirection(dir)
+	if typeof(dir) ~= "Vector3" then
+		return Vector3.new(0, 0, -1)
+	end
+
+	local flat = Vector3.new(dir.X, 0, dir.Z)
+	if flat.Magnitude <= 0.01 then
+		return Vector3.new(0, 0, -1)
+	end
+
+	return flat.Unit
+end
+
+local function getSpellVisualDirection(origin, fallbackDir, searchRange)
+	local direction = fallbackDir
+	local target = pickPriorityEnemy(origin, searchRange)
+	local targetPos = target and getEnemyPosition(target)
+	if targetPos then
+		local towardTarget = targetPos - origin
+		if towardTarget.Magnitude > 0.01 then
+			direction = towardTarget.Unit
+		end
+	end
+
+	return flattenDirection(direction)
+end
+
+local function isWindBladeSpellId(spellId)
+	return spellId == "WindBlade" or spellId == "GustBurst"
+end
+
+local function consumeWindBladeSoundVariant(plr)
+	local s = getState(plr)
+	local current = (s.windBladeSoundToggle == 2) and 2 or 1
+	s.windBladeSoundToggle = (current == 1) and 2 or 1
+	return current
+end
+
 local function syncOrbitVFX(plr, spellId, enabled, params)
 	local s = getState(plr)
 	s.vfx[spellId] = s.vfx[spellId] or {}
@@ -1077,11 +1115,27 @@ local function runNova(plr, spellId, stats, hrp)
 	end
 	s.cds[spellId] = now + ((stats.cooldown or 3) * getCooldownMult(plr))
 
+	local origin = getCastOrigin(hrp)
 	local radius = stats.radius or 8
-	broadcastSpellVisual("nova", {
+	local visualDir = getSpellVisualDirection(origin, hrp.CFrame.LookVector, math.max(24, radius + 12))
+	local effectPos = origin + (visualDir * math.clamp(radius * 0.45, 2.75, 6.0))
+	local payload = {
 		pos = hrp.Position,
+		effectPos = effectPos,
+		dir = visualDir,
 		radius = radius,
 		stats = extractVisualStats(stats),
+	}
+	if isWindBladeSpellId(stats and stats.spellId) or isWindBladeSpellId(spellId) then
+		payload.windBladeSoundVariant = consumeWindBladeSoundVariant(plr)
+	end
+	broadcastSpellVisual("nova", {
+		pos = payload.pos,
+		effectPos = payload.effectPos,
+		dir = payload.dir,
+		radius = payload.radius,
+		stats = payload.stats,
+		windBladeSoundVariant = payload.windBladeSoundVariant,
 	})
 	for _, enemy in ipairs(getEnemiesInRadius(hrp.Position, radius)) do
 		hitEnemy(plr, enemy, stats.damage, stats, hrp.Position, getEnemyPosition(enemy))
