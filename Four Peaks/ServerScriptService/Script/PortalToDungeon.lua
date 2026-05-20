@@ -18,6 +18,15 @@ local replicatedModules = (
 local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
 local PlayerData = require(serverModules:WaitForChild("PlayerData"))
 local Levels = require(replicatedModules:WaitForChild("Levels"))
+local servicesFolder = ServerScriptService:FindFirstChild("Services")
+local ErrorReporter = servicesFolder and servicesFolder:FindFirstChild("ErrorReporter") and require(servicesFolder.ErrorReporter) or nil
+
+local function protect(callbackName, context, callback)
+	if ErrorReporter then
+		return ErrorReporter.WrapCallback(callbackName, callback, context)
+	end
+	return callback
+end
 
 local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
 if not remoteEvents then
@@ -418,7 +427,10 @@ local function tryTeleport(players: {Player}, placeId: number, tpData: any)
 		end
 	end
 end
-prompt.Triggered:Connect(function(player: Player)
+prompt.Triggered:Connect(protect("PortalToDungeon.PromptTriggered", {
+	system = "PortalToDungeon",
+	phase = "lobby",
+}, function(player: Player)
 	if not player or not player.Parent then
 		return
 	end
@@ -432,9 +444,12 @@ prompt.Triggered:Connect(function(player: Player)
 		return
 	end
 	OpenLevelSelect:FireClient(player)
-end)
+end))
 
-RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: any, mode: any)
+RequestLevelTeleport.OnServerEvent:Connect(protect("PortalToDungeon.RequestLevelTeleport", {
+	system = "PortalToDungeon",
+	phase = "lobby",
+}, function(player: Player, levelKey: any, mode: any)
 	if not player or not player.Parent then
 		return
 	end
@@ -493,6 +508,6 @@ RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: an
 	local tpData = buildTeleportDataForLeader(player, runMode, partyId, leaderUserId)
 	tpData.LevelKey = entry.key
 	tryTeleport(group, entry.placeId, tpData)
-end)
+end))
 
 print("[PortalToDungeon] Ready (spells+loadout)")

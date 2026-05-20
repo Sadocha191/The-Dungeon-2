@@ -1,0 +1,9 @@
+name = "td2-roblox-error-bridge"
+main = "src/index.mjs"
+compatibility_date = "2026-05-20"
+
+[secrets]
+required = ["GITHUB_TOKEN", "GITHUB_OWNER", "GITHUB_REPO", "ROBLOX_ERROR_SECRET"]
+
+[observability.logs]
+enabled = true

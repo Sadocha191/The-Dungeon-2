@@ -2,6 +2,204 @@
 
 This file tracks AI-made repo changes and the intended rollback path.
 
+## 2026-05-20 - GitHub bridge backend for Roblox ErrorReporter
+
+### Scope
+
+- Added a standalone Cloudflare Worker backend under `backend/roblox-error-bridge/` for `POST /roblox-error`.
+- The bridge validates a shared secret from the `X-Roblox-Error-Secret` header before accepting any Roblox payload.
+- The bridge normalizes and truncates incoming `message`, `stackTrace`, and context fields before sending data to GitHub.
+- The bridge searches GitHub Issues by `errorCode` and:
+  - creates a new issue when none exists
+  - updates the issue body plus posts a comment when a matching issue already exists
+- The bridge creates the expected labels when possible and skips label creation failures without crashing the request path.
+- The bridge handles GitHub rate-limit responses with explicit `503` responses plus `Retry-After`.
+- Extended the Roblox-side `ErrorReporter.lua` in both places to send the new shared secret header and to warn when `GITHUB_BRIDGE_SECRET` is still unset.
+- Updated Roblox-facing documentation so the endpoint URL and shared secret wiring are explicit on both the backend and Roblox sides.
+
+### Files updated
+
+- `backend/roblox-error-bridge/src/index.mjs`
+- `backend/roblox-error-bridge/wrangler.toml`
+- `backend/roblox-error-bridge/.dev.vars.example`
+- `backend/roblox-error-bridge/README.md`
+- `Level/ServerScriptService/Services/ErrorReporter.lua`
+- `Four Peaks/ServerScriptService/Services/ErrorReporter.lua`
+- `ROBLOX_ERROR_REPORTING.md`
+- `CHANGELOG_AI.md`
+
+### Verification
+
+- Confirmed there was no existing backend app structure in the repo before adding the standalone bridge target.
+- Reviewed the new Worker code path to confirm:
+  - only `POST /roblox-error` is accepted
+  - secret validation happens before payload processing
+  - GitHub rate-limit errors are surfaced as `503`
+  - issue create/update paths both reuse the same normalized payload
+  - repeated reports are tracked in hidden issue metadata keyed by job id
+- Confirmed the Roblox-side reporter now has explicit placeholders for:
+  - `GITHUB_BRIDGE_URL`
+  - `GITHUB_BRIDGE_SECRET`
+- Did not deploy the Worker or call real GitHub APIs in this pass, so end-to-end verification still requires a real secret, repository, and Cloudflare deploy.
+
+### Risks
+
+- The backend is currently shipped as a ready Cloudflare Worker target, not a fully duplicated second Vercel code target, so Vercel is documented as a compatible contract rather than a separately committed runtime adapter.
+- Hidden issue metadata stores per-job occurrence maxima to avoid overcounting repeated reports from the same Roblox server session; if one issue spans a very large number of unique job ids over time, that hidden metadata block will grow.
+- Real GitHub label policies or repo permissions can still block label creation, though the request path now logs and continues instead of crashing.
+
+### Rollback
+
+- Revert the new `backend/roblox-error-bridge/` folder.
+- Revert `Level/ServerScriptService/Services/ErrorReporter.lua`, `Four Peaks/ServerScriptService/Services/ErrorReporter.lua`, `ROBLOX_ERROR_REPORTING.md`, and this changelog entry.
+- If desired, remove `GITHUB_BRIDGE_SECRET` usage and go back to the previous bridge URL-only Roblox configuration.
+
+## 2026-05-20 - Roblox dual-channel error reporting with GitHub bridge payloads
+
+### Scope
+
+- Replaced the old Discord-only server reporter flow in both main places with a shared `ErrorReporter` module while keeping the legacy `ErrorReportService` entrypoint as a compatibility wrapper.
+- Added a second HTTP transport for GitHub issue reporting through an external bridge endpoint so Roblox never needs a GitHub token.
+- Added stable `errorCode` generation using `placeId + scriptName + lineNumber + sanitized message`, with `TD2-ERR-XXXXXXXX` output.
+- Added per-error-code server-side occurrence tracking and a `60s` cooldown so repeated errors update counts without spamming outbound HTTP calls.
+- Extended server and client bootstrap payloads to include richer fields such as `scriptName`, `lineNumber`, `phase`, `sanitizedMessage`, and the GitHub bridge payload shape.
+- Added guarded `xpcall`-based wrappers around critical lobby and combat callbacks in:
+  - `WaveController`
+  - `SpellService`
+  - `WeaponCombat.server`
+  - `ProgressService`
+  - `BlacksmithService`
+  - `MissionRemotes` with `MissionService` context
+  - `PortalToDungeon`
+- Added dedicated setup and testing documentation for Roblox error reporting, backend URL placement, HTTP enablement, synthetic tests, and GitHub verification.
+
+### Files updated
+
+- `Level/ServerScriptService/Services/ErrorReporter.lua`
+- `Four Peaks/ServerScriptService/Services/ErrorReporter.lua`
+- `Level/ServerScriptService/Services/ErrorReportService.lua`
+- `Four Peaks/ServerScriptService/Services/ErrorReportService.lua`
+- `Level/ServerScriptService/ErrorBootstrap.server.lua`
+- `Four Peaks/ServerScriptService/ErrorBootstrap.server.lua`
+- `Level/StarterPlayer/StarterPlayerScripts/ClientErrorReporter.client.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/ClientErrorReporter.client.lua`
+- `Level/ServerScriptService/Script/SpellService.lua`
+- `Level/ServerScriptService/Script/WeaponCombat.server.lua`
+- `Level/ServerScriptService/Script/ProgressService.lua`
+- `Level/ServerScriptService/Script/Model.model/WaveController.lua`
+- `Four Peaks/ServerScriptService/Script/BlacksmithService.lua`
+- `Four Peaks/ServerScriptService/Script/MissionRemotes.lua`
+- `Four Peaks/ServerScriptService/Script/PortalToDungeon.lua`
+- `ROBLOX_ERROR_REPORTING.md`
+- `CHANGELOG_AI.md`
+
+### Verification
+
+- Confirmed both Roblox Studio places were available through MCP at task start and set `Cztery szczyty` active before repo work.
+- Verified the repo already had existing `ErrorReportService` plus `ErrorBootstrap` / `ClientErrorReporter` hooks in both places, then extended that structure instead of replacing the bootstrap flow wholesale.
+- Ran targeted repo searches to confirm the new reporting path covers the existing Discord transport, client relay, and the named critical services.
+- Reviewed diffs for the touched files to confirm:
+  - both places now expose a shared `ErrorReporter.lua`
+  - legacy `ErrorReportService.lua` stays as a compatibility wrapper
+  - client payloads now include `rawMessage`, `stackTrace`, `scriptName`, `lineNumber`, and `phase`
+  - critical server callbacks now use protected wrappers with service-specific context
+- Did not run a live Roblox playtest or outbound HTTP request in Studio in this pass, so runtime validation of real webhook / bridge delivery still needs manual testing after URLs are configured.
+
+### Risks
+
+- `Level/` and `Four Peaks/` keep separate copies of `ErrorReporter.lua`, so future config or logic changes must be mirrored in both files unless the project later consolidates the shared code path.
+- Because this pass stayed repo-side and did not sync or hot-load the scripts into live Studio, a manual Studio test is still required before considering the feature production-ready.
+- Protected wrappers prevent unhandled callback crashes from disappearing silently, but any callback that errors inside a long-running spawned loop will still stop that one loop instance after reporting, which matches Roblox task error behavior but is worth monitoring in playtests.
+
+### Rollback
+
+- Revert all files listed in this changelog entry.
+- Remove `ROBLOX_ERROR_REPORTING.md` if you want to discard the new documentation.
+- Restore the previous contents of `ErrorBootstrap.server.lua`, `ClientErrorReporter.client.lua`, and the touched gameplay services if you need to return to the Discord-only reporter.
+- No GitHub token rollback is needed in Roblox because the Roblox-side code never stores one.
+
+## 2026-05-20 - Poziom Slime procedural fallback after playtest
+
+### Scope
+
+- Re-ran a real `Play` verification pass after the first Slime/Golem animation-object patch.
+- Confirmed the first Slime pass was incomplete: the client track for `rbxassetid://99390813148093` could start, but the current live `Slime` rig still showed no meaningful visible deformation.
+- Inspected the imported Slime asset targets and the live Slime rig structure and found they do not line up cleanly: the asset references target names such as `Armature`, `slime 2`, and multiple `Cube.*` targets, while the current live Slime template exposes only one visible `Bone` plus `Motor6D` joints in a different structure.
+- Switched the live `Slime` template and the existing live `Workspace.Slime` model to `NpcLightweight = true` so the already-shipped procedural client presentation path now drives visible Slime motion during gameplay.
+- Left the previously added `Idle/Run/Attack` animation objects in place for recordkeeping, but the live fix for Slime is now the procedural path rather than the incompatible imported asset.
+
+### Files updated
+
+- `Level/ReplicatedStorage/Enemies/Normal/Slime/MANIFEST.md`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `game.ReplicatedStorage.Enemies.Normal.Slime.Attributes.NpcLightweight`
+- `game.Workspace.Slime.Attributes.NpcLightweight`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Poziom`.
+- Started a fresh `Play` session and inspected a live `Workspace.Enemies.Slime` instance on the client.
+- Verified that after `NpcLightweight = true`, the live Slime clone carries the lightweight attribute and its client-side pivot/rotation changes over time instead of remaining visually static.
+- Captured two client-side snapshots of the same live Slime roughly `0.8s` apart and confirmed both translation and rotation changed during runtime.
+- Kept this pass scoped to Slime because the user specifically reported Slime still looked unanimated; Golem was not changed in this follow-up pass.
+
+### Risks
+
+- This makes Slime use the project's procedural NPC motion path instead of the provided imported animation asset.
+- If you still want authored skeletal animation on Slime later, we will need either the correct asset for the current rig or a rig/template rebuild that matches the provided asset targets.
+
+### Rollback
+
+- In live Studio, clear `NpcLightweight` from `game.ReplicatedStorage.Enemies.Normal.Slime` and `game.Workspace.Slime`.
+- Revert `Level/ReplicatedStorage/Enemies/Normal/Slime/MANIFEST.md` and this changelog entry in the repo.
+
+## 2026-05-20 - Poziom Slime and Golem animation loop objects
+
+### Scope
+
+- Restored client-side animation inputs for the live `Poziom` `Slime` and `Golem` rigs without changing the global NPC presentation code path.
+- Added `Idle [Animation]`, `Run [Animation]`, and `Attack [Animation]` directly to `game.ReplicatedStorage.Enemies.Normal.Slime` with `AnimationId = rbxassetid://99390813148093`.
+- Added `Idle [Animation]`, `Run [Animation]`, and `Attack [Animation]` directly to `game.ReplicatedStorage.Enemies.Elite.Golem` with `AnimationId = rbxassetid://93249939332915`.
+- Added the same `Idle/Run/Attack` animation objects directly to the existing live `game.Workspace.Slime` and `game.Workspace.Golem` models, which were still missing animation descendants even after the first template-only pass.
+- Updated the local repo manifests so the non-script Studio change is recorded in the historical mirror.
+
+### Files updated
+
+- `Level/ReplicatedStorage/Enemies/Normal/Slime/MANIFEST.md`
+- `Level/ReplicatedStorage/Enemies/Elite/Golem/MANIFEST.md`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `game.ReplicatedStorage.Enemies.Normal.Slime.{Idle,Run,Attack}`
+- `game.ReplicatedStorage.Enemies.Elite.Golem.{Idle,Run,Attack}`
+- `game.Workspace.Slime.{Idle,Run,Attack}`
+- `game.Workspace.Golem.{Idle,Run,Attack}`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Poziom`.
+- Verified both live enemy templates and both preplaced `Workspace` models already expose `AnimationController` plus `Animator`.
+- Confirmed that before the final pass, `ReplicatedStorage` templates had only the first `Idle` addition while `Workspace.Slime` and `Workspace.Golem` still had `0` animation descendants.
+- Created the missing `Idle/Run/Attack` descendants and verified the final live asset ids are:
+  - `Slime` -> `rbxassetid://99390813148093`
+  - `Golem` -> `rbxassetid://93249939332915`
+- Started a fresh `Play` session and confirmed a live `Workspace.Enemies.Slime` instance now exposes all three animation descendants and is actively playing the assigned track on the client.
+- Ran a direct in-Play preview for cloned `Slime` and `Golem` rigs in front of the player and confirmed both animators keep the assigned track playing with advancing `TimePosition`, which verified the clips are actually moving on the target rigs during runtime.
+
+### Risks
+
+- This pass reuses one provided clip across `Idle`, `Run`, and `Attack`, so the enemies are now animated consistently but still do not have distinct authored movement or attack clips.
+- There is still no separate live `death` animation asset on these rigs.
+
+### Rollback
+
+- In live Studio, delete `Idle`, `Run`, and `Attack` from `game.ReplicatedStorage.Enemies.Normal.Slime`, `game.ReplicatedStorage.Enemies.Elite.Golem`, `game.Workspace.Slime`, and `game.Workspace.Golem`.
+- Revert `Level/ReplicatedStorage/Enemies/Normal/Slime/MANIFEST.md`, `Level/ReplicatedStorage/Enemies/Elite/Golem/MANIFEST.md`, and this changelog entry in the repo.
+
 ## 2026-05-12 - Poziom WindBlade persistent audio emitter pool
 
 ### Scope

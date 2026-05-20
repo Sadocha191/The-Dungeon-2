@@ -5,10 +5,20 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 local RunService = game:GetService("RunService")
 local PhysicsService = game:GetService("PhysicsService")
 local Debris = game:GetService("Debris")
 local TweenService = game:GetService("TweenService")
+local servicesFolder = ServerScriptService:FindFirstChild("Services")
+local ErrorReporter = servicesFolder and servicesFolder:FindFirstChild("ErrorReporter") and require(servicesFolder.ErrorReporter) or nil
+
+local function protect(callbackName, context, callback)
+	if ErrorReporter then
+		return ErrorReporter.WrapCallback(callbackName, callback, context)
+	end
+	return callback
+end
 
 -- Collision groups (prevent mob stacking/climbing on players and weapons)
 local GROUP_PLAYERS = "Players"
@@ -1085,7 +1095,10 @@ end
 local function createHazardZone(center: Vector3, radius: number, duration: number, tickRate: number, damage: number, color: Color3?)
 	local zone = telegraphCircle(center, radius, duration, color)
 	zone.Transparency = 0.48
-	task.spawn(function()
+	task.spawn(protect("WaveController.CreateHazardZone", {
+		system = "WaveController",
+		phase = "combat",
+	}, function()
 		local remaining = math.max(0.05, tonumber(duration) or 0)
 		while remaining > 0 do
 			if not RunStarted.Value or not anyPlayersAlive() then
@@ -1100,11 +1113,14 @@ local function createHazardZone(center: Vector3, radius: number, duration: numbe
 				remaining -= step
 			end
 		end
-	end)
+	end))
 end
 
 local function scheduleGameplayDelay(delaySeconds: number, callback: () -> ())
-	task.spawn(function()
+	task.spawn(protect("WaveController.ScheduleGameplayDelay", {
+		system = "WaveController",
+		phase = "combat",
+	}, function()
 		local remaining = math.max(0, tonumber(delaySeconds) or 0)
 		while remaining > 0 do
 			if not RunStarted.Value or not anyPlayersAlive() then
@@ -1122,7 +1138,7 @@ local function scheduleGameplayDelay(delaySeconds: number, callback: () -> ())
 			return
 		end
 		callback()
-	end)
+	end))
 end
 
 local function abilityReady(controller, abilityId: string, now: number)
@@ -2077,7 +2093,10 @@ local function ensurePortal()
 		return true
 	end
 
-	prompt.Triggered:Connect(function(plr)
+	prompt.Triggered:Connect(protect("WaveController.PortalPrompt", {
+		system = "WaveController",
+		phase = "combat",
+	}, function(plr)
 		if not RunStarted.Value then return end
 		if plr:GetAttribute("RunEnded") == true then return end
 
@@ -2093,7 +2112,7 @@ local function ensurePortal()
 		if bossDefeated then
 			endRun("Victory")
 		end
-	end)
+	end))
 
 	setPromptState()
 	refreshPortalPromptState = setPromptState
@@ -2103,11 +2122,14 @@ local function ensurePortal()
 end
 
 -- Keep portal present from the start of the run
-RunStarted.Changed:Connect(function(v)
+RunStarted.Changed:Connect(protect("WaveController.RunStartedChanged", {
+	system = "WaveController",
+	phase = "combat",
+}, function(v)
 	if v == true then
 		ensurePortal()
 	end
-end)
+end))
 
 if RunStarted.Value == true then
 	ensurePortal()
@@ -2254,7 +2276,10 @@ end
 local lastHudPush = 0
 local lastSpawnAt = 0
 
-RunService.Heartbeat:Connect(function()
+RunService.Heartbeat:Connect(protect("WaveController.Heartbeat", {
+	system = "WaveController",
+	phase = "combat",
+}, function()
     if not RunStarted.Value then
         return
     end
@@ -2408,7 +2433,7 @@ RunService.Heartbeat:Connect(function()
 	end
 
 	maybeSpawnBonusElite()
-end)
+end))
 
 print("[HordeController] Ready (time-based)")
 

@@ -7,6 +7,15 @@ local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
 local CraftingService = require(serverModules:WaitForChild("CraftingService"))
 local WeaponCatalog = require(serverModules:WaitForChild("WeaponCatalog"))
+local servicesFolder = ServerScriptService:FindFirstChild("Services")
+local ErrorReporter = servicesFolder and servicesFolder:FindFirstChild("ErrorReporter") and require(servicesFolder.ErrorReporter) or nil
+
+local function protect(callbackName, context, callback)
+	if ErrorReporter then
+		return ErrorReporter.WrapCallback(callbackName, callback, context)
+	end
+	return callback
+end
 
 local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
 if not remoteEvents then
@@ -66,12 +75,15 @@ local function bindBlacksmithPrompt(prompt: ProximityPrompt)
 	end
 
 	blacksmithPrompt = prompt
-	blacksmithPromptConnection = prompt.Triggered:Connect(function(player)
+	blacksmithPromptConnection = prompt.Triggered:Connect(protect("BlacksmithService.PromptTriggered", {
+		system = "BlacksmithService",
+		phase = "lobby",
+	}, function(player)
 		if not tutorialComplete(player) then
 			return
 		end
 		OpenBlacksmithUI:FireClient(player)
-	end)
+	end))
 end
 
 local function ensureBlacksmithPrompt()
@@ -221,7 +233,10 @@ end
 
 watchBlacksmithPrompt()
 
-BlacksmithAction.OnServerEvent:Connect(function(player, payload)
+BlacksmithAction.OnServerEvent:Connect(protect("BlacksmithService.ActionRemote", {
+	system = "BlacksmithService",
+	phase = "lobby",
+}, function(player, payload)
 	if typeof(payload) ~= "table" then
 		return
 	end
@@ -299,14 +314,20 @@ BlacksmithAction.OnServerEvent:Connect(function(player, payload)
 		reason = reason,
 		details = ok == true and details or resultDetails,
 	})
-end)
+end))
 
-Players.PlayerAdded:Connect(function(player)
+Players.PlayerAdded:Connect(protect("BlacksmithService.PlayerAdded", {
+	system = "BlacksmithService",
+	phase = "lobby",
+}, function(player)
 	PlayerStateStore.Load(player)
-end)
+end))
 
-Players.PlayerRemoving:Connect(function(player)
+Players.PlayerRemoving:Connect(protect("BlacksmithService.PlayerRemoving", {
+	system = "BlacksmithService",
+	phase = "lobby",
+}, function(player)
 	PlayerStateStore.Save(player, true)
-end)
+end))
 
 print("[BlacksmithService] Ready")

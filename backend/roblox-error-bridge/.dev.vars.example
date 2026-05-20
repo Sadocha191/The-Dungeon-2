@@ -1,0 +1,4 @@
+GITHUB_TOKEN=ghp_replace_me
+GITHUB_OWNER=your-github-owner
+GITHUB_REPO=your-github-repo
+ROBLOX_ERROR_SECRET=replace-with-the-same-secret-you-put-in-roblox

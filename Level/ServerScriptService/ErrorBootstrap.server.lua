@@ -36,7 +36,7 @@ local function ensureRemoteEvent(parent, name)
 end
 
 local servicesFolder = ensureFolder(ServerScriptService, "Services")
-local ErrorReportService = require(servicesFolder:WaitForChild("ErrorReportService"))
+local ErrorReporter = require(servicesFolder:WaitForChild("ErrorReporter"))
 
 local remotesFolder = ensureFolder(ReplicatedStorage, "Remotes")
 local reportClientErrorRemote = ensureRemoteEvent(remotesFolder, "ReportClientError")
@@ -51,12 +51,17 @@ local function sanitizeClientPayload(payload)
 	end
 
 	return {
+		rawMessage = payload.rawMessage,
 		message = payload.message,
 		stack = payload.stack,
+		stackTrace = payload.stackTrace,
 		system = payload.system,
+		scriptName = payload.scriptName,
+		lineNumber = payload.lineNumber,
 		runMode = payload.runMode,
 		level = payload.level,
 		wave = payload.wave,
+		phase = payload.phase,
 		extraContext = typeof(payload.extraContext) == "table" and payload.extraContext or nil,
 	}
 end
@@ -147,18 +152,22 @@ end)
 
 triggerServerTest(ReplicatedStorage:GetAttribute(SERVER_TEST_ATTRIBUTE))
 
-_G.ErrorWebhookTest = _G.ErrorWebhookTest or {}
+local errorReporterTest = _G.ErrorReporterTest or _G.ErrorWebhookTest or {}
+_G.ErrorReporterTest = errorReporterTest
+_G.ErrorWebhookTest = errorReporterTest
 
-function _G.ErrorWebhookTest.TriggerServer(rawToken)
+function errorReporterTest.TriggerServer(rawToken)
 	local token = normalizeTriggerToken(rawToken) or buildTestToken("server")
 	ReplicatedStorage:SetAttribute(SERVER_TEST_ATTRIBUTE, token)
 	return token
 end
 
-function _G.ErrorWebhookTest.TriggerClient(target, rawToken)
+function errorReporterTest.TriggerClient(target, rawToken)
 	local testPlayer = triggerClientTest(target, rawToken)
 	return testPlayer and testPlayer.Name or nil
 end
+
+ErrorReporter.WarnIfHttpDisabled()
 
 reportClientErrorRemote.OnServerEvent:Connect(function(player, payload)
 	local sanitizedPayload = sanitizeClientPayload(payload)
@@ -167,7 +176,7 @@ reportClientErrorRemote.OnServerEvent:Connect(function(player, payload)
 	end
 
 	local ok, err = pcall(function()
-		ErrorReportService.ReportClientError(player, sanitizedPayload)
+		ErrorReporter.ReportClientError(player, sanitizedPayload)
 	end)
 
 	if not ok then
@@ -176,17 +185,24 @@ reportClientErrorRemote.OnServerEvent:Connect(function(player, payload)
 end)
 
 ScriptContext.Error:Connect(function(message, stackTrace, scriptInstance)
-	local system = "N/A"
+	local system = "Server"
 	local extraContext = {}
 
 	if typeof(scriptInstance) == "Instance" then
-		system = scriptInstance:GetFullName()
-		extraContext.ScriptName = scriptInstance.Name
+		system = scriptInstance.Name
+		extraContext.ScriptPath = scriptInstance:GetFullName()
 		extraContext.ClassName = scriptInstance.ClassName
 	end
 
 	local ok, err = pcall(function()
-		ErrorReportService.ReportServerError(message, stackTrace, system, extraContext)
+		ErrorReporter.ReportError(message, stackTrace, {
+			sourceType = "server",
+			errorType = "ServerError",
+			system = system,
+			scriptInstance = scriptInstance,
+			scriptName = typeof(scriptInstance) == "Instance" and scriptInstance.Name or nil,
+			extra = extraContext,
+		})
 	end)
 
 	if not ok then

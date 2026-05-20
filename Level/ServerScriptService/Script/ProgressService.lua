@@ -52,6 +52,15 @@ end
 if not RunStatsService then
 	error("[ProgressService] Missing RunStatsService module")
 end
+local servicesFolder = ServerScriptService:FindFirstChild("Services")
+local ErrorReporter = servicesFolder and servicesFolder:FindFirstChild("ErrorReporter") and require(servicesFolder.ErrorReporter) or nil
+
+local function protect(callbackName, context, callback)
+	if ErrorReporter then
+		return ErrorReporter.WrapCallback(callbackName, callback, context)
+	end
+	return callback
+end
 
 -- Spell defs
 local SpellDefs
@@ -479,7 +488,11 @@ local function hookHealthForMissions(plr: Player)
 		end)
 
 		-- low HP sampling (4Hz)
-		task.spawn(function()
+		task.spawn(protect("ProgressService.LowHpSampler", {
+			system = "ProgressService",
+			phase = "combat",
+			player = plr,
+		}, function()
 			while char.Parent and hum.Parent and hum.Health > 0 do
 				local rr = getRun(plr)
 				if rr.ended then break end
@@ -494,7 +507,7 @@ local function hookHealthForMissions(plr: Player)
 				syncLiveMissionProgress(plr)
 				task.wait(0.25)
 			end
-		end)
+		end))
 	end
 
 	if plr.Character then attach(plr.Character) end
@@ -530,7 +543,10 @@ local function syncHud(plr: Player)
 end
 
 
-PlayerProgressEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
+PlayerProgressEvent.OnServerEvent:Connect(protect("ProgressService.PlayerProgressEvent", {
+	system = "ProgressService",
+	phase = "combat",
+}, function(plr: Player, payload: any)
 	if not plr or not plr.Parent then
 		return
 	end
@@ -548,7 +564,7 @@ PlayerProgressEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 	if t == "requestSync" or t == "request" or t == "sync" then
 		syncHud(plr)
 	end
-end)
+end))
 local function parseUnlocked(plr: Player): {string}
 	local csv = plr:GetAttribute("UnlockedSpellsCSV")
 	if typeof(csv) ~= "string" or csv == "" then return {} end
@@ -680,7 +696,10 @@ local function pauseEnd(plr: Player)
 	setRunPauseSource(plr, getSingleLevelPauseSource(plr), false)
 end
 
-PauseMenuEvent.OnServerEvent:Connect(function(plr: Player, payload)
+PauseMenuEvent.OnServerEvent:Connect(protect("ProgressService.PauseMenuEvent", {
+	system = "ProgressService",
+	phase = "combat",
+}, function(plr: Player, payload)
 	if not plr or plr.Parent ~= Players then
 		return
 	end
@@ -707,7 +726,7 @@ PauseMenuEvent.OnServerEvent:Connect(function(plr: Player, payload)
 	end
 
 	recomputePauseState()
-end)
+end))
 
 
 local function finishUpgrade(plr: Player)
@@ -979,7 +998,10 @@ local function newToken(plr: Player): string
 	return ("%d:%d:%d"):format(plr.UserId, math.floor(os.clock()*1000), math.random(100000,999999))
 end
 
-SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
+SpellEvent.OnServerEvent:Connect(protect("ProgressService.SpellEvent", {
+	system = "ProgressService",
+	phase = "combat",
+}, function(plr: Player, payload: any)
 	if typeof(payload) ~= "table" then return end
 	local p = pending[plr.UserId]
 	if not p or payload.token ~= p.token then return end
@@ -1079,7 +1101,7 @@ SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 		SpellEvent:FireClient(plr, { type="offer", token=token, offers=offers })
 		return
 	end
-end)
+end))
 
 
 -- === Run stat growth (per level) ===

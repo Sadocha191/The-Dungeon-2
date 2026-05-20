@@ -197,6 +197,20 @@ local function inferSystem(message, stack)
 	return "Client"
 end
 
+local function inferScriptDetails(message, stack)
+	local scriptPath, lineNumber = string.match(message or "", "([%w%._/%-\\ ]+):(%d+)")
+	if not scriptPath then
+		scriptPath, lineNumber = string.match(stack or "", "([%w%._/%-\\ ]+):(%d+)")
+	end
+	if not scriptPath then
+		return nil, nil
+	end
+
+	local scriptName = scriptPath:match("([^%.\\/]+)$") or scriptPath
+	scriptName = scriptName:gsub("%.lua$", "")
+	return scriptName, tonumber(lineNumber)
+end
+
 local function buildPayload(rawMessage)
 	local message, stack = splitMessageAndStack(rawMessage)
 	if not message then
@@ -207,14 +221,21 @@ local function buildPayload(rawMessage)
 	local level = readContextValue({ "CurrentLevel", "LevelId", "LevelKey" })
 	local wave = readContextValue({ "CurrentWave", "Wave" })
 	local location = (runMode or level) and "Run" or "Lobby"
+	local scriptName, lineNumber = inferScriptDetails(message, stack)
+	local phase = location == "Run" and "combat" or "lobby"
 
 	return {
+		rawMessage = truncateText(rawMessage, 1600),
 		message = truncateText(message, 700),
 		stack = truncateText(stack, 1000),
+		stackTrace = truncateText(stack, 1000),
 		system = truncateText(inferSystem(message, stack), 256),
+		scriptName = truncateText(scriptName, 256),
+		lineNumber = lineNumber,
 		runMode = truncateText(runMode, 80),
 		level = truncateText(level, 120),
 		wave = truncateText(wave, 80),
+		phase = phase,
 		extraContext = {
 			Location = location,
 		},

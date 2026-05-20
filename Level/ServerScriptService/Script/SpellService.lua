@@ -46,6 +46,15 @@ local NpcService = require(findServerModule("NpcService") or error("[SpellServic
 local PlayerData = require(findServerModule("PlayerData") or error("[SpellService] Missing PlayerData"))
 local RunStatsService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("Stats"):WaitForChild("RunStatsService"))
 local WeaponConfigs = modFolder and require(modFolder:WaitForChild("WeaponConfigs"))
+local servicesFolder = ServerScriptService:FindFirstChild("Services")
+local ErrorReporter = servicesFolder and servicesFolder:FindFirstChild("ErrorReporter") and require(servicesFolder.ErrorReporter) or nil
+
+local function protect(callbackName, context, callback)
+	if ErrorReporter then
+		return ErrorReporter.WrapCallback(callbackName, callback, context)
+	end
+	return callback
+end
 
 local vfxRoot = workspace:FindFirstChild("SpellVFX")
 if not vfxRoot then
@@ -484,12 +493,16 @@ end
 
 local function applyTimedDot(plr, enemy, dps, duration)
 	local endAt = spellClock() + duration
-	task.spawn(function()
+	task.spawn(protect("SpellService.ApplyTimedDot", {
+		system = "SpellService",
+		phase = "combat",
+		player = plr,
+	}, function()
 		while spellClock() < endAt and enemyAlive(enemy) do
 			safeDamage(enemy, dps * 0.5, { player = plr, showFloating = false })
 			task.wait(0.5)
 		end
-	end)
+	end))
 end
 
 local function applyEffects(plr, enemy, stats, sourcePos)
@@ -1040,7 +1053,11 @@ local function runProjectile(plr, spellId, stats, hrp)
 
 	for index = 1, math.max(1, stats.count or 1) do
 		local assignedTarget = targets[index]
-		task.delay((index - 1) * 0.05, function()
+		task.delay((index - 1) * 0.05, protect("SpellService.RunProjectileDelay", {
+			system = "SpellService",
+			phase = "combat",
+			player = plr,
+		}, function()
 			if not isPlayerRunActive(plr) or isPaused() then
 				return
 			end
@@ -1057,7 +1074,7 @@ local function runProjectile(plr, spellId, stats, hrp)
 				return
 			end
 			fireProjectile(plr, origin, direction.Unit, stats.projectileSpeed or 90, searchRange, stats.damage, stats.pierce or 0, stats)
-		end)
+		end))
 	end
 end
 
@@ -1172,7 +1189,11 @@ local function runZone(plr, spellId, stats, hrp)
 	})
 
 	local endAt = spellClock() + duration
-	task.spawn(function()
+	task.spawn(protect("SpellService.RunZone", {
+		system = "SpellService",
+		phase = "combat",
+		player = plr,
+	}, function()
 		while spellClock() < endAt do
 			if not isPlayerRunActive(plr) then
 				break
@@ -1182,7 +1203,7 @@ local function runZone(plr, spellId, stats, hrp)
 			end
 			task.wait(tickRate)
 		end
-	end)
+	end))
 end
 
 local function runBeam(plr, spellId, stats, hrp)
@@ -1217,7 +1238,11 @@ local function runBeam(plr, spellId, stats, hrp)
 	})
 
 	local endAt = spellClock() + duration
-	task.spawn(function()
+	task.spawn(protect("SpellService.RunBeam", {
+		system = "SpellService",
+		phase = "combat",
+		player = plr,
+	}, function()
 		while spellClock() < endAt do
 			if not isPlayerRunActive(plr) then
 				break
@@ -1242,7 +1267,7 @@ local function runBeam(plr, spellId, stats, hrp)
 			end
 			task.wait(tickRate)
 		end
-	end)
+	end))
 end
 
 local function stopOrbitIfNeeded(plr, spellId)
@@ -1294,7 +1319,10 @@ local function stepPlayer(plr, dt)
 	end
 end
 
-RunService.Heartbeat:Connect(function(dt)
+RunService.Heartbeat:Connect(protect("SpellService.Heartbeat", {
+	system = "SpellService",
+	phase = "combat",
+}, function(dt)
 	if isPaused() then
 		return
 	end
@@ -1305,7 +1333,7 @@ RunService.Heartbeat:Connect(function(dt)
 			stopAllOrbitVfx(plr)
 		end
 	end
-end)
+end))
 
 Players.PlayerRemoving:Connect(function(plr)
 	state[plr.UserId] = nil

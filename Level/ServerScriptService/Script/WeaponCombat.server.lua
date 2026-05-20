@@ -26,6 +26,15 @@ local NpcService = require(findModule("NpcService") or error("[WeaponCombat] Mis
 local RunStatsService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("Stats"):WaitForChild("RunStatsService"))
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
 local WeaponConfigs = moduleFolder and moduleFolder:FindFirstChild("WeaponConfigs") and require(moduleFolder.WeaponConfigs) or nil
+local servicesFolder = ServerScriptService:FindFirstChild("Services")
+local ErrorReporter = servicesFolder and servicesFolder:FindFirstChild("ErrorReporter") and require(servicesFolder.ErrorReporter) or nil
+
+local function protect(callbackName, context, callback)
+	if ErrorReporter then
+		return ErrorReporter.WrapCallback(callbackName, callback, context)
+	end
+	return callback
+end
 
 local TYPE_DEFAULTS = {
 	Sword = {
@@ -304,7 +313,11 @@ local function applyBleed(plr: Player, enemyModel: Model, stats, runtime)
 			expiresAt = 0,
 		}
 		DOT_STATES[key] = entry
-		task.spawn(function()
+		task.spawn(protect("WeaponCombat.DotLoop", {
+			system = "WeaponCombat",
+			phase = "combat",
+			player = plr,
+		}, function()
 			while DOT_STATES[key] == entry do
 				if not isCombatPlayerActive(entry.player) or not NpcService.IsAlive(entry.enemy) then
 					break
@@ -332,7 +345,7 @@ local function applyBleed(plr: Player, enemyModel: Model, stats, runtime)
 				task.wait(DOT_TICK)
 			end
 			DOT_STATES[key] = nil
-		end)
+		end))
 	end
 
 	entry.stacks = math.min(maxStacks, (entry.stacks or 0) + 1)
@@ -473,7 +486,11 @@ local function startLoop(plr: Player)
 	}
 	loops[plr] = state
 
-	task.spawn(function()
+	task.spawn(protect("WeaponCombat.AttackLoop", {
+		system = "WeaponCombat",
+		phase = "combat",
+		player = plr,
+	}, function()
 		local last = 0
 		while state.alive and plr.Parent do
 			task.wait(0.05)
@@ -678,7 +695,7 @@ local function startLoop(plr: Player)
 		if loops[plr] == state then
 			loops[plr] = nil
 		end
-	end)
+	end))
 end
 
 Players.PlayerAdded:Connect(function(plr)
