@@ -2,6 +2,266 @@
 
 This file tracks AI-made repo changes and the intended rollback path.
 
+## 2026-05-30 - Cztery szczyty chest warning and DataStore queue cleanup
+
+### Scope
+
+- Disabled the stray live lobby `ChestRewardClient` so it no longer waits forever for level-only `ChestItemConfig`, `StatsConfig`, and `ChestItemEvent` dependencies.
+- Added an in-flight `PlayerStateStore.Load` guard so concurrent lobby startup systems share one `GetAsync` per player instead of queueing duplicate loads.
+- Added dirty-only `PlayerStateStore.Flush` / `SaveScheduler.Flush` for leave and shutdown lifecycle saves.
+- Kept explicit `PlayerStateStore.Save` / `ForceSave` behavior for intentional immediate saves such as profile/race changes.
+- Removed redundant `PlayerStateStore.Load` / `Save` lifecycle hooks from `ProfilesManager`, `BlacksmithService`, and the inventory join path.
+
+### Files updated
+
+- `Four Peaks/ServerScriptService/ModuleScript/PlayerStateStore.lua`
+- `Four Peaks/ServerScriptService/ModuleScript/SaveScheduler.lua`
+- `Four Peaks/ServerScriptService/ModuleScript/ProfilesManager.lua`
+- `Four Peaks/ServerScriptService/Script/BlacksmithService.lua`
+- `Four Peaks/ServerScriptService/Script/InventoryService.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- Confirmed the active Roblox Studio instance was `Cztery szczyty`.
+- Synced the matching lobby source changes into:
+  - `game.ServerScriptService.ModuleScript.PlayerStateStore`
+  - `game.ServerScriptService.ModuleScript.SaveScheduler`
+  - `game.ServerScriptService.ModuleScript.ProfilesManager`
+  - `game.ServerScriptService.Script.BlacksmithService`
+  - `game.ServerScriptService.Script.InventoryService`
+- Set `game.StarterPlayer.StarterPlayerScripts.LocalScript.ChestRewardClient.Disabled = true`.
+- Did not port level chest modules into the lobby.
+
+### Verification
+
+- Verified live Studio `loadstring` compilation for:
+  - `SaveScheduler` lines `152`, chars `3457`
+  - `PlayerStateStore` lines `480`, chars `13834`
+  - `ProfilesManager` lines `105`, chars `3157`
+  - `BlacksmithService` lines `313`, chars `8990`
+  - `InventoryService` lines `325`, chars `10729`
+- Confirmed live `ChestRewardClient.Disabled == true`.
+- Ran a short Studio Play/Stop pass; Output did not show the previous `ChestItemConfig` infinite-yield warning or the `DataStore request was added to queue` warning.
+- Existing `StyleRule CornerRadius` warnings were still present and were left out of scope.
+- Ran `git diff --check` on the touched repo files; it reported only LF/CRLF conversion warnings and no whitespace errors.
+
+### Risks
+
+- `ChestRewardClient` remains a live Studio-only script with a disabled property; there is no matching local source mirror for that disabled state in this pass.
+- Dirty-only leave/shutdown flushes reduce DataStore pressure but intentionally skip writes when no state changed.
+- Explicit `Save` / `ForceSave` calls can still consume DataStore budget by design.
+
+### Rollback
+
+- Revert the files listed in this entry.
+- In live `Cztery szczyty` Studio, restore the previous sources for the five listed scripts.
+- Re-enable `game.StarterPlayer.StarterPlayerScripts.LocalScript.ChestRewardClient` only if the level chest dependencies are also restored in lobby.
+
+## 2026-05-30 - PlayerData cache release and Warden halberd input cleanup
+
+### Scope
+
+- Added `PlayerData.Release` in both places so player profile cache tables are cleared after a deferred leave/shutdown save path.
+- `PlayerData.Release` waits briefly for an active save, skips release while that save is still active, force-saves cached data when possible, then clears `_cache`, `_dirty`, and `_saving`.
+- Hooked `Players.PlayerRemoving` and `game:BindToClose` for `PlayerData` in both `Four Peaks` and `Level`.
+- Cleared small per-user cooldown tables in lobby `CharacterCreation` and `PortalToDungeon` when a player leaves.
+- Updated the Warden's Halberd `Local Gui` in both places so equip-time mouse input connections are disconnected on unequip and before reconnecting.
+- Left broader weapon loop cleanup out of scope because those loops are behavior-sensitive and need a weapon-by-weapon pass.
+
+### Files updated
+
+- `Four Peaks/ServerScriptService/ModuleScript/PlayerData.lua`
+- `Level/ServerScriptService/ModuleScript/PlayerData.lua`
+- `Four Peaks/ServerScriptService/Script/CharacterCreation.lua`
+- `Four Peaks/ServerScriptService/Script/PortalToDungeon.lua`
+- `Four Peaks/ServerStorage/WeaponTemplates/Halberd/Warden's Halberd/LocalScript/Local Gui.lua`
+- `Level/ServerStorage/WeaponTemplates/Halberd/Warden's Halberd/LocalScript/Local Gui.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- Confirmed the active Roblox Studio instance was `Cztery szczyty`.
+- Synced the matching lobby/Four Peaks changes into:
+  - `game.ServerScriptService.ModuleScript.PlayerData`
+  - `game.ServerScriptService.Script.CharacterCreation`
+  - `game.ServerScriptService.Script.PortalToDungeon`
+  - `game.ServerStorage.WeaponTemplates.Halberd.Warden’s Halberd.Local Gui`
+- Did not sync `Level`/`Poziom` live objects because only the `Cztery szczyty` Studio instance was available.
+
+### Verification
+
+- Verified live Studio `loadstring` compilation for:
+  - `PlayerData` lines `513`, chars `14934`
+  - `CharacterCreation` lines `101`, chars `3272`
+  - `PortalToDungeon` lines `542`, chars `15468`
+  - `Warden’s Halberd.Local Gui` lines `121`, chars `2612`
+- Ran a short Studio Play/Stop pass; Output showed only existing `StyleRule CornerRadius` warnings and no errors from the changed scripts.
+- Ran `git diff --check` on the touched repo files; it reported only LF/CRLF conversion warnings and no whitespace errors.
+- Checked for local Luau/lint tools (`luau`, `luau-lsp`, `selene`, `stylua`); none were available in this shell.
+
+### Risks
+
+- If a force-save fails during release, the cache is still cleared after logging a warning so player-leave memory does not accumulate.
+- If a save remains active beyond the short release wait, cache release is skipped to avoid clearing state underneath an in-flight write.
+- `Level` repo changes still need to be synced into a live `Poziom` Studio session before place-specific runtime verification.
+- Existing Studio-vs-repo drift outside these targeted edits was left untouched.
+
+### Rollback
+
+- Revert the files listed in this entry.
+- In live `Cztery szczyty` Studio, restore the previous sources for the four listed objects.
+- For `Level`, revert the repo files until a later `Poziom` sync pass can apply or discard the same change intentionally.
+
+## 2026-05-30 - Cztery szczyty persistent lobby settings and faster FPS counter
+
+### Scope
+
+- Added `PlayerSettingsService` for the lobby place so client settings are saved through the existing `PlayerStateStore` / `SaveScheduler` path instead of only living in client attributes.
+- Persisted the current lobby settings keys:
+  - `ShowFPSCounter`
+  - `ShowScreenButtons`
+  - `CameraZoomPreset`
+- Added the remotes used by the settings flow:
+  - `RemoteFunctions.RF_GetPlayerSettings`
+  - `RemoteEvents.PlayerSettingsEvent`
+- Updated `SettingsClient` to load saved settings on startup, apply them to `PlayerGui` attributes, and send later attribute changes back to the server.
+- Kept the existing `TeleportService` FPS visibility setting as a same-session fallback, but the durable source is now the saved player state.
+- Reduced the FPS counter sample interval from `0.35s` to `0.15s` so the readout updates more responsively.
+- Updated the `roblox/CzterySzczyty` remote manifests for the new settings remotes.
+
+### Files updated
+
+- `Four Peaks/ServerScriptService/Script/PlayerSettingsService.lua`
+- `Four Peaks/StarterGui/Settings/SettingsClient.lua`
+- `Four Peaks/StarterGui/FPSCounter/FPSCounterClient.lua`
+- `roblox/CzterySzczyty/ReplicatedStorage/RemoteEvents/MANIFEST.md`
+- `roblox/CzterySzczyty/ReplicatedStorage/RemoteFunctions/MANIFEST.md`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `game.ServerScriptService.Script.PlayerSettingsService`
+- `game.StarterGui.Settings.SettingsClient`
+- `game.StarterGui.FPSCounter.FPSCounterClient`
+- `game.ReplicatedStorage.RemoteEvents.PlayerSettingsEvent`
+- `game.ReplicatedStorage.RemoteFunctions.RF_GetPlayerSettings`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Cztery szczyty` before live edits.
+- Synced the changed sources into live Studio and verified `loadstring` compilation for:
+  - `SettingsClient` length `14085`, checksum `2115669565`
+  - `FPSCounterClient` length `2306`, checksum `232743585`
+  - `PlayerSettingsService` length `3190`, checksum `447237832`
+- Started a short Play session and confirmed one player runtime plus the new `PlayerSettingsEvent [RemoteEvent]` and `RF_GetPlayerSettings [RemoteFunction]` objects existed.
+- Checked Studio Output after the Play pass; only existing `StyleRule CornerRadius` warnings were present, with no new settings or FPS errors.
+- Ran `git diff --check` on the touched files; it reported only existing LF/CRLF conversion warnings and no whitespace errors.
+
+### Risks
+
+- Settings are marked dirty and saved through the existing scheduler, so persistence follows the same timing and leave/shutdown force-save behavior as other `PlayerStateStore` state.
+- The FPS counter can still briefly use the local teleport fallback before `SettingsClient` applies saved settings during startup.
+- The new remotes add names to the lobby remote contract; future cleanup should keep them unless the settings client/server flow is changed together.
+
+### Rollback
+
+- Revert the files listed in this entry.
+- In live Studio, restore the prior `SettingsClient` and `FPSCounterClient` sources, delete `game.ServerScriptService.Script.PlayerSettingsService`, and remove `PlayerSettingsEvent` / `RF_GetPlayerSettings` if no other code has started using them.
+
+## 2026-05-20 - Roblox ErrorReporter startup diagnostics and server chat triggers
+
+### Scope
+
+- Added startup diagnostics in both `ErrorBootstrap.server.lua` files so server boot now logs whether `_G.ErrorReporterTest` exists and prints a one-line `PrintConfig` summary.
+- Expanded `ErrorReporter.lua` in both places with earlier runtime diagnostics:
+  - `ReportServerError called`
+  - `ReportError called`
+  - channel enabled/reason logs for Discord and GitHub
+  - explicit before/after logs around `SendToGithubBridge`
+- Extended `GetConfigStatus()` / `PrintConfig()` to include human-readable reason fields for disabled channels without exposing secrets.
+- Reused the existing Studio-only `Level` debug chat command system for:
+  - `;debug errorconfig`
+  - `;debug errorreport [message]`
+  - `;td` aliases
+- Added a minimal Studio-only server chat command script for `Four Peaks` with the same `errorconfig` and `errorreport` commands.
+- Updated Roblox reporting docs to point testing toward server-side hooks and chat commands instead of client Command Bar.
+
+### Files updated
+
+- `Level/ServerScriptService/Services/ErrorReporter.lua`
+- `Four Peaks/ServerScriptService/Services/ErrorReporter.lua`
+- `Level/ServerScriptService/ErrorBootstrap.server.lua`
+- `Four Peaks/ServerScriptService/ErrorBootstrap.server.lua`
+- `Level/ServerScriptService/Script/DebugCommandService.server.lua`
+- `Four Peaks/ServerScriptService/Script/ErrorReporterDebugCommand.server.lua`
+- `ROBLOX_ERROR_REPORTING.md`
+- `CHANGELOG_AI.md`
+
+### Verification
+
+- Re-read both `ErrorReportService.lua` wrapper files and confirmed they still only delegate through `require(script.Parent:WaitForChild("ErrorReporter"))`.
+- Confirmed both `ErrorReporter.lua` copies still issue GitHub requests via `HttpService:RequestAsync` with:
+  - `Method = "POST"`
+  - `Content-Type = "application/json"`
+  - `X-Roblox-Error-Secret = GITHUB_BRIDGE_SECRET`
+- Confirmed the new Level/Four Peaks bootstrap flow now invokes `PrintConfig()` from the server side during startup.
+- Did not sync these source changes into live Studio in this pass because direct script read/write MCP tools were not available in the current tool set, so live runtime verification still requires a Studio-side sync step before testing.
+
+### Risks
+
+- Output is now intentionally noisier during ErrorReporter debugging so missing config and request flow are obvious.
+- `Four Peaks` gets a new Studio-only chat command script, which is intentionally minimal and separate from lobby gameplay logic, but it is still one more server script to keep mirrored with future diagnostics changes.
+
+### Rollback
+
+- Revert `Level/ServerScriptService/Services/ErrorReporter.lua`, `Four Peaks/ServerScriptService/Services/ErrorReporter.lua`, `Level/ServerScriptService/ErrorBootstrap.server.lua`, `Four Peaks/ServerScriptService/ErrorBootstrap.server.lua`, `Level/ServerScriptService/Script/DebugCommandService.server.lua`, `Four Peaks/ServerScriptService/Script/ErrorReporterDebugCommand.server.lua`, `ROBLOX_ERROR_REPORTING.md`, and this changelog entry.
+
+## 2026-05-20 - Roblox GitHub bridge diagnostics and manual trigger fix
+
+### Scope
+
+- Re-checked both `ErrorReportService.lua` files and confirmed they are still compatibility wrappers that delegate directly to `ErrorReporter`, with no separate Discord-only logic in the wrapper path.
+- Added explicit Roblox-side diagnostics in both `ErrorReporter.lua` copies for GitHub bridge sends:
+  - bridge enabled / URL configured / secret configured booleans
+  - exact request URL used for the bridge call
+  - HTTP status code plus truncated response body
+  - thrown `RequestAsync` error text when no response is returned
+- Normalized `GITHUB_BRIDGE_URL` so a configured base URL is forced to end with `/roblox-error`, with a warning the first time that correction is applied.
+- Expanded delivery metadata in `ReportError` so manual tests can show the per-channel result for Discord and GitHub bridge.
+- Changed `_G.ErrorReporterTest.TriggerServer(...)` in both `ErrorBootstrap.server.lua` files to call the shared reporter directly with `forceSend = true`, and added:
+  - `_G.ErrorReporterTest.PrintConfig()`
+  - `_G.ErrorReporterTest.TriggerUnhandledServerError(...)` for the older runtime-error path
+- Updated Roblox reporting docs with the new helper flow and expected Output logs.
+
+### Files updated
+
+- `Level/ServerScriptService/Services/ErrorReporter.lua`
+- `Four Peaks/ServerScriptService/Services/ErrorReporter.lua`
+- `Level/ServerScriptService/ErrorBootstrap.server.lua`
+- `Four Peaks/ServerScriptService/ErrorBootstrap.server.lua`
+- `ROBLOX_ERROR_REPORTING.md`
+- `CHANGELOG_AI.md`
+
+### Verification
+
+- Re-read both `ErrorReportService.lua` wrappers and confirmed they still only `require()` the shared `ErrorReporter` module.
+- Checked the updated reporter code to confirm GitHub bridge sends still use `HttpService:RequestAsync` with:
+  - `Method = "POST"`
+  - `Content-Type = "application/json"`
+  - `X-Roblox-Error-Secret = GITHUB_BRIDGE_SECRET`
+- Confirmed the new URL normalization guarantees the outbound bridge request ends with `/roblox-error`.
+- Did not run a live Studio HTTP request in this pass, so the new diagnostics still need one manual Studio test against the deployed Worker.
+
+### Risks
+
+- The new GitHub bridge diagnostics intentionally increase Output verbosity for each send attempt so setup failures are obvious.
+- `_G.ErrorReporterTest.TriggerServer(...)` now tests the shared reporter path directly instead of relying only on an unhandled runtime exception; the old behavior remains available as `TriggerUnhandledServerError(...)`.
+
+### Rollback
+
+- Revert `Level/ServerScriptService/Services/ErrorReporter.lua`, `Four Peaks/ServerScriptService/Services/ErrorReporter.lua`, `Level/ServerScriptService/ErrorBootstrap.server.lua`, `Four Peaks/ServerScriptService/ErrorBootstrap.server.lua`, `ROBLOX_ERROR_REPORTING.md`, and this changelog entry.
+
 ## 2026-05-20 - GitHub bridge backend for Roblox ErrorReporter
 
 ### Scope

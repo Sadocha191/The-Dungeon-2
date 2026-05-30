@@ -5,6 +5,19 @@ currentgrip=originalgrip
 
 enabled=true
 taunting=false
+local mouseButtonConnection = nil
+local mouseKeyConnection = nil
+
+local function disconnectMouseConnections()
+	if mouseButtonConnection then
+		mouseButtonConnection:Disconnect()
+		mouseButtonConnection = nil
+	end
+	if mouseKeyConnection then
+		mouseKeyConnection:Disconnect()
+		mouseKeyConnection = nil
+	end
+end
 
 function waitfor(parent,name)
 	while true do
@@ -44,13 +57,14 @@ function onEquippedLocal(mouse)
 		print("Mouse not found")
 		return 
 	end
+	disconnectMouseConnections()
 	mouse.Icon="rbxasset://textures\\GunCursor.png"
-	mouse.Button1Down:connect(function()
+	mouseButtonConnection = mouse.Button1Down:connect(function()
 		onButton1Down(mouse)
 	end)
 	waitfor(sp,"Taunting")
 	waitfor(sp,"Taunt")
-	mouse.KeyDown:connect(function(key)
+	mouseKeyConnection = mouse.KeyDown:connect(function(key)
 		key=string.lower(key)
 		if key=="l" or key=="t" or key=="g" then	-- :3
 			local h=sp.Parent:FindFirstChild("Humanoid")
@@ -73,6 +87,7 @@ function onEquippedLocal(mouse)
 	end)
 end
 sp.Equipped:connect(onEquippedLocal)
+sp.Unequipped:connect(disconnectMouseConnections)
 
 waitfor(sp,"RunAnim")
 sp.RunAnim.Changed:connect(function()

@@ -94,7 +94,6 @@ function ProfilesManager.RerollRaceOnce(player: Player)
 end
 
 Players.PlayerAdded:Connect(function(player)
-	PlayerStateStore.Load(player)
 	ProfilesManager.LoadIfAny(player)
 end)
 

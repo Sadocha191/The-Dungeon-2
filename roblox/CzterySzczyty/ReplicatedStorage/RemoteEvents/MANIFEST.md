@@ -25,6 +25,7 @@
 - `OpenLevelSelect [RemoteEvent]`
 - `OpenWeaponBannerUI [RemoteEvent]`
 - `PartyAction [RemoteEvent]`
+- `PlayerSettingsEvent [RemoteEvent]`
 - `PlayerProgressEvent [RemoteEvent]`
 - `RequestLevelTeleport [RemoteEvent]`
 - `RerollRaceRequest [RemoteEvent]`
@@ -40,7 +41,7 @@
 
 ## RemoteEvents / RemoteFunctions
 
-- `RemoteEvents`: `AttackRequest`, `BlacksmithAction`, `BlacksmithSync`, `ChangeRace`, `CreateProfile`, `CreateProfileRequest`, `CreateProfileResponse`, `DialogueFinishedEvent`, `EquipItem`, `InventoryAction`, `InventorySync`, `OpenBlacksmithUI`, `OpenCharacterCreation`, `OpenDialogueEvent`, `OpenLevelSelect`, `OpenWeaponBannerUI`, `PartyAction`, `PlayerProgressEvent`, `RequestLevelTeleport`, `RerollRaceRequest`, `RerollRaceResponse`, `SpellEvent`, `TeleportStatus`, `TutorialTargetEvent`, `WitchShopEvent`
+- `RemoteEvents`: `AttackRequest`, `BlacksmithAction`, `BlacksmithSync`, `ChangeRace`, `CreateProfile`, `CreateProfileRequest`, `CreateProfileResponse`, `DialogueFinishedEvent`, `EquipItem`, `InventoryAction`, `InventorySync`, `OpenBlacksmithUI`, `OpenCharacterCreation`, `OpenDialogueEvent`, `OpenLevelSelect`, `OpenWeaponBannerUI`, `PartyAction`, `PlayerSettingsEvent`, `PlayerProgressEvent`, `RequestLevelTeleport`, `RerollRaceRequest`, `RerollRaceResponse`, `SpellEvent`, `TeleportStatus`, `TutorialTargetEvent`, `WitchShopEvent`
 - `RemoteFunctions`: none in this folder
 
 ## Attributes

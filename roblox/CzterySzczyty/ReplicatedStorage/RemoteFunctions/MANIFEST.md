@@ -15,6 +15,7 @@
 - `RF_ClaimMission [RemoteFunction]`
 - `RF_GetInventorySnapshot [RemoteFunction]`
 - `RF_GetMissions [RemoteFunction]`
+- `RF_GetPlayerSettings [RemoteFunction]`
 - `RF_GetTutorialState [RemoteFunction]`
 - `RollBanner [RemoteFunction]`
 
@@ -25,7 +26,7 @@
 ## RemoteEvents / RemoteFunctions
 
 - `RemoteEvents`: none in this folder
-- `RemoteFunctions`: `ConvertWeaponPoints`, `GetActiveBanners`, `GetGachaState`, `PartyQuery`, `RF_ClaimMission`, `RF_GetInventorySnapshot`, `RF_GetMissions`, `RF_GetTutorialState`, `RollBanner`
+- `RemoteFunctions`: `ConvertWeaponPoints`, `GetActiveBanners`, `GetGachaState`, `PartyQuery`, `RF_ClaimMission`, `RF_GetInventorySnapshot`, `RF_GetMissions`, `RF_GetPlayerSettings`, `RF_GetTutorialState`, `RollBanner`
 
 ## Attributes
 

@@ -12,6 +12,7 @@ local DS = DataStoreService:GetDataStore("PlayerState_v2")
 
 local Store = {}
 local cache: {[number]: any} = {}
+local loadingByUserId: {[number]: boolean} = {}
 
 local function dsKey(userId: number): string
 	return "u:" .. tostring(userId)
@@ -171,6 +172,20 @@ end
 
 function Store.Load(player: Player)
 	local uid = player.UserId
+	local cached = cache[uid]
+	if cached then
+		return cached
+	end
+
+	while loadingByUserId[uid] do
+		task.wait()
+		cached = cache[uid]
+		if cached then
+			return cached
+		end
+	end
+
+	loadingByUserId[uid] = true
 	local data
 
 	local ok, err = pcall(function()
@@ -182,7 +197,10 @@ function Store.Load(player: Player)
 	end
 
 	data = ensureSchema(data)
-	cache[uid] = data
+	loadingByUserId[uid] = nil
+	if player.Parent then
+		cache[uid] = data
+	end
 	return data
 end
 
@@ -214,6 +232,10 @@ end
 
 function Store.ForceSave(player: Player, reason: string?)
 	SaveScheduler.ForceSave(player, reason or "force")
+end
+
+function Store.Flush(player: Player, reason: string?)
+	SaveScheduler.Flush(player, reason or "flush")
 end
 
 -- kompat: stare skrypty wołają Save(player, true)
@@ -442,13 +464,15 @@ Players.PlayerAdded:Connect(function(player)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
-	Store.ForceSave(player, "leave")
+	Store.Flush(player, "leave")
 	cache[player.UserId] = nil
+	loadingByUserId[player.UserId] = nil
+	SaveScheduler.Release(player)
 end)
 
 game:BindToClose(function()
 	for _, player in ipairs(Players:GetPlayers()) do
-		Store.ForceSave(player, "shutdown")
+		Store.Flush(player, "shutdown")
 	end
 end)
 

@@ -30,6 +30,7 @@ Domyslne placeholdery:
 
 `GITHUB_BRIDGE_URL` nie jest sekretem. Sekretem pozostaje GitHub token i musi zostac po stronie backendu.
 `GITHUB_BRIDGE_SECRET` jest wspolnym sekretem miedzy Roblox a backendem i musi byc taki sam jak backendowe `ROBLOX_ERROR_SECRET`.
+Jesli URL nie konczy sie na `/roblox-error`, reporter dopnie ten suffix automatycznie i wypisze warning diagnostyczny.
 
 ## Jak dziala errorCode
 
@@ -210,10 +211,34 @@ Ten sam sekret ustaw w backend ENV:
 
 Uruchom serwer lub Play w odpowiednim place.
 
-Test serwera z Server Command Bar:
+Po starcie serwera bootstrap powinien automatycznie wypisac:
+
+```text
+[ErrorBootstrap] _G.ErrorReporterTest exists: true
+[ErrorBootstrap] PrintConfig result: githubEnabled=... urlConfigured=... secretConfigured=... discordEnabled=... githubReason=... discordReason=...
+```
+
+Nie polegaj na client Command Bar dla `_G.ErrorReporterTest`, bo client `_G` nie ma dostepu do serwerowego hooka.
+
+Test serwera przez server-side hook:
 
 ```lua
-_G.ErrorReporterTest.TriggerServer("manual-server-test")
+_G.ErrorReporterTest.PrintConfig()
+_G.ErrorReporterTest.TriggerServer("Test GitHub bridge error")
+```
+
+Test serwera przez chat command w Studio:
+
+```text
+;debug errorconfig
+;debug errorreport Test GitHub bridge error
+```
+
+W `Level` dziala tez alias:
+
+```text
+;td errorconfig
+;td errorreport Test GitHub bridge error
 ```
 
 Test klienta z Server Command Bar:
@@ -228,13 +253,45 @@ Legacy alias nadal dziala:
 _G.ErrorWebhookTest.TriggerServer("legacy-test")
 ```
 
+Jesli chcesz przetestowac stary tor nieobsluzonego runtime error przez `ScriptContext.Error`, uzyj:
+
+```lua
+_G.ErrorReporterTest.TriggerUnhandledServerError("runtime-test")
+```
+
+## Jakie logi powinny sie pojawic
+
+Przy poprawnej konfiguracji i probie wysylki bridge powinienes zobaczyc w Output m.in.:
+
+```text
+[ErrorReporter] ReportServerError called
+[ErrorReporter] ReportError called
+[ErrorReporter] channel discord enabled true|false
+[ErrorReporter] channel github enabled true|false
+[ErrorReporter] GitHub bridge enabled: true
+[ErrorReporter] GitHub bridge URL configured: true
+[ErrorReporter] GitHub bridge secret configured: true
+[ErrorReporter] Sending to GitHub bridge from ReportError
+[ErrorReporter] Sending to GitHub bridge: https://.../roblox-error
+[ErrorReporter] GitHub bridge response: success=true status=201 body={"ok":true,...}
+[ErrorReporter] SendToGithubBridge completed: ok=true reason=Delivered status=201
+[ManualServerTest] ReportServerError called
+```
+
+Przy request failure pojawi sie tez:
+
+```text
+[ErrorReporter] GitHub bridge failed: <blad z RequestAsync>
+```
+
 ## Jak sprawdzic, czy raport dotarl do GitHub
 
 1. Sprawdz Roblox Studio Output.
    - Brak warningu o `HttpService`
    - Brak warningu o `GITHUB_BRIDGE_URL`
    - Brak warningu o `GITHUB_BRIDGE_SECRET`
-   - Brak warningu o failed request / rejected request
+   - Jest log `Sending to GitHub bridge: .../roblox-error`
+   - Jest log `GitHub bridge response: success=... status=... body=...`
 2. Sprawdz logi backendu.
    - Roblox powinien trafic w endpoint HTTP `POST`
    - Backend powinien zwrocic `2xx`

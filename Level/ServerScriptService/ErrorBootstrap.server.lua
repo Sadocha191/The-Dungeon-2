@@ -155,8 +155,53 @@ triggerServerTest(ReplicatedStorage:GetAttribute(SERVER_TEST_ATTRIBUTE))
 local errorReporterTest = _G.ErrorReporterTest or _G.ErrorWebhookTest or {}
 _G.ErrorReporterTest = errorReporterTest
 _G.ErrorWebhookTest = errorReporterTest
+print(string.format("[ErrorBootstrap] _G.ErrorReporterTest exists: %s", tostring(_G.ErrorReporterTest ~= nil)))
 
-function errorReporterTest.TriggerServer(rawToken)
+local function logManualServerResult(ok, reason, errorData)
+	if errorData then
+		local githubDelivery = errorData.delivery and errorData.delivery.github
+		local discordDelivery = errorData.delivery and errorData.delivery.discord
+		local githubReason = githubDelivery and githubDelivery.reason or "N/A"
+		local discordReason = discordDelivery and discordDelivery.reason or "N/A"
+		local githubStatus = githubDelivery and githubDelivery.response and githubDelivery.response.statusCode or "n/a"
+		local githubBody = githubDelivery and githubDelivery.response and (githubDelivery.response.body or githubDelivery.response.error) or ""
+		print(string.format(
+			"[ManualServerTest] Result: success=%s reason=%s errorCode=%s github=%s githubStatus=%s discord=%s",
+			tostring(ok),
+			tostring(reason),
+			tostring(errorData.errorCode),
+			tostring(githubReason),
+			tostring(githubStatus),
+			tostring(discordReason)
+		))
+		if githubBody ~= "" then
+			print(string.format("[ManualServerTest] GitHub bridge body: %s", tostring(githubBody)))
+		end
+	else
+		print(string.format("[ManualServerTest] Result: success=%s reason=%s errorCode=nil", tostring(ok), tostring(reason)))
+	end
+end
+
+function errorReporterTest.TriggerServer(message)
+	local manualMessage = normalizeTriggerToken(message) or "Manual GitHub bridge test"
+	print("[ManualServerTest] Sending GitHub bridge test...")
+	local ok, reason, errorData = ErrorReporter.ReportServerError(
+		manualMessage,
+		debug.traceback("[ManualServerTest] TriggerServer", 2),
+		"ManualServerTest",
+		{
+			forceSend = true,
+			Trigger = "ErrorReporterTest.TriggerServer",
+			RequestedMessage = manualMessage,
+			Place = game.Name,
+		}
+	)
+	print("[ManualServerTest] ReportServerError called")
+	logManualServerResult(ok, reason, errorData)
+	return ok, reason, errorData
+end
+
+function errorReporterTest.TriggerUnhandledServerError(rawToken)
 	local token = normalizeTriggerToken(rawToken) or buildTestToken("server")
 	ReplicatedStorage:SetAttribute(SERVER_TEST_ATTRIBUTE, token)
 	return token
@@ -165,6 +210,27 @@ end
 function errorReporterTest.TriggerClient(target, rawToken)
 	local testPlayer = triggerClientTest(target, rawToken)
 	return testPlayer and testPlayer.Name or nil
+end
+
+function errorReporterTest.PrintConfig()
+	return ErrorReporter.PrintConfig()
+end
+
+local startupConfigOk, startupConfigStatus = pcall(function()
+	return errorReporterTest.PrintConfig()
+end)
+if startupConfigOk and typeof(startupConfigStatus) == "table" then
+	print(string.format(
+		"[ErrorBootstrap] PrintConfig result: githubEnabled=%s urlConfigured=%s secretConfigured=%s discordEnabled=%s githubReason=%s discordReason=%s",
+		tostring(startupConfigStatus.githubBridgeEnabled),
+		tostring(startupConfigStatus.githubBridgeUrlConfigured),
+		tostring(startupConfigStatus.githubBridgeSecretConfigured),
+		tostring(startupConfigStatus.discordEnabled),
+		tostring(startupConfigStatus.githubBridgeReason),
+		tostring(startupConfigStatus.discordReason)
+	))
+else
+	warn(string.format("[ErrorBootstrap] PrintConfig failed: %s", tostring(startupConfigStatus)))
 end
 
 ErrorReporter.WarnIfHttpDisabled()

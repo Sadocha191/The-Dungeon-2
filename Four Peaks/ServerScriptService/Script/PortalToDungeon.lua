@@ -6,6 +6,7 @@ local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local Players = game:GetService("Players")
 
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 local replicatedModules = (
@@ -509,5 +510,10 @@ RequestLevelTeleport.OnServerEvent:Connect(protect("PortalToDungeon.RequestLevel
 	tpData.LevelKey = entry.key
 	tryTeleport(group, entry.placeId, tpData)
 end))
+
+Players.PlayerRemoving:Connect(function(player: Player)
+	lastOpen[player.UserId] = nil
+	lastTp[player.UserId] = nil
+end)
 
 print("[PortalToDungeon] Ready (spells+loadout)")

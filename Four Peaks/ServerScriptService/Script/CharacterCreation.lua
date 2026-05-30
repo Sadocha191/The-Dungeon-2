@@ -4,6 +4,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local Players = game:GetService("Players")
 
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 local replicatedModules = (ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5))
@@ -90,6 +91,10 @@ RerollReq.OnServerEvent:Connect(function(player: Player)
 		player:SetAttribute("Race", payload.Race)
 	end
 	RerollRes:FireClient(player, response)
+end)
+
+Players.PlayerRemoving:Connect(function(player: Player)
+	lastCall[player.UserId] = nil
 end)
 
 print("[CharacterCreation] Server READY")

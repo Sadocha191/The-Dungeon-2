@@ -301,7 +301,7 @@ InventoryAction.OnServerEvent:Connect(function(player: Player, payload: any)
 end)
 
 Players.PlayerAdded:Connect(function(player: Player)
-	local state = PlayerStateStore.Load(player)
+	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
 	-- jeśli brak instancji, spróbuj wykryć tool z Backpack/Character i zrobić instancję
 	if (#(state.WeaponInstances or {}) == 0) then
 		local detected = findWeaponName(player)

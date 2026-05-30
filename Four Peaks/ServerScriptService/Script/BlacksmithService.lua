@@ -316,18 +316,4 @@ BlacksmithAction.OnServerEvent:Connect(protect("BlacksmithService.ActionRemote",
 	})
 end))
 
-Players.PlayerAdded:Connect(protect("BlacksmithService.PlayerAdded", {
-	system = "BlacksmithService",
-	phase = "lobby",
-}, function(player)
-	PlayerStateStore.Load(player)
-end))
-
-Players.PlayerRemoving:Connect(protect("BlacksmithService.PlayerRemoving", {
-	system = "BlacksmithService",
-	phase = "lobby",
-}, function(player)
-	PlayerStateStore.Save(player, true)
-end))
-
 print("[BlacksmithService] Ready")

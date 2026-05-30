@@ -1,6 +1,7 @@
 -- PlayerData (ServerScriptService) - globalny profil (bez armora)
 
 local DataStoreService = game:GetService("DataStoreService")
+local Players = game:GetService("Players")
 local store = DataStoreService:GetDataStore("GlobalPlayerProgress_v1")
 local legacyStore = DataStoreService:GetDataStore("GlobalProfile_v4")
 
@@ -418,5 +419,45 @@ function PlayerData.Reset(plr)
 	PlayerData._cache[plr.UserId] = defaultProfile()
 	PlayerData._dirty[plr.UserId] = true
 end
+
+function PlayerData.Release(plr)
+	local uid = plr.UserId
+
+	if PlayerData._saving[uid] then
+		local startedAt = os.clock()
+		while PlayerData._saving[uid] and (os.clock() - startedAt) < 5 do
+			task.wait(0.1)
+		end
+
+		if PlayerData._saving[uid] then
+			warn("[PlayerData] Skipping cache release while save is still active for userId", uid)
+			return
+		end
+	end
+
+	if PlayerData._cache[uid] then
+		PlayerData.Save(plr, true)
+	end
+
+	if PlayerData._dirty[uid] == true then
+		warn("[PlayerData] Releasing dirty cache after failed save for userId", uid)
+	end
+
+	PlayerData._cache[uid] = nil
+	PlayerData._dirty[uid] = nil
+	PlayerData._saving[uid] = nil
+end
+
+Players.PlayerRemoving:Connect(function(plr)
+	task.defer(function()
+		PlayerData.Release(plr)
+	end)
+end)
+
+game:BindToClose(function()
+	for _, plr in ipairs(Players:GetPlayers()) do
+		PlayerData.Release(plr)
+	end
+end)
 
 return PlayerData

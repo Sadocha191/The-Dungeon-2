@@ -9,6 +9,7 @@ local GAME_NAME = "The Dungeon 2"
 local DISCORD_WEBHOOK_URL_PLACEHOLDER = "PASTE_YOUR_WEBHOOK_HERE"
 local GITHUB_BRIDGE_URL_PLACEHOLDER = "PASTE_YOUR_GITHUB_BRIDGE_URL_HERE"
 local GITHUB_BRIDGE_SECRET_PLACEHOLDER = "PASTE_YOUR_ROBLOX_ERROR_SECRET_HERE"
+local GITHUB_BRIDGE_PATH = "/roblox-error"
 local DISCORD_WEBHOOK_URL = DISCORD_WEBHOOK_URL_PLACEHOLDER
 local GITHUB_BRIDGE_URL = GITHUB_BRIDGE_URL_PLACEHOLDER
 local GITHUB_BRIDGE_SECRET = GITHUB_BRIDGE_SECRET_PLACEHOLDER
@@ -20,6 +21,7 @@ local MAX_CONTEXT_ITEMS = 12
 local MAX_MESSAGE_LENGTH = 1200
 local MAX_SANITIZED_MESSAGE_LENGTH = 700
 local MAX_STACK_LENGTH = 3500
+local MAX_RESPONSE_LOG_BODY_LENGTH = 600
 local MOD32 = 4294967296
 
 local occurrenceState = {}
@@ -28,6 +30,7 @@ local cachedPlaceInfo = nil
 local warnedMissingDiscordWebhook = false
 local warnedMissingGithubBridge = false
 local warnedMissingGithubBridgeSecret = false
+local warnedGithubBridgeUrlNormalized = false
 local warnedHttpDisabled = false
 
 local function normalizeText(value)
@@ -91,6 +94,107 @@ local function cloneTable(source)
 	end
 
 	return out
+end
+
+local function isConfiguredValue(value, placeholder)
+	local normalized = normalizeText(value)
+	return normalized ~= nil and normalized ~= placeholder
+end
+
+local function readHttpEnabledStatus()
+	local ok, enabled = pcall(function()
+		return HttpService.HttpEnabled
+	end)
+
+	if ok and enabled == false then
+		return false, "HttpDisabled"
+	end
+
+	if not ok then
+		return true, "HttpStatusUnknown"
+	end
+
+	return true, "Ready"
+end
+
+local function buildDiscordChannelConfig()
+	local httpEnabled, httpReason = readHttpEnabledStatus()
+	local webhookConfigured = isConfiguredValue(DISCORD_WEBHOOK_URL, DISCORD_WEBHOOK_URL_PLACEHOLDER)
+	local reason = "Ready"
+
+	if not webhookConfigured then
+		reason = "DiscordWebhookMissing"
+	elseif not httpEnabled then
+		reason = httpReason
+	end
+
+	return {
+		enabled = webhookConfigured and httpEnabled,
+		webhookConfigured = webhookConfigured,
+		httpEnabled = httpEnabled,
+		httpReason = httpReason,
+		reason = reason,
+	}
+end
+
+local function buildGithubBridgeConfig()
+	local httpEnabled, httpReason = readHttpEnabledStatus()
+	local urlConfigured = isConfiguredValue(GITHUB_BRIDGE_URL, GITHUB_BRIDGE_URL_PLACEHOLDER)
+	local secretConfigured = isConfiguredValue(GITHUB_BRIDGE_SECRET, GITHUB_BRIDGE_SECRET_PLACEHOLDER)
+	local normalizedUrl = nil
+	local urlHasExpectedPath = false
+	local reason = "Ready"
+
+	if urlConfigured then
+		normalizedUrl = normalizeText(GITHUB_BRIDGE_URL)
+		if normalizedUrl then
+			normalizedUrl = normalizedUrl:gsub("/+$", "")
+			if string.sub(string.lower(normalizedUrl), -#GITHUB_BRIDGE_PATH) == GITHUB_BRIDGE_PATH then
+				urlHasExpectedPath = true
+			else
+				normalizedUrl = normalizedUrl .. GITHUB_BRIDGE_PATH
+			end
+		end
+	end
+
+	if not urlConfigured then
+		reason = "GithubBridgeMissing"
+	elseif not secretConfigured then
+		reason = "GithubBridgeSecretMissing"
+	elseif not normalizedUrl then
+		reason = "GithubBridgeInvalidUrl"
+	elseif not httpEnabled then
+		reason = httpReason
+	elseif not urlHasExpectedPath then
+		reason = "ReadyNormalizedUrl"
+	end
+
+	return {
+		enabled = urlConfigured and secretConfigured and normalizedUrl ~= nil and httpEnabled,
+		urlConfigured = urlConfigured,
+		secretConfigured = secretConfigured,
+		normalizedUrl = normalizedUrl,
+		urlHasExpectedPath = urlHasExpectedPath,
+		httpEnabled = httpEnabled,
+		httpReason = httpReason,
+		reason = reason,
+	}
+end
+
+local function summarizeResponseBody(body)
+	return truncateText(body, MAX_RESPONSE_LOG_BODY_LENGTH) or ""
+end
+
+local function extractDispatchOptions(extraContext)
+	local normalizedExtra = typeof(extraContext) == "table" and cloneTable(extraContext) or extraContext
+	local forceSend = false
+
+	if typeof(normalizedExtra) == "table" then
+		forceSend = normalizedExtra.forceSend == true
+		normalizedExtra.forceSend = nil
+	end
+
+	return normalizedExtra, forceSend
 end
 
 local function stringifyScalar(value)
@@ -450,7 +554,10 @@ end
 
 local function deliverJson(url, payload, requestLabel, extraHeaders)
 	if not isHttpEnabled() then
-		return false, "HttpDisabled"
+		return false, "HttpDisabled", {
+			success = false,
+			error = "HttpServiceDisabled",
+		}
 	end
 
 	local encodeOk, encodedPayload = pcall(function()
@@ -458,7 +565,10 @@ local function deliverJson(url, payload, requestLabel, extraHeaders)
 	end)
 	if not encodeOk then
 		warn(string.format("[ErrorReporter] Failed to encode %s payload: %s", requestLabel, tostring(encodedPayload)))
-		return false, "EncodeFailed"
+		return false, "EncodeFailed", {
+			success = false,
+			error = tostring(encodedPayload),
+		}
 	end
 
 	local requestOk, response = pcall(function()
@@ -489,8 +599,18 @@ local function deliverJson(url, payload, requestLabel, extraHeaders)
 		end
 
 		warn(string.format("[ErrorReporter] %s request failed: %s", requestLabel, tostring(response)))
-		return false, "RequestFailed"
+		return false, "RequestFailed", {
+			success = false,
+			error = tostring(response),
+		}
 	end
+
+	local responseInfo = {
+		success = response.Success == true,
+		statusCode = response.StatusCode,
+		statusMessage = response.StatusMessage,
+		body = summarizeResponseBody(response.Body),
+	}
 
 	if not response.Success then
 		warn(
@@ -501,10 +621,10 @@ local function deliverJson(url, payload, requestLabel, extraHeaders)
 				tostring(response.StatusMessage)
 			)
 		)
-		return false, "Rejected"
+		return false, "Rejected", responseInfo
 	end
 
-	return true, "Delivered"
+	return true, "Delivered", responseInfo
 end
 
 function ErrorReporter.SanitizeMessage(message)
@@ -729,7 +849,12 @@ function ErrorReporter.SendToDiscord(errorData)
 end
 
 function ErrorReporter.SendToGithubBridge(errorData)
-	if GITHUB_BRIDGE_URL == "" or GITHUB_BRIDGE_URL == GITHUB_BRIDGE_URL_PLACEHOLDER then
+	local bridgeConfig = buildGithubBridgeConfig()
+	print(string.format("[ErrorReporter] GitHub bridge enabled: %s", tostring(bridgeConfig.enabled)))
+	print(string.format("[ErrorReporter] GitHub bridge URL configured: %s", tostring(bridgeConfig.urlConfigured)))
+	print(string.format("[ErrorReporter] GitHub bridge secret configured: %s", tostring(bridgeConfig.secretConfigured)))
+
+	if not bridgeConfig.urlConfigured then
 		if not warnedMissingGithubBridge then
 			warn("[ErrorReporter] Set GITHUB_BRIDGE_URL before enabling GitHub bridge error reporting.")
 			warnedMissingGithubBridge = true
@@ -737,7 +862,7 @@ function ErrorReporter.SendToGithubBridge(errorData)
 		return false, "GithubBridgeMissing"
 	end
 
-	if GITHUB_BRIDGE_SECRET == "" or GITHUB_BRIDGE_SECRET == GITHUB_BRIDGE_SECRET_PLACEHOLDER then
+	if not bridgeConfig.secretConfigured then
 		if not warnedMissingGithubBridgeSecret then
 			warn("[ErrorReporter] Set GITHUB_BRIDGE_SECRET before enabling GitHub bridge error reporting.")
 			warnedMissingGithubBridgeSecret = true
@@ -745,17 +870,56 @@ function ErrorReporter.SendToGithubBridge(errorData)
 		return false, "GithubBridgeSecretMissing"
 	end
 
-	return deliverJson(
-		GITHUB_BRIDGE_URL,
+	if not bridgeConfig.normalizedUrl then
+		warn("[ErrorReporter] GITHUB_BRIDGE_URL could not be normalized into a valid request URL.")
+		return false, "GithubBridgeInvalidUrl", {
+			success = false,
+			error = "InvalidUrl",
+		}
+	end
+
+	if not bridgeConfig.urlHasExpectedPath and not warnedGithubBridgeUrlNormalized then
+		warn(string.format(
+			"[ErrorReporter] GITHUB_BRIDGE_URL did not end with %s. Using normalized URL: %s",
+			GITHUB_BRIDGE_PATH,
+			bridgeConfig.normalizedUrl
+		))
+		warnedGithubBridgeUrlNormalized = true
+	end
+
+	print(string.format("[ErrorReporter] Sending to GitHub bridge: %s", bridgeConfig.normalizedUrl))
+	local ok, reason, responseInfo = deliverJson(
+		bridgeConfig.normalizedUrl,
 		ErrorReporter.BuildGithubBridgePayload(errorData),
 		"GitHub bridge",
 		{
 			["X-Roblox-Error-Secret"] = GITHUB_BRIDGE_SECRET,
 		}
 	)
+
+	local responseBody = responseInfo and (responseInfo.body or responseInfo.error) or ""
+	print(string.format(
+		"[ErrorReporter] GitHub bridge response: success=%s status=%s body=%s",
+		tostring(responseInfo and responseInfo.success or ok),
+		tostring(responseInfo and responseInfo.statusCode or "n/a"),
+		tostring(responseBody)
+	))
+
+	if not ok and responseInfo and responseInfo.error then
+		warn(string.format("[ErrorReporter] GitHub bridge failed: %s", tostring(responseInfo.error)))
+	end
+
+	return ok, reason, responseInfo
 end
 
 function ErrorReporter.ReportError(rawMessage, stackTrace, context)
+	local status = ErrorReporter.GetConfigStatus()
+	print("[ErrorReporter] ReportError called")
+	print(string.format("[ErrorReporter] channel discord enabled %s", tostring(status.discordEnabled)))
+	print(string.format("[ErrorReporter] channel discord reason %s", tostring(status.discordReason)))
+	print(string.format("[ErrorReporter] channel github enabled %s", tostring(status.githubBridgeEnabled)))
+	print(string.format("[ErrorReporter] channel github reason %s", tostring(status.githubBridgeReason)))
+
 	local errorData = buildErrorData(rawMessage, stackTrace, context)
 	local state = touchOccurrence(errorData)
 
@@ -765,12 +929,27 @@ function ErrorReporter.ReportError(rawMessage, stackTrace, context)
 
 	state.lastDispatchedAt = os.clock()
 
-	local discordOk, discordReason = ErrorReporter.SendToDiscord(errorData)
-	local githubOk, githubReason = ErrorReporter.SendToGithubBridge(errorData)
+	local discordOk, discordReason, discordResponse = ErrorReporter.SendToDiscord(errorData)
+	print("[ErrorReporter] Sending to GitHub bridge from ReportError")
+	local githubOk, githubReason, githubResponse = ErrorReporter.SendToGithubBridge(errorData)
+	print(string.format(
+		"[ErrorReporter] SendToGithubBridge completed: ok=%s reason=%s status=%s",
+		tostring(githubOk),
+		tostring(githubReason),
+		tostring(githubResponse and githubResponse.statusCode or "n/a")
+	))
 
 	errorData.delivery = {
-		discord = discordReason,
-		github = githubReason,
+		discord = {
+			ok = discordOk,
+			reason = discordReason,
+			response = discordResponse,
+		},
+		github = {
+			ok = githubOk,
+			reason = githubReason,
+			response = githubResponse,
+		},
 	}
 
 	if discordOk or githubOk then
@@ -791,11 +970,14 @@ function ErrorReporter.ReportError(rawMessage, stackTrace, context)
 end
 
 function ErrorReporter.ReportServerError(message, stackTrace, system, extraContext)
+	print("[ErrorReporter] ReportServerError called")
+	local normalizedExtraContext, forceSend = extractDispatchOptions(extraContext)
 	return ErrorReporter.ReportError(message, stackTrace, {
 		sourceType = "server",
 		errorType = "ServerError",
 		system = system,
-		extra = extraContext,
+		extra = normalizedExtraContext,
+		forceSend = forceSend,
 	})
 end
 
@@ -809,6 +991,8 @@ function ErrorReporter.ReportClientError(player, payload)
 		return false, "RateLimited"
 	end
 
+	local normalizedExtraContext, forceSend = extractDispatchOptions(payload.extraContext)
+
 	return ErrorReporter.ReportError(payload.rawMessage or payload.message, payload.stackTrace or payload.stack, {
 		sourceType = "client",
 		errorType = "ClientError",
@@ -820,17 +1004,50 @@ function ErrorReporter.ReportClientError(player, payload)
 		level = payload.level,
 		wave = payload.wave,
 		phase = payload.phase,
-		extra = payload.extraContext,
+		extra = normalizedExtraContext,
+		forceSend = forceSend,
 	})
 end
 
 function ErrorReporter.ReportSystemWarning(message, system, extraContext)
+	local normalizedExtraContext, forceSend = extractDispatchOptions(extraContext)
 	return ErrorReporter.ReportError(message, nil, {
 		sourceType = "server",
 		errorType = "SystemWarning",
 		system = system,
-		extra = extraContext,
+		extra = normalizedExtraContext,
+		forceSend = forceSend,
 	})
+end
+
+function ErrorReporter.GetConfigStatus()
+	local discordConfig = buildDiscordChannelConfig()
+	local bridgeConfig = buildGithubBridgeConfig()
+	return {
+		githubBridgeEnabled = bridgeConfig.enabled,
+		githubBridgeUrlConfigured = bridgeConfig.urlConfigured,
+		githubBridgeSecretConfigured = bridgeConfig.secretConfigured,
+		githubBridgeUrl = bridgeConfig.normalizedUrl,
+		githubBridgeUrlHasExpectedPath = bridgeConfig.urlHasExpectedPath,
+		githubBridgeReason = bridgeConfig.reason,
+		httpEnabled = bridgeConfig.httpEnabled,
+		httpReason = bridgeConfig.httpReason,
+		discordEnabled = discordConfig.enabled,
+		discordWebhookConfigured = discordConfig.webhookConfigured,
+		discordReason = discordConfig.reason,
+	}
+end
+
+function ErrorReporter.PrintConfig()
+	local status = ErrorReporter.GetConfigStatus()
+	print(string.format("[ErrorReporter] HttpService enabled: %s", tostring(status.httpEnabled)))
+	print(string.format("[ErrorReporter] GitHub bridge enabled: %s", tostring(status.githubBridgeEnabled)))
+	print(string.format("[ErrorReporter] GitHub bridge URL configured: %s", tostring(status.githubBridgeUrlConfigured)))
+	print(string.format("[ErrorReporter] GitHub bridge secret configured: %s", tostring(status.githubBridgeSecretConfigured)))
+	print(string.format("[ErrorReporter] GitHub bridge reason: %s", tostring(status.githubBridgeReason)))
+	print(string.format("[ErrorReporter] Discord enabled: %s", tostring(status.discordEnabled)))
+	print(string.format("[ErrorReporter] Discord reason: %s", tostring(status.discordReason)))
+	return status
 end
 
 function ErrorReporter.WarnIfHttpDisabled()
