@@ -100,23 +100,29 @@ local function setBoardPauseActive(active)
 	end
 end
 
-local function getMissionTextBox(note: Instance, sectionName: string): TextBox?
+local function getMissionTextObject(note: Instance, sectionName: string): GuiObject?
 	local section = note:FindFirstChild(sectionName)
 	if not section then
 		return nil
 	end
 
-	local textBox = section:FindFirstChild("TextBox")
-	if not textBox or not textBox:IsA("TextBox") then
+	local textObject = section:FindFirstChild("TextBox")
+	if not textObject or not (
+		textObject:IsA("TextBox")
+		or textObject:IsA("TextLabel")
+		or textObject:IsA("TextButton")
+	) then
 		return nil
 	end
 
-	textBox.ClearTextOnFocus = false
-	pcall(function()
-		textBox.TextEditable = false
-	end)
+	if textObject:IsA("TextBox") then
+		textObject.ClearTextOnFocus = false
+		pcall(function()
+			textObject.TextEditable = false
+		end)
+	end
 
-	return textBox
+	return textObject
 end
 
 local function getMissionDescription(mission): string
@@ -342,8 +348,8 @@ for _, config in ipairs(MISSION_CONFIG) do
 		config = config,
 		note = note,
 		zone = zone,
-		descriptionBox = getMissionTextBox(note, "MissionDescription"),
-		progressBox = getMissionTextBox(note, "Mission progress"),
+		descriptionBox = getMissionTextObject(note, "MissionDescription"),
+		progressBox = getMissionTextObject(note, "Mission progress"),
 		hasMission = false,
 		tween = nil,
 	}

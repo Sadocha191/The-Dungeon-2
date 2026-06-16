@@ -13,11 +13,11 @@ local sourceTool: Tool? = nil
 local rsConn: RBXScriptConnection? = nil
 
 local Profiles = {
-	Sword = { radius = 3.2, height = 1.6, halfAngleDeg = 45, spin = 3.0 },
-	Scythe = { radius = 3.6, height = 1.7, halfAngleDeg = 90, spin = 2.2 },
-	Halberd = { radius = 3.8, height = 1.8, halfAngleDeg = 35, spin = 2.4 },
-	Claymore = { radius = 3.4, height = 1.7, halfAngleDeg = 65, spin = 2.0 },
-	Greataxe = { radius = 3.5, height = 1.7, halfAngleDeg = 75, spin = 1.8 },
+	Sword    = { radius = 3.2, height = 1.6, halfAngleDeg = 45,  spin = 3.0 },
+	Scythe   = { radius = 3.6, height = 1.7, halfAngleDeg = 90,  spin = 2.2 },
+	Halberd  = { radius = 3.8, height = 1.8, halfAngleDeg = 35,  spin = 2.4 },
+	Claymore = { radius = 3.4, height = 1.7, halfAngleDeg = 65,  spin = 2.0 },
+	Greataxe = { radius = 3.5, height = 1.7, halfAngleDeg = 75,  spin = 1.8 },
 }
 
 local function isWeaponTool(inst: Instance): boolean
@@ -26,9 +26,7 @@ end
 
 local function getActiveWeaponTool(): Tool?
 	local backpack = plr:FindFirstChildOfClass("Backpack")
-	if not backpack then
-		return nil
-	end
+	if not backpack then return nil end
 	for _, child in ipairs(backpack:GetChildren()) do
 		if isWeaponTool(child) then
 			return child
@@ -64,9 +62,7 @@ local function stripForVisual(inst: Instance)
 end
 
 local function ensurePrimaryPart(model: Model)
-	if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
-		return
-	end
+	if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then return end
 	local handle = model:FindFirstChild("Handle", true)
 	if handle and handle:IsA("BasePart") then
 		model.PrimaryPart = handle
@@ -108,20 +104,14 @@ end
 
 local function updateVisualLoop(tool: Tool, model: Model)
 	local wType = tool:GetAttribute("WeaponType")
-	if typeof(wType) ~= "string" then
-		return
-	end
+	if typeof(wType) ~= "string" then return end
 	local prof = Profiles[wType]
-	if not prof then
-		return
-	end
+	if not prof then return end
 
 	rsConn = RunService.RenderStepped:Connect(function()
 		local char = plr.Character
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
-		if not hrp or not model.Parent or not model.PrimaryPart then
-			return
-		end
+		if not hrp or not model.Parent or not model.PrimaryPart then return end
 
 		-- Keep visible even on pause, but stop "swing" animation
 		local t = os.clock()
@@ -149,9 +139,7 @@ local function refresh()
 
 	cleanupVisual()
 
-	if not tool then
-		return
-	end
+	if not tool then return end
 	sourceTool = tool
 
 	local model = buildVisualFromTool(tool)
@@ -172,15 +160,9 @@ end
 -- React to backpack changes
 local function bindBackpack()
 	local backpack = plr:WaitForChild("Backpack", 10)
-	if not backpack then
-		return
-	end
-	backpack.ChildAdded:Connect(function()
-		task.defer(refresh)
-	end)
-	backpack.ChildRemoved:Connect(function()
-		task.defer(refresh)
-	end)
+	if not backpack then return end
+	backpack.ChildAdded:Connect(function() task.defer(refresh) end)
+	backpack.ChildRemoved:Connect(function() task.defer(refresh) end)
 end
 
 bindBackpack()

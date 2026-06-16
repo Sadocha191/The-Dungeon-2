@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
@@ -15,11 +16,108 @@ local DEFAULTS = {
 	CameraZoomPreset = "Medium",
 }
 
+local SETTINGS_REMOTE_FUNCTION = "RF_GetPlayerSettings"
+local SETTINGS_REMOTE_EVENT = "PlayerSettingsEvent"
+
 local CAMERA_PRESETS = {
 	{ id = "Close", label = "Close (12)", distance = 12 },
 	{ id = "Medium", label = "Medium (20)", distance = 20 },
 	{ id = "Far", label = "Far (28)", distance = 28 },
 }
+
+local CAMERA_PRESET_IDS = {}
+for _, preset in ipairs(CAMERA_PRESETS) do
+	CAMERA_PRESET_IDS[preset.id] = true
+end
+
+local lastSentSettings = {}
+
+local function getSettingsRemoteFunction(): RemoteFunction?
+	local remoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions", 5)
+	if not remoteFunctions then
+		return nil
+	end
+
+	local remote = remoteFunctions:WaitForChild(SETTINGS_REMOTE_FUNCTION, 5)
+	if remote and remote:IsA("RemoteFunction") then
+		return remote
+	end
+
+	return nil
+end
+
+local function getSettingsRemoteEvent(): RemoteEvent?
+	local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents", 5)
+	if not remoteEvents then
+		return nil
+	end
+
+	local remote = remoteEvents:WaitForChild(SETTINGS_REMOTE_EVENT, 5)
+	if remote and remote:IsA("RemoteEvent") then
+		return remote
+	end
+
+	return nil
+end
+
+local function sanitizeSetting(name: string, value: any)
+	if name == "ShowFPSCounter" or name == "ShowScreenButtons" then
+		if typeof(value) == "boolean" then
+			return value
+		end
+	elseif name == "CameraZoomPreset" then
+		if typeof(value) == "string" and CAMERA_PRESET_IDS[value] then
+			return value
+		end
+	end
+
+	return DEFAULTS[name]
+end
+
+local function getSavedSettings()
+	local settings = {}
+	for name, defaultValue in pairs(DEFAULTS) do
+		local currentValue = playerGui:GetAttribute(name)
+		settings[name] = currentValue ~= nil and sanitizeSetting(name, currentValue) or defaultValue
+	end
+
+	local remote = getSettingsRemoteFunction()
+	if not remote then
+		return settings
+	end
+
+	local ok, savedSettings = pcall(function()
+		return remote:InvokeServer()
+	end)
+
+	if not ok then
+		warn("[SettingsClient] Failed to load saved settings:", savedSettings)
+		return settings
+	end
+
+	if typeof(savedSettings) == "table" then
+		for name in pairs(DEFAULTS) do
+			settings[name] = sanitizeSetting(name, savedSettings[name])
+		end
+	end
+
+	return settings
+end
+
+local settingsRemoteEvent = getSettingsRemoteEvent()
+
+local function sendSettings(values: {[string]: any})
+	if not settingsRemoteEvent then
+		settingsRemoteEvent = getSettingsRemoteEvent()
+	end
+
+	if settingsRemoteEvent then
+		settingsRemoteEvent:FireServer({
+			type = "set",
+			values = values,
+		})
+	end
+end
 
 local function addCorner(inst: Instance, radius: number)
 	local corner = Instance.new("UICorner")
@@ -34,12 +132,6 @@ local function addStroke(inst: Instance, color: Color3, transparency: number?)
 	stroke.Transparency = transparency or 0
 	stroke.Parent = inst
 	return stroke
-end
-
-local function setDefaultAttribute(name: string, value: any)
-	if playerGui:GetAttribute(name) == nil then
-		playerGui:SetAttribute(name, value)
-	end
 end
 
 local function getCameraPresetIndex(id: string?): number
@@ -57,8 +149,10 @@ local function applyCameraZoom()
 	player.CameraMaxZoomDistance = preset.distance
 end
 
-for name, value in pairs(DEFAULTS) do
-	setDefaultAttribute(name, value)
+for name, value in pairs(getSavedSettings()) do
+	local sanitizedValue = sanitizeSetting(name, value)
+	playerGui:SetAttribute(name, sanitizedValue)
+	lastSentSettings[name] = sanitizedValue
 end
 
 gui.Enabled = false
@@ -309,6 +403,18 @@ local function applyDefaults()
 	end
 end
 
+local function persistSetting(name: string)
+	local value = sanitizeSetting(name, playerGui:GetAttribute(name))
+	if lastSentSettings[name] == value then
+		return
+	end
+
+	lastSentSettings[name] = value
+	sendSettings({
+		[name] = value,
+	})
+end
+
 local function openUI()
 	gui.Enabled = true
 	applyCameraZoom()
@@ -361,6 +467,12 @@ root.InputBegan:Connect(function(input)
 		closeUI()
 	end
 end)
+
+for name in pairs(DEFAULTS) do
+	playerGui:GetAttributeChangedSignal(name):Connect(function()
+		persistSetting(name)
+	end)
+end
 
 playerGui:GetAttributeChangedSignal("CameraZoomPreset"):Connect(applyCameraZoom)
 player.CharacterAdded:Connect(function()

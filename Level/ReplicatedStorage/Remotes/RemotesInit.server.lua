@@ -40,7 +40,6 @@ ensureRemoteEvent("TeleportStatus")       -- server -> client (teleport overlay 
 -- Weapon VFX swing (server -> client)
 ensureRemoteEvent("WeaponSwingVFX")
 ensureRemoteEvent("SpellVFXEvent")        -- orbit + transient spell visuals
-ensureRemoteEvent("ChestItemEvent")       -- server <-> client chest reward / run item inventory
 -- WeaponEvent (client -> server) [legacy/manual]
 ensureRemoteEvent("WeaponEvent")
 -- NPC presentation batches (server -> client)

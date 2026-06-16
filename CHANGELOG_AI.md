@@ -2,6 +2,1186 @@
 
 This file tracks AI-made repo changes and the intended rollback path.
 
+## 2026-06-16 - Sync open Studio instances into git mirrors
+
+### Scope
+
+- Synced both open Roblox Studio instances into the historical repo mirrors:
+  - `Poziom` -> `Level/`
+  - `Cztery szczyty` -> `Four Peaks/`
+- Exported current `Script`, `LocalScript`, and `ModuleScript` sources from the active Studio data models without deleting repo-only files.
+- Preserved the existing historical mirror naming where a matching repo file already existed, and created missing `.lua` mirrors for live Studio scripts that did not yet have a repo file.
+- Left non-Studio work outside the sync scope unstaged, including `backend/roblox-error-bridge/node_modules/`.
+
+### Verification
+
+- Confirmed both Roblox Studio instances were available through MCP.
+- Exported `159/159` script sources from `Poziom` with `0` errors.
+- Exported `163/163` script sources from `Cztery szczyty` with `0` errors.
+- Local export summary: `322` script requests, `227` written files, `163` newly created files, `95` unchanged files, `0` errors.
+
+### Rollback
+
+- Revert the sync commit to restore the previous repo mirror state.
+- Live Studio was only read during this pass; no Studio object sources were modified.
+
+## 2026-06-16 - Poziom chain movement slide jump and landing slide resume
+
+### Scope
+
+- Extended the existing `Level` movement controller with chain momentum instead of replacing the movement system.
+- Added slide-jump support so pressing jump during an active grounded slide transfers the stronger current/slide horizontal velocity, applies jump Y velocity, ends the slide with reason `slide_jump`, and marks the player as carrying chain momentum.
+- Added chain-aware speed limits through `MaxMomentumChainSpeed` so slide jump, air jumps after slide jump, airborne momentum, landing momentum, and landing slide resume do not clamp back to normal `MaxAirHorizontalSpeed` / `MaxHorizontalSpeed`.
+- Added landing slide resume so holding slide while landing from chain momentum can automatically restart slide without requiring a fresh input press or normal slide cooldown.
+- Landing slide resume uses carried horizontal velocity projected over the ground normal, applies `SlideLandingFriction`, and does not grant the normal fresh slide boost when `SlideLandingNoFreshBoost = true`.
+- Added debug logs gated by `DebugMovement = true` for `slide_jump`, `landing_slide_resume`, air jump carry speed, and normalized slide-end reasons:
+  - `slide_jump`
+  - `input_released`
+  - `speed_low`
+  - `lost_ground`
+  - `blocked_state`
+  - `hard_max`
+- Kept dash, sprint, multijump, low gravity, UI blocking, RunStarted / PauseState / RunEnded guards, and existing movement upgrade attributes intact.
+
+### Config added
+
+- `MaxMomentumChainSpeed = 140`
+- `SlideJumpEnabled = true`
+- `SlideJumpHorizontalMultiplier = 1.0`
+- `SlideJumpExtraUpVelocity = 0`
+- `SlideJumpMinCarrySpeed = 8`
+- `SlideJumpMaxCarrySpeed = 140`
+- `SlideJumpCountsAsJump = true`
+- `SlideLandingResumeEnabled = true`
+- `SlideLandingResumeGraceTime = 0.25`
+- `SlideLandingMinCarrySpeed = 10`
+- `SlideLandingBypassCooldown = true`
+- `SlideLandingNoFreshBoost = true`
+- `SlideLandingFriction = 0.995`
+
+### Files updated
+
+- `Level/ReplicatedStorage/ModuleScripts/MovementConfig.lua`
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.ReplicatedStorage.ModuleScripts.MovementConfig`
+- `Poziom`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Poziom`.
+- Fetched the patched repo sources into Studio through a temporary local HTTP server and verified `loadstring(...)` compiles for both movement files before assigning live `Source`.
+- Synced the patched sources into live `Poziom`.
+- Fresh-required a clone of live `MovementConfig` and confirmed all new chain movement config values.
+- Verified live `MovementController` source contains:
+  - `doSlideJump`
+  - `tryStartLandingSlide`
+  - `getMaxMomentumChainSpeed`
+  - `getSlideSpeedLimit`
+- Live post-sync checksums:
+  - `MovementConfig` length `2229`, checksum `209712992`
+  - `MovementController` length `51569`, checksum `124290970`
+
+### Not tested
+
+- Did not complete a hands-on Play Solo movement route across real Terrain slopes for the full chain:
+  - downhill slide
+  - slide jump
+  - multijump
+  - held-slide landing resume
+  - continued downhill acceleration
+
+### Risks
+
+- The exact feel of chain speed retention still needs live tuning on the real `Poziom` terrain.
+- `MaxMomentumChainSpeed = 140` allows much higher horizontal speed than regular movement, so collision, camera feel, and terrain edge cases should be playtested.
+- Landing slide resume currently clears the chain if landing speed is below `SlideLandingMinCarrySpeed`; that prevents sticky auto-slide starts but may need tuning if slow downhill chains should continue.
+
+### Rollback
+
+- Revert `Level/ReplicatedStorage/ModuleScripts/MovementConfig.lua`, `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`, and this changelog entry.
+- In live `Poziom`, restore the previous sources for `game.ReplicatedStorage.ModuleScripts.MovementConfig` and `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController`.
+
+## 2026-06-16 - Poziom terrain slide grace, smoother slope tuning, and air momentum limits
+
+### Scope
+
+- Tuned the existing `Level` movement config for smoother Terrain sliding and weaker Megabonk-style air steering.
+- Added slide config keys:
+  - `SlideGroundGraceTime = 0.16`
+  - `SlideHardMaxDurationEnabled = false`
+  - `SlidePreserveYVelocity = true`
+- Updated active slide ground checks so transient `Freefall` does not count as lost ground while the slide raycast still sees valid ground.
+- Added slide ground-loss grace handling with debug logs for temporary loss and recovery.
+- Changed slide velocity application to preserve current Y velocity by default and only drive horizontal X/Z movement.
+- Removed the default hard hold-duration cutoff for held slides unless `SlideHardMaxDurationEnabled` is explicitly enabled.
+- Adjusted slope and friction tuning:
+  - `SlopeAcceleration = 35`
+  - `DownhillSpeedGainMultiplier = 1.0`
+  - `UphillDeceleration = 18`
+  - `UphillSlowdownMultiplier = 0.65`
+  - `FlatSlideFriction = 0.999`
+  - `SlideSurfaceTransitionFriction = 0.9995`
+  - `MinSlideEndSpeed = 3`
+  - `MaxSlideSlopeSpeed = 85`
+- Adjusted air momentum tuning:
+  - `AirControlStrength = 0.025`
+  - `AirTurnResponsiveness = 0.012`
+  - `AirDrag = 0.998`
+- Kept existing movement upgrade hooks, UI blocking, run/pause/end guards, and slide/dash/sprint binds intact.
+
+### Files updated
+
+- `Level/ReplicatedStorage/ModuleScripts/MovementConfig.lua`
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.ReplicatedStorage.ModuleScripts.MovementConfig`
+- `Poziom`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Poziom`.
+- Verified the pre-change repo and live Studio movement source checksums matched.
+- Synced the patched movement sources into live `Poziom` through Roblox MCP after `loadstring(...)` compiled both fetched repo files successfully.
+- Live post-sync checksums:
+  - `MovementConfig` length `1807`, checksum `136640403`
+  - `MovementController` length `41632`, checksum `457259256`
+
+### Not tested
+
+- Did not run a hands-on Play Solo traversal across real Terrain slopes, ramps, and ledges in this pass.
+
+### Risks
+
+- The new slide grace and higher downhill acceleration should smooth Terrain contact jitter, but the exact feel still needs live tuning on the real `Poziom` map.
+- `SlideEdgeLaunchEnabled` remains active, so losing ground beyond grace may still transition into the existing edge-launch behavior.
+- Air control is intentionally much weaker; players may need a small tuning pass if it feels too locked-in after jump.
+
+### Rollback
+
+- Revert `Level/ReplicatedStorage/ModuleScripts/MovementConfig.lua`, `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`, and this changelog entry.
+- In live `Poziom`, restore the previous sources for `game.ReplicatedStorage.ModuleScripts.MovementConfig` and `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController`.
+
+## 2026-06-08 - Poziom raycast movement with slope slide, multi-jump, and air momentum
+
+### Scope
+
+- Added `Level`-only movement configuration in `ReplicatedStorage.ModuleScripts.MovementConfig`.
+- Reworked `MovementController` slide handling to use `HumanoidRootPart.AssemblyLinearVelocity` for forward boost, slope-aware velocity projection, horizontal momentum preservation, friction-based decay, and horizontal speed clamping instead of relying on `WalkSpeed` alone.
+- Bound slide to `LeftControl`, `C`, and the pre-existing controller `ButtonX` path.
+- Added raycast-based grounded checks with slope validation through `GroundCheckDistance` and `MaxSlopeAngle`.
+- Added configurable multi-jump with a default of `2` total jumps, responsive `JumpRequest` handling, air-jump cooldown, grounded reset, and X/Z momentum preservation.
+- Added Megabonk-like air momentum and drag with configurable turn responsiveness, air control strength, max air speed, and landing momentum carry.
+- Tightened multi-jump state tracking with `jumpsUsed`, `lastJumpTime`, `lastAirJumpTime`, `leftGroundTime`, `CanAirJumpAfterGroundLeaveDelay`, and `LandingResetDelay` so short raycast ground contacts cannot refresh infinite air jumps.
+- Increased the air-jump-to-air-jump cooldown to `1.0` second while keeping the initial ground-leave debounce responsive.
+- Added character-local low gravity through a HumanoidRootPart `VectorForce` named `LowGravityForce`, gated by airborne state and `LowGravityMinYVelocity`, without changing `workspace.Gravity`.
+- Extended slide behavior with hold-to-continue timing, slope-plane projection, downhill acceleration, uphill slowdown, flat friction, minimum end speed, and slope speed clamping.
+- Tuned slide feel so slope-to-flat transitions carry momentum longer, downhill acceleration is softer, slide off an edge launches with preserved X/Z momentum, and holding slide while standing on a valid slope starts a slow downhill slide.
+- Added respawn-safe movement state cleanup plus character-specific connection cleanup so slide/jump state does not get stuck after death or respawn.
+- Preserved existing `Level` movement progression hooks by keeping compatibility with `MoveSlideLevel`, `MoveDashLevel`, `MoveSprintLevel`, `RunStat_ExtraJumps`, and `RunStat_JumpHeight`.
+- Did not touch `Four Peaks/` or unrelated combat, enemy, spell, reward, mission, inventory, lobby, or blacksmith logic.
+
+### Files updated
+
+- `Level/ReplicatedStorage/ModuleScripts/MovementConfig.lua`
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `game.ReplicatedStorage.ModuleScripts.MovementConfig`
+- `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController`
+
+### Verification
+
+- Confirmed the active Studio instance was `Poziom` and re-set it active before live edits.
+- Created the live `ReplicatedStorage.ModuleScripts.MovementConfig` module in `Poziom` and synced the updated `MovementController` source into `StarterPlayer.StarterPlayerScripts.LocalScript`.
+- Verified `loadstring(script.Source)` compiles for:
+  - `ReplicatedStorage.ModuleScripts.MovementConfig`
+  - `StarterPlayer.StarterPlayerScripts.LocalScript.MovementController`
+- Fresh-required the live `MovementConfig` module through a temporary clone and confirmed the expected values were returned, including:
+  - `SlideKeyCodes = 3`
+  - `MaxJumps = 2`
+  - `MaxHorizontalSpeed = 75`
+  - `AirJumpCooldown = 1.0`
+  - `LowGravityEnabled = true`
+  - `SlideHoldEnabled = true`
+  - `FlatSlideFriction = 0.997`
+  - `SlopeAcceleration = 18`
+  - `DownhillSpeedGainMultiplier = 0.6`
+  - `MaxSlideSlopeSpeed = 78`
+  - `SlideEdgeLaunchEnabled = true`
+  - `SlopeAutoSlideStartSpeed = 4`
+- Verified the live movement source now contains the raycast ground-check path, slope projection helper, strict jump tracking variables, low gravity `VectorForce` path, slide hold, and air momentum heartbeat updates.
+- Compared live Studio sources against the `Level/` repo mirror with matching rolling checksums for:
+  - `MovementConfig` length `1704`, checksum `40890859`
+  - `MovementController` length `38901`, checksum `616545619`
+- Ran `git diff --check` on the touched movement/changelog files; the only output was existing LF/CRLF conversion warnings for edited files.
+
+### Risks
+
+- This pass verified source sync and compile safety, but it did not include a full in-session movement playtest with manual ramp/slope traversal, repeated air-jump timing, dash interaction, or respawn during an active slide in a live player runtime.
+- The new raycast ground check, air drag, and landing carry are intentionally conservative defaults, but they still need a quick hands-on pass in Studio to tune feel on the real `Poziom` terrain and ramps.
+
+### Rollback
+
+- Revert `Level/ReplicatedStorage/ModuleScripts/MovementConfig.lua`, `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`, and this changelog entry in the repo.
+- In live Studio, remove or restore `game.ReplicatedStorage.ModuleScripts.MovementConfig` and restore the previous source of `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController`.
+
+## 2026-06-08 - Poziom mob overhead names and HP bars removed
+
+### Scope
+
+- Disabled the client-side NPC overhead `BillboardGui` creation in `NpcPresentation`, which removes the mob name label and HP bar shown above enemies.
+- Added a server-side `Humanoid` display shutdown in `NpcService.Register(...)` so Roblox built-in humanoid names and health UI also stay hidden for registered mobs.
+- Kept combat stats, boss bar behavior, and NPC identity attributes unchanged.
+
+### Files updated
+
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/NpcPresentation.client.lua`
+- `Level/ServerScriptService/ModuleScript/NpcService.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `game.StarterPlayer.StarterPlayerScripts.LocalScript.NpcPresentation`
+- `game.ServerScriptService.ModuleScript.NpcService`
+
+### Verification
+
+- Confirmed the active Studio instance was `Poziom` and re-set it active before live edits.
+- Verified the live `NpcPresentation` source now contains `SHOW_NPC_NAMEPLATES = false` and an early return in `ensureHealthbar(...)`.
+- Verified the live `NpcService` source now sets:
+  - `Humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None`
+  - `Humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff`
+  - `Humanoid.NameDisplayDistance = 0`
+  - `Humanoid.HealthDisplayDistance = 0`
+- Confirmed the repo mirrors the same changes in `Level/...`.
+
+### Risks
+
+- This pass updates the runtime sources that create overhead UI, but it did not include a full in-session playtest with spawned enemies visible on screen after the change.
+- If any future system intentionally expects per-mob overhead UI from `NpcPresentation`, it will now need a separate explicit toggle instead of assuming the billboard is always present.
+
+### Rollback
+
+- Revert `Level/StarterPlayer/StarterPlayerScripts/LocalScript/NpcPresentation.client.lua`, `Level/ServerScriptService/ModuleScript/NpcService.lua`, and this changelog entry in the repo.
+- In live Studio, restore the previous source of `game.StarterPlayer.StarterPlayerScripts.LocalScript.NpcPresentation` and `game.ServerScriptService.ModuleScript.NpcService`.
+
+## 2026-06-07 - Gildia real Guild Treasury
+
+### Scope
+
+- Turned the physical `Treasury` / `Skarbiec` location in the `Guild` place from a placeholder into a real server-authoritative treasury panel.
+- Added real treasury remotes in the `Guild` place:
+  - `RemoteFunctions.GetTreasury`
+  - `RemoteFunctions.DepositToTreasury`
+  - `RemoteFunctions.SpendFromTreasury`
+  - `RemoteEvents.GuildTreasuryUpdated`
+- Kept `RemoteEvents.GuildLocationOpened`; the `Treasury` prompt now sends `Location.Panel = "Treasury"` and opens the real panel instead of a `Coming soon` placeholder.
+- Added treasury resource mapping to `GuildConfig`:
+  - `Silver -> profile.silver`
+  - `Souls -> profile.souls`
+  - `Tickets -> profile.tickets`
+  - `WeaponPoints -> profile.weaponPoints`
+  - `MobMaterial:<id> -> profile.crafting.mobMaterials[id]`
+  - `UpgradeMaterial:<id> -> profile.crafting.upgradeMaterials[id]`
+  - `MineResource:<id> -> profile.crafting.mineResources[id]`
+- Added server-side deposit validation:
+  - guild membership
+  - allowed resource id
+  - positive integer amount
+  - sufficient player resource balance
+  - DataStore-backed profile deduction
+  - DataStore-backed guild treasury increment
+  - contribution and guild XP increase
+- Added server-side spend validation:
+  - guild membership
+  - Owner/Officer role
+  - allowed resource id
+  - positive integer amount
+  - sufficient guild treasury balance
+  - DataStore-backed guild treasury decrement
+- Added treasury history entries with:
+  - `userId`
+  - `username`
+  - `resourceId`
+  - `amount`
+  - `createdAt`
+  - plus `action` and `reason`
+- Added same-server live refresh through `GuildTreasuryUpdated`; open treasury panels refresh without closing and the main Guild UI refreshes too.
+- Updated lobby `GuildService` compatibility so future lobby saves preserve:
+  - `guild.treasury.resources`
+  - `guild.memberContributions`
+  - `guild.totalContribution`
+  - `guild.treasuryHistory`
+- Kept existing lobby Donate behavior compatible and updated it to maintain the new treasury metadata.
+- Did not touch `Level/`.
+
+### Data fields added or preserved
+
+- `guild.treasury.resources[resourceId] = amount`
+- `guild.memberContributions[userId] = contribution`
+- `guild.totalContribution`
+- `guild.treasuryHistory[]`
+
+Currency treasury values are still also kept on the existing top-level keys (`guild.treasury.Silver`, `Souls`, `Tickets`, `WeaponPoints`) for existing lobby UI compatibility.
+
+### Files updated
+
+- `Guild/ReplicatedStorage/ModuleScripts/GuildConfig.lua`
+- `Guild/ServerScriptService/Script/GuildPlace.server.lua`
+- `Guild/StarterPlayer/StarterPlayerScripts/LocalScript/GuildCastleClient.lua`
+- `Guild/Workspace/GuildLocations/MANIFEST.md`
+- `Four Peaks/ServerScriptService/ModuleScript/GuildService.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Gildia`: `game.ReplicatedStorage.ModuleScripts.GuildConfig`
+- `Gildia`: `game.ServerScriptService.Script.GuildPlace`
+- `Gildia`: `game.StarterPlayer.StarterPlayerScripts.GuildCastleClient`
+- `Gildia`: `game.ReplicatedStorage.RemoteFunctions.GetTreasury`
+- `Gildia`: `game.ReplicatedStorage.RemoteFunctions.DepositToTreasury`
+- `Gildia`: `game.ReplicatedStorage.RemoteFunctions.SpendFromTreasury`
+- `Gildia`: `game.ReplicatedStorage.RemoteEvents.GuildTreasuryUpdated`
+- `Cztery szczyty`: `game.ServerScriptService.ModuleScript.GuildService`
+
+### Verification
+
+- Confirmed active Studio was `Gildia` for Guild-place work and `Cztery szczyty` for the lobby compatibility sync.
+- Enabled Studio `HttpService.HttpEnabled` for the session and synced local sources into live Studio through a temporary local HTTP server.
+- Verified live `loadstring` compilation for:
+  - `GuildConfig`
+  - `GuildPlace`
+  - `GuildCastleClient`
+  - lobby `GuildService`
+- Ran Play Solo in `Gildia` as the saved `Pinecone` guild Owner:
+  - `GetTreasury` returned `Success = true`
+  - role was `Owner`
+  - `CanSpend = true`
+  - player resources included real `Silver` and material resources
+  - physical `Treasury` prompt returned `Location.Panel = "Treasury"`
+  - treasury panel opened with title `Skarbiec [Owner]`
+  - `Donate` button existed
+  - spend section was visible for Owner
+  - donate amount `0` returned `Amount must be positive.`
+  - donate greater than player balance returned `Not enough Silver.`
+  - fake resource id returned `Unknown treasury resource.`
+  - spend amount `0` returned `Amount must be positive.`
+  - valid `Silver` donate decreased player Silver and increased guild Silver
+  - valid donate increased player contribution and total contribution
+  - valid Owner spend decreased guild Silver
+  - treasury history count increased for deposit/spend
+  - open treasury panel stayed visible after donate/spend refresh
+  - after respawn, counts stayed stable: one `GuildCastleGui`, one return button, seven location buttons, one Donate button, one Spend button, and seven prompts
+  - after stop/start Play, the saved treasury state persisted
+  - return-to-lobby flow still emitted `Teleporting`, then the expected Studio `TeleportFailed`
+- Checked Output after Play; only the existing StyleRule `CornerRadius` warnings appeared.
+
+### Live test data touched
+
+- The `Pinecone` guild test record received small live-test changes:
+  - successful treasury deposits of `Silver`
+  - successful test spends of `Silver`
+  - treasury history entries for those actions
+
+### Not tested
+
+- A true second client/member role test was not available through the current MCP surface. Member spend denial was source-verified in `SpendFromTreasury`: the server requires `Owner` or `Officer` before spending.
+- A successful cross-place teleport still cannot complete in this Studio session; Studio returns `TeleportFailed`, as before.
+- Cross-server live refresh is not implemented; `GuildTreasuryUpdated` refreshes same-server Guild-place members.
+
+### Risks
+
+- Deposit is split across player profile and guild DataStores. If the guild update fails after profile deduction, the server attempts a profile refund.
+- Material resource display uses saved material ids because the `Guild` place does not currently mirror `CraftingConfig` display metadata.
+- Existing lobby Donate remains supported, but future full cross-place treasury refresh would need MessagingService fanout.
+
+### Rollback
+
+- Revert the files listed above and this changelog entry.
+- In live `Gildia`, restore previous sources for `GuildConfig`, `GuildPlace`, and `GuildCastleClient`.
+- In live `Gildia`, remove `GetTreasury`, `DepositToTreasury`, `SpendFromTreasury`, and `GuildTreasuryUpdated` if rolling back the treasury system entirely.
+- In live `Cztery szczyty`, restore the previous `GuildService` source.
+- Existing guild records with `treasury.resources`, `memberContributions`, `totalContribution`, and `treasuryHistory` can remain; older code will ignore or drop those fields on future saves if the compatibility changes are rolled back.
+
+## 2026-06-07 - Gildia physical guild location placeholders
+
+### Scope
+
+- Added physical placeholder locations to the `Guild` place castle hub:
+  - `Dojo`
+  - `Treasury`
+  - `HallOfFame`
+  - `Farms`
+  - `Mine`
+  - `Fishing`
+  - `BossRaid`
+- Added `Workspace.GuildLocations` as the location container in live `Gildia`.
+- Each location is a separate `Model` with placeholder parts, a visible `BillboardGui` name label, and one `GuildLocationPrompt` `ProximityPrompt`.
+- Updated `GuildPlace` so the server idempotently creates/refreshes the placeholder models and validates guild membership before firing the location panel remote.
+- Added `RemoteEvents.GuildLocationOpened` for server-to-client location panel payloads.
+- Updated `GetGuildCastleState` to return the physical location list with id, name, description, status, and in-castle hint text.
+- Updated `GuildCastleClient`:
+  - location tiles now show the physical area hint instead of being UI-only tabs
+  - prompt responses open a modal with location name, description, `Coming soon`, and close button
+  - refreshed location tiles are cleared/rebuilt so respawn refreshes do not duplicate UI
+- Added `Guild/Workspace/GuildLocations/MANIFEST.md` to document the important non-script Workspace structure.
+- Kept the existing return-to-lobby flow intact.
+- Did not touch `Level/`.
+
+### Files updated
+
+- `Guild/ServerScriptService/Script/GuildPlace.server.lua`
+- `Guild/StarterPlayer/StarterPlayerScripts/LocalScript/GuildCastleClient.lua`
+- `Guild/Workspace/GuildLocations/MANIFEST.md`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Gildia`: `game.ServerScriptService.Script.GuildPlace`
+- `Gildia`: `game.StarterPlayer.StarterPlayerScripts.GuildCastleClient`
+- `Gildia`: `game.ReplicatedStorage.RemoteEvents.GuildLocationOpened`
+- `Gildia`: `game.Workspace.GuildLocations`
+- `Gildia`: `game.Workspace.GuildLocations.{Dojo,Treasury,HallOfFame,Farms,Mine,Fishing,BossRaid}`
+
+### Verification
+
+- Confirmed active Studio was `Gildia`.
+- Verified edit-mode `Workspace.GuildLocations` has 7 child models.
+- Verified every location model has exactly one `ProximityPrompt` and one `BillboardGui`.
+- Verified live `GuildPlace` and `GuildCastleClient` sources compile with `loadstring`.
+- Ran Play Solo in `Gildia` as the saved guild member/owner for `Pinecone`:
+  - `GetGuildCastleState` returned success for `Pinecone`
+  - `Locations` returned 7 entries
+  - all 7 prompts fired `GuildLocationOpened` with the expected `Location.Id`
+  - each prompt payload included the expected name, description, and `Status = "Coming soon"`
+  - the location panel rendered the selected location title and status
+  - respawn kept counts stable at one `GuildCastleGui`, one `ReturnToLobbyButton`, seven location buttons, one close button, and seven prompts
+  - `RequestLobbyReturn` still fired the existing return flow and returned `Teleporting`, then the expected Studio `TeleportFailed`
+- Checked Output after Play; only the existing StyleRule `CornerRadius` warnings appeared.
+- Ran `git diff --check` on touched paths; only the existing LF/CRLF warning for `CHANGELOG_AI.md` appeared.
+
+### Not tested
+
+- A true no-guild second client was not available through the current MCP tool surface. The prompt handler was source-verified to call `getAuthorizedGuild(player)` before opening the panel, and the client has no `FireServer` path for `GuildLocationOpened`.
+- A successful cross-place return teleport cannot complete in this Studio session; Studio returned the expected `TeleportFailed`.
+- MCP could not synthesize a real mouse click on the close button because `VirtualInputManager.SendMouseButtonEvent` lacks capability in this context. The close button exists and the source binds its `Activated` handler.
+
+### Risks
+
+- The geometry is placeholder-only and is intentionally simple.
+- Location systems are not implemented yet; no combat upgrades, treasury management, rankings, production, mining, fishing, farming, or raid gameplay was added.
+- The placeholder layout is centered around the current simple Guild place baseplate/spawn setup and may need art/layout adjustment once a full castle model is authored.
+
+### Rollback
+
+- Revert the files listed above and this changelog entry.
+- In live `Gildia`, restore the previous `GuildPlace` and `GuildCastleClient` sources.
+- Remove `game.ReplicatedStorage.RemoteEvents.GuildLocationOpened`.
+- Remove `game.Workspace.GuildLocations` if rolling back the physical placeholders entirely.
+
+## 2026-06-02 - Cztery szczyty Guild privacy, requests, and invites
+
+### Scope
+
+- Added guild privacy control to the lobby guild system:
+  - `privacy = "Public" | "Private"`
+  - `joinRequests`
+  - `invites`
+- Public guilds still join immediately through `JoinGuild`.
+- Private guilds create a join request through `RequestJoin` instead of direct membership.
+- Added server-authoritative owner/officer actions:
+  - `SetPrivacy`
+  - `AcceptJoinRequest`
+  - `RejectJoinRequest`
+  - `SendInvite`
+  - `CancelInvite`
+  - `AcceptInvite`
+  - `DeclineInvite`
+- Kept existing owner-only role management, kick, description edit, disband, leave, donate, upgrade, and teleport flows intact.
+- Extended `GuildUpdated` broadcast usage so privacy/request/invite/member changes refresh online guild members and the affected requester/invitee when present.
+- Updated lobby `GuildClient`:
+  - shows `Public` / `Private` status
+  - shows `Join` for public guilds and `Request to Join` for private guilds
+  - adds `Requests` and `Invites` tabs
+  - shows privacy toggle to Owner/Officer only
+  - lets Owner/Officer accept/reject requests and send/cancel invites
+  - lets invited no-guild players accept/decline invites
+- Updated `Guild` place castle panel so `GetGuildCastleState` returns and renders guild privacy.
+- Did not touch `Level/`.
+
+### Data fields added
+
+- `guild.privacy`
+- `guild.joinRequests[userId] = { userId, username, createdAt }`
+- `guild.invites[userId] = { userId, username, invitedByUserId, createdAt }`
+
+### Remotes updated
+
+- Existing `RemoteFunctions.GuildAction` dispatch now handles:
+  - `RequestJoin`
+  - `SetPrivacy`
+  - `AcceptJoinRequest`
+  - `RejectJoinRequest`
+  - `SendInvite`
+  - `CancelInvite`
+  - `AcceptInvite`
+  - `DeclineInvite`
+- Existing `RemoteEvents.GuildUpdated` is reused for live refresh.
+- Existing `Guild` place `RemoteFunctions.GetGuildCastleState` now includes `Guild.Privacy`.
+- No new lobby remote objects were added.
+
+### Files updated
+
+- `Four Peaks/ServerScriptService/ModuleScript/GuildService.lua`
+- `Four Peaks/ServerScriptService/Script/GuildRemotes.server.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/GuildClient.lua`
+- `Guild/ServerScriptService/Script/GuildPlace.server.lua`
+- `Guild/StarterPlayer/StarterPlayerScripts/LocalScript/GuildCastleClient.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Cztery szczyty`: `game.ServerScriptService.ModuleScript.GuildService`
+- `Cztery szczyty`: `game.ServerScriptService.Script.GuildRemotes`
+- `Cztery szczyty`: `game.StarterPlayer.StarterPlayerScripts.GuildClient`
+- `Gildia`: `game.ServerScriptService.Script.GuildPlace`
+- `Gildia`: `game.StarterPlayer.StarterPlayerScripts.GuildCastleClient`
+
+### Verification
+
+- Confirmed active Studio instances and synced `Cztery szczyty` and `Gildia` through Roblox MCP.
+- Verified live `loadstring` compilation for:
+  - `GuildService`
+  - `GuildRemotes`
+  - `GuildClient`
+  - `GuildPlace`
+  - `GuildCastleClient`
+- Ran Play Solo in `Cztery szczyty` as the `Pinecone` guild owner:
+  - `GetGuildState` returned `CanManageJoin = true`
+  - initial privacy was `Public`
+  - `SetPrivacy` changed the guild to `Private`
+  - `SearchGuilds` returned `Privacy = Private`
+  - `SetPrivacy` restored the guild to `Public`
+  - sending an invite to the current guild member failed with `Player is already in this guild.`
+  - lobby UI showed `Requests` and `Invites` tabs
+  - lobby UI showed `Guild privacy: Public`
+  - owner UI showed `Join controls` and `Make Private`
+- Ran Play Solo in `Gildia`:
+  - `GetGuildCastleState` returned `Privacy = Public`
+  - castle UI rendered `Public`
+  - `ReturnToLobbyButton` still existed exactly once
+- Checked Output in both places after Play; only the existing StyleRule `CornerRadius` warnings appeared.
+- Ran `git diff --check` on touched Lua files with no issues.
+
+### Not tested
+
+- A true 2-player Studio flow was not available through the current MCP controls, so these were not fully live-tested end-to-end:
+  - player2 sends request from a separate client
+  - owner sees that request without closing UI
+  - owner accepts and player2 becomes a member in a live two-client session
+  - player3 joins a public guild from a separate client
+  - member-side hidden/denied controls in a real second client
+  - officer request handling in a real second client
+- Request/invite persistence after rejoin was verified by DataStore-backed implementation and compile/runtime smoke tests, but not by a multi-client rejoin flow in Studio.
+- `Guild` place does not duplicate request/invite management; it renders privacy only. Privacy changes remain in the canonical lobby `GuildService`.
+
+### Risks
+
+- `AcceptJoinRequest` currently requires the requester to be online so the existing `PlayerData` membership can be updated through the established PlayerData path.
+- Cross-server request/invite refresh still depends on same-server `GuildUpdated`; a future MessagingService fanout would be needed for multi-server live refresh.
+- Invites can be sent by userId or username; username resolution uses Roblox player-name APIs and may fail if the platform lookup fails.
+
+### Rollback
+
+- Revert the files listed above and this changelog entry.
+- In live `Cztery szczyty`, restore previous sources for `GuildService`, `GuildRemotes`, and `GuildClient`.
+- In live `Gildia`, restore previous sources for `GuildPlace` and `GuildCastleClient`.
+- Existing guild records with `privacy`, `joinRequests`, or `invites` will be ignored by older code if rolled back, but can remain in DataStore until a cleanup pass is explicitly requested.
+
+## 2026-06-02 - Gildia basic castle UI data panel
+
+### Scope
+
+- Expanded the `Guild` place castle UI from an attribute-only placeholder into a server-backed guild panel.
+- Added `ReplicatedStorage.RemoteFunctions.GetGuildCastleState` in the `Guild` place.
+- Updated `GuildPlace` so `GetGuildCastleState` validates the player through the same server-side profile/guild-record membership path before returning guild data.
+- The castle state now returns:
+  - guild name, description, level, XP
+  - treasury values for Silver, Souls, Tickets, and WeaponPoints
+  - member count and same-server online member count
+  - the current player's guild role and contribution
+- Updated `GuildCastleClient` to render the server snapshot in `GuildCastleGui`.
+- Kept `ReturnToLobbyButton` and the existing server-authoritative lobby return flow intact.
+- Added a `Lokacje gildii` section with buttons for Dojo, Skarbiec, Sala chwały, Farmy, Kopalnia, Łowiska, and Boss Raid. These are MVP placeholders that select the tile and show `Coming soon`.
+- Kept `GuildCastleGui.ResetOnSpawn = false` and refreshed the server snapshot on respawn without creating duplicate UI.
+- Did not touch `Level/`.
+
+### Files updated
+
+- `Guild/ServerScriptService/Script/GuildPlace.server.lua`
+- `Guild/StarterPlayer/StarterPlayerScripts/LocalScript/GuildCastleClient.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Gildia`: `game.ServerScriptService.Script.GuildPlace`
+- `Gildia`: `game.StarterPlayer.StarterPlayerScripts.GuildCastleClient`
+- `Gildia`: `game.ReplicatedStorage.RemoteFunctions.GetGuildCastleState`
+
+### Verification
+
+- Confirmed active Studio was `Gildia`.
+- Synced the updated Guild place sources into live Studio through Roblox MCP using temporary `GuildPlaceNext` / `GuildCastleClientNext` scripts, compiled them, then copied their sources onto the live scripts.
+- Verified live `loadstring` compilation for `GuildPlace` and `GuildCastleClient`.
+- Verified live remotes:
+  - `RemoteEvents.RequestLobbyReturn`
+  - `RemoteEvents.LobbyReturnStatus`
+  - `RemoteFunctions.GetGuildCastleState`
+- Ran Play in `Gildia` as the saved guild member/owner:
+  - `GetGuildCastleState` returned `Pinecone`
+  - description loaded as `jabadabaduuu jabadabaduuu jabadabaduuu jabadabaduuu`
+  - level loaded as `3`
+  - XP loaded as `1,245`
+  - treasury loaded with `Silver = 9,028`, `Souls = 0`, `Tickets = 0`, `WeaponPoints = 0`
+  - member count loaded as `2`
+  - online member count loaded as `1`
+  - player role loaded as `Owner`
+  - `GuildCastleGui` existed with exactly one `ReturnToLobbyButton`
+  - seven location buttons existed after render
+- Re-tested the return flow:
+  - `RequestLobbyReturn` still used server-side `LOBBY_PLACE_ID = 88516424167732`
+  - Studio TeleportService returned `TeleportFailed`
+  - the UI showed `Return to lobby failed. Try again.` and re-enabled the button
+- Killed/respawned the player in Play and verified:
+  - one `GuildCastleGui` before and after respawn
+  - one `ReturnToLobbyButton` before and after respawn
+  - seven location buttons before and after respawn
+- Checked Studio Output after Play; only the existing StyleRule `CornerRadius` warnings appeared.
+- Ran `git diff --check` on touched Guild Lua files with no issues.
+
+### Not tested
+
+- A two-player Studio test was not available through the current MCP controls, so online count was verified with one active Guild-place player against a guild record with two total members.
+- MCP could not synthetically click a location `TextButton`; the live button instances and the client `Activated` handler for `Coming soon` were verified by source and runtime hierarchy.
+- A no-guild runtime client was not available in this session. The existing join rejection plus `GetGuildCastleState` membership validation remain server-side and do not rely on client teleport data.
+
+### Risks
+
+- `OnlineMemberCount` currently counts players online in the same Guild-place server. A cross-server/cross-place online presence count would need a separate presence service.
+- The location buttons are placeholder UI only; no location systems are implemented yet.
+
+### Rollback
+
+- Revert the files listed above and this changelog entry.
+- In live `Gildia`, restore the previous `GuildPlace` and `GuildCastleClient` sources and remove `RemoteFunctions.GetGuildCastleState` if rolling back the castle data panel entirely.
+
+## 2026-06-02 - Gildia return-to-lobby server-authoritative flow
+
+### Scope
+
+- Added a server-authoritative return path from the `Guild` place back to the `Four Peaks` lobby.
+- Set the known live place ids from the connected Studio instances:
+  - `GuildConfig.GUILD_PLACE_ID = 89635326813830`
+  - `GuildConfig.LOBBY_PLACE_ID = 88516424167732`
+- Added `ReplicatedStorage.RemoteEvents.RequestLobbyReturn` and `LobbyReturnStatus` in the `Guild` place.
+- Updated `GuildPlace` so the client never sends a place id; the server reads `LOBBY_PLACE_ID`, verifies the player still has valid guild authorization, and teleports with `guildId` preserved in teleport data.
+- Added a visible `ReturnToLobbyButton` to the castle UI with failure status handling and no polling.
+- Added a Studio-only direct Play fallback that reads the saved server-side guild membership when teleport data is unavailable, so the Guild place can be tested locally without weakening live client authority.
+- Mirrored the live lobby `GUILD_PLACE_ID` into the repo config to avoid future repo-to-Studio drift.
+
+### Files updated
+
+- `Four Peaks/ReplicatedStorage/ModuleScripts/GuildConfig.lua`
+- `Guild/ReplicatedStorage/ModuleScripts/GuildConfig.lua`
+- `Guild/ServerScriptService/Script/GuildPlace.server.lua`
+- `Guild/StarterPlayer/StarterPlayerScripts/LocalScript/GuildCastleClient.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Gildia`: `game.ReplicatedStorage.ModuleScripts.GuildConfig`
+- `Gildia`: `game.ServerScriptService.Script.GuildPlace`
+- `Gildia`: `game.StarterPlayer.StarterPlayerScripts.GuildCastleClient`
+- `Gildia`: `game.ReplicatedStorage.RemoteEvents.RequestLobbyReturn`
+- `Gildia`: `game.ReplicatedStorage.RemoteEvents.LobbyReturnStatus`
+- `Cztery szczyty`: `game.ReplicatedStorage.ModuleScripts.GuildConfig`
+
+### Verification
+
+- Confirmed active Studio instances and place ids:
+  - `Cztery szczyty` lobby: `88516424167732`
+  - `Gildia` place: `89635326813830`
+- Synced the Guild place scripts into live `Gildia` through Roblox MCP after HTTP sync was blocked by disabled Studio HTTP requests.
+- Verified live `loadstring` compilation for `GuildConfig`, `GuildPlace`, and `GuildCastleClient`.
+- Verified live `RequestLobbyReturn` and `LobbyReturnStatus` exist as `RemoteEvent` instances.
+- Ran Play in `Cztery szczyty` and verified the existing guild state for `Pinecone` returns `GuildPlaceId = 89635326813830`.
+- Invoked `TeleportToCastle` from the lobby through the existing server RemoteFunction; the server used the configured Guild place id, but Studio returned the expected `Teleport failed.` result for this cross-place test session.
+- Ran Play in `Gildia`:
+  - verified the player loaded into the saved guild `Pinecone`
+  - verified `GuildCastleGui` exists
+  - verified exactly one `ReturnToLobbyButton` exists
+  - fired `RequestLobbyReturn` without passing a place id
+  - captured `LobbyReturnStatus` payloads with `LobbyPlaceId = 88516424167732`
+  - verified TeleportService failure returns `TeleportFailed`, shows `Return to lobby failed. Try again.`, and re-enables the button
+  - killed/respawned the player and verified the button count stayed at `1`
+- Checked Studio Output after Play; only the existing StyleRule `CornerRadius` warnings appeared.
+- Ran `git diff --check` on the touched paths with no issues.
+
+### Not tested
+
+- A successful live cross-place teleport from `Gildia` back to `Cztery szczyty` could not complete in this Studio session because TeleportService returned failure in Studio.
+- A true no-guild second-player abuse test was not available through the current MCP tool surface. The server-side handler was verified to require `GuildCastleReady`, saved profile membership, and guild-record membership before teleporting.
+
+### Risks
+
+- The return flow depends on both places remaining in the same published experience and `LOBBY_PLACE_ID` staying current.
+- Studio direct Play fallback is guarded by `RunService:IsStudio()` and uses saved server-side membership; it should not affect live joins.
+
+### Rollback
+
+- Revert the files listed above and this changelog entry.
+- In live `Gildia`, restore the previous `GuildConfig`, `GuildPlace`, and `GuildCastleClient` sources and remove `RequestLobbyReturn` / `LobbyReturnStatus` if rolling back the return flow entirely.
+- In live `Cztery szczyty`, restore the previous `GuildConfig` source if the Guild place id should return to a placeholder.
+
+## 2026-06-02 - Cztery szczyty Guild live refresh push
+
+### Scope
+
+- Added server-push refresh for the lobby Guild UI.
+- Added `ReplicatedStorage.RemoteEvents.GuildUpdated` from `GuildRemotes`.
+- Updated `GuildService` to broadcast `GuildUpdated` to online guild members after guild mutations:
+  - create/join/leave
+  - description edits
+  - promote/demote/kick
+  - disband
+  - donate/treasury/XP updates
+  - upgrades and guild task progress
+- Updated `GuildClient` to listen for `GuildUpdated` and refresh the currently open panel through `GetGuildState` without closing it.
+- Kept the selected tab state local to the client; pushed refresh re-renders the active tab instead of forcing the default tab.
+- Did not add polling.
+
+### Files updated
+
+- `Four Peaks/ServerScriptService/ModuleScript/GuildService.lua`
+- `Four Peaks/ServerScriptService/Script/GuildRemotes.server.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/GuildClient.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Cztery szczyty`: `game.ServerScriptService.ModuleScript.GuildService`
+- `Cztery szczyty`: `game.ServerScriptService.Script.GuildRemotes`
+- `Cztery szczyty`: `game.StarterPlayer.StarterPlayerScripts.GuildClient`
+- `Cztery szczyty`: `game.ReplicatedStorage.RemoteEvents.GuildUpdated`
+
+### Verification
+
+- Confirmed active Studio was `Cztery szczyty`.
+- Synced the updated guild sources into live Studio through Roblox MCP.
+- Verified live `loadstring` compilation for `GuildService`, `GuildRemotes`, and `GuildClient`.
+- Verified `ReplicatedStorage.RemoteEvents.GuildUpdated` exists in live Studio.
+- Ran Play in Studio:
+  - opened `GuildGui`
+  - invoked a Silver donate directly through `GuildAction` rather than through `GuildClient.invokeAction`; the open UI refreshed through `GuildUpdated`, showing XP `1,244 -> 1,245` and contribution `10,000 -> 10,010` without closing the panel
+  - demoted an existing non-owner member from `Officer` to `Member` through direct `GuildAction`; the open member list refreshed without closing the panel
+  - promoted the same member back to `Officer`; the open member list refreshed again and final role was restored to `Officer`
+- Checked Studio Output after the Play test; only existing StyleRule `CornerRadius` warnings appeared.
+- Ran `git diff --check` on touched files with no issues.
+
+### Not tested
+
+- A true two-client Studio test was not available through the current Roblox MCP tool surface; `start_stop_play` launched one `LocalPlayer`, and MCP exposed no Start Server with 2 players control.
+- The player2 join/leave/kick visual path was not fully live-tested with two visible clients, but the same server broadcast path was verified for donation and role changes while the panel stayed open.
+
+### Risks
+
+- Push refresh is in-server only. If future guild edits happen from another live server, cross-server MessagingService fanout would still be needed.
+- Kicked/offline players still rely on the existing membership repair path on next guild state load; online kicked players receive an extra refresh event.
+
+### Rollback
+
+- Revert the files listed above and this changelog entry.
+- In live `Cztery szczyty`, restore previous sources for `GuildService`, `GuildRemotes`, and `GuildClient`, and remove `ReplicatedStorage.RemoteEvents.GuildUpdated` if rolling back the push event entirely.
+
+## 2026-06-01 - Cztery szczyty Guild MVP and Guild place scaffold
+
+### Scope
+
+- Added a server-authoritative Guild MVP for the `Four Peaks` lobby.
+- Added `GuildConfig` with `GUILD_PLACE_ID = 0` placeholder and upgrade/task/donation config.
+- Added `GuildService` for create/search/join/leave, owner description/role/kick/disband actions, donations, treasury, upgrades, member contribution ranking, guild task progress API, and guild-castle teleport data.
+- Added `Guild` membership fields to the existing `PlayerData` profile schema.
+- Added `GuildRemotes` with `GetGuildState`, `SearchGuilds`, and `GuildAction` RemoteFunctions.
+- Added programmatic `GuildClient` UI opened by the existing live `ScreenGuiButtons.Frame.Guild` button.
+- Mirrored the live `Guild` button into `ScreenGuiButtons/studio.snapshot.json`.
+- Added a repo scaffold for a separate `Guild/` place with server membership validation and a basic castle panel.
+- Kept `Level/`, blacksmith, missions, inventory, shop, party, and existing dungeon teleport scripts untouched.
+
+### Files updated
+
+- `Four Peaks/ReplicatedStorage/ModuleScripts/GuildConfig.lua`
+- `Four Peaks/ServerScriptService/ModuleScript/GuildService.lua`
+- `Four Peaks/ServerScriptService/ModuleScript/PlayerData.lua`
+- `Four Peaks/ServerScriptService/Script/GuildRemotes.server.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/GuildClient.lua`
+- `Four Peaks/StarterGui/ScreenGuiButtons/ScreenButtonsClient.lua`
+- `Four Peaks/StarterGui/ScreenGuiButtons/studio.snapshot.json`
+- `Guild/ReplicatedStorage/ModuleScripts/GuildConfig.lua`
+- `Guild/ServerScriptService/Script/GuildPlace.server.lua`
+- `Guild/StarterPlayer/StarterPlayerScripts/LocalScript/GuildCastleClient.lua`
+
+### Live Studio objects updated
+
+- `Cztery szczyty`: `game.ReplicatedStorage.ModuleScripts.GuildConfig`
+- `Cztery szczyty`: `game.ServerScriptService.ModuleScript.GuildService`
+- `Cztery szczyty`: `game.ServerScriptService.ModuleScript.PlayerData`
+- `Cztery szczyty`: `game.ServerScriptService.Script.GuildRemotes`
+- `Cztery szczyty`: `game.StarterPlayer.StarterPlayerScripts.GuildClient`
+- `Cztery szczyty`: `game.StarterGui.ScreenGuiButtons.ScreenButtonsClient`
+- `Cztery szczyty`: `game.ReplicatedStorage.RemoteFunctions.{GetGuildState,SearchGuilds,GuildAction}`
+
+### Verification
+
+- Confirmed active Studio was `Cztery szczyty`.
+- Confirmed the live `StarterGui.ScreenGuiButtons.Frame.Guild` `ImageButton` exists.
+- Synced the updated lobby sources into live Studio through Roblox MCP.
+- Verified live `loadstring` compilation for `GuildConfig`, `GuildService`, `GuildRemotes`, `GuildClient`, `PlayerData`, and `ScreenButtonsClient`.
+- Ran Play Solo in the lobby:
+  - verified `GuildGui` exists and opens through the same `ScreenButtonsAction`/`ScreenButtonsNonce` path used by `ScreenButtonsClient`
+  - created a guild and verified name, description area, level, XP, owner role, and member list
+  - verified the left tab labels render, including `Opis`, `Pod zadania 0/5`, `Donate`, `Dojo`, `Skarbiec`, `Farmy, kopalnia i łowiska`, and `Sala chwały`
+  - verified search returns the created guild
+  - verified an oversized Silver donation fails with `Not enough Silver`
+  - verified a valid Silver donation subtracts player Silver and increases guild treasury/XP/task progress
+  - verified Dojo upgrade fails without enough treasury Silver, then succeeds after enough donation
+  - verified owner management UI text renders for the owner
+  - verified `LeaveGuild` works and disbands when the owner is the last member
+  - verified `DisbandGuild` works for the owner and is denied when the player has no owner membership
+  - verified `TeleportToCastle` reads `GUILD_PLACE_ID`, passes the current `guildId` in state, and returns the expected placeholder failure while `GUILD_PLACE_ID = 0`
+- Checked Studio Output after Play Solo; only pre-existing StyleRule `CornerRadius` warnings appeared.
+- Checked `ScreenGuiButtons/studio.snapshot.json` parses as JSON.
+- Ran `git diff --check` on touched files; only existing LF/CRLF conversion warnings were reported.
+
+### Not tested
+
+- A true physical/synthetic mouse click on the `Guild` button could not be fired through MCP because `VirtualInputManager:SendMouseButtonEvent` is blocked in the current command capability; the live button object and source hookup were verified, and the exact ScreenButtons attribute open path was tested.
+- A two-player Studio server test was not available through the current MCP controls, so player2 join/promote/demote/kick and member-side owner-action denial were not live-tested.
+- The separate `Guild` place was not synced into Studio because the only extra open Studio instance was another `Cztery szczyty`, not a Guild place.
+- Real teleport cannot be completed until `GUILD_PLACE_ID` is set to the published Guild place id.
+
+### Risks
+
+- Guild membership is saved in the existing `PlayerData` profile; the shared guild record uses `GuildRecords_v1` plus a small `GuildDirectory_v1` DataStore because guilds are shared across players.
+- If a member is kicked while offline, their profile membership is repaired the next time the guild state is loaded and the server sees they are no longer in the guild record.
+- Current guild DataStore writes are MVP-grade and server-authoritative inside the active server; high-concurrency cross-server guild edits may need an UpdateAsync conflict strategy later.
+- `GUILD_PLACE_ID` is intentionally `0`, so the lobby returns a clear not-configured response instead of attempting an invalid teleport.
+
+### Rollback
+
+- Revert the files listed above and this changelog entry.
+- In live `Cztery szczyty`, remove `GuildConfig`, `GuildService`, `GuildRemotes`, `GuildClient`, and the three guild RemoteFunctions, then restore the previous `PlayerData` and `ScreenButtonsClient` sources.
+- Remove the repo-only `Guild/` place scaffold if the separate place is postponed.
+
+## 2026-06-01 - Poziom normal mob distance despawn and spawn emergence
+
+### Scope
+
+- Added automatic despawn for normal dungeon mobs when their nearest alive player is more than `100` studs away.
+- Kept elites and bosses exempt from the distance despawn.
+- Added a client-side spawn presentation where newly synced mobs start below ground, rise into place, and briefly show a dirt puff.
+- Kept NPC remote names, attributes, folder paths, enemy templates, and wave spawn rules unchanged.
+
+### Files updated
+
+- `Level/ServerScriptService/ModuleScript/NpcService.lua`
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/NpcPresentation.client.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.ServerScriptService.ModuleScript.NpcService`
+- `Poziom`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.NpcPresentation`
+
+### Verification
+
+- Confirmed active Studio was `Poziom`.
+- Synced the updated `NpcService` and `NpcPresentation` sources into live Studio through Roblox MCP.
+- Verified both live sources compile with `loadstring`.
+- Verified the live sources contain the `NORMAL_DESPAWN_DISTANCE = 100` despawn path and the spawn-rise presentation helpers.
+- Started a Play smoke test, but MCP Luau execution landed in the client context and could not access `ServerScriptService`, so a forced server-side despawn scenario was not completed.
+- Checked the Studio console after the Play attempt; only existing StyleRule `CornerRadius` warnings were present.
+- Ran `git diff --check` on the touched Lua files; it reported only existing LF/CRLF conversion warnings.
+
+### Risks
+
+- Distance despawn is based on flat X/Z distance to the nearest alive player, matching the existing NPC movement and spawn-ring distance style.
+- Normal mobs that fall behind during rapid player movement will disappear instead of pathing back from off-screen.
+- The emergence effect is client-side visual presentation only; server spawn position and combat timing remain unchanged.
+
+### Rollback
+
+- Revert `Level/ServerScriptService/ModuleScript/NpcService.lua`, `Level/StarterPlayer/StarterPlayerScripts/LocalScript/NpcPresentation.client.lua`, and this changelog entry.
+- In live `Poziom`, restore the previous sources of `game.ServerScriptService.ModuleScript.NpcService` and `game.StarterPlayer.StarterPlayerScripts.LocalScript.NpcPresentation`.
+
+## 2026-06-01 - Poziom Daily Missions board text binding fix
+
+### Scope
+
+- Fixed the dungeon `DailyMissionsClient` so authored mission card text fields can be `TextLabel`, `TextBox`, or `TextButton`.
+- The live board now replaces the default placeholder text like `Kill 9 elite enemies` with the server-selected daily mission descriptions and progress.
+- Kept the daily mission remotes, mission selection logic, and UI hierarchy unchanged.
+
+### Files updated
+
+- `Level/StarterGUI/DailyMissions.ScreenGui/DailyMissionsClient.LocalScript.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.StarterGui.DailyMissions.DailyMissionsClient`
+
+### Verification
+
+- Confirmed active Studio was `Poziom`.
+- Verified live `DailyMissionsClient` compiles with `loadstring`.
+- Ran a Play smoke test and inspected `PlayerGui.DailyMissions`; the six notes showed live mission text/progress such as rerolls, revenge elite, 15 elites, coins, spending, and boss phase instead of the default placeholder text.
+- Checked the Studio console after the smoke test; only existing StyleRule `CornerRadius` warnings were present.
+- Ran `git diff --check` on the touched client file; it reported only the existing LF/CRLF conversion warning.
+
+### Risks
+
+- This fixes the visible board text binding; it does not change which daily missions are selected or how their counters progress.
+- Any already-running play session needs a fresh client copy of `DailyMissionsClient`.
+
+### Rollback
+
+- Revert `Level/StarterGUI/DailyMissions.ScreenGui/DailyMissionsClient.LocalScript.lua` and this changelog entry.
+- In live `Poziom`, restore the previous source of `game.StarterGui.DailyMissions.DailyMissionsClient`.
+
+## 2026-06-01 - Lobby/level profile cache and loadout sync fix
+
+### Scope
+
+- Fixed stale global `PlayerData` cache after leaving a place by adding `PlayerData.Release` plus `PlayerRemoving` cleanup in both `Four Peaks` and `Level`.
+- Kept the existing save path, but now clears in-memory `GlobalPlayerProgress_v1` data so a returning player reloads the latest level-written profile instead of an old lobby copy.
+- Updated lobby `PortalToDungeon` weapon resolution to fall back to `PlayerData.Loadout[1]` when `PlayerStateStore` has no equipped weapon instance, preserving older/saved loadouts for dungeon teleport.
+- Kept remote names, attributes, folders, and broader inventory/mission systems unchanged.
+
+### Files updated
+
+- `Four Peaks/ServerScriptService/ModuleScript/PlayerData.lua`
+- `Four Peaks/ServerScriptService/Script/PortalToDungeon.lua`
+- `Level/ServerScriptService/ModuleScript/PlayerData.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Cztery szczyty`: `game.ServerScriptService.ModuleScript.PlayerData`
+- `Cztery szczyty`: `game.ServerScriptService.Script.PortalToDungeon`
+- `Poziom`: `game.ServerScriptService.ModuleScript.PlayerData`
+
+### Verification
+
+- Confirmed both Studio instances were available through Roblox MCP.
+- Synced the repo changes into live `Cztery szczyty` and `Poziom`.
+- Verified live Luau compilation with `loadstring` for the updated `PlayerData` modules and `PortalToDungeon`.
+- Verified live markers for cache release, cache clearing, and profile loadout fallback.
+- Ran short Play smoke tests in both places; console output showed only existing StyleRule `CornerRadius` warnings and no new sync/loadout/daily mission errors.
+- Ran `git diff --check` on the touched files; it reported only existing LF/CRLF conversion warnings.
+
+### Risks
+
+- This fixes stale profile reads on future leave/return cycles; an already-running play session that loaded the old module may need a fresh Play/server session.
+- If a DataStore write fails during `PlayerRemoving`, the in-memory cache is still cleared, so the next place relies on the latest persisted DataStore state rather than a retry from the old server cache.
+- The weapon fallback only uses `PlayerData.Loadout` when no concrete equipped weapon instance is available from `PlayerStateStore`.
+
+### Rollback
+
+- Revert the three files listed above and this changelog entry.
+- In live Studio, restore the previous sources of `PlayerData` in both places and `PortalToDungeon` in `Cztery szczyty`.
+
+## 2026-05-31 - Cztery szczyty limited-time Events system
+
+### Scope
+
+- Added a server-authoritative limited-time Events system for the `Four Peaks` lobby with the first event `Blood Moon`.
+- Added shared `EventsConfig` and `EventUtil` modules with exact `ComingSoon`, `Active`, and `Ended` statuses, UTC Unix windows, Studio-only zero-date fallback, event sorting, and timer formatting.
+- Added `Events.Progress` profile data in Four Peaks `PlayerData`, sanitized on load with per-event stats and claimed reward maps.
+- Added `EventService` and `EventRemotes` with `GetEventsState` and `ClaimEventReward`, server-side validation, per-player claim locking/rate limiting, and real reward grants for tickets, WP, souls, and materials.
+- Added `EventsClient`, a programmatic dark fantasy `EventsGui` opened by the existing `ScreenGuiButtons/Events` button through `ScreenButtonsClient`.
+- Added minimal `Level/` progress bridge modules and hooks so dungeon kills, elite kills, chest opens, and victorious run completions update active event progress in the shared profile.
+- Left Daily Login Rewards, daily/weekly mission rewards, WP conversion, banner/gacha ticket balances, and unrelated backend dirty files untouched.
+
+### Files updated
+
+- `Four Peaks/ReplicatedStorage/ModuleScripts/EventsConfig.lua`
+- `Four Peaks/ReplicatedStorage/ModuleScripts/EventUtil.lua`
+- `Four Peaks/ReplicatedStorage/RemoteFunctions/GetEventsState`
+- `Four Peaks/ReplicatedStorage/RemoteFunctions/ClaimEventReward`
+- `Four Peaks/ServerScriptService/ModuleScript/PlayerData.lua`
+- `Four Peaks/ServerScriptService/ModuleScript/EventService.lua`
+- `Four Peaks/ServerScriptService/Script/EventRemotes.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/EventsClient.lua`
+- `Four Peaks/StarterGui/ScreenGuiButtons/ScreenButtonsClient.lua`
+- `Level/ReplicatedStorage/ModuleScripts/EventsConfig.lua`
+- `Level/ReplicatedStorage/ModuleScripts/EventUtil.lua`
+- `Level/ServerScriptService/ModuleScript/EventProgress.lua`
+- `Level/ServerScriptService/ModuleScript/MissionProgress.lua`
+- `Level/ServerScriptService/Script/ChestService.server.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Cztery szczyty`: `game.ReplicatedStorage.ModuleScripts.EventsConfig`
+- `Cztery szczyty`: `game.ReplicatedStorage.ModuleScripts.EventUtil`
+- `Cztery szczyty`: `game.ReplicatedStorage.RemoteFunctions.GetEventsState`
+- `Cztery szczyty`: `game.ReplicatedStorage.RemoteFunctions.ClaimEventReward`
+- `Cztery szczyty`: `game.ServerScriptService.ModuleScript.PlayerData`
+- `Cztery szczyty`: `game.ServerScriptService.ModuleScript.EventService`
+- `Cztery szczyty`: `game.ServerScriptService.Script.EventRemotes`
+- `Cztery szczyty`: `game.StarterPlayer.StarterPlayerScripts.EventsClient`
+- `Cztery szczyty`: `game.StarterGui.ScreenGuiButtons.ScreenButtonsClient`
+- `Poziom`: `game.ReplicatedStorage.ModuleScripts.EventsConfig`
+- `Poziom`: `game.ReplicatedStorage.ModuleScripts.EventUtil`
+- `Poziom`: `game.ServerScriptService.ModuleScript.EventProgress`
+- `Poziom`: `game.ServerScriptService.ModuleScript.MissionProgress`
+- `Poziom`: `game.ServerScriptService.Script.ChestService`
+
+### Verification
+
+- Confirmed active Studio instances and updated `Cztery szczyty` first, then `Poziom`.
+- Verified live `Poziom` compilation with `loadstring` for `EventsConfig`, `EventUtil`, `EventProgress`, `MissionProgress`, and `ChestService`.
+- Verified live `Cztery szczyty` compilation with `loadstring` for `EventsConfig`, `EventUtil`, `EventService`, `EventRemotes`, `EventsClient`, `PlayerData`, and `ScreenButtonsClient`.
+- Required live `EventService` successfully and confirmed `GetState`/`AddProgress` are available.
+- Verified the live `Events` button exists and `ScreenButtonsClient` now calls `openExclusive("EventsGui")`.
+- Verified `EventUtil` reports the zero-date `Blood Moon` config as `Active` in Studio/dev mode.
+
+### Risks
+
+- `Blood Moon` uses `StartUnix = 0` and `EndUnix = 0`, so it is active only in Studio/dev mode; live servers require real Unix dates in both Four Peaks and Level configs before progress/claims become active.
+- Title, cosmetic, and booster rewards are placeholders that log TODO warnings and mark claims safely without granting backend power.
+- The dungeon bridge writes progress through the shared profile and marks it dirty; high-frequency kill progress relies on the existing save cadence rather than forcing a DataStore save per kill.
+- MCP verification covered source compile and wiring, but not a full manual click-through or end-to-end Play claim session.
+
+### Rollback
+
+- Revert the files listed above and this changelog entry.
+- In live Studio, remove the new Event modules/scripts/remotes and restore the previous sources of `PlayerData`, `ScreenButtonsClient`, `MissionProgress`, and `ChestService`.
+
+## 2026-05-31 - Cztery szczyty Daily Login auto-open
+
+### Scope
+
+- Updated `DailyLoginClient` so the Daily Login panel opens automatically on lobby client startup when the server reports `CanClaim = true`.
+- Kept the client passive: it only invokes `GetDailyLoginState`; reward granting remains server-authoritative through `ClaimDailyLoginReward`.
+- The auto-open check runs once after a short startup delay and does not reopen the panel again after the player closes it.
+
+### Files updated
+
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/DailyLoginClient.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `game.StarterPlayer.StarterPlayerScripts.DailyLoginClient`
+
+### Verification
+
+- Confirmed the active Studio instance was `Cztery szczyty`.
+- Synced the updated `DailyLoginClient` source into live Studio through Roblox MCP.
+- Verified the live `DailyLoginClient` source compiles with `loadstring`.
+- Verified the live source contains the new `autoOpenIfClaimable` startup path.
+- Started and stopped a short Play smoke test; the MCP console showed only existing Studio style warnings and no DailyLogin-specific errors.
+
+### Risks
+
+- This opens the Daily Login modal shortly after client startup when a reward is available, so it can appear before the player manually clicks any lobby button.
+
+### Rollback
+
+- Revert `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/DailyLoginClient.lua` and this changelog entry.
+- In live Studio, restore the previous source of `game.StarterPlayer.StarterPlayerScripts.DailyLoginClient`.
+
+## 2026-05-31 - Cztery szczyty Daily Login Rewards system
+
+### Scope
+
+- Added a server-authoritative 7-day Daily Login Rewards system for the `Four Peaks` lobby.
+- Added `DailyLogin` profile data to `PlayerData` with `LastClaimDayUTC`, `CurrentDay`, and `TotalClaims`, sanitized on load.
+- Added `DailyLoginRewardsConfig` under `ReplicatedStorage.ModuleScripts` with the planned ticket, souls, material bundle, booster placeholder, and day-7 ticket rewards.
+- Added `DailyLoginService` with UTC calendar-day claim checks, current-cycle day status payloads, per-player claim locking/rate limiting, reward granting, and explicit Day 7 -> Day 1 wraparound.
+- Added `DailyLoginRemotes` with `GetDailyLoginState` and `ClaimDailyLoginReward` RemoteFunctions under `ReplicatedStorage.RemoteFunctions`.
+- Added a programmatic `DailyLoginClient` UI opened by the existing `ScreenGuiButtons/Login Rewards` button through the existing `ScreenButtonsAction`/`ScreenButtonsNonce` flow.
+- Extended `CurrencyService` with `Souls` balances plus `GetSouls`/`AddSouls` and generic `Souls` add/remove support.
+- Extended pickup toasts with `ticket` and `souls` variants.
+- Kept WP missions, daily/weekly missions, banner roll cost behavior, and `Level/` untouched.
+
+### Files updated
+
+- `Four Peaks/ServerScriptService/ModuleScript/PlayerData.lua`
+- `Four Peaks/ServerScriptService/ModuleScript/CurrencyService.lua`
+- `Four Peaks/ServerScriptService/ModuleScript/DailyLoginService.lua`
+- `Four Peaks/ServerScriptService/Script/DailyLoginRemotes.lua`
+- `Four Peaks/ReplicatedStorage/ModuleScripts/DailyLoginRewardsConfig.lua`
+- `Four Peaks/ReplicatedStorage/RemoteFunctions/GetDailyLoginState`
+- `Four Peaks/ReplicatedStorage/RemoteFunctions/ClaimDailyLoginReward`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/DailyLoginClient.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/PickupToastClient.lua`
+- `Four Peaks/StarterGui/ScreenGuiButtons/ScreenButtonsClient.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `game.ReplicatedStorage.ModuleScripts.DailyLoginRewardsConfig`
+- `game.ReplicatedStorage.RemoteFunctions.GetDailyLoginState`
+- `game.ReplicatedStorage.RemoteFunctions.ClaimDailyLoginReward`
+- `game.ServerScriptService.ModuleScript.PlayerData`
+- `game.ServerScriptService.ModuleScript.CurrencyService`
+- `game.ServerScriptService.ModuleScript.DailyLoginService`
+- `game.ServerScriptService.Script.DailyLoginRemotes`
+- `game.StarterPlayer.StarterPlayerScripts.DailyLoginClient`
+- `game.StarterPlayer.StarterPlayerScripts.PickupToastClient`
+- `game.StarterGui.ScreenGuiButtons.ScreenButtonsClient`
+
+### Verification
+
+- Confirmed the active Studio instance was `Cztery szczyty` before work and synced the repo sources into the live place through Roblox MCP.
+- Verified live Luau compilation with `loadstring` for `DailyLoginRewardsConfig`, `PlayerData`, `CurrencyService`, `DailyLoginService`, `DailyLoginRemotes`, `DailyLoginClient`, `PickupToastClient`, and `ScreenButtonsClient`.
+- Ran an MCP service probe with injected test profile data and `PlayerData.Save` stubbed to avoid DataStore writes:
+  - initial state was claimable on Day 1
+  - Day 1 granted `1` ticket and advanced to Day 2
+  - second same-day claim failed and did not add another ticket
+  - simulated next day Day 2 granted `500` souls
+  - simulated next day Day 3 granted another ticket
+  - Day 4 stayed on Day 4 when the material backend could not load in the MCP client context
+  - Day 6 booster placeholder advanced safely to Day 7
+  - Day 7 granted `2` tickets and wrapped to Day 1
+- Started and stopped a short Play session after Studio sync; MCP console output showed only existing Studio style warnings and no DailyLogin-specific errors.
+- Ran `git diff --check -- 'Four Peaks'`; it reported only existing LF/CRLF conversion warnings on touched files.
+- Checked new Daily Login Lua files for trailing whitespace with `rg`.
+
+### Risks
+
+- The MCP execute context is client-like, so it cannot directly require the existing server-only `PlayerStateStore`/`CraftingService` path; Day 4 material grant still needs a real server playtest claim to verify the material bundle is added through `CraftingService`.
+- `EXP Booster` is intentionally a server-side placeholder with a warning until a real booster backend exists.
+- The DailyLogin UI is built programmatically rather than authored as a StarterGui tree, matching several existing lobby UI scripts but still requiring a visual click-through in Studio for final polish.
+
+### Rollback
+
+- Revert the files listed above.
+- In live Studio, remove `DailyLoginRewardsConfig`, `DailyLoginService`, `DailyLoginRemotes`, `DailyLoginClient`, `GetDailyLoginState`, and `ClaimDailyLoginReward`.
+- Restore the previous live sources of `PlayerData`, `CurrencyService`, `PickupToastClient`, and `ScreenButtonsClient`.
+- No `Level/` rollback is needed because this pass did not modify dungeon files.
+
 ## 2026-05-20 - GitHub bridge backend for Roblox ErrorReporter
 
 ### Scope

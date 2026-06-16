@@ -125,6 +125,7 @@ type NpcRecord = {
 	lastGroundXZ: Vector3,
 	orbitSign: number,
 	orbitRadius: number,
+	targetGroundY: number?,
 	runtimeAttrsCleared: boolean,
 	deathCallbacks: {((any, {[string]: any}) -> ())},
 }
@@ -144,6 +145,7 @@ local NPC_FORMATION_COLLAPSE_BUFFER = 2.75
 local NPC_FORMATION_BLEND_DISTANCE = 7.5
 local TARGET_PRIORITY_ELITE_DISTANCE_BONUS = 12
 local TARGET_PRIORITY_BOSS_DISTANCE_BONUS = 24
+local NORMAL_DESPAWN_DISTANCE = 100
 local RUNTIME_ATTRIBUTE_NAMES = {
 	ATTR.State,
 	ATTR.LegacyState,
@@ -318,6 +320,14 @@ end
 local function flatMagnitude(a: Vector3, b: Vector3): number
 	local d = a - b
 	return math.sqrt((d.X * d.X) + (d.Z * d.Z))
+end
+
+local function nearestAlivePlayerFlatDistance(pos: Vector3, alivePlayers: {AlivePlayerInfo}): number
+	local nearest = math.huge
+	for _, info in ipairs(alivePlayers) do
+		nearest = math.min(nearest, flatMagnitude(info.hrp.Position, pos))
+	end
+	return nearest
 end
 
 local function safeUnit(v: Vector3, fallback: Vector3?): Vector3
@@ -498,7 +508,7 @@ local function setState(npc: NpcRecord, newState: string)
 	if npc.state == newState then
 		return
 	end
-	
+
 	npc.state = newState
 	writeStateAttributes(npc)
 end
@@ -643,6 +653,27 @@ local function killNpc(npc: NpcRecord, context: {[string]: any}?)
 	destroyNpcNow(npc, true)
 end
 
+local function despawnNpcRecord(npc: NpcRecord)
+	if not npc.dead then
+		npc.dead = true
+		npc.health = 0
+		npc.velocity = Vector3.zero
+		npc.impulse = Vector3.zero
+		npc.attackUntil = 0
+		setState(npc, STATE.Despawned)
+		writeHealthAttributes(npc)
+	end
+
+	destroyNpcNow(npc, true)
+end
+
+local function shouldDistanceDespawn(npc: NpcRecord, alivePlayers: {AlivePlayerInfo}): boolean
+	if npc.isElite or npc.isBoss or #alivePlayers == 0 then
+		return false
+	end
+	return nearestAlivePlayerFlatDistance(npc.position, alivePlayers) > NORMAL_DESPAWN_DISTANCE
+end
+
 local function applyPlayerDamage(player: Player, amount: number, sourceModel: Model?)
 	if amount <= 0 then
 		return
@@ -728,16 +759,20 @@ local function getControlResistance(npc: NpcRecord)
 	}
 end
 
-local function groundAdjustedPosition(npc: NpcRecord, pos: Vector3, now: number): Vector3
+local function groundAdjustedPosition(npc: NpcRecord, pos: Vector3, now: number, dt: number): Vector3
+	local targetY = npc.position.Y
 	if now - npc.lastGroundAt >= 0.12 or flatMagnitude(pos, npc.lastGroundXZ) >= 4 then
 		local groundY = sampleGroundY(npc.model, pos)
 		if groundY ~= nil then
 			npc.lastGroundAt = now
 			npc.lastGroundXZ = Vector3.new(pos.X, 0, pos.Z)
-			return Vector3.new(pos.X, groundY + npc.groundOffset, pos.Z)
+			npc.targetGroundY = groundY + npc.groundOffset
 		end
 	end
-	return Vector3.new(pos.X, npc.position.Y, pos.Z)
+	if npc.targetGroundY ~= nil then
+		targetY = npc.position.Y + (npc.targetGroundY - npc.position.Y) * math.min(1, dt * 18)
+	end
+	return Vector3.new(pos.X, targetY, pos.Z)
 end
 
 local function computeFormationWeight(dist: number, stopDistance: number): number
@@ -840,6 +875,11 @@ local function updateNpc(
 		return
 	end
 
+	if shouldDistanceDespawn(npc, alivePlayers) then
+		despawnNpcRecord(npc)
+		return
+	end
+
 	if now < npc.aiLockUntil then
 		npc.velocity = Vector3.zero
 		if npc.aiLookTarget then
@@ -907,9 +947,10 @@ local function updateNpc(
 		end
 	end
 
+
 	local impulseMove = flat(npc.impulse) * dt
 	local nextPos = npc.position + baseMove + impulseMove
-	nextPos = groundAdjustedPosition(npc, nextPos, now)
+	nextPos = groundAdjustedPosition(npc, nextPos, now, dt)
 
 	local newVelocity = Vector3.zero
 	if dt > 1e-4 then
@@ -1223,43 +1264,6 @@ function NpcService.ApplyDamage(target: any, amount: number, meta: {[string]: an
 	return dealt
 end
 
-function NpcService.SetIncomingDamageModifier(target: any, multiplier: number, duration: number)
-	local npc = resolveNpc(target)
-	if not npc or npc.dead then
-		return
-	end
-
-	npc.damageTakenMult = math.clamp(tonumber(multiplier) or 1, 0.10, 3)
-	npc.damageTakenEnd = os.clock() + math.max(0.1, tonumber(duration) or 0)
-end
-
-function NpcService.LockForAbility(target: any, duration: number, faceTarget: Vector3?)
-	local npc = resolveNpc(target)
-	if not npc or npc.dead then
-		return
-	end
-
-	npc.aiLockUntil = math.max(npc.aiLockUntil, os.clock() + math.max(0.05, tonumber(duration) or 0))
-	npc.aiLookTarget = typeof(faceTarget) == "Vector3" and faceTarget or npc.aiLookTarget
-end
-
-function NpcService.SetPosition(target: any, pos: Vector3, lookDir: Vector3?)
-	local npc = resolveNpc(target)
-	if not npc or npc.dead or typeof(pos) ~= "Vector3" then
-		return
-	end
-
-	npc.position = pos
-	if typeof(lookDir) == "Vector3" and lookDir.Magnitude > 1e-4 then
-		npc.look = lookDir.Unit
-	end
-	npc.velocity = Vector3.zero
-	pcall(function()
-		npc.model:PivotTo(CFrame.lookAt(npc.position, npc.position + npc.look))
-	end)
-	writeStateAttributes(npc)
-end
-
 function NpcService.Register(model: Model, config: NpcConfig?): string?
 	if npcByModel[model] then
 		return npcByModel[model].id
@@ -1282,6 +1286,14 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 	root.CanCollide = false
 	root.CanTouch = false
 	root.CanQuery = false
+
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+		humanoid.NameDisplayDistance = 0
+		humanoid.HealthDisplayDistance = 0
+	end
 
 	for _, descendant in ipairs(model:GetDescendants()) do
 		if descendant:IsA("BasePart") then
@@ -1339,6 +1351,7 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		lastGroundXZ = Vector3.new(root.Position.X, 0, root.Position.Z),
 		orbitSign = math.random() < 0.5 and -1 or 1,
 		orbitRadius = 0.8 + math.random() * 1.35,
+		targetGroundY = nil,
 		runtimeAttrsCleared = false,
 		deathCallbacks = {},
 	}
@@ -1367,20 +1380,50 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 	return npc.id
 end
 
+function NpcService.SetIncomingDamageModifier(target: any, multiplier: number, duration: number)
+	local npc = resolveNpc(target)
+	if not npc or npc.dead then
+		return
+	end
+
+	npc.damageTakenMult = math.clamp(tonumber(multiplier) or 1, 0.10, 3)
+	npc.damageTakenEnd = os.clock() + math.max(0.1, tonumber(duration) or 0)
+end
+
+function NpcService.LockForAbility(target: any, duration: number, faceTarget: Vector3?)
+	local npc = resolveNpc(target)
+	if not npc or npc.dead then
+		return
+	end
+
+	npc.aiLockUntil = math.max(npc.aiLockUntil, os.clock() + math.max(0.05, tonumber(duration) or 0))
+	npc.aiLookTarget = typeof(faceTarget) == "Vector3" and faceTarget or npc.aiLookTarget
+end
+
+function NpcService.SetPosition(target: any, pos: Vector3, lookDir: Vector3?)
+	local npc = resolveNpc(target)
+	if not npc or npc.dead or typeof(pos) ~= "Vector3" then
+		return
+	end
+
+	npc.position = pos
+	if typeof(lookDir) == "Vector3" and lookDir.Magnitude > 1e-4 then
+		npc.look = lookDir.Unit
+	end
+	npc.velocity = Vector3.zero
+	pcall(function()
+		npc.model:PivotTo(CFrame.lookAt(npc.position, npc.position + npc.look))
+	end)
+	writeStateAttributes(npc)
+end
+
 function NpcService.Despawn(target: any)
 	local npc = resolveNpc(target)
 	if not npc then
 		return
 	end
 
-	if not npc.dead then
-		npc.dead = true
-		npc.health = 0
-		writeHealthAttributes(npc)
-		setState(npc, STATE.Despawned)
-	end
-
-	destroyNpcNow(npc, true)
+	despawnNpcRecord(npc)
 end
 
 syncRequestEvent.OnServerEvent:Connect(function(player: Player, requestId: number?)

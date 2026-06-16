@@ -121,7 +121,7 @@ local function startIdle(model)
 		if not parent then
 			cleanup(model)
 		end
-	end)
+		end)
 end
 
 if npcFolder then

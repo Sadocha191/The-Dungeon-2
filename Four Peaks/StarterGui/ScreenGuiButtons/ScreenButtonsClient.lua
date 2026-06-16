@@ -22,6 +22,9 @@ local CONTROL_GUIS = {
 	"PartyGui",
 	"InventoryGui",
 	"Settings",
+	"DailyLoginGui",
+	"EventsGui",
+	"GuildGui",
 }
 
 local requestCounters = {}
@@ -451,10 +454,19 @@ refreshMissionBadge(true)
 local eventsButtons = findButtons({ "Events" })
 setHotKeyVisibility(eventsButtons)
 connectButtons(eventsButtons, function()
-	showNotification("Events", "Events are not available yet.")
+	openExclusive("EventsGui")
 end)
 registerHotKey(eventsButtons, function()
-	showNotification("Events", "Events are not available yet.")
+	openExclusive("EventsGui")
+end)
+
+local guildButtons = findButtons({ "Guild" })
+setHotKeyVisibility(guildButtons)
+connectButtons(guildButtons, function()
+	openExclusive("GuildGui")
+end)
+registerHotKey(guildButtons, function()
+	openExclusive("GuildGui")
 end)
 
 local partyButtons = findButtons({ "Party" })
@@ -487,10 +499,10 @@ end)
 local loginRewardsButtons = findButtons({ "Login Rewards" })
 setHotKeyVisibility(loginRewardsButtons)
 connectButtons(loginRewardsButtons, function()
-	showNotification("Login Rewards", "Login rewards are not available yet.")
+	openExclusive("DailyLoginGui")
 end)
 registerHotKey(loginRewardsButtons, function()
-	showNotification("Login Rewards", "Login rewards are not available yet.")
+	openExclusive("DailyLoginGui")
 end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)

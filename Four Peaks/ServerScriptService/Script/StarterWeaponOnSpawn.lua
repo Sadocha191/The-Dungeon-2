@@ -6,7 +6,7 @@
 --    - jeśli nie ma zapisu -> NIE daje nic (zero darmowych mieczy).
 
 local Players = game:GetService("Players")
-local BASE_WALKSPEED = 24
+local BASE_WALKSPEED = 18
 
 local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")

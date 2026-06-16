@@ -297,16 +297,16 @@ local function handleWaveStatus(p)
 		center.Text = ("PORTAL LOCKED: %s"):format(fmtTime(p.secondsLeft))
 		task.delay(2, function() center.Visible = false end)
 
-		elseif p.type == "complete" then
-			local defeated, total = sanitizeEliteProgress(p.elitesDefeated, p.elitesTotal)
-			center.Visible = true
-			center.Text = "LEVEL COMPLETE"
-			task.delay(5, function() center.Visible = false end)
-			if SHOW_TRACKER_PANEL then
-				elites.Text = ("Elites: %d/%d"):format(defeated, total)
-				setBar(total > 0 and (defeated / total) or 1)
-			end
+	elseif p.type == "complete" then
+		local defeated, total = sanitizeEliteProgress(p.elitesDefeated, p.elitesTotal)
+		center.Visible = true
+		center.Text = "LEVEL COMPLETE"
+		task.delay(5, function() center.Visible = false end)
+		if SHOW_TRACKER_PANEL then
+			elites.Text = ("Elites: %d/%d"):format(defeated, total)
+			setBar(total > 0 and (defeated / total) or 1)
 		end
+	end
 end
 
 WaveStatusEvent.OnClientEvent:Connect(handleWaveStatus)

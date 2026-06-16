@@ -217,7 +217,7 @@ local function applyAttributes(player: Player, tutorial: {Active: boolean, Step:
 	player:SetAttribute("TutorialComplete", tutorial.Complete == true)
 end
 
--- ZMIANA: nie dajemy już miecza (broń jest od kowala)
+-- ZMIANA: miecz jest nadawany po rozmowie z kowalem i odtwarzany dla już uszkodzonych stanów tutorialu.
 local function isWeaponTool(inst: Instance): boolean
 	if not inst:IsA("Tool") then
 		return false

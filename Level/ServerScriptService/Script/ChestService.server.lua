@@ -16,8 +16,8 @@ local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 
 local CraftingConfig = require(moduleFolder:WaitForChild("CraftingConfig"))
 
-local MIN_CHESTS = 30
-local MAX_CHESTS = 30
+local MIN_CHESTS = 300
+local MAX_CHESTS = 500
 local MIN_CHEST_GAP = 24
 local CHEST_RAYCAST_TRIES = 45
 local CHEST_HEIGHT = 1.8
@@ -184,7 +184,7 @@ local function applyMovement(plr)
 	if not hum then
 		return
 	end
-	local baseSpeed = getNumAttr(plr, "BaseWalkSpeed", 21)
+	local baseSpeed = getNumAttr(plr, "BaseWalkSpeed", 18)
 	local runBonusSpeed = getNumAttr(plr, "RunBonusSpeed", 0)
 	hum.WalkSpeed = baseSpeed + runBonusSpeed
 end

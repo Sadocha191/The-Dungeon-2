@@ -64,6 +64,7 @@ progressEvent.OnClientEvent:Connect(function(payload)
 	end
 end)
 
+
 -- Pull initial snapshot (first server push can happen before this UI binds).
 local function requestProgressSync()
 	progressEvent:FireServer({ type = "requestSync" })

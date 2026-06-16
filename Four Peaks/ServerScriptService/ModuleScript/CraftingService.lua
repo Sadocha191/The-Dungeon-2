@@ -73,12 +73,10 @@ end
 
 local RARITY_RANK = {
 	Common = 1,
-	Uncommon = 2,
-	Rare = 3,
-	Epic = 4,
-	Legendary = 5,
-	Mythical = 6,
-	Mythic = 6,
+	Rare = 2,
+	Epic = 3,
+	Legendary = 4,
+	Mythical = 5,
 }
 
 local function getPlayerProgress(player)
@@ -218,11 +216,6 @@ local function buildRequirementProgress(resourceMap, list)
 		local amount = clampInt(entry.amount, 0)
 		if typeof(entry.id) == "string" and entry.id ~= "" and amount > 0 then
 			local owned = clampInt(resourceMap and resourceMap[entry.id], 0)
-			if typeof(CraftingConfig.GetMaterialAliases) == "function" then
-				for _, alias in ipairs(CraftingConfig.GetMaterialAliases(entry.id) or {}) do
-					owned += clampInt(resourceMap and resourceMap[alias], 0)
-				end
-			end
 			local missing = math.max(0, amount - owned)
 			totals.required += amount
 			totals.owned += math.min(owned, amount)
@@ -322,13 +315,7 @@ end
 
 local function getOwnedMaterialCount(progress, materialId)
 	local resourceMap = select(1, getMaterialResourceMap(progress, materialId))
-	local owned = clampInt(resourceMap and resourceMap[materialId], 0)
-	if typeof(CraftingConfig.GetMaterialAliases) == "function" then
-		for _, alias in ipairs(CraftingConfig.GetMaterialAliases(materialId) or {}) do
-			owned += clampInt(resourceMap and resourceMap[alias], 0)
-		end
-	end
-	return owned
+	return clampInt(resourceMap and resourceMap[materialId], 0)
 end
 
 local function buildCombinedMaterialProgress(progress, list)
@@ -444,55 +431,20 @@ local function spendCount(resourceMap, resourceId, amount)
 	end
 	local current = clampInt(resourceMap[resourceId], 0)
 	if current < amount then
-		local remaining = amount
-		local aliases = typeof(CraftingConfig.GetMaterialAliases) == "function" and CraftingConfig.GetMaterialAliases(resourceId) or {}
-		for _, alias in ipairs(aliases or {}) do
-			remaining -= clampInt(resourceMap[alias], 0)
-			if remaining <= 0 then
-				break
-			end
-		end
-		if remaining > current then
-			return false
-		end
+		return false
 	end
-	local remainingToSpend = amount
-	local canonicalSpend = math.min(current, remainingToSpend)
-	current -= canonicalSpend
-	remainingToSpend -= canonicalSpend
+	current -= amount
 	if current > 0 then
 		resourceMap[resourceId] = current
 	else
 		resourceMap[resourceId] = nil
-	end
-	if remainingToSpend > 0 and typeof(CraftingConfig.GetMaterialAliases) == "function" then
-		for _, alias in ipairs(CraftingConfig.GetMaterialAliases(resourceId) or {}) do
-			local aliasCurrent = clampInt(resourceMap[alias], 0)
-			local aliasSpend = math.min(aliasCurrent, remainingToSpend)
-			aliasCurrent -= aliasSpend
-			remainingToSpend -= aliasSpend
-			if aliasCurrent > 0 then
-				resourceMap[alias] = aliasCurrent
-			else
-				resourceMap[alias] = nil
-			end
-			if remainingToSpend <= 0 then
-				break
-			end
-		end
 	end
 	return true
 end
 
 local function hasAllRequirements(resourceMap, list)
 	for _, entry in ipairs(list or {}) do
-		local owned = clampInt(resourceMap[entry.id], 0)
-		if typeof(CraftingConfig.GetMaterialAliases) == "function" then
-			for _, alias in ipairs(CraftingConfig.GetMaterialAliases(entry.id) or {}) do
-				owned += clampInt(resourceMap[alias], 0)
-			end
-		end
-		if owned < clampInt(entry.amount, 0) then
+		if clampInt(resourceMap[entry.id], 0) < clampInt(entry.amount, 0) then
 			return false
 		end
 	end
@@ -663,16 +615,12 @@ local function buildCraftEntries(data, progress, balances, craftedCounts, instan
 	local silverBalance = clampInt(balances and balances.Silver, 0)
 	local craftEntries = {}
 
-	for _, recipe in ipairs(CraftingConfig.GetAllRecipes() or {}) do
-		local recipeId = recipe.recipeId
+	for recipeId, recipeState in pairs(progress.recipes or {}) do
+		local recipe = CraftingConfig.GetRecipe(recipeId)
 		local stateEntry = getRecipeState(progress, recipeId)
-		local found = stateEntry ~= nil and stateEntry.found == true
-		local unlocked = found and stateEntry.unlocked == true
-		local tier = found and CraftingConfig.GetRecipeTierFromCopies(stateEntry.copies) or 1
-		if stateEntry then
+		if recipe and recipeState and stateEntry and stateEntry.found then
+			local tier = CraftingConfig.GetRecipeTierFromCopies(stateEntry.copies)
 			stateEntry.tier = tier
-		end
-		if recipe and typeof(recipeId) == "string" and recipeId ~= "" then
 			local requirements = CraftingConfig.BuildRecipeRequirements(recipeId, tier)
 			local def = WeaponConfigs.Get(recipe.weaponId)
 			local craftedCount = clampInt(craftedCounts[recipe.weaponId], 0)
@@ -684,23 +632,21 @@ local function buildCraftEntries(data, progress, balances, craftedCounts, instan
 			local silverForCraft = silverBalance >= clampInt(requirements.craftSilverCost, 0)
 			local silverForUnlock = silverBalance >= clampInt(requirements.unlockSilverCost, 0)
 			local alreadyOwned = requirements.unique == true and playerHasWeaponInstance(instances, recipe.weaponId)
-			local canCraft = unlocked
+			local canCraft = stateEntry.unlocked
 				and levelOk
 				and hasMine
 				and hasMob
 				and silverForCraft
 				and not alreadyOwned
-			local status = "Locked"
+			local status = "Found"
 			if alreadyOwned then
 				status = "Owned"
 			elseif craftedCount > 0 then
 				status = "Crafted"
 			elseif canCraft then
 				status = "Craftable"
-			elseif unlocked then
+			elseif stateEntry.unlocked then
 				status = "Unlocked"
-			elseif found then
-				status = "Found"
 			end
 
 			local mineResourceProgress, missingMineResources, mineProgressSummary =
@@ -716,11 +662,10 @@ local function buildCraftEntries(data, progress, balances, craftedCounts, instan
 				rarity = recipe.rarity,
 				requiredLevel = recipe.requiredLevel,
 				status = status,
-				found = found,
-				copies = found and stateEntry.copies or 0,
+				copies = stateEntry.copies,
 				tier = tier,
 				nextTierCopies = CraftingConfig.GetNextTierCopyTarget(tier),
-				unlocked = unlocked,
+				unlocked = stateEntry.unlocked,
 				craftedCount = craftedCount,
 				unlockSilverCost = requirements.unlockSilverCost,
 				craftSilverCost = requirements.craftSilverCost,
@@ -737,7 +682,7 @@ local function buildCraftEntries(data, progress, balances, craftedCounts, instan
 				materialProgressSummary = materialProgressSummary,
 				mineProgressSummary = mineProgressSummary,
 				mobProgressSummary = mobProgressSummary,
-				canUnlock = found and (not unlocked) and levelOk and silverForUnlock,
+				canUnlock = (not stateEntry.unlocked) and levelOk and silverForUnlock,
 				canCraft = canCraft,
 				hasMineResources = hasMine,
 				hasMobMaterials = hasMob,
@@ -795,11 +740,9 @@ local function getSellPreview(inst, def)
 		local rarity = (inst.rarity ~= "" and inst.rarity) or def.rarity or "Common"
 		local multiplier = ({
 			Common = 1.0,
-			Uncommon = 1.18,
 			Rare = 1.4,
 			Epic = 1.9,
 			Legendary = 2.6,
-			Mythic = 3.3,
 			Mythical = 3.3,
 		})[rarity] or 1.0
 		baseSilver = math.max(1, math.floor((tonumber(def.baseDamage) or 1) * 6 * multiplier))

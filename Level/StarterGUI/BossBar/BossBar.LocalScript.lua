@@ -55,8 +55,8 @@ local ATTR = NpcShared.Attributes
 local BOSSBAR_VISIBLE_POSITION = UDim2.new(0.5, 0, 0.103, 0)
 local BOSSBAR_HIDDEN_POSITION = UDim2.new(0.5, 0, -0.12, 0)
 local BOSSBAR_TWEEN_INFO = TweenInfo.new(0.32, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local BOSSBAR_MIN_CROP_SCALE = 0.052
-local BOSSBAR_MAX_CROP_SCALE = 1
+local BOSSBAR_MIN_CROP_SCALE = 0.018
+local BOSSBAR_MAX_CROP_SCALE = 0.968
 local BOSSBAR_CROP_SMOOTH_SPEED = 14
 local TARGET_TIMEOUT = math.max(0.5, (NpcShared.BatchRate or 0.1) * 8)
 

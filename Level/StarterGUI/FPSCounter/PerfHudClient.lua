@@ -20,15 +20,7 @@ frame.BackgroundTransparency = 0.22
 frame.BorderSizePixel = 0
 frame.Active = true
 
-local function styleLabel(
-	label: TextLabel,
-	size: UDim2,
-	position: UDim2,
-	font: Enum.Font,
-	textSize: number,
-	color: Color3,
-	alignment: Enum.TextXAlignment
-)
+local function styleLabel(label: TextLabel, size: UDim2, position: UDim2, font: Enum.Font, textSize: number, color: Color3, alignment: Enum.TextXAlignment)
 	label.Size = size
 	label.Position = position
 	label.BackgroundTransparency = 1
@@ -38,25 +30,9 @@ local function styleLabel(
 	label.TextXAlignment = alignment
 end
 
-styleLabel(
-	fpsTextLabel,
-	UDim2.new(0, 110, 0, 18),
-	UDim2.fromOffset(12, 10),
-	Enum.Font.Gotham,
-	12,
-	Color3.fromRGB(142, 154, 171),
-	Enum.TextXAlignment.Left
-)
+styleLabel(fpsTextLabel, UDim2.new(0, 110, 0, 18), UDim2.fromOffset(12, 10), Enum.Font.Gotham, 12, Color3.fromRGB(142, 154, 171), Enum.TextXAlignment.Left)
 fpsTextLabel.Text = "FPS"
-styleLabel(
-	fpsLabel,
-	UDim2.new(0, 90, 0, 18),
-	UDim2.fromOffset(132, 10),
-	Enum.Font.GothamSemibold,
-	12,
-	Color3.fromRGB(236, 242, 248),
-	Enum.TextXAlignment.Right
-)
+styleLabel(fpsLabel, UDim2.new(0, 90, 0, 18), UDim2.fromOffset(132, 10), Enum.Font.GothamSemibold, 12, Color3.fromRGB(236, 242, 248), Enum.TextXAlignment.Right)
 
 local function ensureRow(labelName: string, valueName: string, caption: string, y: number)
 	local label = frame:FindFirstChild(labelName)
@@ -71,25 +47,9 @@ local function ensureRow(labelName: string, valueName: string, caption: string, 
 		value.Name = valueName
 		value.Parent = frame
 	end
-	styleLabel(
-		label,
-		UDim2.new(0, 118, 0, 18),
-		UDim2.fromOffset(12, y),
-		Enum.Font.Gotham,
-		12,
-		Color3.fromRGB(142, 154, 171),
-		Enum.TextXAlignment.Left
-	)
+	styleLabel(label, UDim2.new(0, 118, 0, 18), UDim2.fromOffset(12, y), Enum.Font.Gotham, 12, Color3.fromRGB(142, 154, 171), Enum.TextXAlignment.Left)
 	label.Text = caption
-	styleLabel(
-		value,
-		UDim2.new(0, 90, 0, 18),
-		UDim2.fromOffset(132, y),
-		Enum.Font.GothamSemibold,
-		12,
-		Color3.fromRGB(236, 242, 248),
-		Enum.TextXAlignment.Right
-	)
+	styleLabel(value, UDim2.new(0, 90, 0, 18), UDim2.fromOffset(132, y), Enum.Font.GothamSemibold, 12, Color3.fromRGB(236, 242, 248), Enum.TextXAlignment.Right)
 	value.Text = "--"
 	return value
 end
@@ -107,15 +67,7 @@ if not hint then
 	hint.Name = "PerfHint"
 	hint.Parent = frame
 end
-styleLabel(
-	hint,
-	UDim2.new(1, -24, 0, 14),
-	UDim2.fromOffset(12, 148),
-	Enum.Font.Gotham,
-	11,
-	Color3.fromRGB(120, 130, 146),
-	Enum.TextXAlignment.Left
-)
+styleLabel(hint, UDim2.new(1, -24, 0, 14), UDim2.fromOffset(12, 148), Enum.Font.Gotham, 11, Color3.fromRGB(120, 130, 146), Enum.TextXAlignment.Left)
 hint.Text = "F3 toggle"
 
 UserInputService.InputBegan:Connect(function(input, processed)

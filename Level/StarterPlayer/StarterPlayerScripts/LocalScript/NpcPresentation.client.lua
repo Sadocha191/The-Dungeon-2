@@ -1,6 +1,9 @@
+-- codex test
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
 
 local localPlayer = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -49,6 +52,10 @@ local VISUAL_SCALE_ATTR = "NpcVisualScale"
 local FACING_YAW_ATTR = "NpcFacingYawDegrees"
 local PROCEDURAL_IDLE_SWAY_SPEED = 1.8
 local PROCEDURAL_MOVE_BOUNCE_SPEED = 8
+local SPAWN_RISE_DURATION = 0.65
+local SPAWN_RISE_DEPTH = 5.75
+local SPAWN_DUST_DURATION = 0.55
+local SHOW_NPC_NAMEPLATES = false
 local NAME_COLOR_NORMAL = Color3.fromRGB(242, 246, 252)
 local NAME_COLOR_ELITE = Color3.fromRGB(255, 171, 102)
 local NAME_COLOR_BOSS = Color3.fromRGB(255, 214, 128)
@@ -91,6 +98,58 @@ local function getVisualScale(entry): number
 		return scale
 	end
 	return 1
+end
+
+local function playSpawnGroundFx(pos: Vector3, scale: number)
+	if typeof(pos) ~= "Vector3" then
+		return
+	end
+
+	local sizeScale = math.clamp(tonumber(scale) or 1, 1, 3.5)
+	local dust = Instance.new("Part")
+	dust.Name = "NpcSpawnGroundFx"
+	dust.Anchored = true
+	dust.CanCollide = false
+	dust.CanTouch = false
+	dust.CanQuery = false
+	dust.CastShadow = false
+	dust.Material = Enum.Material.Ground
+	dust.Color = Color3.fromRGB(98, 75, 52)
+	dust.Transparency = 0.32
+	dust.Size = Vector3.new(2.8 * sizeScale, 0.08, 2.8 * sizeScale)
+	dust.CFrame = CFrame.new(pos + Vector3.new(0, 0.05, 0))
+	dust.Parent = workspace
+
+	local tween = TweenService:Create(dust, TweenInfo.new(SPAWN_DUST_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = Vector3.new(5.5 * sizeScale, 0.08, 5.5 * sizeScale),
+		Transparency = 1,
+	})
+	tween:Play()
+	Debris:AddItem(dust, SPAWN_DUST_DURATION + 0.15)
+end
+
+local function startSpawnRise(entry, pos: Vector3)
+	entry.spawnRiseStart = os.clock()
+	entry.spawnRiseDepth = SPAWN_RISE_DEPTH * math.clamp(getVisualScale(entry), 1, 3.5)
+	playSpawnGroundFx(pos, getVisualScale(entry))
+end
+
+local function getSpawnRiseOffset(entry, now: number): Vector3
+	local startTime = entry and entry.spawnRiseStart
+	if type(startTime) ~= "number" then
+		return Vector3.zero
+	end
+
+	local alpha = math.clamp((now - startTime) / SPAWN_RISE_DURATION, 0, 1)
+	if alpha >= 1 then
+		entry.spawnRiseStart = nil
+		entry.spawnRiseDepth = nil
+		return Vector3.zero
+	end
+
+	local eased = 1 - ((1 - alpha) * (1 - alpha) * (1 - alpha))
+	local depth = tonumber(entry.spawnRiseDepth) or SPAWN_RISE_DEPTH
+	return Vector3.new(0, -depth * (1 - eased), 0)
 end
 
 local function formatDisplayName(rawName: any): string
@@ -436,6 +495,9 @@ local function playAnimation(entry)
 end
 
 local function ensureHealthbar(entry)
+	if not SHOW_NPC_NAMEPLATES then
+		return nil
+	end
 	if entry.healthbar then
 		return entry.healthbar
 	end
@@ -509,7 +571,7 @@ local function updateHealthbar(entry)
 	local hp = math.max(0, tonumber(entry.hp) or 0)
 	entry.healthFill.Size = UDim2.fromScale(math.clamp(hp / maxHp, 0, 1), 1)
 	updateNameplateAppearance(entry)
-	gui.Enabled = not entry.dead
+	gui.Enabled = not entry.dead and entry.spawnRiseStart == nil
 end
 
 local function cleanupEntry(id: string)
@@ -624,10 +686,12 @@ batchEvent.OnClientEvent:Connect(function(payload)
 	for _, item in ipairs(items) do
 		if typeof(item) == "table" and item.id ~= nil then
 			local id = tostring(item.id)
+			local isNew = presentations[id] == nil
 			local entry = ensureEntry(id)
 			if seen then
 				seen[id] = true
 			end
+			local spawnFxPos = nil
 			if typeof(item.model) == "Instance" and item.model:IsA("Model") then
 				entry.model = item.model
 				refreshRigBinding(entry)
@@ -635,6 +699,7 @@ batchEvent.OnClientEvent:Connect(function(payload)
 			end
 			if typeof(item.pos) == "Vector3" then
 				entry.targetPos = item.pos
+				spawnFxPos = item.pos
 				if fullSnapshot or not entry.renderPos then
 					entry.renderPos = item.pos
 				end
@@ -662,6 +727,9 @@ batchEvent.OnClientEvent:Connect(function(payload)
 			entry.lastSeen = now
 			if entry.model and not entry.model:GetAttribute(ATTR.Id) then
 				entry.model:SetAttribute(ATTR.Id, id)
+			end
+			if isNew and fullSnapshot ~= true and not entry.dead and not entry.despawned and spawnFxPos then
+				startSpawnRise(entry, spawnFxPos)
 			end
 		end
 	end
@@ -727,7 +795,8 @@ RunService.RenderStepped:Connect(function(dt)
 
 		updateAnimationMotion(entry, dt, now)
 		refreshRigBinding(entry)
-		local rootFrame = CFrame.lookAt(entry.renderPos, entry.renderPos + entry.renderDir)
+		local displayPos = entry.renderPos + getSpawnRiseOffset(entry, now)
+		local rootFrame = CFrame.lookAt(displayPos, displayPos + entry.renderDir)
 		if isProceduralVisualModel(model) then
 			rootFrame = rootFrame * buildProceduralPose(entry, now)
 		end
@@ -749,3 +818,6 @@ requestFullSync()
 localPlayer.CharacterAdded:Connect(function()
 	requestFullSync()
 end)
+
+
+

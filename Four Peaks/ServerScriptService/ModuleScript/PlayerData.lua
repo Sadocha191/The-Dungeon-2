@@ -2,6 +2,7 @@
 -- Used for: silver, XP/level, gacha (Weapons/Pity), tickets, weaponPoints.
 
 local DataStoreService = game:GetService("DataStoreService")
+local Players = game:GetService("Players")
 local store = DataStoreService:GetDataStore("GlobalPlayerProgress_v1")
 local legacyStore = DataStoreService:GetDataStore("GlobalProfile_v4")
 
@@ -17,6 +18,29 @@ local function defaultCraftingData()
 		mobMaterials = {},
 		upgradeMaterials = {},
 		miningSession = nil,
+	}
+end
+
+local function defaultDailyLoginData()
+	return {
+		LastClaimDayUTC = 0,
+		CurrentDay = 1,
+		TotalClaims = 0,
+	}
+end
+
+local function defaultEventsData()
+	return {
+		Progress = {},
+	}
+end
+
+local function defaultGuildData()
+	return {
+		GuildId = nil,
+		Role = nil,
+		JoinedAt = 0,
+		Contribution = 0,
 	}
 end
 
@@ -97,6 +121,9 @@ local function defaultProfile()
 		levelRecords = {},
 
 		crafting = defaultCraftingData(),
+		DailyLogin = defaultDailyLoginData(),
+		Events = defaultEventsData(),
+		Guild = defaultGuildData(),
 	}
 end
 
@@ -235,6 +262,100 @@ local function sanitizeLevelRecords(raw)
 	return out
 end
 
+local function sanitizeDailyLogin(raw)
+	local out = defaultDailyLoginData()
+	if typeof(raw) ~= "table" then
+		return out
+	end
+
+	out.LastClaimDayUTC = clampInt(raw.LastClaimDayUTC or raw.lastClaimDayUTC)
+	out.CurrentDay = math.clamp(clampInt(raw.CurrentDay or raw.currentDay), 1, 7)
+	out.TotalClaims = clampInt(raw.TotalClaims or raw.totalClaims)
+	return out
+end
+
+local function sanitizeEventStats(raw)
+	local out = {}
+	if typeof(raw) ~= "table" then
+		return out
+	end
+	for key, value in pairs(raw) do
+		if typeof(key) == "string" and key ~= "" then
+			local amount = clampInt(value)
+			if amount > 0 then
+				out[key] = amount
+			end
+		end
+	end
+	return out
+end
+
+local function sanitizeEventBoolMap(raw)
+	local out = {}
+	if typeof(raw) ~= "table" then
+		return out
+	end
+	for key, value in pairs(raw) do
+		if typeof(key) == "string" and key ~= "" and value == true then
+			out[key] = true
+		end
+	end
+	return out
+end
+
+local function sanitizeEvents(raw)
+	local out = defaultEventsData()
+	if typeof(raw) ~= "table" then
+		return out
+	end
+
+	local progress = raw.Progress
+	if typeof(progress) ~= "table" then
+		return out
+	end
+
+	for eventId, eventState in pairs(progress) do
+		if typeof(eventId) == "string" and eventId ~= "" and typeof(eventState) == "table" then
+			out.Progress[eventId] = {
+				Stats = sanitizeEventStats(eventState.Stats),
+				ClaimedTasks = sanitizeEventBoolMap(eventState.ClaimedTasks),
+				ClaimedMilestones = sanitizeEventBoolMap(eventState.ClaimedMilestones),
+				ClaimedFinalRewards = eventState.ClaimedFinalRewards == true,
+			}
+		end
+	end
+
+	return out
+end
+
+local function sanitizeGuild(raw)
+	local out = defaultGuildData()
+	if typeof(raw) ~= "table" then
+		return out
+	end
+
+	local guildId = raw.GuildId or raw.guildId
+	if typeof(guildId) == "string" and guildId ~= "" then
+		out.GuildId = guildId
+	end
+
+	local role = raw.Role or raw.role
+	if role == "Owner" or role == "Officer" or role == "Member" then
+		out.Role = role
+	end
+
+	out.JoinedAt = clampInt(raw.JoinedAt or raw.joinedAt)
+	out.Contribution = clampInt(raw.Contribution or raw.contribution)
+
+	if not out.GuildId then
+		out.Role = nil
+		out.JoinedAt = 0
+		out.Contribution = 0
+	end
+
+	return out
+end
+
 function PlayerData.Get(plr)
 	local uid = plr.UserId
 	if PlayerData._cache[uid] then
@@ -361,6 +482,9 @@ function PlayerData.Get(plr)
 	data.crafting.mobMaterials = sanitizeCountMap(data.crafting.mobMaterials)
 	data.crafting.upgradeMaterials = sanitizeCountMap(data.crafting.upgradeMaterials)
 	data.crafting.miningSession = sanitizeMiningSession(data.crafting.miningSession)
+	data.DailyLogin = sanitizeDailyLogin(data.DailyLogin)
+	data.Events = sanitizeEvents(data.Events)
+	data.Guild = sanitizeGuild(data.Guild)
 
 	-- tutorial/spells sanity
 	data.tutorialCompleted = data.tutorialCompleted == true
@@ -464,9 +588,31 @@ function PlayerData.Save(plr, force: boolean)
 	end
 end
 
+function PlayerData.Release(plr, force: boolean?)
+	if not plr then
+		return
+	end
+
+	local uid = plr.UserId
+	PlayerData.Save(plr, force == true)
+	PlayerData._cache[uid] = nil
+	PlayerData._dirty[uid] = nil
+	PlayerData._saving[uid] = nil
+end
+
 function PlayerData.Reset(plr)
 	PlayerData._cache[plr.UserId] = defaultProfile()
 	PlayerData._dirty[plr.UserId] = true
 end
+
+Players.PlayerRemoving:Connect(function(plr)
+	PlayerData.Release(plr, true)
+end)
+
+game:BindToClose(function()
+	for _, plr in ipairs(Players:GetPlayers()) do
+		PlayerData.Save(plr, true)
+	end
+end)
 
 return PlayerData

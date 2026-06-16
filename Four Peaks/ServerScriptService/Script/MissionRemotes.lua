@@ -6,19 +6,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
-local servicesFolder = ServerScriptService:FindFirstChild("Services")
-local ErrorReporter = servicesFolder and servicesFolder:FindFirstChild("ErrorReporter") and require(servicesFolder.ErrorReporter) or nil
 
 local MissionService = require(serverModules:WaitForChild("MissionService"))
 local CurrencyService = require(serverModules:WaitForChild("CurrencyService"))
 local PlayerData = require(serverModules:WaitForChild("PlayerData"))
-
-local function protect(callbackName, context, callback)
-	if ErrorReporter then
-		return ErrorReporter.WrapCallback(callbackName, callback, context)
-	end
-	return callback
-end
 
 local remoteFunctions = ReplicatedStorage:FindFirstChild("RemoteFunctions")
 if not remoteFunctions then
@@ -62,10 +53,7 @@ local function nextWeeklyResetAt(now: number): number
 	return midnight + (daysUntilNextMonday * SECONDS_PER_DAY)
 end
 
-RF_GetMissions.OnServerInvoke = protect("MissionService.GetMissions", {
-	system = "MissionService",
-	phase = "lobby",
-}, function(player: Player)
+RF_GetMissions.OnServerInvoke = function(player: Player)
 	local now = os.time()
 	local missions = MissionService.GetMissions(player)
 	local currencies = CurrencyService.GetBalances(player)
@@ -77,12 +65,9 @@ RF_GetMissions.OnServerInvoke = protect("MissionService.GetMissions", {
 			weeklyAt = nextWeeklyResetAt(now),
 		},
 	}
-end)
+end
 
-RF_ClaimMission.OnServerInvoke = protect("MissionService.ClaimMission", {
-	system = "MissionService",
-	phase = "lobby",
-}, function(player: Player, missionId: string)
+RF_ClaimMission.OnServerInvoke = function(player: Player, missionId: string)
 	if typeof(missionId) ~= "string" then
 		return { ok = false, error = "InvalidMission" }
 	end
@@ -107,6 +92,6 @@ RF_ClaimMission.OnServerInvoke = protect("MissionService.ClaimMission", {
 		claimCounts = claimCounts,
 		updatedMission = updatedMission,
 	}
-end)
+end
 
 print("[MissionRemotes] Ready")

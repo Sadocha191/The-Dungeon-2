@@ -80,6 +80,7 @@ local spawnedForRun = false
 local statues = {}
 local monuments = {}
 local activeChallenge = nil
+local isAlive
 
 local function getRarityColor(rarity)
 	return RARITY_COLORS[tostring(rarity or "")] or Color3.fromRGB(255, 192, 92)
@@ -138,7 +139,7 @@ local function broadcast(payload)
 	end
 end
 
-local function isAlive(plr: Player?): boolean
+isAlive = function(plr: Player?): boolean
 	if not plr or plr.Parent ~= Players then
 		return false
 	end

@@ -10,7 +10,7 @@ if gui and gui:IsA("ScreenGui") then
 	gui.IgnoreGuiInset = true
 end
 
-local frame = gui:WaitForChild("Frame")
+local frame = gui:WaitForChild("SpellUI")
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
 assert(moduleFolder and moduleFolder:IsA("Folder"), "[SpellUI] Missing ReplicatedStorage.ModuleScripts/ModuleScript")
 

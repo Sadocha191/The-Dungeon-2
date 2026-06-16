@@ -5,6 +5,7 @@
 --   SaveScheduler.Bind(store)  -- store musi mieć :_RawSave(player, reason)
 --   SaveScheduler.MarkDirty(player, "reason")
 --   SaveScheduler.ForceSave(player, "reason")
+--   SaveScheduler.Flush(player, "reason")
 
 local Players = game:GetService("Players")
 
@@ -82,13 +83,15 @@ local function schedule(userId: number)
 				if boundStore and boundStore._RawSave then
 					local reason = st.reason or "dirty"
 					st.reason = nil
-					st.dirty = false
 					st.lastSaveAt = now()
 
 					-- mały jitter żeby nie walić wielu graczy w tym samym ticku
 					task.wait(math.random(JITTER_MIN, JITTER_MAX) * 0.1)
 
-					boundStore:_RawSave(plr, reason)
+					if st.dirty then
+						st.dirty = false
+						boundStore:_RawSave(plr, reason)
+					end
 				else
 					-- brak store -> nie rób nic, ale wyłącz task żeby nie mielić
 					st.taskActive = false
@@ -118,9 +121,31 @@ function SaveScheduler.ForceSave(player: Player, reason: string?)
 	end
 end
 
-Players.PlayerRemoving:Connect(function(player)
-	-- nic nie zapisujemy tu bezpośrednio (store zrobi własny ForceSave).
+function SaveScheduler.Flush(player: Player, reason: string?)
+	local st = stateByUserId[player.UserId]
+	if not st or not st.dirty then
+		return
+	end
+
+	local saveReason = reason or st.reason or "flush"
+	st.dirty = false
+	st.reason = nil
+	st.lastSaveAt = now()
+
+	if boundStore and boundStore._RawSave then
+		boundStore:_RawSave(player, saveReason)
+	end
+end
+
+function SaveScheduler.Release(player: Player)
 	stateByUserId[player.UserId] = nil
+end
+
+Players.PlayerRemoving:Connect(function(player)
+	-- Store lifecycle robi flush; cleanup odkładamy, żeby nie wyczyścić dirty przed nim.
+	task.defer(function()
+		SaveScheduler.Release(player)
+	end)
 end)
 
 return SaveScheduler

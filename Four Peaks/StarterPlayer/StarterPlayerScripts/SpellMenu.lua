@@ -1,0 +1,190 @@
+-- SpellMenu.client.lua (StarterPlayerScripts)
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local plr = Players.LocalPlayer
+local pg = plr:WaitForChild("PlayerGui")
+
+local remotes = ReplicatedStorage:WaitForChild("RemoteEvents")
+local SpellEvent = remotes:WaitForChild("SpellEvent")
+
+local PauseState = ReplicatedStorage:WaitForChild("PauseState")
+
+local gui = pg:WaitForChild("SpellMenu")
+gui.ResetOnSpawn = false
+gui.Enabled = false
+gui:SetAttribute("Modal", true)
+
+local dim = gui:WaitForChild("dim")
+dim.Size = UDim2.fromScale(1,1)
+dim.BackgroundColor3 = Color3.fromRGB(0,0,0)
+dim.BackgroundTransparency = 0.35
+dim.BorderSizePixel = 0
+dim.Parent = gui
+
+local card = dim:WaitForChild("card")
+card.AnchorPoint = Vector2.new(0.5,0.5)
+card.Position = UDim2.fromScale(0.5,0.5)
+card.Size = UDim2.fromScale(0.72, 0.62)
+card.BackgroundColor3 = Color3.fromRGB(14,14,16)
+card.BackgroundTransparency = 0.05
+card.BorderSizePixel = 0
+card.Parent = dim
+Instance.new("UICorner", card).CornerRadius = UDim.new(0, 18)
+local cardSizeConstraint = Instance.new("UISizeConstraint", card)
+cardSizeConstraint.MaxSize = Vector2.new(640, 340)
+local cardAspect = Instance.new("UIAspectRatioConstraint", card)
+cardAspect.AspectRatio = 640 / 340
+cardAspect.DominantAxis = Enum.DominantAxis.Height
+
+local title = Instance.new("TextLabel")
+title.BackgroundTransparency = 1
+title.Position = UDim2.fromOffset(22, 18)
+title.Size = UDim2.new(1, -44, 0, 28)
+title.Font = Enum.Font.GothamBlack
+title.TextSize = 20
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.TextColor3 = Color3.fromRGB(245,245,245)
+title.Text = "Choose a spell"
+title.Parent = card
+
+local closeButton = Instance.new("TextButton")
+closeButton.AnchorPoint = Vector2.new(1, 0)
+closeButton.Position = UDim2.new(1, -16, 0, 16)
+closeButton.Size = UDim2.fromOffset(32, 32)
+closeButton.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+closeButton.BorderSizePixel = 0
+closeButton.Font = Enum.Font.GothamBold
+closeButton.TextSize = 14
+closeButton.TextColor3 = Color3.fromRGB(235, 235, 235)
+closeButton.Text = "X"
+closeButton.Parent = card
+Instance.new("UICorner", closeButton).CornerRadius = UDim.new(0, 10)
+
+local container = Instance.new("Frame")
+container.BackgroundTransparency = 1
+container.Position = UDim2.fromOffset(22, 64)
+container.Size = UDim2.new(1, -44, 1, -132)
+container.Parent = card
+
+local list = Instance.new("UIListLayout")
+list.FillDirection = Enum.FillDirection.Horizontal
+list.Padding = UDim.new(0, 14)
+list.Parent = container
+
+local footer = Instance.new("TextLabel")
+footer.BackgroundTransparency = 1
+footer.AnchorPoint = Vector2.new(0.5,1)
+footer.Position = UDim2.new(0.5,0,1,-18)
+footer.Size = UDim2.new(1, -44, 0, 18)
+footer.Font = Enum.Font.Gotham
+footer.TextSize = 12
+footer.TextColor3 = Color3.fromRGB(210,210,210)
+footer.Text = "Click a card, then Confirm."
+footer.Parent = card
+
+local selectedId = nil
+local currentToken = nil
+local confirmBtn
+
+local function makeOption(opt)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(0, 190, 1, 0)
+	btn.BackgroundColor3 = Color3.fromRGB(20,20,24)
+	btn.BackgroundTransparency = 0.08
+	btn.BorderSizePixel = 0
+	btn.Text = ""
+	btn.AutoButtonColor = true
+	btn.Parent = container
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 16)
+
+	local name = Instance.new("TextLabel")
+	name.BackgroundTransparency = 1
+	name.Position = UDim2.fromOffset(14, 14)
+	name.Size = UDim2.new(1, -28, 0, 20)
+	name.Font = Enum.Font.GothamBold
+	name.TextSize = 14
+	name.TextXAlignment = Enum.TextXAlignment.Left
+	name.TextColor3 = Color3.fromRGB(245,245,245)
+	name.Text = opt.name
+	name.Parent = btn
+
+	local rar = Instance.new("TextLabel")
+	rar.BackgroundTransparency = 1
+	rar.Position = UDim2.fromOffset(14, 38)
+	rar.Size = UDim2.new(1, -28, 0, 16)
+	rar.Font = Enum.Font.Gotham
+	rar.TextSize = 12
+	rar.TextXAlignment = Enum.TextXAlignment.Left
+	rar.TextColor3 = opt.color or Color3.fromRGB(210,210,210)
+	rar.Text = tostring(opt.rarity or "Spell")
+	rar.Parent = btn
+
+	local desc = Instance.new("TextLabel")
+	desc.BackgroundTransparency = 1
+	desc.Position = UDim2.fromOffset(14, 62)
+	desc.Size = UDim2.new(1, -28, 1, -120)
+	desc.Font = Enum.Font.Gotham
+	desc.TextSize = 12
+	desc.TextXAlignment = Enum.TextXAlignment.Left
+	desc.TextYAlignment = Enum.TextYAlignment.Top
+	desc.TextColor3 = Color3.fromRGB(220,220,220)
+	desc.TextWrapped = true
+	desc.Text = tostring(opt.desc or "")
+	desc.Parent = btn
+
+	btn.MouseButton1Click:Connect(function()
+		selectedId = opt.id
+		confirmBtn.Text = ("Confirm: %s"):format(opt.name)
+		confirmBtn.BackgroundTransparency = 0
+	end)
+
+	return btn
+end
+
+confirmBtn = Instance.new("TextButton")
+confirmBtn.AnchorPoint = Vector2.new(0.5,1)
+confirmBtn.Position = UDim2.new(0.5,0,1,-44)
+confirmBtn.Size = UDim2.fromOffset(340, 42)
+confirmBtn.BackgroundColor3 = Color3.fromRGB(96,165,250)
+confirmBtn.BackgroundTransparency = 0.35
+confirmBtn.BorderSizePixel = 0
+confirmBtn.Font = Enum.Font.GothamBold
+confirmBtn.TextSize = 14
+confirmBtn.TextColor3 = Color3.fromRGB(10,10,12)
+confirmBtn.Text = "Select a card"
+confirmBtn.Parent = card
+Instance.new("UICorner", confirmBtn).CornerRadius = UDim.new(0, 14)
+
+confirmBtn.MouseButton1Click:Connect(function()
+	if not currentToken or not selectedId then return end
+	SpellEvent:FireServer({ type="PICK", token=currentToken, id=selectedId })
+	gui.Enabled = false
+	PauseState.Value = false
+end)
+
+closeButton.MouseButton1Click:Connect(function()
+	gui.Enabled = false
+	PauseState.Value = false
+end)
+
+SpellEvent.OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" or payload.type ~= "SHOW" then return end
+	currentToken = payload.token
+	selectedId = nil
+
+	for _,c in ipairs(container:GetChildren()) do
+		if c:IsA("GuiObject") and c ~= list then c:Destroy() end
+	end
+
+	for _,opt in ipairs(payload.choices or {}) do
+		makeOption(opt)
+	end
+
+	confirmBtn.Text = "Select a card"
+	confirmBtn.BackgroundTransparency = 0.35
+
+	gui.Enabled = true
+	PauseState.Value = true
+end)

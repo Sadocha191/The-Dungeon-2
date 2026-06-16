@@ -1,6 +1,7 @@
 -- PlayerData (ServerScriptService) - globalny profil (bez armora)
 
 local DataStoreService = game:GetService("DataStoreService")
+local Players = game:GetService("Players")
 local store = DataStoreService:GetDataStore("GlobalPlayerProgress_v1")
 local legacyStore = DataStoreService:GetDataStore("GlobalProfile_v4")
 
@@ -414,9 +415,30 @@ function PlayerData.Save(plr, force: boolean)
 	end
 end
 
+function PlayerData.Release(plr, force: boolean?)
+	if not plr then
+		return
+	end
+
+	local uid = plr.UserId
+	PlayerData.Save(plr, force == true)
+	PlayerData._cache[uid] = nil
+	PlayerData._dirty[uid] = nil
+	PlayerData._saving[uid] = nil
+end
+
 function PlayerData.Reset(plr)
 	PlayerData._cache[plr.UserId] = defaultProfile()
 	PlayerData._dirty[plr.UserId] = true
 end
 
+Players.PlayerRemoving:Connect(function(plr)
+	PlayerData.Release(plr, true)
+end)
+
+game:BindToClose(function()
+	for _, plr in ipairs(Players:GetPlayers()) do
+		PlayerData.Save(plr, true)
+	end
+end)
 return PlayerData

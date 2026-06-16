@@ -3,6 +3,7 @@
 -- Silver -> PlayerData.silver
 -- WeaponPoints -> PlayerData.weaponPoints
 -- Tickets -> PlayerData.tickets
+-- Souls -> PlayerData.souls
 -- (100 WP = 1 Ticket)
 
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
@@ -68,6 +69,7 @@ end
 
 local function ensure(data)
 	data.silver = clamp0(data.silver)
+	data.souls = clamp0(data.souls)
 	data.weaponPoints = clamp0(data.weaponPoints)
 	data.tickets = clamp0(data.tickets)
 end
@@ -78,6 +80,7 @@ function CurrencyService.GetBalances(player: Player)
 	return {
 		Silver = data.silver,
 		Coins = data.silver,
+		Souls = data.souls,
 		WeaponPoints = data.weaponPoints,
 		Tickets = data.tickets,
 	}
@@ -135,6 +138,19 @@ function CurrencyService.AddTickets(player: Player, amount: number)
 	PlayerData.MarkDirty(player)
 end
 
+function CurrencyService.GetSouls(player: Player): number
+	local data = getData(player); ensure(data)
+	return data.souls
+end
+
+function CurrencyService.AddSouls(player: Player, amount: number)
+	amount = math.floor(tonumber(amount) or 0)
+	if amount == 0 then return end
+	local data = getData(player); ensure(data)
+	data.souls = math.max(0, data.souls + amount)
+	PlayerData.MarkDirty(player)
+end
+
 -- Generic add/remove used by GachaService
 function CurrencyService.AddCurrency(player: Player, currency: string, amount: number)
 	amount = clamp0(amount)
@@ -143,6 +159,8 @@ function CurrencyService.AddCurrency(player: Player, currency: string, amount: n
 
 	if currency == "Coins" or currency == "Silver" then
 		data.silver += amount
+	elseif currency == "Souls" then
+		data.souls += amount
 	elseif currency == "WeaponPoints" then
 		data.weaponPoints += amount
 	elseif currency == "Tickets" then
@@ -163,6 +181,9 @@ function CurrencyService.RemoveCurrency(player: Player, currency: string, amount
 	if currency == "Coins" or currency == "Silver" then
 		if data.silver < amount then return false end
 		data.silver -= amount
+	elseif currency == "Souls" then
+		if data.souls < amount then return false end
+		data.souls -= amount
 	elseif currency == "WeaponPoints" then
 		if data.weaponPoints < amount then return false end
 		data.weaponPoints -= amount

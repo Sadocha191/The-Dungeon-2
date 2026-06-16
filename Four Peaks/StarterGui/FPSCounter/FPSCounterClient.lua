@@ -8,6 +8,7 @@ local gui = script.Parent
 local frame = gui:WaitForChild("Frame")
 local fpsLabel = frame:WaitForChild("FPS")
 local FPS_TELEPORT_SETTING = "ShowFPSCounter"
+local FPS_SAMPLE_INTERVAL = 0.15
 
 local function getPersistedVisibility(): boolean
 	local ok, value = pcall(function()
@@ -73,7 +74,7 @@ RunService.RenderStepped:Connect(function(dt)
 	sampleTime += dt
 	sampleFrames += 1
 
-	if sampleTime < 0.35 then
+	if sampleTime < FPS_SAMPLE_INTERVAL then
 		return
 	end
 

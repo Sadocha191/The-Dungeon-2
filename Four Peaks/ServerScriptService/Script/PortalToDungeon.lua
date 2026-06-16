@@ -6,6 +6,7 @@ local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local Players = game:GetService("Players")
 
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 local replicatedModules = (
@@ -17,16 +18,8 @@ local replicatedModules = (
 
 local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
 local PlayerData = require(serverModules:WaitForChild("PlayerData"))
+local CraftingService = require(serverModules:WaitForChild("CraftingService"))
 local Levels = require(replicatedModules:WaitForChild("Levels"))
-local servicesFolder = ServerScriptService:FindFirstChild("Services")
-local ErrorReporter = servicesFolder and servicesFolder:FindFirstChild("ErrorReporter") and require(servicesFolder.ErrorReporter) or nil
-
-local function protect(callbackName, context, callback)
-	if ErrorReporter then
-		return ErrorReporter.WrapCallback(callbackName, callback, context)
-	end
-	return callback
-end
 
 local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
 if not remoteEvents then
@@ -154,6 +147,28 @@ local function canTeleport(player: Player): boolean
 	return true
 end
 
+local function hasActiveMiningSession(player: Player): boolean
+	local ok, snapshot = pcall(function()
+		return CraftingService.GetMiningSnapshot(player)
+	end)
+	return ok
+		and typeof(snapshot) == "table"
+		and typeof(snapshot.session) == "table"
+		and snapshot.session.active == true
+end
+
+local function getMiningBlockReason(players: {Player}, requester: Player): string?
+	for _, candidate in ipairs(players) do
+		if candidate and candidate.Parent and hasActiveMiningSession(candidate) then
+			if candidate == requester then
+				return "mining_active"
+			end
+			return "party_member_mining"
+		end
+	end
+	return nil
+end
+
 local function buildUnlockedSpells(player: Player): {string}
 	local out = {}
 	local d = PlayerData.Get(player)
@@ -225,6 +240,24 @@ local function sanitizeWeaponEntry(rawEntry: any, fallbackWeaponName: string?): 
 	return clean
 end
 
+local function getProfileLoadoutEntry(player: Player): {[string]: any}?
+	local profile = PlayerData.Get(player)
+	if typeof(profile) ~= "table" or typeof(profile.Loadout) ~= "table" then
+		return nil
+	end
+
+	local first = profile.Loadout[1]
+	if typeof(first) == "string" and first ~= "" then
+		return {
+			id = first,
+			weaponId = first,
+			level = 1,
+		}
+	end
+
+	return sanitizeWeaponEntry(first, nil)
+end
+
 local function resolveWeaponSelection(player: Player, state: any): (string?, {[string]: any}?)
 	local weaponName = state and state.StarterWeaponName or nil
 	local weaponEntry = nil
@@ -249,7 +282,16 @@ local function resolveWeaponSelection(player: Player, state: any): (string?, {[s
 		and typeof(state.WeaponInstances[1]) == "table"
 		and typeof(state.WeaponInstances[1].weaponId) == "string"
 	then
+		weaponEntry = sanitizeWeaponEntry(state.WeaponInstances[1], state.WeaponInstances[1].weaponId)
 		weaponName = state.WeaponInstances[1].weaponId
+	end
+
+	if not weaponEntry then
+		local profileEntry = getProfileLoadoutEntry(player)
+		if profileEntry then
+			weaponEntry = profileEntry
+			weaponName = profileEntry.id
+		end
 	end
 
 	return weaponName, weaponEntry
@@ -427,10 +469,7 @@ local function tryTeleport(players: {Player}, placeId: number, tpData: any)
 		end
 	end
 end
-prompt.Triggered:Connect(protect("PortalToDungeon.PromptTriggered", {
-	system = "PortalToDungeon",
-	phase = "lobby",
-}, function(player: Player)
+prompt.Triggered:Connect(function(player: Player)
 	if not player or not player.Parent then
 		return
 	end
@@ -443,13 +482,14 @@ prompt.Triggered:Connect(protect("PortalToDungeon.PromptTriggered", {
 	if not tutorialComplete(player) then
 		return
 	end
+	if hasActiveMiningSession(player) then
+		TeleportStatus:FireClient(player, { type = "failed", reason = "mining_active" })
+		return
+	end
 	OpenLevelSelect:FireClient(player)
-end))
+end)
 
-RequestLevelTeleport.OnServerEvent:Connect(protect("PortalToDungeon.RequestLevelTeleport", {
-	system = "PortalToDungeon",
-	phase = "lobby",
-}, function(player: Player, levelKey: any, mode: any)
+RequestLevelTeleport.OnServerEvent:Connect(function(player: Player, levelKey: any, mode: any)
 	if not player or not player.Parent then
 		return
 	end
@@ -460,6 +500,10 @@ RequestLevelTeleport.OnServerEvent:Connect(protect("PortalToDungeon.RequestLevel
 		return
 	end
 	if not distanceOk(player) then
+		return
+	end
+	if hasActiveMiningSession(player) then
+		TeleportStatus:FireClient(player, { type = "failed", reason = "mining_active" })
 		return
 	end
 
@@ -505,9 +549,20 @@ RequestLevelTeleport.OnServerEvent:Connect(protect("PortalToDungeon.RequestLevel
 		end
 	end
 
+	local miningBlockReason = getMiningBlockReason(group, player)
+	if miningBlockReason then
+		TeleportStatus:FireClient(player, { type = "failed", reason = miningBlockReason })
+		return
+	end
+
 	local tpData = buildTeleportDataForLeader(player, runMode, partyId, leaderUserId)
 	tpData.LevelKey = entry.key
 	tryTeleport(group, entry.placeId, tpData)
-end))
+end)
+
+Players.PlayerRemoving:Connect(function(player: Player)
+	lastOpen[player.UserId] = nil
+	lastTp[player.UserId] = nil
+end)
 
 print("[PortalToDungeon] Ready (spells+loadout)")

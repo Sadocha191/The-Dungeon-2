@@ -24,6 +24,19 @@ do
 end
 
 local MissionProgress = {}
+local EventProgress = nil
+do
+	local eventProgressModule = serverModules:FindFirstChild("EventProgress")
+	if eventProgressModule and eventProgressModule:IsA("ModuleScript") then
+		local ok, service = pcall(require, eventProgressModule)
+		if ok then
+			EventProgress = service
+		else
+			warn("[MissionProgress] Failed to load EventProgress:", service)
+		end
+	end
+end
+
 
 local function ensureState(plr: Player)
 	return MissionState.Ensure(plr)

@@ -45,21 +45,8 @@ end
 
 local PlayerData = safeRequire(findModule("PlayerData"))
 local MissionProgress = safeRequire(findModule("MissionProgress"))
-local RunStatsService = safeRequire(findModule("RunStatsService"))
 if not PlayerData then
 	error("[ProgressService] Missing PlayerData module")
-end
-if not RunStatsService then
-	error("[ProgressService] Missing RunStatsService module")
-end
-local servicesFolder = ServerScriptService:FindFirstChild("Services")
-local ErrorReporter = servicesFolder and servicesFolder:FindFirstChild("ErrorReporter") and require(servicesFolder.ErrorReporter) or nil
-
-local function protect(callbackName, context, callback)
-	if ErrorReporter then
-		return ErrorReporter.WrapCallback(callbackName, callback, context)
-	end
-	return callback
 end
 
 -- Spell defs
@@ -82,8 +69,6 @@ local SpellEvent = ensureRemoteEvent(Remotes, "SpellEvent")
 local PauseMenuEvent = ensureRemoteEvent(Remotes, "PauseMenuEvent")
 local distinctOwnedCount
 local runSeconds
-local getRun
-local recomputePauseState
 
 -- PauseState (shared)
 local PauseState = ReplicatedStorage:FindFirstChild("PauseState")
@@ -93,6 +78,7 @@ if not PauseState then
 	PauseState.Value = false
 	PauseState.Parent = ReplicatedStorage
 end
+
 local RunStarted = ReplicatedStorage:FindFirstChild("RunStarted")
 if not RunStarted then
 	RunStarted = Instance.new("BoolValue")
@@ -114,17 +100,7 @@ local pending = {} -- [uid] = {token, offers}
 
 -- Party shared progression (Multi)
 local party = {} -- [partyId] = {level, xp, nextXp, pendingLevelUps, inLevelUp, waitingFor = {[uid]=true}}
-local manualPauseUsers = {} -- [uid] = {[source]=true} while modal UIs request a pause
-
-local function hasActiveRunPlayers(): boolean
-	for _, candidate in ipairs(Players:GetPlayers()) do
-		if candidate.Parent and candidate:GetAttribute("RunEnded") ~= true then
-			return true
-		end
-	end
-
-	return false
-end
+local manualPauseUsers = {} -- [uid] = true while a player has pause UI open
 
 local function getPartyId(plr: Player): string?
 	local pid = plr:GetAttribute("PartyId")
@@ -156,6 +132,15 @@ local function getPartyState(partyId: string)
 	return p
 end
 
+local function hasActiveRunPlayers(): boolean
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Parent == Players and player:GetAttribute("RunEnded") ~= true then
+			return true
+		end
+	end
+	return false
+end
+
 local function getPartyPlayers(partyId: string): {Player}
 	local list = {}
 	for _, plr in ipairs(Players:GetPlayers()) do
@@ -181,64 +166,8 @@ local function syncPartyHud(partyId: string)
 	end
 end
 
-local function getPauseSourceSet(r)
-	local sourceSet = r.pauseSources
-	if typeof(sourceSet) ~= "table" then
-		sourceSet = {}
-		r.pauseSources = sourceSet
-	end
-	return sourceSet
-end
 
-local function setRunPauseSource(plr: Player, sourceId: string, active: boolean)
-	if not plr or plr.Parent ~= Players then
-		return
-	end
-
-	local r = getRun(plr)
-	local sourceSet = getPauseSourceSet(r)
-	local hadAny = next(sourceSet) ~= nil
-	local now = time()
-
-	if active then
-		if sourceSet[sourceId] then
-			return
-		end
-		sourceSet[sourceId] = true
-		if not hadAny then
-			r.pauseStart = now
-		end
-	else
-		if not sourceSet[sourceId] then
-			return
-		end
-		sourceSet[sourceId] = nil
-		if next(sourceSet) == nil and r.pauseStart then
-			r.pausedTotal += (now - r.pauseStart)
-			r.pauseStart = nil
-		end
-	end
-
-	recomputePauseState()
-end
-
-local function setPauseSourceForPlayers(playersList: {Player}, sourceId: string, active: boolean)
-	for _, member in ipairs(playersList) do
-		if member and member.Parent == Players and member:GetAttribute("RunEnded") ~= true then
-			setRunPauseSource(member, sourceId, active)
-		end
-	end
-end
-
-local function getSingleLevelPauseSource(plr: Player): string
-	return ("LevelUp:%d"):format(plr.UserId)
-end
-
-local function getPartyLevelPauseSource(partyId: string): string
-	return "PartyLevelUp:" .. tostring(partyId)
-end
-
-recomputePauseState = function()
+local function recomputePauseState()
 	for _, sources in pairs(manualPauseUsers) do
 		if typeof(sources) == "table" and next(sources) ~= nil then
 			PauseState.Value = true
@@ -301,16 +230,28 @@ local function startPartyLevelUp(partyId: string)
 
 	p.inLevelUp = true
 	p.waitingFor = {}
-	local pauseSource = getPartyLevelPauseSource(partyId)
-	setPauseSourceForPlayers(members, pauseSource, true)
+
+	local now = time()
 	for _, member in ipairs(members) do
+		local r = getRun(member)
+		if not r.pauseStart then
+			r.pauseStart = now
+		end
 		if openSpellMenu(member) then
 			p.waitingFor[member.UserId] = true
 		end
 	end
+	recomputePauseState()
 
 	if next(p.waitingFor) == nil then
-		setPauseSourceForPlayers(members, pauseSource, false)
+		for _, member in ipairs(members) do
+			local r = getRun(member)
+			if r.pauseStart then
+				r.pausedTotal += (now - r.pauseStart)
+				r.pauseStart = nil
+			end
+		end
+		recomputePauseState()
 		if p.pendingLevelUps > 0 then
 			p.pendingLevelUps -= 1
 		end
@@ -326,7 +267,7 @@ local function rollNextRunXp(level: number): number
 	return 90 + (level * 48) + math.floor((level * level) * 3)
 end
 
-getRun = function(plr: Player)
+local function getRun(plr: Player)
 	local uid = plr.UserId
 	local r = run[uid]
 	if not r then
@@ -367,8 +308,6 @@ getRun = function(plr: Player)
 			ended = false,
 			banished = {}, -- [spellId]=true
 			pendingLevelUps = 0,
-			pauseSources = {},
-			levelStatGrowthLevels = 0,
 		}
 		run[uid] = r
 	end
@@ -488,11 +427,7 @@ local function hookHealthForMissions(plr: Player)
 		end)
 
 		-- low HP sampling (4Hz)
-		task.spawn(protect("ProgressService.LowHpSampler", {
-			system = "ProgressService",
-			phase = "combat",
-			player = plr,
-		}, function()
+		task.spawn(function()
 			while char.Parent and hum.Parent and hum.Health > 0 do
 				local rr = getRun(plr)
 				if rr.ended then break end
@@ -507,7 +442,7 @@ local function hookHealthForMissions(plr: Player)
 				syncLiveMissionProgress(plr)
 				task.wait(0.25)
 			end
-		end))
+		end)
 	end
 
 	if plr.Character then attach(plr.Character) end
@@ -543,10 +478,7 @@ local function syncHud(plr: Player)
 end
 
 
-PlayerProgressEvent.OnServerEvent:Connect(protect("ProgressService.PlayerProgressEvent", {
-	system = "ProgressService",
-	phase = "combat",
-}, function(plr: Player, payload: any)
+PlayerProgressEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 	if not plr or not plr.Parent then
 		return
 	end
@@ -564,7 +496,7 @@ PlayerProgressEvent.OnServerEvent:Connect(protect("ProgressService.PlayerProgres
 	if t == "requestSync" or t == "request" or t == "sync" then
 		syncHud(plr)
 	end
-end))
+end)
 local function parseUnlocked(plr: Player): {string}
 	local csv = plr:GetAttribute("UnlockedSpellsCSV")
 	if typeof(csv) ~= "string" or csv == "" then return {} end
@@ -590,7 +522,6 @@ local function parseUnlocked(plr: Player): {string}
 
 		return id
 	end
-
 	for tok in string.gmatch(csv, "([^,]+)") do
 		tok = string.gsub(tok, "^%s+", "")
 		tok = string.gsub(tok, "%s+$", "")
@@ -689,17 +620,24 @@ local function canOffer(plr: Player, id: string): boolean
 end
 
 local function pauseBegin(plr: Player)
-	setRunPauseSource(plr, getSingleLevelPauseSource(plr), true)
+	local r = getRun(plr)
+	if r.pauseStart then return end
+	r.pauseStart = time()
+	recomputePauseState()
 end
 
 local function pauseEnd(plr: Player)
-	setRunPauseSource(plr, getSingleLevelPauseSource(plr), false)
+	local r = getRun(plr)
+	if not r.pauseStart then
+		recomputePauseState()
+		return
+	end
+	r.pausedTotal += (time() - r.pauseStart)
+	r.pauseStart = nil
+	recomputePauseState()
 end
 
-PauseMenuEvent.OnServerEvent:Connect(protect("ProgressService.PauseMenuEvent", {
-	system = "ProgressService",
-	phase = "combat",
-}, function(plr: Player, payload)
+PauseMenuEvent.OnServerEvent:Connect(function(plr: Player, payload)
 	if not plr or plr.Parent ~= Players then
 		return
 	end
@@ -726,7 +664,7 @@ PauseMenuEvent.OnServerEvent:Connect(protect("ProgressService.PauseMenuEvent", {
 	end
 
 	recomputePauseState()
-end))
+end)
 
 
 local function finishUpgrade(plr: Player)
@@ -755,7 +693,15 @@ local function finishUpgrade(plr: Player)
 
 	-- If everyone picked, unpause globally and handle queued level-ups
 	if next(p.waitingFor) == nil then
-		setPauseSourceForPlayers(getPartyPlayers(pid), getPartyLevelPauseSource(pid), false)
+		local now = time()
+		for _, member in ipairs(getPartyPlayers(pid)) do
+			local r = getRun(member)
+			if r.pauseStart then
+				r.pausedTotal += (now - r.pauseStart)
+				r.pauseStart = nil
+			end
+		end
+		recomputePauseState()
 
 		if p.pendingLevelUps > 0 then
 			p.pendingLevelUps -= 1
@@ -998,10 +944,7 @@ local function newToken(plr: Player): string
 	return ("%d:%d:%d"):format(plr.UserId, math.floor(os.clock()*1000), math.random(100000,999999))
 end
 
-SpellEvent.OnServerEvent:Connect(protect("ProgressService.SpellEvent", {
-	system = "ProgressService",
-	phase = "combat",
-}, function(plr: Player, payload: any)
+SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 	if typeof(payload) ~= "table" then return end
 	local p = pending[plr.UserId]
 	if not p or payload.token ~= p.token then return end
@@ -1101,32 +1044,72 @@ SpellEvent.OnServerEvent:Connect(protect("ProgressService.SpellEvent", {
 		SpellEvent:FireClient(plr, { type="offer", token=token, offers=offers })
 		return
 	end
-end))
+end)
 
 
 -- === Run stat growth (per level) ===
 local STAT_HP_PER_LEVEL = 6
-local STAT_SPEED_PER_LEVEL = 0.30
+local STAT_SPEED_PER_LEVEL = 0.50
 local STAT_ATK_PCT_PER_LEVEL = 0.04 -- slightly stronger per-level ramp so leveling feels more impactful
 
 local function applyRunStatsNow(plr: Player)
-	local r = getRun(plr)
-	local totalLevels = math.max(0, math.floor(tonumber(r.levelStatGrowthLevels) or 0))
-	local baseWalkSpeed = tonumber(plr:GetAttribute("BaseWalkSpeed")) or 21
-	local movementSpeedDelta = (STAT_SPEED_PER_LEVEL * totalLevels) / math.max(1, baseWalkSpeed)
-	local damageDelta = ((1 + STAT_ATK_PCT_PER_LEVEL) ^ totalLevels) - 1
+	local char = plr.Character
+	if not char then return end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
 
-	RunStatsService.AddModifier(plr, "RunLevelGrowth", {
-		MaxHP = STAT_HP_PER_LEVEL * totalLevels,
-		MovementSpeed = movementSpeedDelta,
-		Damage = damageDelta,
-	})
+	local baseHp = tonumber(plr:GetAttribute("BaseMaxHP")) or 100
+	local baseSpd = tonumber(plr:GetAttribute("BaseWalkSpeed")) or 21
+
+	local bonusHp = tonumber(plr:GetAttribute("RunBonusHP")) or 0
+	local bonusSpd = tonumber(plr:GetAttribute("RunBonusSpeed")) or 0
+
+	hum.MaxHealth = baseHp + bonusHp
+	if hum.Health > hum.MaxHealth then hum.Health = hum.MaxHealth end
+	hum.WalkSpeed = baseSpd + bonusSpd
+
+	-- scale equipped weapon ATK (best-effort, no breaking if templates ignore it)
+	local atkMult = tonumber(plr:GetAttribute("RunAtkMult")) or 1
+	for _, tool in ipairs(char:GetChildren()) do
+		if tool:IsA("Tool") then
+			local unscaledBase = tool:GetAttribute("BaseATK_Unscaled")
+			local unscaledPer = tool:GetAttribute("ATKPerLevel_Unscaled")
+			if not unscaledBase then
+				unscaledBase = tool:GetAttribute("BaseATK")
+				if typeof(unscaledBase) == "number" then
+					tool:SetAttribute("BaseATK_Unscaled", unscaledBase)
+				end
+			end
+			if not unscaledPer then
+				unscaledPer = tool:GetAttribute("ATKPerLevel")
+				if typeof(unscaledPer) == "number" then
+					tool:SetAttribute("ATKPerLevel_Unscaled", unscaledPer)
+				end
+			end
+			if typeof(unscaledBase) == "number" then
+				tool:SetAttribute("BaseATK", unscaledBase * atkMult)
+			end
+			if typeof(unscaledPer) == "number" then
+				tool:SetAttribute("ATKPerLevel", unscaledPer * atkMult)
+			end
+		end
+	end
 end
 
 local function grantLevelStatGains(plr: Player, levelsGained: number)
 	if levelsGained <= 0 then return end
-	local r = getRun(plr)
-	r.levelStatGrowthLevels = math.max(0, math.floor(tonumber(r.levelStatGrowthLevels) or 0)) + levelsGained
+	local bonusHp = tonumber(plr:GetAttribute("RunBonusHP")) or 0
+	local bonusSpd = tonumber(plr:GetAttribute("RunBonusSpeed")) or 0
+	local atkMult = tonumber(plr:GetAttribute("RunAtkMult")) or 1
+
+	bonusHp += STAT_HP_PER_LEVEL * levelsGained
+	bonusSpd += STAT_SPEED_PER_LEVEL * levelsGained
+	atkMult *= (1 + STAT_ATK_PCT_PER_LEVEL) ^ levelsGained
+
+	plr:SetAttribute("RunBonusHP", bonusHp)
+	plr:SetAttribute("RunBonusSpeed", bonusSpd)
+	plr:SetAttribute("RunAtkMult", atkMult)
+
 	applyRunStatsNow(plr)
 end
 
@@ -1152,8 +1135,8 @@ end
 function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 	if not plr or not plr.Parent then return end
 
-	xp = math.max(0, math.floor((tonumber(xp) or 0) * RunStatsService.GetStat(plr, "XPGain") + 0.5))
-	coins = math.max(0, math.floor((tonumber(coins) or 0) * RunStatsService.GetStat(plr, "GoldGain") + 0.5))
+	xp = math.max(0, math.floor(tonumber(xp) or 0))
+	coins = math.max(0, math.floor(tonumber(coins) or 0))
 
 	-- Multiplayer: shared party XP/Level
 	if isMulti(plr) then
@@ -1250,7 +1233,7 @@ end
 -- Public API for soul orbs (DropService calls _G.AwardSouls)
 function _G.AwardSouls(plr: Player, souls: number)
 	if not plr or not plr.Parent then return end
-	souls = math.max(0, math.floor((tonumber(souls) or 0) * RunStatsService.GetStat(plr, "SilverGain") + 0.5))
+	souls = math.max(0, math.floor(tonumber(souls) or 0))
 	if souls <= 0 then return end
 
 	local d = PlayerData.Get(plr)
@@ -1383,7 +1366,7 @@ local function endRunForPlayer(plr: Player, reason: string)
 	-- Gold coins are run-only. Convert a larger share into lobby silver so hard runs feel more rewarding.
 	local goldSilver = math.max(0, math.floor(r.runSilver or 0))
 	local runCoinsEarned = math.max(0, math.floor(r.coinsEarned or 0))
-	local coinsGained = math.max(0, math.floor(goldSilver * 0.6 * RunStatsService.GetStat(plr, "SilverGain") + 0.5))
+	local coinsGained = math.max(0, math.floor(goldSilver * 0.6))
 
 	local d = PlayerData.Get(plr)
 	d.xp = (tonumber(d.xp) or 0) + accountXp
@@ -1514,17 +1497,6 @@ local function endRunForPlayer(plr: Player, reason: string)
 end
 
 _G.EndRunForPlayer = endRunForPlayer
-_G.SetGlobalRunPause = function(source: string, active: boolean)
-	local normalizedSource = "External:" .. normalizePauseSource(source)
-	print(string.format("[ProgressService] %s run pause source %s", active == true and "Acquire" or "Release", normalizedSource))
-	local affected = {}
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr.Parent == Players and plr:GetAttribute("RunEnded") ~= true then
-			table.insert(affected, plr)
-		end
-	end
-	setPauseSourceForPlayers(affected, normalizedSource, active == true)
-end
 
 Players.PlayerAdded:Connect(function(plr: Player)
 	run[plr.UserId] = nil
@@ -1569,8 +1541,6 @@ Players.PlayerAdded:Connect(function(plr: Player)
 	r.ended = false
 	r.banished = {}
 	r.pendingLevelUps = 0
-	r.pauseSources = {}
-	r.levelStatGrowthLevels = 0
 	plr:SetAttribute("RunRerollsUsed", 0)
 
 	-- reset spell levels for this run
