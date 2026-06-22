@@ -2,15 +2,13 @@
 
 This file tracks AI-made repo changes and the intended rollback path.
 
-## 2026-06-22 - Poziom visible enemy ground offset
+## 2026-06-22 - Poziom signed enemy root ground offset
 
 ### Scope
 
-- Fixed enemy grounding for templates whose invisible root part sits below the visible mesh bottom, including floating Slime cases observed in live Play mode.
-- Changed the shared `WaveController` spawn grounding offset and `NpcService` runtime ground-follow offset to use the lowest visible BasePart first, falling back to all parts only if no visible parts exist.
-- This allows the NPC root to sit below terrain when imported geometry requires it, so the visible model bottom rests on the surface instead of the invisible root touching the surface.
-- Changed server-side `NpcService` emerge/SetPosition movement to translate every BasePart by the same root delta, preventing imported rigs from moving only `RootPart` while visible MeshParts remain at stale world coordinates.
-- Added a guarded `NpcService` repair for truly detached visible mesh clusters, with a large flat-distance threshold so intentional boss offsets like Golem are preserved.
+- Fixed enemy grounding for templates whose root part sits below the visible model bottom, including floating Slime cases observed in live Play mode.
+- Changed the shared `WaveController` spawn grounding offset and `NpcService` runtime ground-follow offset from nonnegative clamped values to signed root-to-bottom offsets.
+- This allows the NPC root to sit slightly below terrain when the imported model geometry requires it, so the visible bottom rests on the surface.
 - Kept the underground emerge spawn behavior, spawn pools, map bounds, remotes, folders, and enemy stats unchanged.
 
 ### Files updated
@@ -21,31 +19,20 @@ This file tracks AI-made repo changes and the intended rollback path.
 
 ### Live Studio objects updated
 
-- `Poziom`: `game.ServerScriptService.Script.Model.WaveController`
-- `Poziom`: `game.ServerScriptService.ModuleScript.NpcService`
-- `Poziom`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.NpcPresentation`
+- Pending final live Studio sync in this pass.
 
 ### Verification
 
 - In live Play mode before the fix, real `WaveController` Slime spawns included a client-visible floating case with `bottomGap = 4.25` studs while terrain under the same X/Z was `Workspace.Terrain`.
-- Found that those bad real spawns had `RootPart` moved to the map while visible Slime MeshParts remained at stale template-space coordinates; `GeneratedSmoothDuneMap` was not the direct final ground hit in the active `WorldBounds` path.
-- Synced `WaveController`, `NpcService`, and `NpcPresentation` into the active `Level` Studio through local read-only HTTP plus Roblox MCP.
-- Ran live Studio `loadstring(...)` compile checks for `WaveController`, `NpcService`, and `NpcPresentation`; all returned `ok`.
-- Verified real `WaveController` Play spawns after the final sync: 12 Slimes, `high = 0`, `low = 0`, visible bottom gap `0.079` studs against `Workspace.Terrain`.
-- Verified controlled live `NpcService` probes for Slime, Skeleton, Zombie, Goblin, Warewolf, LandShark, Demon, and boss Golem:
-  - start below ground at about `-5.67` studs for normal enemies and `-5.81` for Golem
-  - finish grounded at `0.079..0.08` studs after emergence
-- Verified slope samples: Slime on a `0.515` stud local terrain delta finished at `0.109` studs; Skeleton on a `0.448` stud local terrain delta finished at `0.08` studs.
-- Checked the `GeneratedSmoothDuneMap` suspicion: raw raycasts from `Y=420` hit `Workspace.GeneratedSmoothDuneMap.InvisibleCollision.HeightLimitCeiling` at `Y=322`, but `WorldBounds.RaycastTerrainAtXZ` skipped it and hit `Workspace.Terrain` at center/edge samples (`Y=12.8`, `Y=36.2`); border samples outside terrain returned no ground instead of using the ceiling.
+- Pending final live compile and spawn probes after sync.
 
 ### Risks
 
-- Enemy templates with intentionally unusual visible geometry now follow their visible bottom rather than forcing the root above terrain; this is desired for ground enemies but flying enemies should keep using `CanFly` or `IgnoreGroundSnap`.
-- The detached-visual repair intentionally only triggers after a large flat separation (`64` studs) so oversized/imported bosses keep their authored root offset.
+- Enemy templates with intentionally unusual root placement now follow their visible bottom rather than forcing the root above terrain; this is desired for ground enemies but flying enemies should keep using `CanFly` or `IgnoreGroundSnap`.
 
 ### Rollback
 
-- Restore the previous all-parts root-ground offset and `Model:PivotTo` movement logic in `WaveController` and `NpcService`, then revert this changelog entry.
+- Restore the previous nonnegative clamped root-ground offset logic in `WaveController` and `NpcService`, then revert this changelog entry.
 
 ## 2026-06-22 - Poziom enemy underground emerge spawn
 

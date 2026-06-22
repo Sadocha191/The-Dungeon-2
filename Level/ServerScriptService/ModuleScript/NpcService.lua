@@ -105,6 +105,7 @@ type NpcRecord = {
 	state: string,
 	dead: boolean,
 	spawnTime: number,
+	rootToPivot: CFrame?,
 	attackUntil: number,
 	nextAttackAt: number,
 	targetPlayer: Player?,
@@ -160,7 +161,6 @@ local SPAWN_EMERGE_RISE_DURATION = 0.85
 local SPAWN_EMERGE_MIN_DEPTH = 5.75
 local SPAWN_EMERGE_MAX_DEPTH = 16
 local SPAWN_EMERGE_EXTRA_DEPTH = 2.75
-local DETACHED_VISUAL_REPAIR_MIN_FLAT_DISTANCE = 64
 local RUNTIME_ATTRIBUTE_NAMES = {
 	ATTR.State,
 	ATTR.LegacyState,
@@ -302,93 +302,30 @@ local function sampleGroundY(model: Model, pos: Vector3): number?
 	return nil
 end
 
-local function partYExtents(part: BasePart): (number, number)
-	local half = part.Size * 0.5
-	local minY = math.huge
-	local maxY = -math.huge
-	for _, x in ipairs({ -half.X, half.X }) do
-		for _, y in ipairs({ -half.Y, half.Y }) do
-			for _, z in ipairs({ -half.Z, half.Z }) do
-				local world = part.CFrame:PointToWorldSpace(Vector3.new(x, y, z))
-				minY = math.min(minY, world.Y)
-				maxY = math.max(maxY, world.Y)
-			end
-		end
-	end
-	return minY, maxY
-end
-
-local function isVisualGroundingPart(part: BasePart): boolean
-	return part.Transparency < 0.95
-end
-
-local function modelYExtents(model: Model, visualOnly: boolean): (number?, number?)
+local function computeGroundOffset(model: Model, root: BasePart): number
 	local lowestY = math.huge
-	local highestY = -math.huge
 	for _, descendant in ipairs(model:GetDescendants()) do
-		if descendant:IsA("BasePart") and (not visualOnly or isVisualGroundingPart(descendant)) then
-			local partMinY, partMaxY = partYExtents(descendant)
-			lowestY = math.min(lowestY, partMinY)
-			highestY = math.max(highestY, partMaxY)
+		if descendant:IsA("BasePart") then
+			local partBottom = descendant.Position.Y - (descendant.Size.Y * 0.5)
+			if partBottom < lowestY then
+				lowestY = partBottom
+			end
 		end
 	end
 
 	if lowestY == math.huge then
-		return nil, nil
-	end
-
-	return lowestY, highestY
-end
-
-local function visualPartCenter(model: Model): (Vector3?, number)
-	local sum = Vector3.zero
-	local count = 0
-	for _, descendant in ipairs(model:GetDescendants()) do
-		if descendant:IsA("BasePart") and isVisualGroundingPart(descendant) then
-			sum += descendant.Position
-			count += 1
-		end
-	end
-	if count <= 0 then
-		return nil, 0
-	end
-	return sum / count, count
-end
-
-local function repairDetachedVisualParts(model: Model, root: BasePart)
-	local center, count = visualPartCenter(model)
-	if not center or count <= 0 then
-		return
-	end
-
-	local flatDelta = Vector3.new(root.Position.X - center.X, 0, root.Position.Z - center.Z)
-	if flatDelta.Magnitude < DETACHED_VISUAL_REPAIR_MIN_FLAT_DISTANCE then
-		return
-	end
-
-	local delta = root.Position - center
-	for _, descendant in ipairs(model:GetDescendants()) do
-		if descendant:IsA("BasePart") and descendant ~= root then
-			descendant.CFrame += delta
-		end
-	end
-end
-
-local function computeGroundOffset(model: Model, root: BasePart): number
-	local lowestY = modelYExtents(model, true) or modelYExtents(model, false)
-	if not lowestY then
 		return math.max(0, root.Size.Y * 0.5)
 	end
+
 	return root.Position.Y - lowestY
 end
 
 local function computeModelHeight(model: Model, root: BasePart): number
-	local lowestY, highestY = modelYExtents(model, true)
-	if not lowestY or not highestY then
-		lowestY, highestY = modelYExtents(model, false)
-	end
-	if lowestY and highestY and highestY > lowestY then
-		return highestY - lowestY
+	local ok, _boundsCFrame, boundsSize = pcall(function()
+		return model:GetBoundingBox()
+	end)
+	if ok and typeof(boundsSize) == "Vector3" and boundsSize.Y > 0 then
+		return boundsSize.Y
 	end
 	return math.max(1, root.Size.Y)
 end
@@ -420,13 +357,10 @@ local function beginSpawnEmergence(model: Model, root: BasePart, groundOffset: n
 	local depth = resolveSpawnEmergeDepth(model, root, groundOffset)
 	local surfacePosition = root.Position
 	local undergroundPosition = surfacePosition - Vector3.new(0, depth, 0)
-	local emergeDelta = undergroundPosition - surfacePosition
 
-	for _, descendant in ipairs(model:GetDescendants()) do
-		if descendant:IsA("BasePart") then
-			descendant.CFrame += emergeDelta
-		end
-	end
+	pcall(function()
+		model:PivotTo(model:GetPivot() + Vector3.new(0, -depth, 0))
+	end)
 
 	return undergroundPosition, surfacePosition, now + holdDuration, now + holdDuration + riseDuration, depth
 end
@@ -639,19 +573,15 @@ local function setState(npc: NpcRecord, newState: string)
 	writeStateAttributes(npc)
 end
 
-local function translateModel(model: Model, delta: Vector3)
-	if delta.Magnitude <= 1e-5 then
-		return
+local function pivotNpcModelToRoot(npc: NpcRecord)
+	local rootFrame = CFrame.lookAt(npc.position, npc.position + npc.look)
+	local pivotFrame = rootFrame
+	if npc.rootToPivot then
+		pivotFrame = rootFrame * npc.rootToPivot
 	end
-	for _, descendant in ipairs(model:GetDescendants()) do
-		if descendant:IsA("BasePart") then
-			descendant.CFrame += delta
-		end
-	end
-end
-
-local function moveNpcModelToRoot(npc: NpcRecord)
-	translateModel(npc.model, npc.position - npc.root.Position)
+	pcall(function()
+		npc.model:PivotTo(pivotFrame)
+	end)
 end
 
 local function updateSpawnEmergence(npc: NpcRecord, now: number, dt: number): boolean
@@ -691,7 +621,7 @@ local function updateSpawnEmergence(npc: NpcRecord, now: number, dt: number): bo
 	npc.attackUntil = 0
 	npc.nextAttackAt = math.max(npc.nextAttackAt, now + 0.15)
 
-	moveNpcModelToRoot(npc)
+	pivotNpcModelToRoot(npc)
 	writeStateAttributes(npc)
 	return true
 end
@@ -1579,14 +1509,16 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		end
 	end
 
-	repairDetachedVisualParts(model, root)
-
 	nextNpcId += 1
 	local npcId = tostring(nextNpcId)
 	local mobType = tostring((config and config.mobType) or model.Name)
 	local maxHealth = math.max(1, math.floor(tonumber(config and config.maxHealth) or 1))
 	local speed = math.max(0, tonumber(config and config.speed) or 0)
 	local groundOffset = computeGroundOffset(model, root)
+	local rootToPivot: CFrame? = nil
+	pcall(function()
+		rootToPivot = root.CFrame:ToObjectSpace(model:GetPivot())
+	end)
 	local now = os.clock()
 	local initialPosition, spawnSurfacePosition, spawnHoldUntil, spawnEmergeEnd, spawnEmergeDepth =
 		beginSpawnEmergence(model, root, groundOffset, now)
@@ -1610,6 +1542,7 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		state = STATE.Spawn,
 		dead = false,
 		spawnTime = now,
+		rootToPivot = rootToPivot,
 		attackUntil = 0,
 		nextAttackAt = 0,
 		targetPlayer = nil,
@@ -1695,7 +1628,7 @@ function NpcService.SetPosition(target: any, pos: Vector3, lookDir: Vector3?)
 		npc.look = lookDir.Unit
 	end
 	npc.velocity = Vector3.zero
-	moveNpcModelToRoot(npc)
+	pivotNpcModelToRoot(npc)
 	writeStateAttributes(npc)
 end
 
