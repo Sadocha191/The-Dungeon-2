@@ -118,6 +118,11 @@ type NpcRecord = {
 	slowPct: number,
 	slowEnd: number,
 	freezeEnd: number,
+	spawnSurfacePosition: Vector3?,
+	spawnUndergroundPosition: Vector3?,
+	spawnHoldUntil: number,
+	spawnEmergeEnd: number,
+	spawnEmergeDepth: number,
 	aiLockUntil: number,
 	aiLookTarget: Vector3?,
 	groundOffset: number,
@@ -150,6 +155,12 @@ local ENEMY_MELEE_MAX_VERTICAL_DELTA = 5
 local ENEMY_MELEE_MAX_HIT_HEIGHT_ABOVE_ENEMY = 4.5
 local ENEMY_MELEE_USE_3D_DISTANCE = true
 local ENEMY_MELEE_DEBUG = false
+local SPAWN_EMERGE_HOLD_DURATION = 0.35
+local SPAWN_EMERGE_RISE_DURATION = 0.85
+local SPAWN_EMERGE_MIN_DEPTH = 5.75
+local SPAWN_EMERGE_MAX_DEPTH = 16
+local SPAWN_EMERGE_EXTRA_DEPTH = 2.75
+local DETACHED_VISUAL_REPAIR_MIN_FLAT_DISTANCE = 64
 local RUNTIME_ATTRIBUTE_NAMES = {
 	ATTR.State,
 	ATTR.LegacyState,
@@ -291,22 +302,133 @@ local function sampleGroundY(model: Model, pos: Vector3): number?
 	return nil
 end
 
-local function computeGroundOffset(model: Model, root: BasePart): number
-	local lowestY = math.huge
-	for _, descendant in ipairs(model:GetDescendants()) do
-		if descendant:IsA("BasePart") then
-			local partBottom = descendant.Position.Y - (descendant.Size.Y * 0.5)
-			if partBottom < lowestY then
-				lowestY = partBottom
+local function partYExtents(part: BasePart): (number, number)
+	local half = part.Size * 0.5
+	local minY = math.huge
+	local maxY = -math.huge
+	for _, x in ipairs({ -half.X, half.X }) do
+		for _, y in ipairs({ -half.Y, half.Y }) do
+			for _, z in ipairs({ -half.Z, half.Z }) do
+				local world = part.CFrame:PointToWorldSpace(Vector3.new(x, y, z))
+				minY = math.min(minY, world.Y)
+				maxY = math.max(maxY, world.Y)
 			end
+		end
+	end
+	return minY, maxY
+end
+
+local function isVisualGroundingPart(part: BasePart): boolean
+	return part.Transparency < 0.95
+end
+
+local function modelYExtents(model: Model, visualOnly: boolean): (number?, number?)
+	local lowestY = math.huge
+	local highestY = -math.huge
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") and (not visualOnly or isVisualGroundingPart(descendant)) then
+			local partMinY, partMaxY = partYExtents(descendant)
+			lowestY = math.min(lowestY, partMinY)
+			highestY = math.max(highestY, partMaxY)
 		end
 	end
 
 	if lowestY == math.huge then
-		return math.max(0, root.Size.Y * 0.5)
+		return nil, nil
 	end
 
-	return math.max(0, root.Position.Y - lowestY)
+	return lowestY, highestY
+end
+
+local function visualPartCenter(model: Model): (Vector3?, number)
+	local sum = Vector3.zero
+	local count = 0
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") and isVisualGroundingPart(descendant) then
+			sum += descendant.Position
+			count += 1
+		end
+	end
+	if count <= 0 then
+		return nil, 0
+	end
+	return sum / count, count
+end
+
+local function repairDetachedVisualParts(model: Model, root: BasePart)
+	local center, count = visualPartCenter(model)
+	if not center or count <= 0 then
+		return
+	end
+
+	local flatDelta = Vector3.new(root.Position.X - center.X, 0, root.Position.Z - center.Z)
+	if flatDelta.Magnitude < DETACHED_VISUAL_REPAIR_MIN_FLAT_DISTANCE then
+		return
+	end
+
+	local delta = root.Position - center
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") and descendant ~= root then
+			descendant.CFrame += delta
+		end
+	end
+end
+
+local function computeGroundOffset(model: Model, root: BasePart): number
+	local lowestY = modelYExtents(model, true) or modelYExtents(model, false)
+	if not lowestY then
+		return math.max(0, root.Size.Y * 0.5)
+	end
+	return root.Position.Y - lowestY
+end
+
+local function computeModelHeight(model: Model, root: BasePart): number
+	local lowestY, highestY = modelYExtents(model, true)
+	if not lowestY or not highestY then
+		lowestY, highestY = modelYExtents(model, false)
+	end
+	if lowestY and highestY and highestY > lowestY then
+		return highestY - lowestY
+	end
+	return math.max(1, root.Size.Y)
+end
+
+local function resolveSpawnEmergeDepth(model: Model, root: BasePart, groundOffset: number): number
+	local explicitDepth = model:GetAttribute("SpawnEmergeDepth")
+	if typeof(explicitDepth) == "number" and explicitDepth > 0 then
+		return math.clamp(explicitDepth, 0, SPAWN_EMERGE_MAX_DEPTH)
+	end
+
+	local modelHeight = computeModelHeight(model, root)
+	local defaultDepth = math.max(
+		SPAWN_EMERGE_MIN_DEPTH,
+		groundOffset + SPAWN_EMERGE_EXTRA_DEPTH,
+		modelHeight * 0.65
+	)
+	return math.clamp(defaultDepth, SPAWN_EMERGE_MIN_DEPTH, SPAWN_EMERGE_MAX_DEPTH)
+end
+
+local function beginSpawnEmergence(model: Model, root: BasePart, groundOffset: number, now: number)
+	if model:GetAttribute("DisableSpawnEmerge") == true
+		or model:GetAttribute("IgnoreGroundSnap") == true
+		or model:GetAttribute("CanFly") == true then
+		return root.Position, nil, 0, 0, 0
+	end
+
+	local holdDuration = math.max(0, tonumber(model:GetAttribute("SpawnEmergeHoldDuration")) or SPAWN_EMERGE_HOLD_DURATION)
+	local riseDuration = math.max(0.05, tonumber(model:GetAttribute("SpawnEmergeRiseDuration")) or SPAWN_EMERGE_RISE_DURATION)
+	local depth = resolveSpawnEmergeDepth(model, root, groundOffset)
+	local surfacePosition = root.Position
+	local undergroundPosition = surfacePosition - Vector3.new(0, depth, 0)
+	local emergeDelta = undergroundPosition - surfacePosition
+
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.CFrame += emergeDelta
+		end
+	end
+
+	return undergroundPosition, surfacePosition, now + holdDuration, now + holdDuration + riseDuration, depth
 end
 
 local function clampMagnitude(v: Vector3, maxMagnitude: number): Vector3
@@ -517,6 +639,63 @@ local function setState(npc: NpcRecord, newState: string)
 	writeStateAttributes(npc)
 end
 
+local function translateModel(model: Model, delta: Vector3)
+	if delta.Magnitude <= 1e-5 then
+		return
+	end
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.CFrame += delta
+		end
+	end
+end
+
+local function moveNpcModelToRoot(npc: NpcRecord)
+	translateModel(npc.model, npc.position - npc.root.Position)
+end
+
+local function updateSpawnEmergence(npc: NpcRecord, now: number, dt: number): boolean
+	local surfacePosition = npc.spawnSurfacePosition
+	if typeof(surfacePosition) ~= "Vector3" then
+		return false
+	end
+
+	local undergroundPosition = npc.spawnUndergroundPosition or surfacePosition
+	local nextPosition = undergroundPosition
+	local holdUntil = tonumber(npc.spawnHoldUntil) or now
+	local emergeEnd = tonumber(npc.spawnEmergeEnd) or holdUntil
+
+	if now >= emergeEnd then
+		nextPosition = surfacePosition
+		npc.spawnSurfacePosition = nil
+		npc.spawnUndergroundPosition = nil
+		npc.spawnHoldUntil = 0
+		npc.spawnEmergeEnd = 0
+		npc.spawnEmergeDepth = 0
+		npc.targetGroundY = surfacePosition.Y
+		npc.lastGroundAt = 0
+		setState(npc, STATE.Idle)
+	else
+		if now >= holdUntil then
+			local duration = math.max(0.05, emergeEnd - holdUntil)
+			local alpha = math.clamp((now - holdUntil) / duration, 0, 1)
+			local eased = 1 - ((1 - alpha) * (1 - alpha) * (1 - alpha))
+			nextPosition = undergroundPosition:Lerp(surfacePosition, eased)
+		end
+		setState(npc, STATE.Spawn)
+	end
+
+	npc.position = nextPosition
+	npc.velocity = Vector3.zero
+	npc.impulse = Vector3.zero
+	npc.attackUntil = 0
+	npc.nextAttackAt = math.max(npc.nextAttackAt, now + 0.15)
+
+	moveNpcModelToRoot(npc)
+	writeStateAttributes(npc)
+	return true
+end
+
 local function resolveNpc(target: any): NpcRecord?
 	if typeof(target) ~= "Instance" then
 		return nil
@@ -553,6 +732,10 @@ local function matchesActiveCountFilter(npc: NpcRecord, filter: ActiveCountFilte
 		return includeElite == true
 	end
 	return includeNormal == true
+end
+
+local function isNpcTargetable(npc: NpcRecord): boolean
+	return not npc.dead and npc.model.Parent ~= nil and typeof(npc.spawnSurfacePosition) ~= "Vector3"
 end
 
 local function getTargetPriority(npc: NpcRecord): number
@@ -945,6 +1128,10 @@ local function updateNpc(
 		return
 	end
 
+	if updateSpawnEmergence(npc, now, dt) then
+		return
+	end
+
 	if pauseState.Value then
 		npc.velocity = Vector3.zero
 		npc.impulse = Vector3.zero
@@ -1054,7 +1241,7 @@ local function updateNpc(
 end
 
 local function buildSnapshot(npc: NpcRecord)
-	return {
+	local snapshot = {
 		id = npc.id,
 		model = npc.model,
 		type = npc.mobType,
@@ -1068,6 +1255,11 @@ local function buildSnapshot(npc: NpcRecord)
 		dead = npc.dead,
 		despawned = false,
 	}
+	if typeof(npc.spawnSurfacePosition) == "Vector3" then
+		snapshot.spawnSurfacePos = npc.spawnSurfacePosition
+		snapshot.spawnEmergeDepth = npc.spawnEmergeDepth
+	end
+	return snapshot
 end
 
 local function collectBatchItems(includeTombstones: boolean?)
@@ -1137,7 +1329,7 @@ end
 function NpcService.GetLivingModels(): {Model}
 	local result = {}
 	for _, npc in pairs(npcById) do
-		if not npc.dead and npc.model.Parent then
+		if isNpcTargetable(npc) then
 			table.insert(result, npc.model)
 		end
 	end
@@ -1192,7 +1384,7 @@ function NpcService.GetNearestEnemy(fromPos: Vector3, maxRange: number): (Model?
 	local bestEffectiveDist = math.huge
 	local bestPriority = -math.huge
 	for _, npc in pairs(npcById) do
-		if not npc.dead and npc.model.Parent then
+		if isNpcTargetable(npc) then
 			local dist = (npc.position - fromPos).Magnitude
 			if dist <= searchRange then
 				local effectiveDist, actualDist, priority = computeTargetingMetrics(npc, fromPos)
@@ -1214,7 +1406,7 @@ end
 function NpcService.GetEnemiesInRadius(fromPos: Vector3, radius: number): {Model}
 	local hits = {}
 	for _, npc in pairs(npcById) do
-		if not npc.dead and npc.model.Parent then
+		if isNpcTargetable(npc) then
 			local dist = (npc.position - fromPos).Magnitude
 			if dist <= radius then
 				local effectiveDist, actualDist, priority = computeTargetingMetrics(npc, fromPos)
@@ -1254,7 +1446,7 @@ function NpcService.GetTargetingMetrics(fromPos: Vector3, target: any): (number?
 	end
 
 	local npc = resolveNpc(target)
-	if not npc or npc.dead or not npc.model.Parent then
+	if not npc or not isNpcTargetable(npc) then
 		return nil, nil, nil
 	end
 
@@ -1387,12 +1579,17 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		end
 	end
 
+	repairDetachedVisualParts(model, root)
+
 	nextNpcId += 1
 	local npcId = tostring(nextNpcId)
 	local mobType = tostring((config and config.mobType) or model.Name)
 	local maxHealth = math.max(1, math.floor(tonumber(config and config.maxHealth) or 1))
 	local speed = math.max(0, tonumber(config and config.speed) or 0)
 	local groundOffset = computeGroundOffset(model, root)
+	local now = os.clock()
+	local initialPosition, spawnSurfacePosition, spawnHoldUntil, spawnEmergeEnd, spawnEmergeDepth =
+		beginSpawnEmergence(model, root, groundOffset, now)
 
 	local npc: NpcRecord = {
 		id = npcId,
@@ -1412,12 +1609,12 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		attackWindup = math.max(0.15, tonumber(config and config.attackWindup) or 0.35),
 		state = STATE.Spawn,
 		dead = false,
-		spawnTime = os.clock(),
+		spawnTime = now,
 		attackUntil = 0,
 		nextAttackAt = 0,
 		targetPlayer = nil,
 		nextTargetScanAt = 0,
-		position = root.Position,
+		position = initialPosition,
 		look = Vector3.new(0, 0, -1),
 		velocity = Vector3.zero,
 		impulse = Vector3.zero,
@@ -1426,11 +1623,16 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		slowPct = 0,
 		slowEnd = 0,
 		freezeEnd = 0,
+		spawnSurfacePosition = spawnSurfacePosition,
+		spawnUndergroundPosition = spawnSurfacePosition and initialPosition or nil,
+		spawnHoldUntil = spawnHoldUntil,
+		spawnEmergeEnd = spawnEmergeEnd,
+		spawnEmergeDepth = spawnEmergeDepth,
 		aiLockUntil = 0,
 		aiLookTarget = nil,
 		groundOffset = groundOffset,
 		lastGroundAt = 0,
-		lastGroundXZ = Vector3.new(root.Position.X, 0, root.Position.Z),
+		lastGroundXZ = Vector3.new(initialPosition.X, 0, initialPosition.Z),
 		orbitSign = math.random() < 0.5 and -1 or 1,
 		orbitRadius = 0.8 + math.random() * 1.35,
 		targetGroundY = nil,
@@ -1493,9 +1695,7 @@ function NpcService.SetPosition(target: any, pos: Vector3, lookDir: Vector3?)
 		npc.look = lookDir.Unit
 	end
 	npc.velocity = Vector3.zero
-	pcall(function()
-		npc.model:PivotTo(CFrame.lookAt(npc.position, npc.position + npc.look))
-	end)
+	moveNpcModelToRoot(npc)
 	writeStateAttributes(npc)
 end
 

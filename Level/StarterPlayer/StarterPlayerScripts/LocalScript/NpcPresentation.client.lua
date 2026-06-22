@@ -692,10 +692,14 @@ batchEvent.OnClientEvent:Connect(function(payload)
 				seen[id] = true
 			end
 			local spawnFxPos = nil
+			local serverSpawnFxPos = nil
 			if typeof(item.model) == "Instance" and item.model:IsA("Model") then
 				entry.model = item.model
 				refreshRigBinding(entry)
 				queueTrackBuild(entry)
+			end
+			if typeof(item.spawnSurfacePos) == "Vector3" then
+				serverSpawnFxPos = item.spawnSurfacePos
 			end
 			if typeof(item.pos) == "Vector3" then
 				entry.targetPos = item.pos
@@ -729,7 +733,13 @@ batchEvent.OnClientEvent:Connect(function(payload)
 				entry.model:SetAttribute(ATTR.Id, id)
 			end
 			if isNew and fullSnapshot ~= true and not entry.dead and not entry.despawned and spawnFxPos then
-				startSpawnRise(entry, spawnFxPos)
+				if serverSpawnFxPos then
+					entry.spawnRiseStart = nil
+					entry.spawnRiseDepth = nil
+					playSpawnGroundFx(serverSpawnFxPos, getVisualScale(entry))
+				else
+					startSpawnRise(entry, spawnFxPos)
+				end
 			end
 		end
 	end
@@ -818,6 +828,5 @@ requestFullSync()
 localPlayer.CharacterAdded:Connect(function()
 	requestFullSync()
 end)
-
 
 

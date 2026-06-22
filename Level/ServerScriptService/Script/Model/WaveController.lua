@@ -296,6 +296,32 @@ function WorldBounds.BuildMobGrounding(mob: Model?, spawnConfig)
 		rootGroundOffset = 0,
 	}
 
+	local function partMinY(part: BasePart): number
+		local half = part.Size * 0.5
+		local lowestY = math.huge
+		for _, x in ipairs({ -half.X, half.X }) do
+			for _, y in ipairs({ -half.Y, half.Y }) do
+				for _, z in ipairs({ -half.Z, half.Z }) do
+					lowestY = math.min(lowestY, part.CFrame:PointToWorldSpace(Vector3.new(x, y, z)).Y)
+				end
+			end
+		end
+		return lowestY
+	end
+
+	local function modelBottomY(model: Model, visualOnly: boolean): number?
+		local lowestY = math.huge
+		for _, descendant in ipairs(model:GetDescendants()) do
+			if descendant:IsA("BasePart") and (not visualOnly or descendant.Transparency < 0.95) then
+				lowestY = math.min(lowestY, partMinY(descendant))
+			end
+		end
+		if lowestY == math.huge then
+			return nil
+		end
+		return lowestY
+	end
+
 	if not mob then
 		return grounding
 	end
@@ -322,12 +348,9 @@ function WorldBounds.BuildMobGrounding(mob: Model?, spawnConfig)
 		end
 		grounding.rootLocalCFrame = mob:GetPivot():ToObjectSpace(grounding.root.CFrame)
 
-		local ok, boundsCFrame, boundsSize = pcall(function()
-			return mob:GetBoundingBox()
-		end)
-		if ok and typeof(boundsCFrame) == "CFrame" and typeof(boundsSize) == "Vector3" and boundsSize.Y > 0 then
-			local lowestY = boundsCFrame.Position.Y - (boundsSize.Y * 0.5)
-			grounding.rootGroundOffset = math.max(0, grounding.root.Position.Y - lowestY)
+		local lowestY = modelBottomY(mob, true) or modelBottomY(mob, false)
+		if lowestY then
+			grounding.rootGroundOffset = grounding.root.Position.Y - lowestY
 		else
 			grounding.rootGroundOffset = math.max(0, grounding.root.Size.Y * 0.5)
 		end
