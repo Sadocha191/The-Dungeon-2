@@ -44,6 +44,8 @@ local GLOBAL_MAGNET_SPEED = 180
 local PICKUP_ANIM_DURATION = 0.24
 local ORB_SPAWN_HEIGHT = 2.5
 local ORB_HALF_HEIGHT = 0.5
+local ORB_SETTLE_SPEED = 42
+local ORB_SETTLE_EPSILON = 0.05
 local GLOBAL_MAGNET_ATTR = "DropGlobalMagnetExpiresAt"
 
 local GROUND_RAY_PARAMS = RaycastParams.new()
@@ -74,7 +76,7 @@ local function getPickupRangeMult(plr: Player): number
 	return math.max(0.1, 1 + bonus)
 end
 
-local function getGroundedPosition(pos: Vector3): Vector3
+local function raycastGroundedPosition(pos: Vector3): Vector3?
 	local ignore = {}
 
 	local enemiesFolder = workspace:FindFirstChild("Enemies")
@@ -98,7 +100,30 @@ local function getGroundedPosition(pos: Vector3): Vector3
 		return Vector3.new(grounded.X, grounded.Y, grounded.Z)
 	end
 
-	return pos + Vector3.new(0, ORB_SPAWN_HEIGHT, 0)
+	return nil
+end
+
+local function getGroundedPosition(pos: Vector3): Vector3
+	return raycastGroundedPosition(pos) or (pos + Vector3.new(0, ORB_SPAWN_HEIGHT, 0))
+end
+
+local function settleDropToGround(meta, dt: number)
+	local grounded = raycastGroundedPosition(meta.corePos)
+	if not grounded then
+		return
+	end
+
+	local target = Vector3.new(meta.corePos.X, grounded.Y, meta.corePos.Z)
+	local delta = target - meta.corePos
+	if delta.Magnitude <= ORB_SETTLE_EPSILON then
+		meta.corePos = target
+		return
+	end
+
+	local step = math.min(delta.Magnitude, ORB_SETTLE_SPEED * math.max(0, dt))
+	if step > 0 then
+		meta.corePos += delta.Unit * step
+	end
 end
 
 local function nearestAlivePlayer(pos: Vector3): (Player?, number)
@@ -379,6 +404,7 @@ RunService.Heartbeat:Connect(function(dt)
 			plr, dist = nearestAlivePlayer(meta.corePos)
 		end
 		if not plr then
+			settleDropToGround(meta, dt)
 			continue
 		end
 
@@ -386,6 +412,7 @@ RunService.Heartbeat:Connect(function(dt)
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
 		if not hrp or not hum or hum.Health <= 0 then
+			settleDropToGround(meta, dt)
 			continue
 		end
 
@@ -414,6 +441,8 @@ RunService.Heartbeat:Connect(function(dt)
 				local step = math.min(toTargetDist, attractSpeed * dt)
 				meta.corePos += toTarget.Unit * step
 			end
+		else
+			settleDropToGround(meta, dt)
 		end
 	end
 end)

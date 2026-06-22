@@ -26,6 +26,8 @@ local ATTRACT_SPEED_MULT = 1.15
 local ATTRACT_SPEED_BONUS = 4
 local ATTRACT_SPEED_MIN = 22
 local GLOBAL_MAGNET_SPEED = 180
+local ORB_SETTLE_SPEED = 42
+local ORB_SETTLE_EPSILON = 0.05
 
 local ORB_SIZE = Vector3.new(1, 1, 1)
 local ORB_IDLE_BOB = 0.28
@@ -36,6 +38,10 @@ local ORB_BASE_TRANSPARENCY = 0.16
 local ORB_TRAIL_LIGHT_EMISSION = 0.35
 local ORB_SPARKLE_LIGHT_EMISSION = 0.4
 local GLOBAL_MAGNET_ATTR = "DropGlobalMagnetExpiresAt"
+
+local GROUND_RAY_PARAMS = RaycastParams.new()
+GROUND_RAY_PARAMS.FilterType = Enum.RaycastFilterType.Exclude
+GROUND_RAY_PARAMS.IgnoreWater = false
 
 local ORB_LIGHT_BRIGHTNESS = {
 	xp = 0.7,
@@ -77,6 +83,50 @@ local function getPickupRangeMult(plr: Player): number
 		return 1
 	end
 	return math.max(0.1, 1 + bonus)
+end
+
+local function raycastGroundedPosition(pos: Vector3): Vector3?
+	local ignore = { dropsRoot }
+
+	local enemiesFolder = workspace:FindFirstChild("Enemies")
+	if enemiesFolder then
+		table.insert(ignore, enemiesFolder)
+	end
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr.Character then
+			table.insert(ignore, plr.Character)
+		end
+	end
+
+	GROUND_RAY_PARAMS.FilterDescendantsInstances = ignore
+
+	local result = workspace:Raycast(pos + Vector3.new(0, 10, 0), Vector3.new(0, -120, 0), GROUND_RAY_PARAMS)
+	if result then
+		local grounded = result.Position + result.Normal * (ORB_SIZE.Y * 0.5)
+		return Vector3.new(grounded.X, grounded.Y, grounded.Z)
+	end
+
+	return nil
+end
+
+local function settleDropToGround(entry, dt: number)
+	local grounded = raycastGroundedPosition(entry.corePos)
+	if not grounded then
+		return
+	end
+
+	local target = Vector3.new(entry.corePos.X, grounded.Y, entry.corePos.Z)
+	local delta = target - entry.corePos
+	if delta.Magnitude <= ORB_SETTLE_EPSILON then
+		entry.corePos = target
+		return
+	end
+
+	local step = math.min(delta.Magnitude, ORB_SETTLE_SPEED * math.max(0, dt))
+	if step > 0 then
+		entry.corePos += delta.Unit * step
+	end
 end
 
 local function createDropTrail(part: BasePart, color: Color3)
@@ -452,13 +502,17 @@ RunService.RenderStepped:Connect(function(dt)
 			plr, dist = nearestAlivePlayer(entry.corePos)
 		end
 
+		local shouldSettle = true
 		if plr then
 			local hrp, hum = getAliveCharacterInfo(plr)
 			if hrp and hum then
 				local pickupMult = getPickupRangeMult(plr)
 				local pickupDist = PICKUP_DIST * pickupMult
 				local attractRadius = ATTRACT_RADIUS * pickupMult
-				if dist > pickupDist and (usingGlobalMagnet or dist <= attractRadius) then
+				if dist <= pickupDist then
+					shouldSettle = false
+				elseif usingGlobalMagnet or dist <= attractRadius then
+					shouldSettle = false
 					local target = hrp.Position + Vector3.new(0, 1.6, 0)
 					local toTarget = target - entry.corePos
 					local toTargetDist = toTarget.Magnitude
@@ -475,6 +529,9 @@ RunService.RenderStepped:Connect(function(dt)
 					end
 				end
 			end
+		end
+		if shouldSettle then
+			settleDropToGround(entry, dt)
 		end
 
 		local shouldAnimateIdle = localRoot and (localRoot.Position - entry.corePos).Magnitude <= ORB_ANIMATION_DISTANCE

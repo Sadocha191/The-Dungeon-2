@@ -146,6 +146,10 @@ local NPC_FORMATION_BLEND_DISTANCE = 7.5
 local TARGET_PRIORITY_ELITE_DISTANCE_BONUS = 12
 local TARGET_PRIORITY_BOSS_DISTANCE_BONUS = 24
 local NORMAL_DESPAWN_DISTANCE = 100
+local ENEMY_MELEE_MAX_VERTICAL_DELTA = 5
+local ENEMY_MELEE_MAX_HIT_HEIGHT_ABOVE_ENEMY = 4.5
+local ENEMY_MELEE_USE_3D_DISTANCE = true
+local ENEMY_MELEE_DEBUG = false
 local RUNTIME_ATTRIBUTE_NAMES = {
 	ATTR.State,
 	ATTR.LegacyState,
@@ -414,7 +418,7 @@ local function getAlivePlayers(): {AlivePlayerInfo}
 			local char = plr.Character
 			local hum = char and char:FindFirstChildOfClass("Humanoid")
 			local hrp = char and char:FindFirstChild("HumanoidRootPart")
-			if hum and hrp and hum.Health > 0 then
+			if hum and hrp and hrp:IsA("BasePart") and hum.Health > 0 then
 				table.insert(result, {
 					player = plr,
 					hrp = hrp,
@@ -691,6 +695,82 @@ local function applyPlayerDamage(player: Player, amount: number, sourceModel: Mo
 	end
 end
 
+local function getNpcBooleanAttribute(model: Model, attributeName: string, fallback: boolean): boolean
+	local value = model:GetAttribute(attributeName)
+	if typeof(value) == "boolean" then
+		return value
+	end
+	return fallback
+end
+
+local function getNpcNumberAttribute(model: Model, attributeName: string, fallback: number): number
+	local value = model:GetAttribute(attributeName)
+	if typeof(value) == "number" then
+		return value
+	end
+	return fallback
+end
+
+local function debugMeleeSkip(npc: NpcRecord, targetInfo: AlivePlayerInfo, reason: string, detail: string)
+	if ENEMY_MELEE_DEBUG ~= true then
+		return
+	end
+
+	print(string.format(
+		"[NpcService] Skip melee hit %s -> %s: %s (%s)",
+		npc.model.Name,
+		targetInfo.player.Name,
+		reason,
+		detail
+	))
+end
+
+local function canApplyMeleeDamage(npc: NpcRecord, targetInfo: AlivePlayerInfo): boolean
+	if npc.isRanged then
+		return true
+	end
+
+	local targetRoot = targetInfo.hrp
+	local npcRoot = npc.root
+	if not targetRoot.Parent then
+		debugMeleeSkip(npc, targetInfo, "missing_target_root", "HumanoidRootPart is no longer parented")
+		return false
+	end
+	if not npcRoot.Parent then
+		debugMeleeSkip(npc, targetInfo, "missing_npc_root", "NPC root is no longer parented")
+		return false
+	end
+
+	local targetPos = targetRoot.Position
+	local npcPos = npc.position
+	local verticalDelta = targetPos.Y - npcPos.Y
+	local verticalDeltaAbs = math.abs(verticalDelta)
+	local maxVerticalDelta = math.max(0, getNpcNumberAttribute(npc.model, "EnemyMeleeMaxVerticalDelta", ENEMY_MELEE_MAX_VERTICAL_DELTA))
+	local maxHitHeightAboveEnemy = math.max(0, getNpcNumberAttribute(npc.model, "EnemyMeleeMaxHitHeightAboveEnemy", ENEMY_MELEE_MAX_HIT_HEIGHT_ABOVE_ENEMY))
+	local ignoreVerticalValidation = getNpcBooleanAttribute(npc.model, "EnemyMeleeIgnoreVerticalValidation", false)
+
+	if not ignoreVerticalValidation and verticalDelta > maxHitHeightAboveEnemy then
+		debugMeleeSkip(npc, targetInfo, "target_above_enemy", string.format("verticalDelta=%.2f limit=%.2f", verticalDelta, maxHitHeightAboveEnemy))
+		return false
+	end
+
+	if not ignoreVerticalValidation and verticalDeltaAbs > maxVerticalDelta then
+		debugMeleeSkip(npc, targetInfo, "vertical_delta", string.format("absDelta=%.2f limit=%.2f", verticalDeltaAbs, maxVerticalDelta))
+		return false
+	end
+
+	if getNpcBooleanAttribute(npc.model, "EnemyMeleeUse3DDistance", ENEMY_MELEE_USE_3D_DISTANCE) then
+		local max3DDistance = math.sqrt((npc.attackRange * npc.attackRange) + (maxVerticalDelta * maxVerticalDelta))
+		local fullDistance = (targetPos - npcPos).Magnitude
+		if fullDistance > max3DDistance then
+			debugMeleeSkip(npc, targetInfo, "3d_distance", string.format("distance=%.2f limit=%.2f", fullDistance, max3DDistance))
+			return false
+		end
+	end
+
+	return true
+end
+
 local function findNearestTarget(npc: NpcRecord, alivePlayers: {AlivePlayerInfo}, now: number): AlivePlayerInfo?
 	local targetPlayer = npc.targetPlayer
 	if targetPlayer then
@@ -917,7 +997,9 @@ local function updateNpc(
 			npc.nextAttackAt = now + npc.attackCooldown
 			npc.attackUntil = now + npc.attackWindup
 			setState(npc, STATE.Attacking)
-			applyPlayerDamage(targetInfo.player, npc.damage, npc.model)
+			if canApplyMeleeDamage(npc, targetInfo) then
+				applyPlayerDamage(targetInfo.player, npc.damage, npc.model)
+			end
 		else
 			setState(npc, STATE.Idle)
 		end
@@ -1449,5 +1531,3 @@ RunService.Heartbeat:Connect(function(dt)
 end)
 
 return NpcService
-
-

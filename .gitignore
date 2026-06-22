@@ -1,1 +1,10 @@
 .claude/worktrees/gifted-ride
+
+# Backend local/generated artifacts
+backend/**/node_modules/
+backend/**/.wrangler/
+backend/**/.dev.vars
+backend/**/*.log
+backend/**/*.local
+
+backend/roblox-error-bridge/node_modules/youch-core/build/src/types.js

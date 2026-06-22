@@ -115,6 +115,7 @@ local pauseGuiConnections = {}
 local chestGuiConnections = {}
 local boundPauseGui = nil
 local boundChestRewardGui = nil
+local boundChestOpeningGui = nil
 
 local rarityColors = {
 	Common = Color3.fromRGB(220, 225, 234),
@@ -392,7 +393,9 @@ end
 
 local function isChestRewardOpen()
 	local chestRewardGui = playerGui:FindFirstChild("ChestRewardGui")
-	return chestRewardGui ~= nil and chestRewardGui:IsA("ScreenGui") and chestRewardGui.Enabled
+	local chestOpeningGui = playerGui:FindFirstChild("ChestOpening")
+	return (chestRewardGui ~= nil and chestRewardGui:IsA("ScreenGui") and chestRewardGui.Enabled)
+		or (chestOpeningGui ~= nil and chestOpeningGui:IsA("ScreenGui") and chestOpeningGui.Enabled)
 end
 
 local function refreshVisibility()
@@ -433,16 +436,22 @@ end
 
 local function bindChestRewardGuiSignals()
 	local chestRewardGui = playerGui:FindFirstChild("ChestRewardGui")
-	if chestRewardGui == boundChestRewardGui then
+	local chestOpeningGui = playerGui:FindFirstChild("ChestOpening")
+	if chestRewardGui == boundChestRewardGui and chestOpeningGui == boundChestOpeningGui then
 		return
 	end
 
 	disconnectConnections(chestGuiConnections)
 	boundChestRewardGui = nil
+	boundChestOpeningGui = nil
 
 	if chestRewardGui and chestRewardGui:IsA("ScreenGui") then
 		boundChestRewardGui = chestRewardGui
 		chestGuiConnections[#chestGuiConnections + 1] = chestRewardGui:GetPropertyChangedSignal("Enabled"):Connect(refreshVisibility)
+	end
+	if chestOpeningGui and chestOpeningGui:IsA("ScreenGui") then
+		boundChestOpeningGui = chestOpeningGui
+		chestGuiConnections[#chestGuiConnections + 1] = chestOpeningGui:GetPropertyChangedSignal("Enabled"):Connect(refreshVisibility)
 	end
 end
 
@@ -466,7 +475,7 @@ end)
 playerGui.ChildAdded:Connect(function(child)
 	if child.Name == "Pause" then
 		bindPauseGuiSignals()
-	elseif child.Name == "ChestRewardGui" then
+	elseif child.Name == "ChestRewardGui" or child.Name == "ChestOpening" then
 		bindChestRewardGuiSignals()
 	end
 	refreshVisibility()
@@ -475,7 +484,7 @@ end)
 playerGui.ChildRemoved:Connect(function(child)
 	if child == boundPauseGui then
 		bindPauseGuiSignals()
-	elseif child == boundChestRewardGui then
+	elseif child == boundChestRewardGui or child == boundChestOpeningGui then
 		bindChestRewardGuiSignals()
 	end
 	refreshVisibility()

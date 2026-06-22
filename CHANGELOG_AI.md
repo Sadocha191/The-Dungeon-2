@@ -2,6 +2,835 @@
 
 This file tracks AI-made repo changes and the intended rollback path.
 
+## 2026-06-22 - Backend local artifact gitignore
+
+### Scope
+
+- Added repository ignore rules for backend-local generated artifacts under `backend/**`, including `node_modules/`, `.wrangler/`, `.dev.vars`, log files, and `.local` files.
+- Left tracked backend source and documentation files visible to git.
+- Kept the existing specific `roblox-error-bridge` `node_modules` ignore line for compatibility with the current dirty worktree.
+
+### Files updated
+
+- `.gitignore`
+- `CHANGELOG_AI.md`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Level`; no Studio objects were changed for this repo-only gitignore update.
+- Verified `backend/roblox-error-bridge/node_modules/` is ignored by the new backend `node_modules` rule.
+- Ran `git diff --check` after the change; only existing LF-to-CRLF warnings were reported.
+
+### Risks
+
+- `.gitignore` does not hide files that are already tracked, so the currently tracked `backend/roblox-error-bridge/wrangler.toml` remains visible if it has local modifications.
+- Future backend source files under `backend/` remain trackable unless they match one of the local/generated artifact rules.
+
+### Rollback
+
+- Remove the backend local/generated artifact rules from `.gitignore` and revert this changelog entry.
+
+## 2026-06-22 - Poziom grounded spawns, chest yaw variety, and drop settling
+
+### Scope
+
+- Reused the enemy root/feet grounding calculation in `WaveController` through shared `WorldBounds` helper methods so normal, elite, and portal boss spawns use terrain surface plus model bottom offset instead of raw pivot height.
+- Replaced the portal boss direct `base.CFrame * CFrame.new(0, 0, -18)` placement with terrain raycast/nearby terrain grounding for the boss model.
+- Added random per-spawn Y yaw for cloned `Workspace.skrzynia` chests and generated fallback chests, with optional yaw override support through chest config.
+- Kept generated fallback chests grounded with the same small clearance while applying random yaw.
+- Added server and client drop settling so XP, coins, and souls that stop attracting before pickup fall vertically back to their grounded idle height instead of remaining at player-height.
+- Left remote names, folder names, enemy pools, spawn pacing, and stale `Level/ServerScriptService/Script/Model.model/WaveController.lua` unchanged.
+
+### Files updated
+
+- `Level/ServerScriptService/Script/Model/WaveController.lua`
+- `Level/ServerScriptService/Script/ChestService.server.lua`
+- `Level/ServerScriptService/Script/DropService.lua`
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/DropPresentation.client.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.ServerScriptService.Script.Model.WaveController`
+- `Poziom`: `game.ServerScriptService.Script.ChestService`
+- `Poziom`: `game.ServerScriptService.Script.DropService`
+- `Poziom`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.DropPresentation`
+
+### Verification
+
+- Confirmed and re-set the active Roblox Studio instance to `Level`.
+- Synced the four updated repo sources into live Studio through local read-only HTTP plus Roblox MCP.
+- Ran live Studio `loadstring(...)` compile checks for `WaveController`, `ChestService`, `DropService`, and `DropPresentation`; all returned `ok`.
+- Ran controlled Studio enemy placement probes and measured `bottomGap = 0.05` for Slime, Skeleton, Zombie, Goblin, Warewolf, LandShark, Demon, and boss Golem on flat terrain.
+- Rechecked Slime and Skeleton on a sampled slope (`10.53` degrees); both measured `bottomGap = 0.05`.
+- Ran Studio chest placement probes for five cloned `Workspace.skrzynia` chests and five generated fallback chests; each had a prompt, unique yaw coverage across the sample, and `bottomGap = 0.05`.
+- Ran Studio drop-settle probes for XP, coins, and souls; each rose during attraction, then settled back to ground height with `finalYDelta = 0` and `xzDrift = 0`.
+- Ran `git diff --check` on touched files; only LF-to-CRLF warnings were reported.
+
+### Risks
+
+- No full Play Solo visual/combat pass was run, so final camera-visible feel still benefits from one in-game check.
+- The new portal boss grounding retries if terrain cannot be found near the portal boss offset; if a future portal location is invalid, the boss may delay spawning instead of appearing in the air.
+
+### Rollback
+
+- Restore the previous live sources for `WaveController`, `ChestService`, `DropService`, and `DropPresentation`.
+- Revert the files listed above and this changelog entry.
+
+## 2026-06-21 - Poziom ChestOpening follow-up and world chest model swap
+
+### Scope
+
+- Delayed the `ChestOpening` chest animation start by `0.5` seconds after the reward GUI opens.
+- Changed the chest animation flow to wait for the actual `AnimationTrack.Length` when available, play the full animation, then freeze the chest model at the final frame.
+- Made `ChestOpening.Frame.Item` force-visible at reveal time, resolve the rolled item icon, and fall back to Roblox's placeholder image only if no icon can be resolved.
+- Added a runtime transparent `TakeRewardButton` over `Item` so clicking/tapping the revealed item claims the reward reliably.
+- Changed `ChestService` so spawned world chests prefer clones of live `Workspace.skrzynia` instead of the old generated Part-based chest.
+- Anchored spawned `skrzynia` chest clones, put their `OpenPrompt` on a visible mesh part, and positioned the model with a small ground clearance.
+- Left the generated Part chest path as a fallback if `Workspace.skrzynia` is missing.
+
+### Files updated
+
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/ChestRewardClient.client.lua`
+- `Level/ServerScriptService/Script/ChestService.server.lua`
+- `Level/StarterGUI/ChestOpening/MANIFEST.md`
+- `Level/Workspace/skrzynia/MANIFEST.md`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.ChestRewardClient`
+- `Poziom`: `game.ServerScriptService.Script.ChestService`
+
+### Verification
+
+- Confirmed and re-set the active Roblox Studio instance to `Poziom`.
+- Verified live `Workspace.skrzynia` exists as a `Model` with `PrimaryPart = RootPart`.
+- Ran live Studio compile checks for `ChestRewardClient` and `ChestService`; both returned `ok`.
+- Ran a live Studio clone-placement probe for `Workspace.skrzynia`; the clone used `RootPart` as primary, parented `OpenPrompt` to visible `Cylinder.001`, anchored its parts, and measured `bottomGap = 0.050`.
+- Verified the live `ChestRewardClient` source contains `CHEST_OPEN_ANIMATION_DELAY = 0.5`, `TakeRewardButton`, and `getChestOpeningTrackDuration`.
+- Verified the live `ChestService` source contains `WORLD_CHEST_TEMPLATE_NAME = "skrzynia"` and the `createChestFromWorldTemplate` path.
+- Ran `git diff --check` on tracked touched files; only LF-to-CRLF warnings were reported.
+- Checked the new `Level/Workspace/skrzynia/MANIFEST.md` for trailing whitespace; no matches were returned.
+
+### Risks
+
+- No full Play Solo chest-opening click-through was run in this pass, so the actual on-screen animation/reveal/claim flow still benefits from a manual test.
+- Existing already-spawned chest instances in a running session are not retroactively replaced; newly spawned chests use the new template path.
+
+### Rollback
+
+- Restore the previous live sources for `ChestRewardClient` and `ChestService`.
+- Revert the files listed above and this changelog entry.
+
+## 2026-06-21 - Poziom ChestOpening animated chest reward UI
+
+### Scope
+
+- Switched the chest reward client to prefer the authored `StarterGui.ChestOpening` ScreenGui during level chest opening.
+- Added support for playing the `skrzynia` model animation `rbxassetid://128606196135074` for `2.02` seconds, then freezing the chest pose instead of auto-hiding the GUI.
+- Hid `ChestOpening.Frame.Item` while the animation plays, then populated it with the rolled item icon after the animation duration.
+- Kept the old generated `ChestRewardGui` as a fallback only if `ChestOpening` is missing from `PlayerGui`.
+- Updated modal UI and run stats visibility checks so `ChestOpening.Enabled` counts as an active chest reward UI.
+- Added a manifest documenting the live `StarterGui.ChestOpening` object contract because the full imported GUI/model hierarchy is not mirrored on disk.
+
+### Files updated
+
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/ChestRewardClient.client.lua`
+- `Level/ReplicatedStorage/ModuleScripts/ModalUiState.lua`
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/RunStatsHud.client.lua`
+- `Level/StarterGUI/ChestOpening/MANIFEST.md`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.ChestRewardClient`
+- `Poziom`: `game.ReplicatedStorage.ModuleScripts.ModalUiState`
+- `Poziom`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.RunStatsHud`
+- `Poziom`: `game.StarterGui.ChestOpening`
+- `Poziom`: `game.StarterGui.ChestOpening.ViewportFrame.WorldModel.skrzynia.OpenAnimation`
+
+### Verification
+
+- Confirmed and re-set the active Roblox Studio instance to `Poziom`.
+- Verified `StarterGui.ChestOpening` contains `ViewportFrame.WorldModel.skrzynia`, `AnimationController.Animator`, `Camera`, and `Frame.Item`.
+- Added/updated live `OpenAnimation.AnimationId = rbxassetid://128606196135074`.
+- Set live `ChestOpening.Enabled = false`, `ResetOnSpawn = false`, `DisplayOrder = 92`, and hid `Frame.Item` at startup.
+- Synced the updated live client/module scripts through Roblox MCP.
+- Ran live Studio compile checks for `ChestRewardClient`, `ModalUiState`, and `RunStatsHud`; all returned `ok`.
+- Verified sample item icon resolution for `Sharp Splinter`, `Giant's Button`, and `Angel's Debt`, including apostrophe-name matching against live `ReplicatedStorage.Assets.Items`.
+- Ran `git diff --check` on the tracked touched files; only LF-to-CRLF warnings were reported.
+- Checked untracked `ModalUiState.lua` and `ChestOpening/MANIFEST.md` for trailing whitespace; no matches were returned.
+
+### Risks
+
+- No full Play Solo chest-opening click-through was run in this pass, so final animation timing and visual framing should still be checked in-game.
+- If a rolled item icon is missing from `ReplicatedStorage.Assets.Items`, the `Item` ImageLabel will become visible but blank for that reward.
+
+### Rollback
+
+- In live Studio, restore the previous sources for `ChestRewardClient`, `ModalUiState`, and `RunStatsHud`.
+- Remove `OpenAnimation` from `StarterGui.ChestOpening.ViewportFrame.WorldModel.skrzynia` if the old GUI contract should be restored.
+- Revert the files listed above and this changelog entry.
+
+## 2026-06-21 - Poziom simple mob config module
+
+### Scope
+
+- Added `MobConfig` as the simple place to tune mob stats and model presentation values.
+- Moved the enemy stat table out of `WaveController` into `ServerScriptService.ModuleScript.MobConfig`.
+- Added explicit per-mob config fields for `visualScale` and `facingYawDegrees` so mob size and visual facing can be controlled from one script.
+- Kept `WaveController` spawn pools, spawn timing, elite scheduling, boss portal flow, and combat systems unchanged.
+- Preserved compatibility aliases (`range`, `cd`, `dmg`) inside `MobConfig` so the existing `WaveController` stat reads still work.
+
+### Files updated
+
+- `Level/ServerScriptService/ModuleScript/MobConfig.lua`
+- `Level/ServerScriptService/Script/Model/WaveController.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.ServerScriptService.ModuleScript.MobConfig`
+- `Poziom`: `game.ServerScriptService.Script.Model.WaveController`
+
+### Verification
+
+- Confirmed active Roblox Studio instance was `Poziom`.
+- Synced the new `MobConfig` module into live Studio and pointed live `WaveController` at it.
+- Ran live Studio compile checks for `MobConfig` and `WaveController`; both returned `ok`.
+- Required live `MobConfig` and verified `Ent.visualScale = 3.3`, `Goblin.facingYawDegrees = -90`, and `Grzyb.facingYawDegrees = -90`.
+
+### Risks
+
+- No full Play Solo spawn/visual pass was run; verification covered source sync, config loading, and compile checks.
+- Future mob tuning should happen in `MobConfig`; changing legacy aliases generated at the bottom of the module is not needed for normal balancing.
+
+### Rollback
+
+- Remove `game.ServerScriptService.ModuleScript.MobConfig` from live Studio and restore the previous `WaveController` source with its inline `ENEMY_CONFIGS` table.
+- Revert `Level/ServerScriptService/ModuleScript/MobConfig.lua`, `Level/ServerScriptService/Script/Model/WaveController.lua`, and this changelog entry.
+
+## 2026-06-21 - Poziom enemy model facing and Ent scale follow-up
+
+### Scope
+
+- Set `NpcFacingYawDegrees = -90` on the live `Ent`, `Goblin`, and `Grzyb` enemy templates so runtime NPC presentation rotates them 90 degrees clockwise around the vertical axis.
+- Mirrored the same facing attribute onto their `ServerStorage.EnemyRigBackup` copies.
+- Added an `Ent`-specific `visualScale = 3.3` in `WaveController`, making it slightly larger than the default elite visual scale of `3`.
+- Left spawn pools, stats other than Ent visual scale, remote names, and enemy folder names unchanged.
+
+### Files updated
+
+- `Level/ServerScriptService/Script/Model/WaveController.lua`
+- `Level/ReplicatedStorage/Enemies/Elite/Ent/MANIFEST.md`
+- `Level/ReplicatedStorage/Enemies/Normal/Goblin/MANIFEST.md`
+- `Level/ReplicatedStorage/Enemies/Normal/Grzyb/MANIFEST.md`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.ReplicatedStorage.Enemies.Elite.Ent.Attributes.NpcFacingYawDegrees`
+- `Poziom`: `game.ReplicatedStorage.Enemies.Normal.Goblin.Attributes.NpcFacingYawDegrees`
+- `Poziom`: `game.ReplicatedStorage.Enemies.Normal.Grzyb.Attributes.NpcFacingYawDegrees`
+- `Poziom`: `game.ServerStorage.EnemyRigBackup.{Elite.Ent,Normal.Goblin,Normal.Grzyb}.Attributes.NpcFacingYawDegrees`
+- `Poziom`: `game.ServerScriptService.Script.Model.WaveController`
+
+### Verification
+
+- Confirmed active Roblox Studio instance was `Poziom`.
+- Verified live `Ent`, `Goblin`, and `Grzyb` templates and backups now report `NpcFacingYawDegrees = -90`.
+- Ran a live Studio `loadstring(...)` compile check for the updated `WaveController`; it returned `ok`.
+- Verified the live `WaveController` source includes the Ent `visualScale = 3.3` override path.
+
+### Risks
+
+- No full Play Solo visual pass was run, so final facing/scale feel still benefits from an in-game look.
+- The rotation is implemented through the existing runtime presentation attribute, not by rewriting imported mesh transforms on disk.
+
+### Rollback
+
+- Clear `NpcFacingYawDegrees` from the six live template/backup models listed above.
+- Restore the previous `WaveController` source without the Ent `visualScale` override.
+- Revert the files listed above and this changelog entry.
+
+## 2026-06-21 - Poziom Ent Goblin Grzyb enemy model templates
+
+### Scope
+
+- Replaced the live `Poziom` enemy templates for `Ent` and `Goblin` with clones of the matching models from `Workspace`.
+- Added `Grzyb` as a new normal enemy template from `Workspace.Grzyb`.
+- Added a transparent `RootPart` to the live `Grzyb` template because the source model had only one mesh part.
+- Added `Run [Animation]` to the live `Goblin` template with `AnimationId = rbxassetid://97052990382415`.
+- Added `Grzyb` to `WaveController` enemy stats and normal spawn pools from the early/mid run onward.
+- Added manifest notes for the live `Ent`, `Goblin`, and `Grzyb` templates because the repo does not fully mirror imported model hierarchies.
+- Added the `Grzyb` legacy backup `Animate` placeholder mirror.
+
+### Files updated
+
+- `Level/ServerScriptService/Script/Model/WaveController.lua`
+- `Level/ReplicatedStorage/Enemies/Elite/Ent/MANIFEST.md`
+- `Level/ReplicatedStorage/Enemies/Normal/Goblin/MANIFEST.md`
+- `Level/ReplicatedStorage/Enemies/Normal/Grzyb/MANIFEST.md`
+- `Level/ServerStorage/EnemyRigBackup/Normal/Grzyb/Animate.lua`
+- `roblox/Poziom/ServerStorage/EnemyRigBackup/Normal/Grzyb/Animate.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.ReplicatedStorage.Enemies.Elite.Ent`
+- `Poziom`: `game.ReplicatedStorage.Enemies.Normal.Goblin`
+- `Poziom`: `game.ReplicatedStorage.Enemies.Normal.Grzyb`
+- `Poziom`: `game.ServerScriptService.Script.Model.WaveController`
+- `Poziom`: `game.ServerStorage.EnemyRigBackup.{Elite.Ent,Normal.Goblin,Normal.Grzyb}.Animate`
+
+### Verification
+
+- Confirmed and re-set the active Roblox Studio instance to `Poziom`.
+- Verified live `ReplicatedStorage.Enemies` now contains `Elite.Ent`, `Normal.Goblin`, and `Normal.Grzyb` with `PrimaryPart = RootPart`.
+- Verified live `Goblin.Run.AnimationId = rbxassetid://97052990382415`.
+- Ran a live Studio `loadstring(...)` compile check for the updated `WaveController`; it returned `ok`.
+- Verified live `WaveController` contains the `Grzyb` config entry and the updated spawn pools.
+- Started Play mode and confirmed `WaveController` reached `[HordeController] Ready (time-based)` without a new enemy setup error in Studio Output.
+- The existing `ServerScriptService.Hybrid Terrain Hex Generator` `CreateToolbar` error still appears during Play and is unrelated to this pass.
+
+### Risks
+
+- No full Play Solo combat pass was run; an attempted forced `Grzyb` spawn through `_G.DebugForceSpawnMob` could not be completed because that debug hook was not available from the MCP server command context.
+- The repo manifests document the imported model state, but the full MeshPart/Bone hierarchy is still not mirrored 1:1 on disk.
+- `Ent` and `Grzyb` do not have explicit run/idle/attack animation assets from this pass, so their visible motion depends on the existing NPC presentation movement path rather than authored animation clips.
+
+### Rollback
+
+- In live `Poziom`, restore the previous enemy templates for `ReplicatedStorage.Enemies.Elite.Ent` and `ReplicatedStorage.Enemies.Normal.Goblin`, delete `ReplicatedStorage.Enemies.Normal.Grzyb`, and restore the previous `WaveController` source.
+- Revert the files listed above and this changelog entry.
+
+## 2026-06-18 - Cztery szczyty mission list state sorting
+
+### Scope
+
+- Sorted lobby mission cards by stable mission state on every mission UI refresh.
+- State priority is `claimable = 1`, `inProgress = 2`, `completed = 3`.
+- Preserved existing mission/config order inside each state group unless a mission payload provides an explicit order field.
+- Added `LayoutOrder` values to mission rows and set the mission list `UIListLayout` to `LayoutOrder`.
+- Left mission progress, reward claiming, save data, server validation, and unrelated lobby/combat systems unchanged.
+- Synced the updated `MissionsUI` source into the active live Studio place `Cztery szczyty`.
+
+### Files updated
+
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/MissionsUI.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/MissionsUI.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Cztery szczyty`: `game.StarterPlayer.StarterPlayerScripts.MissionsUI`
+
+### Verification
+
+- Confirmed and re-set the active Roblox Studio instance to `Cztery szczyty`.
+- Read back the live `MissionsUI` source and verified the state-priority helper, `UIListLayout.SortOrder`, row `LayoutOrder`, and sorted refresh loops are present.
+- Ran an Edit-mode Studio logic probe with synthetic claimable, in-progress, and claimed mission payloads; result order was claimable first, in-progress second, claimed last.
+- Did not mutate live mission save data or manually claim/progress missions during this pass.
+
+### Risks
+
+- Full click-through validation with real player mission save states was not performed; the change is limited to client-side row ordering during refresh.
+- The repo contains both a top-level `MissionsUI.lua` and a nested `LocalScript/MissionsUI.lua`; both were updated to prevent mirror drift, while live Studio currently has the top-level script.
+
+### Rollback
+
+- Revert the two `Four Peaks/.../MissionsUI.lua` files and this changelog entry.
+- In live `Cztery szczyty`, restore the previous source for `game.StarterPlayer.StarterPlayerScripts.MissionsUI` if needed.
+
+## 2026-06-18 - Poziom shared enemy spawn grounding fix
+
+### Scope
+
+- Fixed shared normal/elite enemy spawn placement in `WaveController` so ground mobs are placed by root/feet offset from the terrain hit instead of treating the ground hit as the model pivot height.
+- Removed the final spawn fallback that reused the player/anchor Y position when spawn sampling failed; fallback now searches nearby/random terrain and returns no spawn if no valid ground is found.
+- Expanded spawn raycast ignores to include the enemy model being positioned, existing enemies, players, drops/chests/shrines/statues/portal, `SpellVFX`, and `EnemyAbilityVFX`.
+- Kept spawn pacing, enemy selection, elite scheduling, swarm logic, and max-alive caps unchanged.
+- Synced the updated `WaveController` source into the active live Studio place `Poziom`.
+
+### Files updated
+
+- `Level/ServerScriptService/Script/Model/WaveController.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.ServerScriptService.Script.Model.WaveController`
+
+### Verification
+
+- Confirmed and re-set the active Roblox Studio instance to `Poziom`.
+- Ran a live Studio `loadstring(...)` compile check for `WaveController`; it returned `ok`.
+- In Play mode, let live `WaveController` naturally spawn 24 Slimes with accelerated existing debug spawn settings; all measured at `bottomGap=0.05` from terrain.
+- Ran controlled server-side placement checks using the same root/feet grounding math for live normal templates:
+  - Slime flat and slope: `bottomGap=0.05`
+  - Skeleton flat and slope: `bottomGap=0.05`
+  - Goblin flat: `bottomGap=0.05`
+  - Zombie flat: `bottomGap=0.05`
+  - Warewolf flat: `bottomGap=0.05`
+  - LandShark flat: `bottomGap=0.05`
+  - Demon flat: `bottomGap=0.05`
+- Verified the persisted live source contains the model-aware `pickSpawnCFrame(...)`, effect-folder raycast ignores, root offset grounding, and no player-Y anchor fallback.
+
+### Risks
+
+- Manual visual inspection on every map slope was not performed; the server-side measurements covered one sampled slope for Slime/Skeleton and flat/low-slope samples for the other templates.
+- Boss portal spawn placement uses its existing separate path and was not changed in this pass.
+
+### Rollback
+
+- Revert `Level/ServerScriptService/Script/Model/WaveController.lua` and this changelog entry.
+- In live `Poziom`, restore the previous source for `game.ServerScriptService.Script.Model.WaveController` if needed.
+
+## 2026-06-18 - Poziom melee and movement regression follow-up
+
+### Scope
+
+- Fixed the melee regression where grounded enemies could stop damaging because the server hit validation compared the player against the anchored model root instead of the simulated NPC position used by `NpcService`.
+- Tightened `EnemyMeleeIgnoreVerticalValidation` so it only skips vertical-overlap rejection; missing-root checks and 3D reach validation still apply unless an enemy explicitly disables 3D distance checks.
+- Restored movement steering paths in `MovementController` so slide start/steer and airborne momentum use the controller's current input intent fallback instead of relying only on raw `Humanoid.MoveDirection`.
+- Synced the targeted `NpcService` and `MovementController` fixes into the active live Studio place `Poziom`.
+- Left the existing post-elite spawn debt smoother in `WaveController` untouched.
+
+### Files updated
+
+- `Level/ServerScriptService/ModuleScript/NpcService.lua`
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.ServerScriptService.ModuleScript.NpcService`
+- `Poziom`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController`
+
+### Verification
+
+- Confirmed and re-set the active Roblox Studio instance to `Poziom`.
+- Ran live Studio `loadstring(...)` compile checks for `NpcService`, `MovementController`, and `MovementConfig`; all returned `ok`.
+- In Play mode with ambient spawns disabled and enemies cleared, ran a controlled server-side contact test through `NpcService`:
+  - Slime at `+9` studs vertical separation: no health loss.
+  - Slime at normal contact height: player health dropped.
+  - Goblin at `+9` studs vertical separation: no health loss.
+  - Goblin at normal contact height: player health dropped.
+- Verified the running client and persisted Edit source contain the restored movement call sites for `getCurrentMoveIntent(...)`, slide steering, airborne steering, and slide/air movement-facing.
+
+### Risks
+
+- Movement verification confirmed the live source and runtime hooks, but did not include a hands-on Studio movement feel pass for slide steering, air steering, or slide-jump chaining.
+- Enemies that intentionally hit across unusual height differences should use the existing melee override attributes with an explicit 3D reach choice.
+
+### Rollback
+
+- Revert `Level/ServerScriptService/ModuleScript/NpcService.lua`, `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`, and this changelog entry.
+- In live `Poziom`, restore the previous sources for `game.ServerScriptService.ModuleScript.NpcService` and `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController` if needed.
+
+## 2026-06-18 - Poziom P1 melee height and post-elite spawn hardening
+
+### Scope
+
+- Hardened enemy melee/contact damage validation in `NpcService` so only real `HumanoidRootPart` base parts are tracked and melee damage is skipped if either the player root or NPC root disappears before the server hit check.
+- Kept the vertical melee validation server-authoritative with default height/3D distance constants plus model attributes for special-case overrides.
+- Added optional pass-through melee override attributes from the existing enemy config table in `WaveController`, without changing current Slime/Goblin/basic melee values.
+- Fixed the post-elite/swarm spawn cap helper in `WaveController` so `spawnBurst` captures the local `getMaxLivingEnemyCap` function instead of resolving a missing global.
+- Synced the updated `NpcService` and `WaveController` sources into the active live Studio place `Poziom`.
+
+### Files updated
+
+- `Level/ServerScriptService/ModuleScript/NpcService.lua`
+- `Level/ServerScriptService/Script/Model/WaveController.lua`
+- `CHANGELOG_AI.md`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Poziom` before live edits.
+- Ran live Studio `loadstring(...)` compile checks for `NpcService`, `RunSpawnConfig`, and `WaveController`; all returned `ok`.
+- Re-read live Studio snippets for `NpcService` and `WaveController` to confirm the HRP `BasePart` guard, optional melee attributes, and `getMaxLivingEnemyCap` forward declaration are present.
+- In Play mode, ran a contained server-side Slime/Goblin contact check through `NpcService`: both mobs dealt no damage at `+9` studs vertical separation and dealt damage again at ground-level contact range.
+- Ran `git diff --check` on the touched Level scripts; only LF/CRLF conversion warnings were reported.
+
+### Risks
+
+- This pass verified source sync and compilation, but did not complete a manual Play Solo jump-over test or a full elite-defeat pacing playtest.
+- Any enemy meant to damage from unusual vertical separation should use the `EnemyMeleeIgnoreVerticalValidation`, `EnemyMeleeMaxVerticalDelta`, `EnemyMeleeMaxHitHeightAboveEnemy`, or `EnemyMeleeUse3DDistance` model/config override path.
+
+### Rollback
+
+- Revert `Level/ServerScriptService/ModuleScript/NpcService.lua`, `Level/ServerScriptService/Script/Model/WaveController.lua`, and this changelog entry.
+- In live `Poziom`, restore the previous sources for `game.ServerScriptService.ModuleScript.NpcService` and `game.ServerScriptService.Script.Model.WaveController` if needed.
+
+## 2026-06-16 - Poziom P1 gameplay responsiveness and spawn pacing fixes
+
+### Scope
+
+- Added central modal UI state helpers so gameplay input locks use one shared source of truth for pause, reward, chest, and other blocking UI states.
+- Stopped camera snap after modal UI close by making `CameraMouseLock` ignore look delta while blocking UI is open and briefly swallowing the first mouse delta after release.
+- Restored run movement after chest reward flow by making `MovementController` resync held sprint state and rebuild held movement intent from current keyboard input instead of treating the chest UI open/close as a permanent stop.
+- Shortened chest reward reveal timing and removed chest prompt hold time so chest interaction starts immediately while keeping existing server-side chest-open validation.
+- Added shrine/statue charge decay with a short grace period after leaving the area so objective progress falls gradually instead of resetting to zero, and kept the visible progress billboard alive while any progress remains.
+- Added melee hit validation in `NpcService` so grounded enemies respect vertical separation and optional 3D reach checks before dealing damage, with per-enemy attribute overrides for exceptions such as flying or special mobs.
+- Raised swarm-only enemy pressure to `120` by adding a swarm cap override and preserved the normal `MAX_LIVING_ENEMIES` cap outside swarm windows.
+- Reworked post-elite normal spawn catch-up in `WaveController` so paused ambient spawns become spawn debt that drains over roughly `10` seconds with a per-tick cap instead of flushing instantly after the elite ends.
+- Removed portal hold time so portal activation starts immediately once server-side conditions are satisfied.
+- Synced the updated gameplay scripts into the active live Studio place `Poziom`.
+
+### Files updated
+
+- `Level/ReplicatedStorage/ModuleScripts/ModalUiState.lua`
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/CameraMouseLock.lua`
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/ChestRewardClient.client.lua`
+- `Level/ServerScriptService/ModuleScript/RunSpawnConfig.lua`
+- `Level/ServerScriptService/ModuleScript/NpcService.lua`
+- `Level/ServerScriptService/Script/ChestService.server.lua`
+- `Level/ServerScriptService/Script/ShrineService.server.lua`
+- `Level/ServerScriptService/Script/Model/WaveController.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.ReplicatedStorage.ModuleScripts.ModalUiState`
+- `Poziom`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.CameraMouseLock`
+- `Poziom`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController`
+- `Poziom`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.ChestRewardClient`
+- `Poziom`: `game.ServerScriptService.ModuleScript.RunSpawnConfig`
+- `Poziom`: `game.ServerScriptService.ModuleScript.NpcService`
+- `Poziom`: `game.ServerScriptService.Script.ChestService`
+- `Poziom`: `game.ServerScriptService.Script.ShrineService`
+- `Poziom`: `game.ServerScriptService.Script.Model.WaveController`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Poziom` and re-set it active before the live sync and compile pass.
+- Synced the updated repo sources into live Studio for all touched gameplay scripts listed above.
+- Ran a live `loadstring(...)` compile check in Studio for:
+  - `ModalUiState`
+  - `CameraMouseLock`
+  - `MovementController`
+  - `ChestRewardClient`
+  - `RunSpawnConfig`
+  - `NpcService`
+  - `ChestService`
+  - `ShrineService`
+  - `WaveController`
+  - all returned `ok` after the final `WaveController` register-limit fix.
+- Fresh-required a clone of live `RunSpawnConfig` and confirmed:
+  - `SWARM.targetMaxAlive = 120`
+  - `SWARM.maxLivingEnemies = 120`
+  - `POST_ELITE_SPAWN.catchupDuration = 10`
+  - `POST_ELITE_SPAWN.maxPerTick = 4`
+- Verified live sources contain the expected hooks:
+  - `CameraMouseLock` uses `ModalUiState` and the `ignoreLookDeltaUntil` release cooldown
+  - `MovementController` uses `ModalUiState` and `applyHeldMovementIntent(...)`
+  - `ChestRewardClient` uses `ROLL_DURATION = 0.6`
+  - `ChestService` sets `prompt.HoldDuration = 0`
+  - `ShrineService` contains charge decay and exit-grace handling
+  - `NpcService` contains `canApplyMeleeDamage(...)` and melee height caps
+  - `WaveController` contains `spawnLimitConfig`, spawn debt catch-up, and `prompt.HoldDuration = 0` for the portal
+- Ran `git diff --check` on the touched files earlier in the pass; the only output was LF/CRLF conversion warnings and no trailing-whitespace or patch-shape errors.
+
+### Risks
+
+- The chest movement-resume fix reconstructs held keyboard intent on the client; if gamepad or mobile input needs the same resume behavior, those input paths may need a follow-up pass.
+- Melee height validation is applied generically to enemy melee hits, so any enemy that intentionally attacks from below should use the per-model override attributes added in `NpcService`.
+- Swarm pressure now has a dedicated `120` cap path in `WaveController`; if performance degrades in dense scenes, the safest next step is tuning spawn cadence or pathing load rather than reverting the whole system.
+- This pass verified live source sync and compilation, but it did not include a manual in-session playtest for chest flow, shrine charge decay, swarm saturation, or elite catch-up pacing.
+
+### Rollback
+
+- Revert `Level/ReplicatedStorage/ModuleScripts/ModalUiState.lua`, `Level/StarterPlayer/StarterPlayerScripts/LocalScript/CameraMouseLock.lua`, `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`, `Level/StarterPlayer/StarterPlayerScripts/LocalScript/ChestRewardClient.client.lua`, `Level/ServerScriptService/ModuleScript/RunSpawnConfig.lua`, `Level/ServerScriptService/ModuleScript/NpcService.lua`, `Level/ServerScriptService/Script/ChestService.server.lua`, `Level/ServerScriptService/Script/ShrineService.server.lua`, `Level/ServerScriptService/Script/Model/WaveController.lua`, and this changelog entry in the repo.
+- In live Studio, restore the previous source of the same objects under `game.ReplicatedStorage`, `game.StarterPlayer`, and `game.ServerScriptService` in the `Poziom` place, or mirror the reverted repo sources back into Studio.
+
+## 2026-06-16 - Poziom slide steering and movement-facing tuning
+
+### Scope
+
+- Tuned slide steering and slope acceleration without rewriting the movement controller:
+  - `SlideSteerStrength = 0.42`
+  - `SlideSteerResponsiveness = 0.16`
+  - `SlideMaxTurnRate = 7.5`
+  - `SlopeAcceleration = 22`
+  - `DownhillSpeedGainMultiplier = 0.65`
+  - `FlatSlideFriction = 0.9965`
+  - `SlideSurfaceTransitionFriction = 0.9985`
+  - `MaxSlideSlopeSpeed = 150`
+- Tuned regular and chain airborne steering:
+  - `AirControlStrength = 0.04`
+  - `AirTurnResponsiveness = 0.025`
+  - `MomentumChainAirControlStrength = 0.018`
+  - `MomentumChainAirTurnResponsiveness = 0.012`
+  - `MomentumChainAirDrag = 1.0`
+- Added `FaceMovementDirectionEnabled`, `SlideFaceTurnSpeed`, and `AirFaceTurnSpeed` so the character faces actual horizontal movement during slide and airborne momentum.
+- Added slide steering in the existing slide update by gently lerping `activeMotion.direction` toward projected `Humanoid.MoveDirection`, with reduced turn strength for near-opposite input.
+- Added `faceMovementDirection(...)` and preserved current assembly velocity while rotating `HumanoidRootPart` so facing updates do not wipe horizontal momentum.
+- Added debug logs for `slide_steer`, `slide_accel`, `air_steer`, and `face_movement`.
+- Left slide jump, landing slide resume, dash, sprint, multijump, UI locks, RunStarted / RunEnded, and weapon scripts untouched.
+
+### Files updated
+
+- `Level/ReplicatedStorage/ModuleScripts/MovementConfig.lua`
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.ReplicatedStorage.ModuleScripts.MovementConfig`
+- `Poziom`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Poziom`.
+- Synced the repo movement sources into live `Poziom` after `loadstring(...)` compilation succeeded for both fetched sources.
+- Fresh-required a clone of live `MovementConfig` and confirmed:
+  - `SlideSteerStrength = 0.42`
+  - `SlideSteerResponsiveness = 0.16`
+  - `SlideMaxTurnRate = 7.5`
+  - `SlopeAcceleration = 22`
+  - `DownhillSpeedGainMultiplier = 0.65`
+  - `FlatSlideFriction = 0.9965`
+  - `SlideSurfaceTransitionFriction = 0.9985`
+  - `MaxSlideSlopeSpeed = 150`
+  - `MaxMomentumChainSpeed = 160`
+  - `AirControlStrength = 0.04`
+  - `AirTurnResponsiveness = 0.025`
+  - `AirDrag = 0.999`
+  - `MomentumChainAirControlStrength = 0.018`
+  - `MomentumChainAirTurnResponsiveness = 0.012`
+  - `MomentumChainAirDrag = 1`
+  - `FaceMovementDirectionEnabled = true`
+  - `SlideFaceTurnSpeed = 14`
+  - `AirFaceTurnSpeed = 10`
+- Verified live `MovementController` contains `faceMovementDirection`, `slide_steer`, `slide_accel`, `air_steer`, and both slide/air face-direction call sites.
+- Compared live Studio sources against the `Level/` repo mirror with matching rolling checksums:
+  - `MovementConfig` length `2693`, checksum `767423173`
+  - `MovementController` length `58721`, checksum `271530354`
+- Started Play Solo and confirmed the runtime client sees:
+  - `SlideSteerStrength = 0.42`
+  - `SlopeAcceleration = 22`
+  - `AirControlStrength = 0.04`
+  - `MomentumChainAirControlStrength = 0.018`
+  - `FaceMovementDirectionEnabled = true`
+  - the cloned `MovementController`
+  - a spawned character with `HumanoidRootPart`
+- Studio Output did not show a new movement-controller error during this sanity check.
+- Noted the existing unrelated runtime error from `ServerScriptService.Hybrid Terrain Hex Generator` at line `16` (`CreateToolbar`) during Play Solo.
+- Ran `git diff --check` on the touched movement/changelog files; the only output was LF/CRLF conversion warnings for edited files.
+
+### Rollback
+
+- Revert `Level/ReplicatedStorage/ModuleScripts/MovementConfig.lua`, `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`, and this changelog entry.
+- In live `Poziom`, restore the previous sources for `game.ReplicatedStorage.ModuleScripts.MovementConfig` and `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController` if needed.
+
+## 2026-06-16 - Poziom airborne chain momentum preservation
+
+### Scope
+
+- Added explicit chain-momentum air tuning to `MovementConfig`:
+  - `MomentumChainMinSpeed = 3`
+  - `MomentumChainAirDrag = 1.0`
+  - `MomentumChainAllowAirControl = true`
+  - `MomentumChainAirControlStrength = 0.008`
+  - `MomentumChainAirTurnResponsiveness = 0.004`
+- Updated airborne chain momentum so slide-jump carry uses the stronger of current X/Z velocity and stored `chainMomentum.velocity`, clamps only to `MaxMomentumChainSpeed`, and uses `MomentumChainAirDrag` instead of regular `AirDrag`.
+- Updated chain air control so input can slowly steer the trajectory without cutting horizontal speed or immediately reversing direction.
+- Updated multijump carry so active chain momentum uses the stronger current/stored X/Z velocity, clamps to `MaxMomentumChainSpeed`, and refreshes `chainMomentum.velocity` after the air jump.
+- Updated movement debug logs for `air_momentum`, `air_jump_carry`, `low_gravity`, and `chain_clear`.
+- Kept dash, sprint, RunStarted / RunEnded, PauseState, UI locks, weapon scripts, and landing slide resume behavior outside the chain-compatibility path untouched.
+
+### Files updated
+
+- `Level/ReplicatedStorage/ModuleScripts/MovementConfig.lua`
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.ReplicatedStorage.ModuleScripts.MovementConfig`
+- `Poziom`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Poziom`.
+- Synced the repo movement sources into live `Poziom` after `loadstring(...)` compilation succeeded for both fetched sources.
+- Fresh-required a clone of live `MovementConfig` and confirmed:
+  - `MaxMomentumChainSpeed = 160`
+  - `MomentumChainAirDrag = 1`
+  - `MomentumChainAirControlStrength = 0.008`
+  - `MomentumChainAirTurnResponsiveness = 0.004`
+  - `SlideJumpGravityScale = 0.48`
+  - `SlideJumpLowGravityDuration = 0.45`
+  - `MomentumChainGravityScale = 0.55`
+  - `SlideJumpEnabled = true`
+  - `SlideJumpHorizontalMultiplier = 1.12`
+  - `SlideJumpExtraUpVelocity = 6`
+  - `SlideJumpMinCarrySpeed = 3`
+  - `SlideJumpMaxCarrySpeed = 160`
+- Verified live `MovementController` contains the chain air drag path, `air_jump_carry` debug, `chain_clear reason` debug, and low-gravity reason selection.
+- Compared live Studio sources against the `Level/` repo mirror with matching rolling checksums:
+  - `MovementConfig` length `2514`, checksum `603935661`
+  - `MovementController` length `55255`, checksum `988958357`
+- Started Play Solo and confirmed the runtime client sees:
+  - `MaxMomentumChainSpeed = 160`
+  - `MomentumChainAirDrag = 1`
+  - `SlideJumpEnabled = true`
+  - the cloned `MovementController`
+  - a spawned character with `HumanoidRootPart`
+- Studio Output did not show a new movement-controller error during this sanity check.
+- Noted an unrelated existing runtime error from `ServerScriptService.Hybrid Terrain Hex Generator` at line `16` (`CreateToolbar`) during Play Solo.
+- Ran `git diff --check` on the touched movement/changelog files; the only output was LF/CRLF conversion warnings for edited files.
+
+### Rollback
+
+- Revert `Level/ReplicatedStorage/ModuleScripts/MovementConfig.lua`, `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`, and this changelog entry.
+- In live `Poziom`, restore the previous sources for `game.ReplicatedStorage.ModuleScripts.MovementConfig` and `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController` if needed.
+
+## 2026-06-16 - Poziom slide jump hang-time tuning
+
+### Scope
+
+- Tuned `MovementConfig` so slide jump starts carrying momentum at medium slide speeds:
+  - `SlideJumpMinCarrySpeed = 3`
+  - `SlideJumpHorizontalMultiplier = 1.12`
+  - `SlideJumpExtraUpVelocity = 6`
+  - `SlideJumpMaxCarrySpeed = 160`
+  - `MaxMomentumChainSpeed = 160`
+  - `MaxSlideSlopeSpeed = 160`
+- Tuned airborne chain feel with weaker air steering and slower fall:
+  - `AirGravityScale = 0.52`
+  - `LowGravityMinYVelocity = -140`
+  - `AirControlStrength = 0.02`
+  - `AirTurnResponsiveness = 0.01`
+  - `AirDrag = 0.999`
+- Added slide-jump-specific gravity tuning without changing global `workspace.Gravity`:
+  - `SlideJumpGravityScale = 0.48`
+  - `SlideJumpLowGravityDuration = 0.45`
+  - `MomentumChainGravityScale = 0.55`
+- Added `slideJumpLowGravityUntil` state so the existing character-local `VectorForce` low gravity uses slide-jump scale first, then chain momentum scale, then normal air scale.
+- Updated debug logs for slide jump carry, slide-jump low-gravity scale, and slide-jump low-gravity expiry.
+- Left dash, sprint, landing slide resume, UI locks, RunStarted / RunEnded, and weapon scripts untouched.
+
+### Files updated
+
+- `Level/ReplicatedStorage/ModuleScripts/MovementConfig.lua`
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.ReplicatedStorage.ModuleScripts.MovementConfig`
+- `Poziom`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Poziom`.
+- Synced the patched `MovementConfig` and `MovementController` sources into live `Poziom`.
+- Verified live `loadstring(...)` compilation for:
+  - `game.ReplicatedStorage.ModuleScripts.MovementConfig`
+  - `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController`
+- Fresh-required a clone of live `MovementConfig` and confirmed:
+  - `SlideJumpMinCarrySpeed = 3`
+  - `SlideJumpHorizontalMultiplier = 1.12`
+  - `SlideJumpExtraUpVelocity = 6`
+  - `SlideJumpMaxCarrySpeed = 160`
+  - `MaxMomentumChainSpeed = 160`
+  - `AirGravityScale = 0.52`
+  - `LowGravityMinYVelocity = -140`
+  - `SlideJumpGravityScale = 0.48`
+  - `SlideJumpLowGravityDuration = 0.45`
+  - `MomentumChainGravityScale = 0.55`
+  - `AirControlStrength = 0.02`
+  - `AirTurnResponsiveness = 0.01`
+  - `AirDrag = 0.999`
+  - `MaxSlideSlopeSpeed = 160`
+- Verified live `MovementController` contains `slideJumpLowGravityUntil`, `slide_jump_blocked carrySpeed`, active low-gravity scale debug, and slide-jump low-gravity expiry debug.
+- Compared live Studio sources against the `Level/` repo mirror with matching rolling checksums:
+  - `MovementConfig` length `2332`, checksum `229534118`
+  - `MovementController` length `52406`, checksum `914719137`
+
+### Rollback
+
+- Revert `Level/ReplicatedStorage/ModuleScripts/MovementConfig.lua`, `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`, and this changelog entry.
+- In live `Poziom`, restore the previous sources for `game.ReplicatedStorage.ModuleScripts.MovementConfig` and `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController` if needed.
+
+## 2026-06-16 - Poziom strict slide jump carry threshold
+
+### Scope
+
+- Narrowed `doSlideJump` so slide jump only fires when the real carried horizontal velocity from `motion.lastSlideVelocity` or `HumanoidRootPart.AssemblyLinearVelocity` meets `SlideJumpMinCarrySpeed`.
+- Removed the fallback that could synthesize slide-jump carry from slide direction / move direction and raise it to the minimum speed.
+- Kept velocity assignment before `clearMotion()` and left dash, sprint, UI blocking, RunStarted / RunEnded, and movement upgrade attributes untouched.
+
+### Files updated
+
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Poziom`.
+- Synced the patched `MovementController` source into live `Poziom`.
+- Verified live `MovementController` contains `doSlideJump`.
+- Verified live `MovementConfig` contains `SlideJumpEnabled = true`, `SlideJumpMaxCarrySpeed = 140`, and `MaxMomentumChainSpeed = 140`.
+- Verified live `loadstring(...)` compilation for:
+  - `game.ReplicatedStorage.ModuleScripts.MovementConfig`
+  - `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController`
+- Compared live Studio sources against the `Level/` repo mirror with matching rolling checksums:
+  - `MovementConfig` length `2230`, checksum `209857942`
+  - `MovementController` length `51463`, checksum `608303684`
+
+### Rollback
+
+- Revert `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua` and this changelog entry.
+- In live `Poziom`, restore `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController` to the previous source if needed.
+
+## 2026-06-16 - Poziom movement slope speed cap alignment
+
+### Scope
+
+- Aligned the `Level` movement config with the requested momentum-chain tuning by raising `MaxSlideSlopeSpeed` from `85` to `140`.
+- Kept the existing chain momentum, slide jump, landing slide resume, terrain ground grace, air control, dash, sprint, multijump, and movement upgrade compatibility code intact.
+
+### Files updated
+
+- `Level/ReplicatedStorage/ModuleScripts/MovementConfig.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Poziom`: `game.ReplicatedStorage.ModuleScripts.MovementConfig`
+
+### Verification
+
+- Confirmed the active Roblox Studio instance was `Poziom`.
+- Synced the patched `MovementConfig` source into live `Poziom`.
+- Verified live `loadstring(...)` compilation for:
+  - `game.ReplicatedStorage.ModuleScripts.MovementConfig`
+  - `game.StarterPlayer.StarterPlayerScripts.LocalScript.MovementController`
+- Fresh-required a clone of live `MovementConfig` and confirmed:
+  - `MaxMomentumChainSpeed = 140`
+  - `MaxSlideSlopeSpeed = 140`
+  - `SlideJumpEnabled = true`
+  - `SlideLandingResumeEnabled = true`
+  - `SlidePreserveYVelocity = true`
+  - `SlideHardMaxDurationEnabled = false`
+  - `SlideGroundGraceTime = 0.16`
+- Compared live Studio sources against the `Level/` repo mirror with matching rolling checksums:
+  - `MovementConfig` length `2230`, checksum `209857942`
+  - `MovementController` length `51569`, checksum `124290970`
+
+### Rollback
+
+- Revert `Level/ReplicatedStorage/ModuleScripts/MovementConfig.lua` and this changelog entry.
+- In live `Poziom`, restore `game.ReplicatedStorage.ModuleScripts.MovementConfig` to the previous source value if needed.
+
 ## 2026-06-16 - Sync open Studio instances into git mirrors
 
 ### Scope

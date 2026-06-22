@@ -12,6 +12,8 @@ local MIN_SHRINES = 10
 local MAX_SHRINES = 20
 local CHARGE_SECONDS = 5
 local CHARGE_RADIUS = 12
+local CHARGE_DECAY_PER_SECOND = 0.75
+local CHARGE_GRACE_TIME_AFTER_EXIT = 0.5
 local MIN_SHRINE_GAP = 22
 local SHRINE_RAYCAST_TRIES = 45
 local SHRINE_HEIGHT = 2.2
@@ -317,6 +319,7 @@ local function buildShrine(pos, idx)
 		billboard = billboard,
 		label = text,
 		progress = {},
+		exitGrace = {},
 		completed = false,
 	}
 end
@@ -627,6 +630,7 @@ RunService.Heartbeat:Connect(function(dt)
 			if dist <= CHARGE_RADIUS then
 				progress = math.min(CHARGE_SECONDS, progress + dt)
 				shrine.progress[uid] = progress
+				shrine.exitGrace[uid] = CHARGE_GRACE_TIME_AFTER_EXIT
 				anyoneCharging = true
 
 				if progress >= CHARGE_SECONDS then
@@ -634,8 +638,21 @@ RunService.Heartbeat:Connect(function(dt)
 					break
 				end
 			else
-				progress = 0
-				shrine.progress[uid] = nil
+				local remainingGrace = math.max(0, tonumber(shrine.exitGrace[uid]) or 0)
+				if remainingGrace > 0 then
+					shrine.exitGrace[uid] = math.max(0, remainingGrace - dt)
+				elseif progress > 0 then
+					progress = math.max(0, progress - (CHARGE_DECAY_PER_SECOND * dt))
+					if progress > 0 then
+						shrine.progress[uid] = progress
+					else
+						shrine.progress[uid] = nil
+						shrine.exitGrace[uid] = nil
+					end
+				else
+					shrine.progress[uid] = nil
+					shrine.exitGrace[uid] = nil
+				end
 			end
 
 			if progress > topProgress then
@@ -648,7 +665,7 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 
 		if shrine.label then
-			if anyoneCharging and topProgress > 0 then
+			if topProgress > 0 then
 				local pct = math.floor((topProgress / CHARGE_SECONDS) * 100 + 0.5)
 				shrine.label.Text = ("%d%%"):format(math.clamp(pct, 0, 100))
 				if shrine.billboard then shrine.billboard.Enabled = true end

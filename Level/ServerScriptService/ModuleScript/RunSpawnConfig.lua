@@ -44,8 +44,15 @@ RunSpawnConfig.OVERTIME = {
 }
 
 RunSpawnConfig.SWARM = {
-	extraBurst = 1,
+	extraBurst = 3,
 	intervalMultiplier = 0.33,
+	targetMaxAlive = 120,
+	maxLivingEnemies = 120,
+}
+
+RunSpawnConfig.POST_ELITE_SPAWN = {
+	catchupDuration = 10,
+	maxPerTick = 4,
 }
 
 RunSpawnConfig.IMPORTANT_ENCOUNTER = {

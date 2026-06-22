@@ -166,6 +166,58 @@ local function getMissionState(mission: any)
 	}
 end
 
+local MISSION_STATE_PRIORITY = table.freeze({
+	claimable = 1,
+	inProgress = 2,
+	completed = 3,
+})
+local MISSION_LAYOUT_GROUP_SIZE = 10000
+
+local function getMissionStatePriority(mission: any): number
+	local state = getMissionState(mission)
+	if state.claimable then
+		return MISSION_STATE_PRIORITY.claimable
+	end
+	if state.completed then
+		return MISSION_STATE_PRIORITY.completed
+	end
+	return MISSION_STATE_PRIORITY.inProgress
+end
+
+local function getMissionSecondaryOrder(mission: any, fallbackIndex: number): number
+	local explicitOrder = tonumber(mission.SortOrder or mission.Order or mission.Index or mission.DisplayOrder)
+	if explicitOrder then
+		return explicitOrder
+	end
+	return fallbackIndex
+end
+
+local function sortMissionsForDisplay(missions: { any })
+	local decorated = {}
+	for index, mission in ipairs(missions) do
+		decorated[#decorated + 1] = {
+			mission = mission,
+			priority = getMissionStatePriority(mission),
+			secondary = getMissionSecondaryOrder(mission, index),
+			index = index,
+		}
+	end
+
+	table.sort(decorated, function(a, b)
+		if a.priority ~= b.priority then
+			return a.priority < b.priority
+		end
+		if a.secondary ~= b.secondary then
+			return a.secondary < b.secondary
+		end
+		return a.index < b.index
+	end)
+
+	for index, entry in ipairs(decorated) do
+		missions[index] = entry.mission
+	end
+end
+
 local function buildRewardParts(reward: any)
 	local parts = {}
 	if typeof(reward) ~= "table" then
@@ -594,6 +646,7 @@ local function makeMissionPage(parent: Instance, titleText: string, subtitleText
 
 	local listLayout = Instance.new("UIListLayout")
 	listLayout.Padding = UDim.new(0, 12)
+	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	listLayout.Parent = list
 
 	local emptyLabel = Instance.new("TextLabel")
@@ -813,7 +866,7 @@ local function makeMissionRow(parentList: ScrollingFrame, mission: any, onClaim)
 	end)
 end
 
-makeMissionRow = function(parentList: ScrollingFrame, mission: any, onClaim)
+makeMissionRow = function(parentList: ScrollingFrame, mission: any, onClaim, displayIndex: number?)
 	local state = getMissionState(mission)
 	local accent = mission.Type == "Weekly" and THEME.weekly or THEME.daily
 	local accentSoft = mission.Type == "Weekly" and THEME.weeklySoft or THEME.dailySoft
@@ -827,6 +880,7 @@ makeMissionRow = function(parentList: ScrollingFrame, mission: any, onClaim)
 
 	local row = Instance.new("Frame")
 	row:SetAttribute("MissionRow", true)
+	row.LayoutOrder = (getMissionStatePriority(mission) * MISSION_LAYOUT_GROUP_SIZE) + (tonumber(displayIndex) or 0)
 	row.Size = UDim2.new(1, 0, 0, 126)
 	row.BackgroundColor3 = THEME.card
 	row.BorderSizePixel = 0
@@ -1060,6 +1114,9 @@ local function refreshUI(preserveScroll: boolean?)
 		end
 	end
 
+	sortMissionsForDisplay(daily)
+	sortMissionsForDisplay(weekly)
+
 	while #daily > DAILY_MAX do
 		table.remove(daily)
 	end
@@ -1077,11 +1134,11 @@ local function refreshUI(preserveScroll: boolean?)
 		end
 	end
 
-	for _, mission in ipairs(daily) do
-		makeMissionRow(dailyPage.list, mission, onClaim)
+	for index, mission in ipairs(daily) do
+		makeMissionRow(dailyPage.list, mission, onClaim, index)
 	end
-	for _, mission in ipairs(weekly) do
-		makeMissionRow(weeklyPage.list, mission, onClaim)
+	for index, mission in ipairs(weekly) do
+		makeMissionRow(weeklyPage.list, mission, onClaim, index)
 	end
 
 	updatePageSummary(dailyPage, daily, dailyResetAt, "Refresh in")

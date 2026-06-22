@@ -203,6 +203,7 @@ local SPAWN_RAY_START_Y = 200
 local GROUND_RAY_DIST = 600
 local MAX_SPAWN_TRIES = 25
 local MAX_GROUND_SLOPE_DEG = 35
+WorldBounds.SpawnGroundClearance = 0.05
 
 local function anyPlayersAlive(): boolean
     for _, plr in ipairs(Players:GetPlayers()) do
@@ -228,19 +229,7 @@ local function getAliveHRPs(): {BasePart}
     return list
 end
 
-local function getClosestLivingHRP(fromPos: Vector3): BasePart?
-    local best, bestDist = nil, math.huge
-    for _, hrp in ipairs(getAliveHRPs()) do
-        local d = (hrp.Position - fromPos).Magnitude
-        if d < bestDist then
-            bestDist = d
-            best = hrp
-        end
-    end
-    return best
-end
-
-local function buildSpawnRaycastIgnore()
+local function buildSpawnRaycastIgnore(extraIgnore: {Instance}?)
 	local blacklist = {
 		ENEMIES_FOLDER,
 		workspace:FindFirstChild("Drops"),
@@ -248,28 +237,44 @@ local function buildSpawnRaycastIgnore()
 		workspace:FindFirstChild("Shrines"),
 		workspace:FindFirstChild("Statues"),
 		workspace:FindFirstChild("RunPortal"),
+		workspace:FindFirstChild("SpellVFX"),
+		workspace:FindFirstChild("EnemyAbilityVFX"),
 	}
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr.Character then
 			table.insert(blacklist, plr.Character)
 		end
 	end
+	if type(extraIgnore) == "table" then
+		for _, inst in ipairs(extraIgnore) do
+			if inst then
+				table.insert(blacklist, inst)
+			end
+		end
+	end
 	return blacklist
 end
 
-local function buildSpawnOverlapIgnore()
+local function buildSpawnOverlapIgnore(extraIgnore: {Instance}?)
 	local ignore = {
 		workspace:FindFirstChild("Drops"),
 	}
+	if type(extraIgnore) == "table" then
+		for _, inst in ipairs(extraIgnore) do
+			if inst then
+				table.insert(ignore, inst)
+			end
+		end
+	end
 	return ignore
 end
 
-local function raycastGround(pos: Vector3)
+local function raycastGround(pos: Vector3, extraIgnore: {Instance}?)
 	return WorldBounds.RaycastTerrainAtXZ(pos.X, pos.Z, {
 		originY = SPAWN_RAY_START_Y,
 		distance = GROUND_RAY_DIST,
 		ignoreWater = true,
-		raycastIgnoreInstances = buildSpawnRaycastIgnore(),
+		raycastIgnoreInstances = buildSpawnRaycastIgnore(extraIgnore),
 	})
 end
 
@@ -277,6 +282,74 @@ local function slopeDeg(normal: Vector3): number
     local up = Vector3.new(0, 1, 0)
     local dot = math.clamp(normal:Dot(up), -1, 1)
     return math.deg(math.acos(dot))
+end
+
+function WorldBounds.CFrameRotationOnly(cframe: CFrame): CFrame
+	return cframe - cframe.Position
+end
+
+function WorldBounds.BuildMobGrounding(mob: Model?, spawnConfig)
+	local grounding = {
+		groundSnapDisabled = false,
+		root = nil,
+		rootLocalCFrame = nil,
+		rootGroundOffset = 0,
+	}
+
+	if not mob then
+		return grounding
+	end
+
+	grounding.groundSnapDisabled = mob:GetAttribute("IgnoreGroundSnap") == true
+		or mob:GetAttribute("CanFly") == true
+		or (type(spawnConfig) == "table" and (spawnConfig.ignoreGroundSnap == true or spawnConfig.canFly == true))
+	if grounding.groundSnapDisabled then
+		return grounding
+	end
+
+	local foundRoot = mob:FindFirstChild("HumanoidRootPart")
+	if foundRoot and foundRoot:IsA("BasePart") then
+		grounding.root = foundRoot
+	elseif mob.PrimaryPart and mob.PrimaryPart:IsA("BasePart") then
+		grounding.root = mob.PrimaryPart
+	else
+		grounding.root = mob:FindFirstChildWhichIsA("BasePart", true)
+	end
+
+	if grounding.root then
+		if mob.PrimaryPart ~= grounding.root then
+			mob.PrimaryPart = grounding.root
+		end
+		grounding.rootLocalCFrame = mob:GetPivot():ToObjectSpace(grounding.root.CFrame)
+
+		local ok, boundsCFrame, boundsSize = pcall(function()
+			return mob:GetBoundingBox()
+		end)
+		if ok and typeof(boundsCFrame) == "CFrame" and typeof(boundsSize) == "Vector3" and boundsSize.Y > 0 then
+			local lowestY = boundsCFrame.Position.Y - (boundsSize.Y * 0.5)
+			grounding.rootGroundOffset = math.max(0, grounding.root.Position.Y - lowestY)
+		else
+			grounding.rootGroundOffset = math.max(0, grounding.root.Size.Y * 0.5)
+		end
+	else
+		warn("[WaveController] Missing root while grounding spawn:", mob.Name)
+	end
+
+	return grounding
+end
+
+function WorldBounds.CFrameFromGround(surfacePos: Vector3, grounding, rotation: CFrame?): CFrame
+	local rootRotation = rotation or CFrame.identity
+	if not grounding or not grounding.root or not grounding.rootLocalCFrame or grounding.groundSnapDisabled then
+		return CFrame.new(surfacePos + Vector3.new(0, WorldBounds.SpawnGroundClearance, 0)) * rootRotation
+	end
+
+	local targetRootPos = Vector3.new(
+		surfacePos.X,
+		surfacePos.Y + grounding.rootGroundOffset + WorldBounds.SpawnGroundClearance,
+		surfacePos.Z
+	)
+	return CFrame.new(targetRootPos) * rootRotation * grounding.rootLocalCFrame:Inverse()
 end
 
 -- Spawn bounds: prefer Map from Spawnable, fallback to any Map part in workspace.
@@ -309,7 +382,7 @@ local function inBounds(bounds, x, z, margin)
     return x >= (bounds.minX + margin) and x <= (bounds.maxX - margin) and z >= (bounds.minZ + margin) and z <= (bounds.maxZ - margin)
 end
 
-local function pickSpawnCFrame(anchorPos: Vector3?): CFrame?
+local function pickSpawnCFrame(anchorPos: Vector3?, mob: Model?, spawnConfig): CFrame?
     local anchor = anchorPos
     if not anchor then
         local hrps = getAliveHRPs()
@@ -319,8 +392,40 @@ local function pickSpawnCFrame(anchorPos: Vector3?): CFrame?
 
     -- We intentionally do NOT use SpawnPoints here (raycast-based spawning only).
 
-    local bounds = getSpawnBounds()
-    local BOUNDS_MARGIN = 6
+	local bounds = getSpawnBounds()
+	local BOUNDS_MARGIN = 6
+	local extraIgnore = mob and { mob } or nil
+	local grounding = WorldBounds.BuildMobGrounding(mob, spawnConfig)
+
+	local function fallbackGroundPoint(): Vector3?
+		local point = WorldBounds.FindNearbyTerrainPoint(anchor, {
+			searchRadii = { 0, 8, 16, 28, 40 },
+			samplesPerRing = 10,
+			heightOffset = 0,
+			raycastIgnoreInstances = buildSpawnRaycastIgnore(extraIgnore),
+			overlapIgnoreInstances = buildSpawnOverlapIgnore(extraIgnore),
+			clearanceRadius = 3.5,
+			clearanceHeight = 7,
+			maxSlopeDeg = MAX_GROUND_SLOPE_DEG,
+		})
+		if point then
+			return point
+		end
+
+		local randomPoint = WorldBounds.FindRandomTerrainPoint({
+			pad = 6,
+			tries = MAX_SPAWN_TRIES,
+			heightOffset = 0,
+			raycastIgnoreInstances = buildSpawnRaycastIgnore(extraIgnore),
+			overlapIgnoreInstances = buildSpawnOverlapIgnore(extraIgnore),
+			clearanceRadius = 3.5,
+			clearanceHeight = 7,
+			maxSlopeDeg = MAX_GROUND_SLOPE_DEG,
+			fallbackMin = Vector2.new(-200, -200),
+			fallbackMax = Vector2.new(200, 200),
+		})
+		return randomPoint
+	end
 
     for _ = 1, MAX_SPAWN_TRIES do
         local ang = math.random() * math.pi * 2
@@ -334,12 +439,12 @@ local function pickSpawnCFrame(anchorPos: Vector3?): CFrame?
             z = math.clamp(z, bounds.minZ + BOUNDS_MARGIN, bounds.maxZ - BOUNDS_MARGIN)
         end
 
-		local hit = raycastGround(Vector3.new(x, 0, z))
+		local hit = raycastGround(Vector3.new(x, 0, z), extraIgnore)
 		if hit and hit.Position and slopeDeg(hit.Normal) <= MAX_GROUND_SLOPE_DEG then
 			local spawnPos = hit.Position + Vector3.new(0, 0.05, 0)
-			local clear = WorldBounds.IsAreaClear(spawnPos, 3.5, 7, buildSpawnOverlapIgnore())
+			local clear = WorldBounds.IsAreaClear(spawnPos, 3.5, 7, buildSpawnOverlapIgnore(extraIgnore))
 			if clear == true then
-				return CFrame.new(spawnPos)
+				return WorldBounds.CFrameFromGround(hit.Position, grounding)
 			end
 		end
 	end
@@ -349,34 +454,23 @@ local function pickSpawnCFrame(anchorPos: Vector3?): CFrame?
         for _ = 1, MAX_SPAWN_TRIES do
 			local x = (bounds.minX + BOUNDS_MARGIN) + math.random() * ((bounds.maxX - BOUNDS_MARGIN) - (bounds.minX + BOUNDS_MARGIN))
 			local z = (bounds.minZ + BOUNDS_MARGIN) + math.random() * ((bounds.maxZ - BOUNDS_MARGIN) - (bounds.minZ + BOUNDS_MARGIN))
-			local hit = raycastGround(Vector3.new(x, 0, z))
+			local hit = raycastGround(Vector3.new(x, 0, z), extraIgnore)
 			if hit and hit.Position and slopeDeg(hit.Normal) <= MAX_GROUND_SLOPE_DEG then
 				local spawnPos = hit.Position + Vector3.new(0, 0.05, 0)
-				local clear = WorldBounds.IsAreaClear(spawnPos, 3.5, 7, buildSpawnOverlapIgnore())
+				local clear = WorldBounds.IsAreaClear(spawnPos, 3.5, 7, buildSpawnOverlapIgnore(extraIgnore))
 				if clear == true then
-					return CFrame.new(spawnPos)
+					return WorldBounds.CFrameFromGround(hit.Position, grounding)
 				end
 			end
 		end
 	end
 
-    return CFrame.new(anchor + Vector3.new(0, 0.05, 0))
+	local fallbackPoint = fallbackGroundPoint()
+	return fallbackPoint and WorldBounds.CFrameFromGround(fallbackPoint, grounding) or nil
 end
 
--- Enemy config (custom movement/combat stats)
-local ENEMY_CONFIGS = {
-    Slime =      { hp = 22,  speed = 8.5, range = 3,  cd = 1.9, dmg = 5,  xp = 5,  coins = 1 },
-    Zombie =     { hp = 74,  speed = 7.0, range = 4,  cd = 2.3, dmg = 9,  xp = 9,  coins = 2 },
-    Skeleton =   { hp = 44,  speed = 13.5, range = 4,  cd = 1.45, dmg = 10, xp = 11, coins = 2 },
-    Goblin =     { hp = 56,  speed = 15.5, range = 3,  cd = 1.18, dmg = 8,  xp = 13, coins = 2 },
-    Warewolf =   { hp = 112, speed = 17.0, range = 5,  cd = 1.18, dmg = 13, xp = 20, coins = 3 },
-    Harp =       { hp = 88,  speed = 13.5, range = 25, cd = 2.1, dmg = 11, xp = 19, coins = 3, isRanged = true },
-    Demon =      { hp = 128, speed = 11.5, range = 18, cd = 1.85, dmg = 13, xp = 23, coins = 4, isRanged = true, hasFireball = true },
-    LandShark =  { hp = 108, speed = 18.5, range = 7,  cd = 2.7, dmg = 15, xp = 22, coins = 4, isBurrow = true },
-    Golem =      { hp = 210, speed = 6.5, range = 6,  cd = 2.6, dmg = 18, xp = 30, coins = 5 },
-    Knight =     { hp = 150, speed = 11.8, range = 5,  cd = 1.35, dmg = 14, xp = 27, coins = 4 },
-    Ent =        { hp = 260, speed = 5.5, range = 8,  cd = 2.9, dmg = 17, xp = 34, coins = 6 },
-}
+-- Enemy config lives in ServerScriptService.ModuleScript.MobConfig.
+local ENEMY_CONFIGS = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("MobConfig")).Mobs
 
 local RUN_TIME_LIMIT = 15 * 60 -- 15:00 (portal/boss threshold)
 local ENEMY_HP_MULTIPLIER = 2 / 3 -- start slime dies in 2 hits from Knight's Oath; the rest scales from the same baseline
@@ -404,6 +498,21 @@ local DEFAULT_LEVEL_SPAWN_BAND = {
 	alivePerMinute = 4,
 	spawnBurst = 1,
 	intervalMultiplier = 1,
+}
+local spawnLimitConfig = {
+	swarmTargetMaxAlive = math.max(0, math.floor(tonumber(SWARM_SPAWN_CONFIG.targetMaxAlive) or 0)),
+	swarmMaxLivingEnemies = math.max(
+		MAX_LIVING_ENEMIES,
+		math.floor(tonumber(SWARM_SPAWN_CONFIG.maxLivingEnemies) or MAX_LIVING_ENEMIES)
+	),
+	postEliteCatchupDuration = math.max(
+		0.1,
+		tonumber((RunSpawnConfig.POST_ELITE_SPAWN or {}).catchupDuration) or 10
+	),
+	postEliteMaxPerTick = math.max(
+		1,
+		math.floor(tonumber((RunSpawnConfig.POST_ELITE_SPAWN or {}).maxPerTick) or 4)
+	),
 }
 local DEFAULT_IMPORTANT_ENCOUNTER_CONFIG = {
 	maxAliveMultiplier = 1,
@@ -515,13 +624,13 @@ local function getPool(elapsed: number)
     elseif elapsed < 210 then
         return { {"Slime", 58}, {"Zombie", 42} }
     elseif elapsed < 360 then
-        return { {"Slime", 22}, {"Zombie", 44}, {"Skeleton", 34} }
+        return { {"Slime", 18}, {"Zombie", 38}, {"Skeleton", 28}, {"Grzyb", 16} }
     elseif elapsed < 540 then
-        return { {"Zombie", 28}, {"Skeleton", 30}, {"Goblin", 28}, {"Slime", 14} }
+        return { {"Zombie", 24}, {"Skeleton", 26}, {"Goblin", 26}, {"Grzyb", 16}, {"Slime", 8} }
     elseif elapsed < 720 then
-        return { {"Skeleton", 24}, {"Goblin", 30}, {"Warewolf", 26}, {"Zombie", 20} }
+        return { {"Skeleton", 22}, {"Goblin", 28}, {"Warewolf", 24}, {"Zombie", 16}, {"Grzyb", 10} }
     elseif elapsed < 900 then
-        return { {"Goblin", 24}, {"Warewolf", 24}, {"Harp", 20}, {"Demon", 18}, {"Skeleton", 14} }
+        return { {"Goblin", 22}, {"Warewolf", 23}, {"Harp", 19}, {"Demon", 17}, {"Skeleton", 13}, {"Grzyb", 6} }
     elseif elapsed < 1080 then
         return { {"Warewolf", 22}, {"Harp", 20}, {"Demon", 20}, {"LandShark", 20}, {"Knight", 18} }
     elseif elapsed < 1200 then
@@ -559,11 +668,6 @@ end
 
 local function activeBossEnemiesCount()
 	return NpcService.GetActiveCount(BOSS_ENEMY_COUNT_FILTER)
-end
-
-local function hasEnemyCapacity(slotsNeeded: number?): boolean
-	local needed = math.max(1, math.floor(tonumber(slotsNeeded) or 1))
-	return (activeEnemiesCount() + needed) <= MAX_LIVING_ENEMIES
 end
 
 local function getImportantEncounterConfig(kind: string?)
@@ -735,7 +839,11 @@ end
 local ELITE_VISUAL_SCALE = 3
 local BOSS_VISUAL_SCALE = 3
 
-local function getMobVisualScale(isElite: boolean, isBoss: boolean): number
+local function getMobVisualScale(isElite: boolean, isBoss: boolean, stats): number
+	local overrideScale = stats and tonumber(stats.visualScale) or nil
+	if overrideScale and overrideScale > 0 then
+		return overrideScale
+	end
 	if isBoss then
 		return BOSS_VISUAL_SCALE
 	end
@@ -745,8 +853,8 @@ local function getMobVisualScale(isElite: boolean, isBoss: boolean): number
 	return 1
 end
 
-local function applyMobVisualScale(mob: Model, isElite: boolean, isBoss: boolean): number
-	local desiredScale = getMobVisualScale(isElite, isBoss)
+local function applyMobVisualScale(mob: Model, isElite: boolean, isBoss: boolean, stats): number
+	local desiredScale = getMobVisualScale(isElite, isBoss, stats)
 	local appliedScale = 1
 	if desiredScale > 1.001 then
 		local ok, err = pcall(function()
@@ -762,6 +870,12 @@ local function applyMobVisualScale(mob: Model, isElite: boolean, isBoss: boolean
 	return appliedScale
 end
 
+local function setOptionalMobAttribute(mob: Model, name: string, value: any)
+	if value ~= nil then
+		mob:SetAttribute(name, value)
+	end
+end
+
 local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, isElite: boolean, isBoss: boolean, extraOnDeath)
 	mob:SetAttribute("MobType", mobType)
 	mob:SetAttribute("DisplayName", mobType)
@@ -773,6 +887,11 @@ local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, i
 	mob:SetAttribute("IsRanged", stats.isRanged == true)
 	mob:SetAttribute("IsDead", false)
 	mob:SetAttribute("IsAttacking", false)
+	setOptionalMobAttribute(mob, "NpcFacingYawDegrees", stats.facingYawDegrees)
+	setOptionalMobAttribute(mob, "EnemyMeleeIgnoreVerticalValidation", stats.meleeIgnoreVerticalValidation)
+	setOptionalMobAttribute(mob, "EnemyMeleeMaxVerticalDelta", stats.meleeMaxVerticalDelta)
+	setOptionalMobAttribute(mob, "EnemyMeleeMaxHitHeightAboveEnemy", stats.meleeMaxHitHeightAboveEnemy)
+	setOptionalMobAttribute(mob, "EnemyMeleeUse3DDistance", stats.meleeUse3DDistance)
 
     local registeredId = NpcService.Register(mob, {
         mobType = mobType,
@@ -818,15 +937,19 @@ local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vecto
         return
     end
 
-    local cf = pickSpawnCFrame(spawnAnchorPos)
-    if not cf then return end
-
     local mob = template:Clone()
     mob.Name = mobName
     cleanupTemplateScripts(mob)
     setMobGroup(mob)
-    applyMobVisualScale(mob, isElite, false)
+    applyMobVisualScale(mob, isElite, false, cfg)
     mob:SetAttribute("SpawnSource", spawnSource or (isElite and "Elite" or "RunAmbient"))
+
+    local cf = pickSpawnCFrame(spawnAnchorPos, mob, cfg)
+	if not cf then
+		mob:Destroy()
+		return
+	end
+
     mob.Parent = ENEMIES_FOLDER
     mob:PivotTo(cf)
 
@@ -850,6 +973,10 @@ local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vecto
         cd = cd,
         dmg = dmg,
         isRanged = cfg.isRanged == true,
+		meleeIgnoreVerticalValidation = cfg.meleeIgnoreVerticalValidation,
+		meleeMaxVerticalDelta = cfg.meleeMaxVerticalDelta,
+		meleeMaxHitHeightAboveEnemy = cfg.meleeMaxHitHeightAboveEnemy,
+		meleeUse3DDistance = cfg.meleeUse3DDistance,
     }, cfg, isElite, false, nil)
 
     if registered and isElite then
@@ -860,6 +987,7 @@ local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vecto
 end
 
 local elapsed: () -> number
+local getMaxLivingEnemyCap: (number?) -> number
 
 local function spawnBurst(count: number, anchorPos: Vector3?, poolTime: number?, spawnSource: string?)
     local spawned = {}
@@ -868,10 +996,11 @@ local function spawnBurst(count: number, anchorPos: Vector3?, poolTime: number?,
         return spawned
     end
 
-    local pool = getPool(tonumber(poolTime) or elapsed())
+    local burstTime = math.max(0, tonumber(poolTime) or elapsed())
+    local pool = getPool(burstTime)
 	local aliveNow = activeEnemiesCount()
     for _ = 1, targetCount do
-		if aliveNow >= MAX_LIVING_ENEMIES then
+		if aliveNow >= getMaxLivingEnemyCap(burstTime) then
 			break
 		end
         local mobName = pickWeighted(pool)
@@ -1751,10 +1880,29 @@ local swarmState = {
 	queuedDuration = 0,
 	eliteSuppressionActive = false,
 }
-local nextEncounterTrimAt = 0
+local normalSpawnState = {
+	nextAt = 0,
+	debt = 0,
+	catchupAccumulator = 0,
+	wasEliteEncounterActive = false,
+	nextEncounterTrimAt = 0,
+}
 
 local function isSwarmActiveAt(t: number): boolean
     return swarmState.active and t < swarmState.activeUntil
+end
+
+getMaxLivingEnemyCap = function(t: number?): number
+	local currentTime = math.max(0, tonumber(t) or elapsed())
+	if isSwarmActiveAt(currentTime) then
+		return spawnLimitConfig.swarmMaxLivingEnemies
+	end
+	return MAX_LIVING_ENEMIES
+end
+
+local function hasEnemyCapacity(slotsNeeded: number?, t: number?): boolean
+	local needed = math.max(1, math.floor(tonumber(slotsNeeded) or 1))
+	return (activeEnemiesCount() + needed) <= getMaxLivingEnemyCap(t)
 end
 
 local function desiredMaxAlive(t: number)
@@ -1776,7 +1924,10 @@ local function desiredMaxAlive(t: number)
 		encounterConfig.minNormalAlive,
 		math.floor((scaled * encounterConfig.maxAliveMultiplier) + 0.5)
 	)
-	return math.clamp(scaled, math.max(1, encounterConfig.minNormalAlive), MAX_LIVING_ENEMIES)
+	if isSwarmActiveAt(t) and spawnLimitConfig.swarmTargetMaxAlive > 0 then
+		scaled = math.max(scaled, spawnLimitConfig.swarmTargetMaxAlive)
+	end
+	return math.clamp(scaled, math.max(1, encounterConfig.minNormalAlive), getMaxLivingEnemyCap(t))
 end
 
 local function spawnInterval(t: number)
@@ -1959,7 +2110,7 @@ local function ensurePortal()
 	prompt.Name = "PortalPrompt"
 	prompt.ActionText = "Awaken Boss"
 	prompt.ObjectText = "Portal"
-	prompt.HoldDuration = 1
+	prompt.HoldDuration = 0
 	prompt.MaxActivationDistance = 10
 	prompt.RequiresLineOfSight = false
 	prompt.Parent = base
@@ -2002,13 +2153,46 @@ local function ensurePortal()
 		mob.Name = "Boss_" .. bossName
 		cleanupTemplateScripts(mob)
 		setMobGroup(mob)
-		applyMobVisualScale(mob, true, true)
+		local bossConfig = ENEMY_CONFIGS[bossName]
+		applyMobVisualScale(mob, true, true, bossConfig)
 		mob:SetAttribute("SpawnSource", "Boss")
 		mob.Parent = ENEMIES_FOLDER
 
-		pcall(function()
-			mob:PivotTo(base.CFrame * CFrame.new(0, 0, -18))
-		end)
+		local desiredBossFrame = base.CFrame * CFrame.new(0, 0, -18)
+		local bossIgnore = { mob }
+		local bossGroundPoint = nil
+		local bossHit = raycastGround(desiredBossFrame.Position, bossIgnore)
+		if bossHit and bossHit.Position and slopeDeg(bossHit.Normal) <= MAX_GROUND_SLOPE_DEG then
+			local clear = WorldBounds.IsAreaClear(
+				bossHit.Position + Vector3.new(0, WorldBounds.SpawnGroundClearance, 0),
+				7.5,
+				12,
+				buildSpawnOverlapIgnore(bossIgnore)
+			)
+			if clear == true then
+				bossGroundPoint = bossHit.Position
+			end
+		end
+		if not bossGroundPoint then
+			bossGroundPoint = WorldBounds.FindNearbyTerrainPoint(desiredBossFrame.Position, {
+				searchRadii = { 0, 5, 10, 15, 22, 30 },
+				samplesPerRing = 12,
+				heightOffset = 0,
+				raycastIgnoreInstances = buildSpawnRaycastIgnore(bossIgnore),
+				overlapIgnoreInstances = buildSpawnOverlapIgnore(bossIgnore),
+				clearanceRadius = 7.5,
+				clearanceHeight = 12,
+				maxSlopeDeg = MAX_GROUND_SLOPE_DEG,
+			})
+		end
+		if not bossGroundPoint then
+			warn("[Portal] Could not find grounded boss spawn point near portal")
+			mob:Destroy()
+			return false
+		end
+
+		local bossGrounding = WorldBounds.BuildMobGrounding(mob, bossConfig)
+		mob:PivotTo(WorldBounds.CFrameFromGround(bossGroundPoint, bossGrounding, WorldBounds.CFrameRotationOnly(base.CFrame)))
 
 		local bossStats = getBossCombatStatsForCurrentRun()
 		local registered = registerMobModel(mob, bossName, {
@@ -2218,9 +2402,8 @@ do
 end
 
 local lastHudPush = 0
-local lastSpawnAt = 0
 
-RunService.Heartbeat:Connect(function()
+RunService.Heartbeat:Connect(function(dt)
     if not RunStarted.Value then
         return
     end
@@ -2270,7 +2453,7 @@ RunService.Heartbeat:Connect(function()
 
     -- Elites (every 5 minutes during the scheduled run)
     if eliteIndex <= eliteTotal and t >= nextEliteAt then
-        if not hasEnemyCapacity(1) then
+		if not hasEnemyCapacity(1, t) then
 			nextEliteAt = t + 1
 		else
 			local eliteName = eliteOrder[((eliteIndex - 1) % #eliteOrder) + 1]
@@ -2335,32 +2518,65 @@ RunService.Heartbeat:Connect(function()
 		end
 	end
 
+	if normalSpawnState.nextAt <= 0 then
+		normalSpawnState.nextAt = t + spawnInterval(t)
+	end
+
+	local scheduledSpawnBudget = 0
+	local scheduleGuard = 0
+	while t >= normalSpawnState.nextAt and scheduleGuard < 24 do
+		scheduleGuard += 1
+		local spawnAt = normalSpawnState.nextAt
+		normalSpawnState.nextAt += spawnInterval(spawnAt)
+		local burstSize = getNormalSpawnBurstSize(spawnAt)
+		if eliteEncounterActive then
+			normalSpawnState.debt += burstSize
+		else
+			scheduledSpawnBudget += burstSize
+		end
+	end
+
+	if normalSpawnState.wasEliteEncounterActive and not eliteEncounterActive then
+		normalSpawnState.catchupAccumulator = 0
+	end
+	normalSpawnState.wasEliteEncounterActive = eliteEncounterActive
+
 	if eliteEncounterActive then
 		return
 	end
 
-    -- Normal spawns
-	local interval = spawnInterval(t)
-	if t - lastSpawnAt < interval then
+	local catchupBudget = 0
+	if normalSpawnState.debt > 0 then
+		local catchupRate = normalSpawnState.debt / spawnLimitConfig.postEliteCatchupDuration
+		normalSpawnState.catchupAccumulator += catchupRate * dt
+	end
+
+	if normalSpawnState.debt > 0 then
+		catchupBudget = math.min(
+			normalSpawnState.debt,
+			spawnLimitConfig.postEliteMaxPerTick,
+			math.floor(normalSpawnState.catchupAccumulator)
+		)
+	end
+
+	if scheduledSpawnBudget <= 0 and catchupBudget <= 0 then
 		return
 	end
-	lastSpawnAt = t
 
 	local maxAlive = desiredMaxAlive(t)
 	local aliveNow = activeEnemiesCount()
 	local normalAliveNow = activeNormalEnemiesCount()
 	local encounterKind, encounterConfig = getActiveImportantEncounter()
-	if encounterKind and normalAliveNow > maxAlive and encounterConfig.trimInterval > 0 and t >= nextEncounterTrimAt then
-		nextEncounterTrimAt = t + encounterConfig.trimInterval
+	if encounterKind and normalAliveNow > maxAlive and encounterConfig.trimInterval > 0 and t >= normalSpawnState.nextEncounterTrimAt then
+		normalSpawnState.nextEncounterTrimAt = t + encounterConfig.trimInterval
 		if NpcService.DespawnOldestFarNormal(encounterConfig.trimDistance) then
 			aliveNow = math.max(0, aliveNow - 1)
 			normalAliveNow = math.max(0, normalAliveNow - 1)
 		end
 	end
-	local spawnBurstSize = getNormalSpawnBurstSize(t)
 	local pool = getPool(t)
-	for _ = 1, spawnBurstSize do
-		if aliveNow >= MAX_LIVING_ENEMIES or normalAliveNow >= maxAlive then
+	for _ = 1, (scheduledSpawnBudget + catchupBudget) do
+		if aliveNow >= getMaxLivingEnemyCap(t) or normalAliveNow >= maxAlive then
 			break
 		end
 
@@ -2370,13 +2586,15 @@ RunService.Heartbeat:Connect(function()
 		if spawnedMob then
 			aliveNow += 1
 			normalAliveNow += 1
+			if scheduledSpawnBudget > 0 then
+				scheduledSpawnBudget -= 1
+			elseif catchupBudget > 0 then
+				catchupBudget -= 1
+				normalSpawnState.debt = math.max(0, normalSpawnState.debt - 1)
+				normalSpawnState.catchupAccumulator = math.max(0, normalSpawnState.catchupAccumulator - 1)
+			end
 		end
 	end
 end)
 
 print("[HordeController] Ready (time-based)")
-
-
-
-
-

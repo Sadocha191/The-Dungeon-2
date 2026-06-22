@@ -21,6 +21,9 @@ local MAX_CHESTS = 500
 local MIN_CHEST_GAP = 24
 local CHEST_RAYCAST_TRIES = 45
 local CHEST_HEIGHT = 1.8
+local CHEST_GROUND_CLEARANCE = 0.05
+local GENERATED_CHEST_BOTTOM_OFFSET = 2
+local WORLD_CHEST_TEMPLATE_NAME = "skrzynia"
 
 local BASE_CHEST_COST = 55
 local CHEST_COST_STEP = 25
@@ -70,6 +73,29 @@ local spawnedForRun = false
 local nextChestId = 0
 local recipeRng = Random.new()
 local revealRng = Random.new()
+
+local function getWorldChestTemplate()
+	local template = workspace:FindFirstChild(WORLD_CHEST_TEMPLATE_NAME)
+	if template and template:IsA("Model") then
+		return template
+	end
+	return nil
+end
+
+local function resolveChestYawRadians(config)
+	if type(config) == "table" then
+		if typeof(config.yawRadians) == "number" then
+			return config.yawRadians
+		end
+
+		local yawDegrees = tonumber(config.yawDegrees or config.rotationYawDegrees or config.yaw)
+		if yawDegrees then
+			return math.rad(yawDegrees)
+		end
+	end
+
+	return math.rad(math.random(0, 359))
+end
 
 local RARITY_COLORS = {
 	Common = Color3.fromRGB(206, 206, 206),
@@ -207,6 +233,7 @@ end
 local function buildRaycastIgnore()
 	local list = {
 		chestsFolder,
+		getWorldChestTemplate(),
 		workspace:FindFirstChild("Enemies"),
 		workspace:FindFirstChild("Drops"),
 		workspace:FindFirstChild("Shrines"),
@@ -286,6 +313,101 @@ local function newPart(parent, name, size, color, material)
 	p.Anchored = true
 	p.Parent = parent
 	return p
+end
+
+local function getFirstBasePart(root)
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			return descendant
+		end
+	end
+	return nil
+end
+
+local function getFirstVisibleBasePart(root)
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("BasePart") and descendant.Transparency < 1 then
+			return descendant
+		end
+	end
+	return getFirstBasePart(root)
+end
+
+local function prepareWorldChestClone(model)
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = true
+			descendant.CanTouch = false
+			if descendant.Name == "RootPart" and descendant.Transparency >= 1 then
+				descendant.CanCollide = false
+				descendant.CanQuery = false
+			end
+		end
+	end
+end
+
+local function pivotWorldChestClone(model, pos, config)
+	local pivot = model:GetPivot()
+	local boundingCFrame, boundingSize = model:GetBoundingBox()
+	local bottomOffset = (boundingCFrame.Position.Y - (boundingSize.Y * 0.5)) - pivot.Position.Y
+	local targetBottomY = pos.Y - CHEST_HEIGHT + CHEST_GROUND_CLEARANCE
+	local targetPivotY = targetBottomY - bottomOffset
+	local rotation = CFrame.Angles(0, resolveChestYawRadians(config), 0) * (pivot - pivot.Position)
+	model:PivotTo(CFrame.new(pos.X, targetPivotY, pos.Z) * rotation)
+end
+
+local function createChestFromWorldTemplate(pos, idx, config)
+	local template = getWorldChestTemplate()
+	if not template then
+		return nil
+	end
+
+	local model = template:Clone()
+	model.Name = tostring(config.name or ("Chest_%d"):format(idx))
+
+	if not model.PrimaryPart then
+		local rootPart = model:FindFirstChild("RootPart", true)
+		if rootPart and rootPart:IsA("BasePart") then
+			model.PrimaryPart = rootPart
+		else
+			model.PrimaryPart = getFirstBasePart(model)
+		end
+	end
+
+	local promptParent = getFirstVisibleBasePart(model) or model.PrimaryPart
+	if not promptParent then
+		model:Destroy()
+		return nil
+	end
+
+	prepareWorldChestClone(model)
+	pivotWorldChestClone(model, pos, config)
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "OpenPrompt"
+	prompt.ActionText = tostring(config.actionText or "Open Chest")
+	prompt.ObjectText = tostring(config.objectText or "")
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 12
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = promptParent
+
+	model.Parent = chestsFolder
+
+	return {
+		model = model,
+		core = promptParent,
+		lid = model:FindFirstChild("Lid", true),
+		prompt = prompt,
+		opened = false,
+		forceFree = config.forceFree == true,
+		ownerUserId = tonumber(config.ownerUserId),
+		countsForScaling = config.countsForScaling ~= false,
+		recipeId = typeof(config.recipeId) == "string" and config.recipeId or nil,
+		recipeRarity = typeof(config.recipeRarity) == "string" and config.recipeRarity or nil,
+		specialRewardOnly = config.specialRewardOnly == true,
+		rewardLabel = typeof(config.rewardLabel) == "string" and config.rewardLabel or nil,
+	}
 end
 
 local function computeFreeChance(plr)
@@ -531,28 +653,36 @@ local function createChestModel(pos, idx, config)
 		coreColor = Color3.fromRGB(109, 255, 157)
 	end
 
+	local worldTemplateChest = createChestFromWorldTemplate(pos, idx, config)
+	if worldTemplateChest then
+		return worldTemplateChest
+	end
+
 	local model = Instance.new("Model")
 	model.Name = tostring(config.name or ("Chest_%d"):format(idx))
+	local chestFrame = CFrame.new(
+		pos + Vector3.new(0, GENERATED_CHEST_BOTTOM_OFFSET - CHEST_HEIGHT + CHEST_GROUND_CLEARANCE, 0)
+	) * CFrame.Angles(0, resolveChestYawRadians(config), 0)
 
 	local base = newPart(model, "Base", Vector3.new(5.2, 1.2, 4.2), Color3.fromRGB(86, 56, 35), Enum.Material.WoodPlanks)
-	base.CFrame = CFrame.new(pos - Vector3.new(0, 1.4, 0))
+	base.CFrame = chestFrame * CFrame.new(0, -1.4, 0)
 	base.CanCollide = true
 
 	local body = newPart(model, "Body", Vector3.new(4.4, 2, 3.4), Color3.fromRGB(121, 80, 44), Enum.Material.Wood)
-	body.CFrame = CFrame.new(pos)
+	body.CFrame = chestFrame
 	body.CanCollide = true
 
 	local band = newPart(model, "Band", Vector3.new(4.5, 0.4, 3.6), accentColor, Enum.Material.Metal)
-	band.CFrame = CFrame.new(pos + Vector3.new(0, 0.75, 0))
+	band.CFrame = chestFrame * CFrame.new(0, 0.75, 0)
 	band.CanCollide = false
 
 	local lid = newPart(model, "Lid", Vector3.new(4.6, 0.9, 3.6), Color3.fromRGB(103, 67, 38), Enum.Material.Wood)
-	lid.CFrame = CFrame.new(pos + Vector3.new(0, 1.5, -0.2))
+	lid.CFrame = chestFrame * CFrame.new(0, 1.5, -0.2)
 	lid.CanCollide = true
 
 	local core = newPart(model, "Core", Vector3.new(1.2, 1.2, 1.2), coreColor, Enum.Material.Neon)
 	core.Shape = Enum.PartType.Ball
-	core.CFrame = CFrame.new(pos + Vector3.new(0, 1.3, 0.8))
+	core.CFrame = chestFrame * CFrame.new(0, 1.3, 0.8)
 	core.CanCollide = false
 	core.CanTouch = false
 	core.CanQuery = false
@@ -567,7 +697,7 @@ local function createChestModel(pos, idx, config)
 	prompt.Name = "OpenPrompt"
 	prompt.ActionText = tostring(config.actionText or "Open Chest")
 	prompt.ObjectText = tostring(config.objectText or "")
-	prompt.HoldDuration = 0.45
+	prompt.HoldDuration = 0
 	prompt.MaxActivationDistance = 12
 	prompt.RequiresLineOfSight = false
 	prompt.Parent = core
@@ -831,4 +961,3 @@ if RunStarted.Value == true then
 end
 
 print("[ChestService] Ready")
-

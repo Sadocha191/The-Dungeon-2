@@ -15,6 +15,7 @@ local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
 
 local MovementConfig = require(moduleFolder:WaitForChild("MovementConfig"))
+local ModalUiState = require(moduleFolder:WaitForChild("ModalUiState"))
 
 local BASE_SPRINT_BONUS = 0.18
 local SPRINT_BONUS_PER_LEVEL = 0.12
@@ -32,6 +33,16 @@ local DOWN_VECTOR = Vector3.new(0, -1, 0)
 local LOW_GRAVITY_ATTACHMENT_NAME = "MovementLowGravityAttachment"
 local LOW_GRAVITY_FORCE_NAME = "LowGravityForce"
 local SLIDE_MIN_END_GRACE = 0.12
+local KEYBOARD_MOVE_VECTORS = {
+	[Enum.KeyCode.W] = Vector3.new(0, 0, -1),
+	[Enum.KeyCode.S] = Vector3.new(0, 0, 1),
+	[Enum.KeyCode.A] = Vector3.new(-1, 0, 0),
+	[Enum.KeyCode.D] = Vector3.new(1, 0, 0),
+	[Enum.KeyCode.Up] = Vector3.new(0, 0, -1),
+	[Enum.KeyCode.Down] = Vector3.new(0, 0, 1),
+	[Enum.KeyCode.Left] = Vector3.new(-1, 0, 0),
+	[Enum.KeyCode.Right] = Vector3.new(1, 0, 0),
+}
 
 local BLOCKED_SLIDE_STATES = {
 	[Enum.HumanoidStateType.Seated] = true,
@@ -130,6 +141,7 @@ local activeMotion: MotionState? = nil
 local landingMomentum: LandingMomentumState? = nil
 local chainMomentum: ChainMomentumState? = nil
 local landingSlideResumeUntil = -math.huge
+local slideJumpLowGravityUntil = -math.huge
 local lowGravityAttachment: Attachment? = nil
 local lowGravityForce: VectorForce? = nil
 local lastDebugPrintAt = {}
@@ -243,6 +255,33 @@ local function clampVelocityByHorizontal(velocity: Vector3, maxHorizontalSpeed: 
 	return velocity * scale
 end
 
+local function faceMovementDirection(root: BasePart, horizontalVelocity: Vector3, dt: number, turnSpeed: number?, state: string)
+	if MovementConfig.FaceMovementDirectionEnabled ~= true then
+		return
+	end
+
+	local flatVelocity = flatten(horizontalVelocity)
+	local speed = flatVelocity.Magnitude
+	if speed < 1 then
+		return
+	end
+
+	local currentPosition = root.Position
+	local targetCFrame = CFrame.lookAt(currentPosition, currentPosition + flatVelocity.Unit)
+	local configuredTurnSpeed = math.max(0, turnSpeed or 12)
+	local alpha = math.clamp(configuredTurnSpeed * dt, 0, 1)
+	local linearVelocity = root.AssemblyLinearVelocity
+	local angularVelocity = root.AssemblyAngularVelocity
+	root.CFrame = root.CFrame:Lerp(targetCFrame, alpha)
+	root.AssemblyLinearVelocity = linearVelocity
+	root.AssemblyAngularVelocity = angularVelocity
+
+	debugLog(
+		"face_movement_" .. state,
+		string.format("face_movement state=%s speed=%.2f turnSpeed=%.2f", state, speed, configuredTurnSpeed)
+	)
+end
+
 local function projectOntoPlane(vector: Vector3, normal: Vector3): Vector3
 	return vector - normal * vector:Dot(normal)
 end
@@ -263,66 +302,8 @@ local function getRunStat(name: string, fallback: number): number
 	return fallback
 end
 
-local function isPauseMenuOpen(): boolean
-	local pauseGui = playerGui:FindFirstChild("Pause")
-	if not pauseGui or not pauseGui:IsA("ScreenGui") then
-		return false
-	end
-
-	local overlay = pauseGui:FindFirstChild("MenuOverlay")
-	local menuOpen = pauseGui:GetAttribute("MenuOpen") == true
-	return menuOpen or (overlay and overlay:IsA("GuiObject") and overlay.Visible) == true
-end
-
-local function isDailyMissionsOpen(): boolean
-	local dailyMissionsGui = playerGui:FindFirstChild("DailyMissions")
-	if not dailyMissionsGui or not dailyMissionsGui:IsA("ScreenGui") then
-		return false
-	end
-
-	return dailyMissionsGui:GetAttribute("BoardShown") == true
-end
-
-local function isRewardRevealOpen(): boolean
-	local rewardRevealGui = playerGui:FindFirstChild("RewardRevealGui")
-	return rewardRevealGui ~= nil and rewardRevealGui:IsA("ScreenGui") and rewardRevealGui.Enabled
-end
-
-local function isChestRewardOpen(): boolean
-	local chestRewardGui = playerGui:FindFirstChild("ChestRewardGui")
-	return chestRewardGui ~= nil and chestRewardGui:IsA("ScreenGui") and chestRewardGui.Enabled
-end
-
 local function isBlockingUIOpen(): boolean
-	local upgradesGui = playerGui:FindFirstChild("UpgradesGUI")
-	local upgradesMain = upgradesGui and upgradesGui:FindFirstChild("Main")
-	if upgradesGui and upgradesGui:IsA("ScreenGui") and upgradesGui.Enabled and upgradesMain and upgradesMain:IsA("GuiObject") and upgradesMain.Visible then
-		return true
-	end
-
-	if isDailyMissionsOpen() then
-		return true
-	end
-
-	local missionSummary = playerGui:FindFirstChild("MissionSummary")
-	if missionSummary and missionSummary:IsA("ScreenGui") and missionSummary.Enabled then
-		return true
-	end
-
-	local ekeyMenu = playerGui:FindFirstChild("EKeyMenu")
-	if ekeyMenu and ekeyMenu:IsA("ScreenGui") and ekeyMenu.Enabled then
-		return true
-	end
-
-	if isRewardRevealOpen() then
-		return true
-	end
-
-	if isChestRewardOpen() then
-		return true
-	end
-
-	return isPauseMenuOpen()
+	return ModalUiState.IsBlockingUiOpen(playerGui)
 end
 
 local function isRunActive(): boolean
@@ -335,6 +316,48 @@ local function isMovementSuppressed(): boolean
 	return not isRunActive()
 		or isBlockingUIOpen()
 		or UserInputService:GetFocusedTextBox() ~= nil
+end
+
+local function syncHeldSprintState()
+	sprintHeld = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+		or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+		or UserInputService:IsKeyDown(Enum.KeyCode.ButtonL3)
+end
+
+local function getHeldMovementIntent(): Vector3
+	local moveIntent = Vector3.zero
+	for keyCode, direction in pairs(KEYBOARD_MOVE_VECTORS) do
+		if UserInputService:IsKeyDown(keyCode) then
+			moveIntent += direction
+		end
+	end
+
+	if moveIntent.Magnitude <= MIN_MOVE_MAGNITUDE then
+		return Vector3.zero
+	end
+
+	return moveIntent.Unit
+end
+
+local function getCurrentMoveIntent(humanoid: Humanoid): Vector3
+	local moveDirection = flatten(humanoid.MoveDirection)
+	if moveDirection.Magnitude > MIN_MOVE_MAGNITUDE then
+		return moveDirection
+	end
+
+	return getHeldMovementIntent()
+end
+
+local function applyHeldMovementIntent(humanoid: Humanoid, moveIntent: Vector3)
+	if moveIntent.Magnitude <= MIN_MOVE_MAGNITUDE then
+		return
+	end
+
+	if flatten(humanoid.MoveDirection).Magnitude > MIN_MOVE_MAGNITUDE then
+		return
+	end
+
+	humanoid:Move(Vector3.new(moveIntent.X, 0, moveIntent.Z), true)
 end
 
 local function refreshCharacterReferences()
@@ -435,11 +458,27 @@ local function getMaxAirHorizontalSpeed(): number
 end
 
 local function getMaxMomentumChainSpeed(): number
-	return math.max(getMaxAirHorizontalSpeed(), tonumber(MovementConfig.MaxMomentumChainSpeed) or 140)
+	return math.max(getMaxAirHorizontalSpeed(), tonumber(MovementConfig.MaxMomentumChainSpeed) or 160)
+end
+
+local function getMomentumChainMinSpeed(): number
+	return math.max(0, tonumber(MovementConfig.MomentumChainMinSpeed) or 3)
+end
+
+local function getMomentumChainAirDrag(): number
+	return math.clamp(tonumber(MovementConfig.MomentumChainAirDrag) or 1, 0, 1)
+end
+
+local function getMomentumChainAirControlStrength(): number
+	return math.max(0, tonumber(MovementConfig.MomentumChainAirControlStrength) or 0.018)
+end
+
+local function getMomentumChainAirTurnResponsiveness(): number
+	return math.max(0, tonumber(MovementConfig.MomentumChainAirTurnResponsiveness) or 0.012)
 end
 
 local function getMaxSlideSlopeSpeed(): number
-	return math.max(getMaxHorizontalSpeed(), tonumber(MovementConfig.MaxSlideSlopeSpeed) or 90)
+	return math.max(getMaxHorizontalSpeed(), tonumber(MovementConfig.MaxSlideSlopeSpeed) or 150)
 end
 
 local function getSlideSpeedLimit(useChainLimit: boolean?): number
@@ -568,15 +607,21 @@ local function clearLandingMomentum()
 	landingMomentum = nil
 end
 
-local function clearChainMomentum()
+local function clearChainMomentum(reason: string?)
+	if chainMomentum then
+		debugLog(
+			"chain_clear",
+			string.format("chain_clear reason=%s speed=%.2f", tostring(reason or "unspecified"), chainMomentum.velocity.Magnitude)
+		)
+	end
 	chainMomentum = nil
 	landingSlideResumeUntil = -math.huge
 end
 
 local function setChainMomentum(horizontalVelocity: Vector3, now: number)
 	local clampedVelocity = clampHorizontal(flatten(horizontalVelocity), getMaxMomentumChainSpeed())
-	if clampedVelocity.Magnitude <= MIN_MOVE_MAGNITUDE then
-		clearChainMomentum()
+	if clampedVelocity.Magnitude < getMomentumChainMinSpeed() then
+		clearChainMomentum("speed_low")
 		return
 	end
 
@@ -645,7 +690,7 @@ local function setLowGravityEnabled(root: BasePart?, enabled: boolean, scale: nu
 		lowGravityForce = force
 	end
 
-	local gravityScale = math.clamp(scale or tonumber(MovementConfig.AirGravityScale) or 0.65, 0, 1)
+	local gravityScale = math.clamp(scale or tonumber(MovementConfig.AirGravityScale) or 0.52, 0, 1)
 	local forceAmount = root.AssemblyMass * workspace.Gravity * (1 - gravityScale)
 	lowGravityForce.Attachment0 = lowGravityAttachment
 	lowGravityForce.Force = Vector3.new(0, forceAmount, 0)
@@ -658,21 +703,41 @@ local function updateLowGravity(humanoid: Humanoid, root: BasePart, groundInfo: 
 		return
 	end
 
-	local minYVelocity = tonumber(MovementConfig.LowGravityMinYVelocity) or -120
+	local now = os.clock()
+	local baseGravityScale = tonumber(MovementConfig.AirGravityScale) or 0.52
+	local gravityScale = baseGravityScale
+	local gravityReason = "normal_air"
+	if now <= slideJumpLowGravityUntil then
+		gravityScale = tonumber(MovementConfig.SlideJumpGravityScale) or 0.48
+		gravityReason = "slide_jump_window"
+	elseif slideJumpLowGravityUntil ~= -math.huge then
+		debugLog("slide_jump_low_gravity_end", string.format("slideJumpLowGravityUntil ended at %.2f", now))
+		slideJumpLowGravityUntil = -math.huge
+		if chainMomentum then
+			gravityScale = tonumber(MovementConfig.MomentumChainGravityScale) or 0.55
+			gravityReason = "chain_momentum"
+		end
+	elseif chainMomentum then
+		gravityScale = tonumber(MovementConfig.MomentumChainGravityScale) or 0.55
+		gravityReason = "chain_momentum"
+	end
+
+	local minYVelocity = tonumber(MovementConfig.LowGravityMinYVelocity) or -140
 	local shouldEnable = not groundInfo.isGrounded
 		and humanoid.Health > 0
 		and not isAirStateBlocked(humanoid)
 		and root.AssemblyLinearVelocity.Y > minYVelocity
 
-	setLowGravityEnabled(root, shouldEnable, tonumber(MovementConfig.AirGravityScale) or 0.65)
+	setLowGravityEnabled(root, shouldEnable, gravityScale)
 
 	if shouldEnable then
 		debugLog(
 			"low_gravity",
 			string.format(
-				"Low gravity active: y=%.2f scale=%.2f",
-				root.AssemblyLinearVelocity.Y,
-				tonumber(MovementConfig.AirGravityScale) or 0.65
+				"low_gravity gravityScale=%.2f reason=%s yVelocity=%.2f",
+				gravityScale,
+				gravityReason,
+				root.AssemblyLinearVelocity.Y
 			)
 		)
 	end
@@ -703,7 +768,7 @@ local function isAutoSlideSlope(groundInfo: GroundInfo): boolean
 end
 
 local function resolveSlideDirection(humanoid: Humanoid, root: BasePart, groundInfo: GroundInfo): (Vector3?, string)
-	local moveDirection = humanoid.MoveDirection
+	local moveDirection = getCurrentMoveIntent(humanoid)
 	local direction = moveDirection
 	local reason = "move_direction"
 
@@ -847,7 +912,7 @@ local function startSlide(groundInfo: GroundInfo, options: SlideStartOptions?): 
 	local slideMaxDuration = getSlideMaxDuration(slideDuration)
 
 	if not (options and options.chainMomentum == true) then
-		clearChainMomentum()
+		clearChainMomentum("new_slide")
 	end
 
 	slideReadyAt = now + getSlideCooldown()
@@ -907,30 +972,31 @@ local function doSlideJump(humanoid: Humanoid, root: BasePart, motion: MotionSta
 	if MovementConfig.SlideJumpEnabled ~= true then
 		return false
 	end
+	if not humanoid or humanoid.Health <= 0 or not root or not motion then
+		return false
+	end
 
-	local slideHorizontal = flatten(motion.lastSlideVelocity or root.AssemblyLinearVelocity)
+	local slideHorizontal = flatten((motion and motion.lastSlideVelocity) or root.AssemblyLinearVelocity)
 	local currentHorizontal = flatten(root.AssemblyLinearVelocity)
 	local carriedHorizontal = getStrongerHorizontal(slideHorizontal, currentHorizontal)
-	if carriedHorizontal.Magnitude <= MIN_MOVE_MAGNITUDE then
-		carriedHorizontal = flatten(motion.direction)
-	end
-	if carriedHorizontal.Magnitude <= MIN_MOVE_MAGNITUDE then
-		carriedHorizontal = getMotionDirection(humanoid, root)
-	end
 
 	local speedBefore = math.max(slideHorizontal.Magnitude, currentHorizontal.Magnitude)
-	local minCarrySpeed = math.max(0, tonumber(MovementConfig.SlideJumpMinCarrySpeed) or 8)
+	local minCarrySpeed = math.max(0, tonumber(MovementConfig.SlideJumpMinCarrySpeed) or 3)
+	if carriedHorizontal.Magnitude < minCarrySpeed then
+		debugLog(
+			"slide_jump_blocked",
+			string.format("slide_jump_blocked carrySpeed=%.2f min=%.2f", carriedHorizontal.Magnitude, minCarrySpeed)
+		)
+		return false
+	end
+
 	local multiplier = math.max(0, tonumber(MovementConfig.SlideJumpHorizontalMultiplier) or 1)
 	local maxCarrySpeed = math.min(
-		math.max(1, tonumber(MovementConfig.SlideJumpMaxCarrySpeed) or 140),
+		math.max(1, tonumber(MovementConfig.SlideJumpMaxCarrySpeed) or 160),
 		getMaxMomentumChainSpeed()
 	)
 
-	carriedHorizontal = flatten(carriedHorizontal)
-	if carriedHorizontal.Magnitude > MIN_MOVE_MAGNITUDE then
-		carriedHorizontal = carriedHorizontal.Unit * math.max(carriedHorizontal.Magnitude * multiplier, minCarrySpeed)
-	end
-	carriedHorizontal = clampHorizontal(carriedHorizontal, maxCarrySpeed)
+	carriedHorizontal = clampHorizontal(flatten(carriedHorizontal) * multiplier, maxCarrySpeed)
 
 	local yVelocity = getAirJumpPower(humanoid) + (tonumber(MovementConfig.SlideJumpExtraUpVelocity) or 0)
 	root.AssemblyLinearVelocity = Vector3.new(carriedHorizontal.X, yVelocity, carriedHorizontal.Z)
@@ -943,15 +1009,17 @@ local function doSlideJump(humanoid: Humanoid, root: BasePart, motion: MotionSta
 	leftGroundTime = now
 	landedAt = -math.huge
 	setChainMomentum(carriedHorizontal, now)
+	slideJumpLowGravityUntil = now + math.max(0, tonumber(MovementConfig.SlideJumpLowGravityDuration) or 0.45)
 	clearLandingMomentum()
 
 	debugLog(
 		"slide_jump",
 		string.format(
-			"Slide jump: speedBefore=%.2f speedAfter=%.2f y=%.2f slope=%.2f state=%s",
+			"slide_jump speedBefore=%.2f speedAfter=%.2f yVelocity=%.2f lowGravityUntil=%.2f slope=%.2f state=%s",
 			speedBefore,
 			carriedHorizontal.Magnitude,
 			yVelocity,
+			slideJumpLowGravityUntil,
 			groundInfo.slopeAngle,
 			tostring(groundInfo.humanoidState or humanoid:GetState())
 		)
@@ -962,11 +1030,16 @@ local function doSlideJump(humanoid: Humanoid, root: BasePart, motion: MotionSta
 end
 
 local function doAirJump(humanoid: Humanoid, root: BasePart)
-	local horizontalVelocity = getCurrentHorizontalVelocity(root)
-	if MovementConfig.PreserveHorizontalMomentum ~= true then
+	local currentHorizontal = getCurrentHorizontalVelocity(root)
+	local horizontalVelocity = currentHorizontal
+	if chainMomentum then
+		horizontalVelocity = getStrongerHorizontal(currentHorizontal, chainMomentum.velocity)
+	end
+	if MovementConfig.PreserveHorizontalMomentum ~= true and not chainMomentum then
 		horizontalVelocity = Vector3.zero
 	end
 
+	local speedBefore = horizontalVelocity.Magnitude
 	local maxCarrySpeed = chainMomentum and getMaxMomentumChainSpeed() or getMaxAirHorizontalSpeed()
 	horizontalVelocity = clampHorizontal(horizontalVelocity, maxCarrySpeed)
 	if chainMomentum then
@@ -977,12 +1050,12 @@ local function doAirJump(humanoid: Humanoid, root: BasePart)
 	humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 
 	debugLog(
-		"air_jump",
+		"air_jump_carry",
 		string.format(
-			"Air jump triggered: used=%d max=%d carrySpeed=%.2f chain=%s",
-			jumpsUsed,
-			getMaxJumpCount(),
+			"air_jump_carry speedBefore=%.2f speedAfter=%.2f limitUsed=%.2f chainMomentum=%s",
+			speedBefore,
 			horizontalVelocity.Magnitude,
+			maxCarrySpeed,
 			tostring(chainMomentum ~= nil)
 		)
 	)
@@ -1014,47 +1087,95 @@ local function applyLandingMomentum(root: BasePart, dt: number, now: number)
 end
 
 local function applyAirMomentum(humanoid: Humanoid, root: BasePart, dt: number)
-	if MovementConfig.AirControlEnabled ~= true or isAirStateBlocked(humanoid) then
+	local chainState = chainMomentum
+	if isAirStateBlocked(humanoid) then
+		return
+	end
+	if MovementConfig.AirControlEnabled ~= true and not chainState then
 		return
 	end
 
 	local currentVelocity = root.AssemblyLinearVelocity
-	local horizontal = flatten(currentVelocity)
-	local desiredInput = flatten(humanoid.MoveDirection)
+	local currentHorizontal = flatten(currentVelocity)
+	local horizontal = currentHorizontal
+	local desiredInput = getCurrentMoveIntent(humanoid)
+	local speedBefore = currentHorizontal.Magnitude
+	local dragUsed = math.clamp(tonumber(MovementConfig.AirDrag) or 0.999, 0, 1)
+	local limitUsed = getMaxAirHorizontalSpeed()
 
-	if desiredInput.Magnitude > MIN_MOVE_MAGNITUDE then
-		desiredInput = desiredInput.Unit
-		local currentSpeed = horizontal.Magnitude
-		if currentSpeed >= (tonumber(MovementConfig.MinAirSpeedToPreserve) or 8) then
-			local desiredVelocity = desiredInput * currentSpeed
-			local turnAlpha = math.clamp((tonumber(MovementConfig.AirTurnResponsiveness) or 0.012) * dt * 60, 0, 1)
-			horizontal = horizontal:Lerp(desiredVelocity, turnAlpha)
+	if chainState then
+		if chainState.velocity.Magnitude > currentHorizontal.Magnitude then
+			horizontal = chainState.velocity
 		end
 
-		local airControlStrength = math.max(0, tonumber(MovementConfig.AirControlStrength) or 0.025)
-		horizontal += desiredInput * (getBaseWalkSpeed() * airControlStrength * dt * 60)
+		local chainSpeed = horizontal.Magnitude
+		if MovementConfig.MomentumChainAllowAirControl ~= false
+			and desiredInput.Magnitude > MIN_MOVE_MAGNITUDE
+			and chainSpeed > MIN_VECTOR_MAGNITUDE
+		then
+			desiredInput = desiredInput.Unit
+			local desiredVelocity = desiredInput * chainSpeed
+			local turnAlpha = math.clamp(getMomentumChainAirTurnResponsiveness() * dt * 60, 0, 1)
+			local steeredHorizontal = horizontal:Lerp(desiredVelocity, turnAlpha)
+			local controlStrength = getMomentumChainAirControlStrength()
+			if controlStrength > 0 then
+				steeredHorizontal += desiredInput * (getBaseWalkSpeed() * controlStrength * dt * 60)
+			end
+			if steeredHorizontal.Magnitude > MIN_VECTOR_MAGNITUDE then
+				horizontal = steeredHorizontal.Unit * chainSpeed
+			end
+		end
+
+		dragUsed = getMomentumChainAirDrag()
+		horizontal *= dragUsed ^ (dt * 60)
+		limitUsed = getMaxMomentumChainSpeed()
+		horizontal = clampHorizontal(horizontal, limitUsed)
+
+		if horizontal.Magnitude < getMomentumChainMinSpeed() then
+			clearChainMomentum("speed_low")
+		elseif chainMomentum then
+			chainMomentum.velocity = horizontal
+			chainMomentum.lastAirborneAt = os.clock()
+		end
+	else
+		if desiredInput.Magnitude > MIN_MOVE_MAGNITUDE then
+			desiredInput = desiredInput.Unit
+			local currentSpeed = horizontal.Magnitude
+			if currentSpeed >= (tonumber(MovementConfig.MinAirSpeedToPreserve) or 8) then
+				local desiredVelocity = desiredInput * currentSpeed
+				local turnAlpha = math.clamp((tonumber(MovementConfig.AirTurnResponsiveness) or 0.025) * dt * 60, 0, 1)
+				horizontal = horizontal:Lerp(desiredVelocity, turnAlpha)
+			end
+
+			local airControlStrength = math.max(0, tonumber(MovementConfig.AirControlStrength) or 0.04)
+			horizontal += desiredInput * (getBaseWalkSpeed() * airControlStrength * dt * 60)
+		end
+
+		horizontal *= dragUsed ^ (dt * 60)
+		horizontal = clampHorizontal(horizontal, limitUsed)
 	end
 
-	local airDrag = math.clamp(tonumber(MovementConfig.AirDrag) or 0.998, 0, 1)
-	horizontal *= airDrag ^ (dt * 60)
-	local airLimit = chainMomentum and getMaxMomentumChainSpeed() or getMaxAirHorizontalSpeed()
-	horizontal = clampHorizontal(horizontal, airLimit)
-	if chainMomentum then
-		chainMomentum.velocity = horizontal
-		chainMomentum.lastAirborneAt = os.clock()
-	end
 	root.AssemblyLinearVelocity = Vector3.new(horizontal.X, currentVelocity.Y, horizontal.Z)
+	faceMovementDirection(root, horizontal, dt, tonumber(MovementConfig.AirFaceTurnSpeed) or 10, "air")
 
 	debugLog(
 		"air_momentum",
 		string.format(
-			"Air momentum: speed=%.2f input=(%.2f, %.2f, %.2f) active=%s chain=%s",
+			"air_momentum speedBefore=%.2f speedAfter=%.2f dragUsed=%.4f limitUsed=%.2f chainMomentum=%s",
+			speedBefore,
 			horizontal.Magnitude,
-			desiredInput.X,
-			desiredInput.Y,
-			desiredInput.Z,
-			tostring(horizontal.Magnitude > MIN_MOVE_MAGNITUDE),
-			tostring(chainMomentum ~= nil)
+			dragUsed,
+			limitUsed,
+			tostring(chainState ~= nil)
+		)
+	)
+	debugLog(
+		"air_steer",
+		string.format(
+			"air_steer speedBefore=%.2f speedAfter=%.2f chainMomentum=%s",
+			speedBefore,
+			horizontal.Magnitude,
+			tostring(chainState ~= nil)
 		)
 	)
 end
@@ -1153,14 +1274,14 @@ local function tryStartLandingSlide(humanoid: Humanoid, root: BasePart, groundIn
 			"landing_slide_resume_blocked",
 			string.format("Landing slide resume blocked: speed=%.2f min=%.2f", carriedHorizontal.Magnitude, minCarrySpeed)
 		)
-		clearChainMomentum()
+		clearChainMomentum("landing_slide_resume_speed_low")
 		return false
 	end
 
 	local projectedCarry = projectOntoPlane(carriedHorizontal, groundInfo.normal)
 	if projectedCarry.Magnitude <= MIN_MOVE_MAGNITUDE then
 		debugLog("landing_slide_resume_blocked", "Landing slide resume blocked: projected carry too small.")
-		clearChainMomentum()
+		clearChainMomentum("landing_slide_resume_projected_low")
 		return false
 	end
 
@@ -1244,7 +1365,7 @@ local function bindCharacter(character: Model)
 
 	clearMotion()
 	clearLandingMomentum()
-	clearChainMomentum()
+	clearChainMomentum("character_bound")
 	clearLowGravity()
 	sprintHeld = false
 	table.clear(slideHeldKeyCodes)
@@ -1271,7 +1392,7 @@ local function bindCharacter(character: Model)
 			connect(characterConnections, humanoid.Died, function()
 				clearMotion()
 				clearLandingMomentum()
-				clearChainMomentum()
+				clearChainMomentum("humanoid_died")
 				clearLowGravity()
 				resetJumpTracking()
 			end)
@@ -1286,7 +1407,7 @@ local function bindCharacter(character: Model)
 		if parent == nil and currentCharacter == character then
 			clearMotion()
 			clearLandingMomentum()
-			clearChainMomentum()
+			clearChainMomentum("character_removed")
 			clearLowGravity()
 			resetJumpTracking()
 			currentCharacter = nil
@@ -1302,7 +1423,7 @@ local function updateMovement(dt: number)
 	if not character or not humanoid or not root then
 		clearMotion()
 		clearLandingMomentum()
-		clearChainMomentum()
+		clearChainMomentum("missing_character")
 		clearLowGravity()
 		wasGrounded = false
 		return
@@ -1311,7 +1432,7 @@ local function updateMovement(dt: number)
 	if humanoid.Health <= 0 then
 		clearMotion()
 		clearLandingMomentum()
-		clearChainMomentum()
+		clearChainMomentum("humanoid_dead")
 		clearLowGravity()
 		wasGrounded = false
 		return
@@ -1324,11 +1445,12 @@ local function updateMovement(dt: number)
 	if isMovementSuppressed() then
 		clearMotion()
 		clearLandingMomentum()
-		clearChainMomentum()
+		clearChainMomentum("movement_suppressed")
 		setLowGravityEnabled(root, false)
 		return
 	end
 
+	syncHeldSprintState()
 	updateLowGravity(humanoid, root, groundInfo)
 	if justLanded then
 		tryStartLandingSlide(humanoid, root, groundInfo, now)
@@ -1360,7 +1482,13 @@ local function updateMovement(dt: number)
 						debugSlideEnd("lost_ground", string.format("duration=%.2f launched_from_edge=true", timeWithoutGround))
 					else
 						debugSlideEnd("lost_ground", string.format("duration=%.2f", timeWithoutGround))
-						clearChainMomentum()
+						if activeMotion.chainMomentum == true then
+							if chainMomentum then
+								chainMomentum.lastAirborneAt = now
+							end
+						else
+							clearChainMomentum("slide_lost_ground")
+						end
 					end
 					clearMotion()
 				else
@@ -1388,23 +1516,60 @@ local function updateMovement(dt: number)
 
 			if activeMotion and isSlideStateBlocked(humanoid) then
 				debugSlideEnd("blocked_state", "humanoid state no longer allows sliding.")
-				clearChainMomentum()
+				clearChainMomentum("slide_blocked_state")
 				clearMotion()
 			elseif activeMotion and activeMotion.holdEnabled == true
 				and now >= (activeMotion.minEndsAt or activeMotion.endsAt)
 				and not isSlideInputHeld()
 			then
 				debugSlideEnd("input_released", "slide input released after minimum duration.")
-				clearChainMomentum()
+				clearChainMomentum("slide_input_released")
 				clearMotion()
 			elseif activeMotion then
 				local projectedDirection = projectOntoPlane(activeMotion.direction, slideGroundInfo.normal)
 				if projectedDirection.Magnitude <= MIN_MOVE_MAGNITUDE then
 					debugSlideEnd("blocked_state", "slope projection became invalid.")
-					clearChainMomentum()
+					clearChainMomentum("slide_projection_invalid")
 					clearMotion()
 				else
 					activeMotion.direction = projectedDirection.Unit
+					local slideInput = getCurrentMoveIntent(humanoid)
+					if slideInput.Magnitude > MIN_MOVE_MAGNITUDE then
+						local projectedMoveDirection = projectOntoPlane(slideInput, slideGroundInfo.normal)
+						if projectedMoveDirection.Magnitude > MIN_MOVE_MAGNITUDE then
+							local oldDirection = activeMotion.direction
+							local targetDirection = projectedMoveDirection.Unit
+							local steerStrength = math.max(0, tonumber(MovementConfig.SlideSteerStrength) or 0.42)
+							local steerResponsiveness = math.max(0, tonumber(MovementConfig.SlideSteerResponsiveness) or 0.16)
+							local maxTurnRate = math.max(0, tonumber(MovementConfig.SlideMaxTurnRate) or 7.5)
+							local alpha = math.clamp(steerResponsiveness * dt * 60, 0, 1) * steerStrength
+							alpha = math.min(alpha, math.clamp(maxTurnRate * dt, 0, 1))
+							if oldDirection:Dot(targetDirection) < -0.35 then
+								alpha *= 0.35
+							end
+
+							local steeredDirection = oldDirection:Lerp(targetDirection, alpha)
+							if steeredDirection.Magnitude > MIN_VECTOR_MAGNITUDE then
+								activeMotion.direction = steeredDirection.Unit
+								debugLog(
+									"slide_steer",
+									string.format(
+										"slide_steer inputDir=(%.2f, %.2f, %.2f) oldDir=(%.2f, %.2f, %.2f) newDir=(%.2f, %.2f, %.2f) speed=%.2f",
+										targetDirection.X,
+										targetDirection.Y,
+										targetDirection.Z,
+										oldDirection.X,
+										oldDirection.Y,
+										oldDirection.Z,
+										activeMotion.direction.X,
+										activeMotion.direction.Y,
+										activeMotion.direction.Z,
+										activeMotion.speed
+									)
+								)
+							end
+						end
+					end
 					local currentIsSlope = isAutoSlideSlope(slideGroundInfo)
 					if activeMotion.lastWasOnSlope == true and not currentIsSlope and not activeMotion.surfaceTransitionUntil then
 						activeMotion.surfaceTransitionUntil = now + math.max(0, tonumber(MovementConfig.SlideSurfaceTransitionGrace) or 0.2)
@@ -1417,6 +1582,7 @@ local function updateMovement(dt: number)
 					end
 
 					local downhillDot = 0
+					local slopeAccelerationApplied = 0
 					if MovementConfig.SlopeSlideEnabled == true then
 						local downhillDirection = getSlopeDownhillDirection(slideGroundInfo.normal)
 						if downhillDirection then
@@ -1425,13 +1591,15 @@ local function updateMovement(dt: number)
 					end
 
 					if downhillDot > 0.05 then
-						local acceleration = math.max(0, tonumber(MovementConfig.SlopeAcceleration) or 35)
-						local multiplier = math.max(0, tonumber(MovementConfig.DownhillSpeedGainMultiplier) or 1)
-						activeMotion.speed += acceleration * downhillDot * multiplier * dt
+						local acceleration = math.max(0, tonumber(MovementConfig.SlopeAcceleration) or 22)
+						local multiplier = math.max(0, tonumber(MovementConfig.DownhillSpeedGainMultiplier) or 0.65)
+						slopeAccelerationApplied = acceleration * downhillDot * multiplier * dt
+						activeMotion.speed += slopeAccelerationApplied
 					elseif downhillDot < -0.05 then
 						local deceleration = math.max(0, tonumber(MovementConfig.UphillDeceleration) or 18)
 						local multiplier = math.max(0, tonumber(MovementConfig.UphillSlowdownMultiplier) or 1)
-						activeMotion.speed -= deceleration * -downhillDot * multiplier * dt
+						slopeAccelerationApplied = -deceleration * -downhillDot * multiplier * dt
+						activeMotion.speed += slopeAccelerationApplied
 					else
 						local inTransitionGrace = activeMotion.surfaceTransitionUntil ~= nil and now <= activeMotion.surfaceTransitionUntil
 						local configuredFriction = tonumber(MovementConfig.FlatSlideFriction)
@@ -1441,13 +1609,22 @@ local function updateMovement(dt: number)
 						local friction = math.clamp(configuredFriction or tonumber(MovementConfig.SlideFriction) or 0.999, 0.01, 1)
 						activeMotion.speed *= friction ^ (dt * 60)
 					end
+					debugLog(
+						"slide_accel",
+						string.format(
+							"slide_accel downhillDot=%.2f slopeAccelerationApplied=%.3f speed=%.2f",
+							downhillDot,
+							slopeAccelerationApplied,
+							activeMotion.speed
+						)
+					)
 
 					local slideSpeedLimit = getSlideSpeedLimit(activeMotion.chainMomentum == true)
 					activeMotion.speed = math.clamp(activeMotion.speed, 0, slideSpeedLimit)
 					local minSlideEndSpeed = math.max(0, tonumber(MovementConfig.MinSlideEndSpeed) or 3)
 					if now - activeMotion.startedAt >= SLIDE_MIN_END_GRACE and activeMotion.speed <= minSlideEndSpeed then
 						debugSlideEnd("speed_low", string.format("speed=%.2f min=%.2f", activeMotion.speed, minSlideEndSpeed))
-						clearChainMomentum()
+						clearChainMomentum("speed_low")
 						clearMotion()
 					else
 						local desiredVelocity = activeMotion.direction * activeMotion.speed
@@ -1463,6 +1640,7 @@ local function updateMovement(dt: number)
 						end
 
 						root.AssemblyLinearVelocity = appliedVelocity
+						faceMovementDirection(root, appliedVelocity, dt, tonumber(MovementConfig.SlideFaceTurnSpeed) or 14, "slide")
 						activeMotion.lastSlideVelocity = appliedVelocity
 						activeMotion.lastGroundNormal = slideGroundInfo.normal
 						activeMotion.lastSlopeAngle = slideGroundInfo.slopeAngle
@@ -1498,7 +1676,7 @@ local function updateMovement(dt: number)
 		if activeMotion and now >= activeMotion.endsAt then
 			if activeMotion.kind == "slide" then
 				debugSlideEnd("hard_max", "hard max duration.")
-				clearChainMomentum()
+				clearChainMomentum("slide_hard_max")
 			end
 			clearMotion()
 		end
@@ -1508,21 +1686,24 @@ local function updateMovement(dt: number)
 		end
 	end
 
-	humanoid.AutoRotate = true
 	humanoid.CameraOffset = Vector3.zero
 
 	if groundInfo.isGrounded and chainMomentum and now > landingSlideResumeUntil then
-		clearChainMomentum()
+		clearChainMomentum("landed_without_slide")
 	end
 
 	if groundInfo.isGrounded then
+		humanoid.AutoRotate = true
+		local moveIntent = getCurrentMoveIntent(humanoid)
+		applyHeldMovementIntent(humanoid, moveIntent)
 		local walkSpeed = getBaseWalkSpeed()
-		if sprintHeld and humanoid.MoveDirection.Magnitude >= MIN_MOVE_MAGNITUDE then
+		if sprintHeld and moveIntent.Magnitude >= MIN_MOVE_MAGNITUDE then
 			walkSpeed *= getSprintMultiplier()
 		end
 		humanoid.WalkSpeed = walkSpeed
 		applyLandingMomentum(root, dt, now)
 	else
+		humanoid.AutoRotate = isAirStateBlocked(humanoid)
 		applyAirMomentum(humanoid, root, dt)
 	end
 end
@@ -1632,7 +1813,7 @@ connect(connections, RunService.Heartbeat, updateMovement)
 connect(connections, script.Destroying, function()
 	clearMotion()
 	clearLandingMomentum()
-	clearChainMomentum()
+	clearChainMomentum("script_destroying")
 	clearLowGravity()
 	sprintHeld = false
 	table.clear(slideHeldKeyCodes)

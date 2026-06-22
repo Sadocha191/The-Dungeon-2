@@ -3,12 +3,15 @@ local ContextActionService = game:GetService("ContextActionService")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
-
-local upgradesGui = playerGui:WaitForChild("UpgradesGUI")
-local upgradesMain = upgradesGui:WaitForChild("Main")
+local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
+local ModalUiState = require(moduleFolder:WaitForChild("ModalUiState"))
 
 local DISTANCE = 20
 local HEIGHT = 2.5
@@ -31,6 +34,8 @@ local frozenCFrame: CFrame? = nil
 local touchLookDelta = Vector2.zero
 local lastTouchPanTranslation = Vector2.zero
 local movementLocked = false
+local ignoreLookDeltaUntil = 0
+local lookInputBlockedLastFrame = false
 
 local function getHRP(): BasePart?
 	local char = player.Character
@@ -60,55 +65,8 @@ local function getHumanoid(): Humanoid?
 	return nil
 end
 
-local function isPauseMenuOpen(): boolean
-	local pauseGui = playerGui:FindFirstChild("Pause")
-	if not pauseGui or not pauseGui:IsA("ScreenGui") then
-		return false
-	end
-
-	local overlay = pauseGui:FindFirstChild("MenuOverlay")
-	local menuOpen = pauseGui:GetAttribute("MenuOpen") == true
-	return menuOpen or (overlay and overlay:IsA("GuiObject") and overlay.Visible) == true
-end
-
-local function isDailyMissionsOpen(): boolean
-	local dailyMissionsGui = playerGui:FindFirstChild("DailyMissions")
-	if not dailyMissionsGui or not dailyMissionsGui:IsA("ScreenGui") then
-		return false
-	end
-
-	return dailyMissionsGui:GetAttribute("BoardShown") == true
-end
-
-local function isChestRewardOpen(): boolean
-	local chestRewardGui = playerGui:FindFirstChild("ChestRewardGui")
-	return chestRewardGui ~= nil and chestRewardGui:IsA("ScreenGui") and chestRewardGui.Enabled
-end
-
 local function isBlockingUIOpen(): boolean
-	if upgradesGui.Enabled and upgradesMain.Visible then
-		return true
-	end
-
-	if isDailyMissionsOpen() then
-		return true
-	end
-
-	local missionSummary = playerGui:FindFirstChild("MissionSummary")
-	if missionSummary and missionSummary:IsA("ScreenGui") and missionSummary.Enabled then
-		return true
-	end
-
-	local ekeyMenu = playerGui:FindFirstChild("EKeyMenu")
-	if ekeyMenu and ekeyMenu:IsA("ScreenGui") and ekeyMenu.Enabled then
-		return true
-	end
-
-	if isChestRewardOpen() then
-		return true
-	end
-
-	return isPauseMenuOpen()
+	return ModalUiState.IsBlockingUiOpen(playerGui)
 end
 
 local function shouldReleaseCursor(): boolean
@@ -217,7 +175,18 @@ local function orbitStep(dt: number)
 
 	local blockingUiOpen = isBlockingUIOpen()
 	local releaseCursor = shouldReleaseCursor()
+	local now = os.clock()
+	local lookInputBlocked = blockingUiOpen or releaseCursor
 	setMovementLocked(blockingUiOpen)
+
+	if lookInputBlocked ~= lookInputBlockedLastFrame then
+		touchLookDelta = Vector2.zero
+		lastTouchPanTranslation = Vector2.zero
+		if not lookInputBlocked then
+			ignoreLookDeltaUntil = now + 0.12
+		end
+		lookInputBlockedLastFrame = lookInputBlocked
+	end
 
 	camera.CameraType = Enum.CameraType.Scriptable
 
@@ -245,7 +214,8 @@ local function orbitStep(dt: number)
 
 	rayParams.FilterDescendantsInstances = { player.Character }
 
-	local mouseDelta = releaseCursor and Vector2.zero or UIS:GetMouseDelta()
+	local suppressLookDelta = releaseCursor or now < ignoreLookDeltaUntil
+	local mouseDelta = suppressLookDelta and Vector2.zero or UIS:GetMouseDelta()
 	local touchDelta = touchLookDelta
 	touchLookDelta = Vector2.zero
 	targetYaw -= mouseDelta.X * MOUSE_SENSITIVITY
