@@ -20,6 +20,7 @@ local PlayerStateStore = require(serverModules:WaitForChild("PlayerStateStore"))
 local PlayerData = require(serverModules:WaitForChild("PlayerData"))
 local CraftingService = require(serverModules:WaitForChild("CraftingService"))
 local Levels = require(replicatedModules:WaitForChild("Levels"))
+local SpellDefs = require(replicatedModules:WaitForChild("SpellDefinitions"))
 
 local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
 if not remoteEvents then
@@ -181,6 +182,20 @@ local function buildUnlockedSpells(player: Player): {string}
 	end
 	table.sort(out)
 	return out
+end
+
+local function buildSpellLoadout(player: Player): {string}
+	if PlayerData.ResolveSpellLoadout then
+		local resolved = PlayerData.ResolveSpellLoadout(player)
+		if typeof(resolved) == "table" and #resolved > 0 then
+			return resolved
+		end
+	end
+	local data = PlayerData.Get(player)
+	if SpellDefs and SpellDefs.BuildDefaultLoadout then
+		return SpellDefs.BuildDefaultLoadout(data.spellsUnlocked or {})
+	end
+	return {}
 end
 
 local function cloneNumberMap(src: any): {[string]: number}?
@@ -403,6 +418,7 @@ local function buildTeleportDataForLeader(leader: Player, runMode: string, party
 		StarterWeaponName = weaponName,
 		StarterWeaponEntry = compactWeaponEntry(weaponEntry),
 		UnlockedSpells = buildUnlockedSpells(leader),
+		SpellLoadout = buildSpellLoadout(leader),
 		RunMode = runMode,
 		PartyId = partyId,
 		PartyLeaderUserId = leaderUserId,
@@ -421,11 +437,15 @@ local function tryTeleport(players: {Player}, placeId: number, tpData: any)
 
 	local weaponByUserId: {[string]: any} = {}
 	local weaponNameByUserId: {[string]: string} = {}
+	local unlockedSpellsByUserId: {[string]: any} = {}
+	local spellLoadoutByUserId: {[string]: any} = {}
 	for _, p in ipairs(players) do
 		local st = PlayerStateStore.Get(p) or PlayerStateStore.Load(p)
 		local weaponName, weaponEntry = resolveWeaponSelection(p, st)
 		local uidKey = tostring(p.UserId)
 		syncProfileLoadout(p, weaponName, weaponEntry)
+		unlockedSpellsByUserId[uidKey] = buildUnlockedSpells(p)
+		spellLoadoutByUserId[uidKey] = buildSpellLoadout(p)
 		weaponByUserId[uidKey] = {
 			StarterWeaponName = weaponName,
 			StarterWeaponEntry = compactWeaponEntry(weaponEntry),
@@ -436,6 +456,8 @@ local function tryTeleport(players: {Player}, placeId: number, tpData: any)
 	end
 	tpData.WeaponByUserId = weaponByUserId
 	tpData.WeaponNameByUserId = weaponNameByUserId
+	tpData.UnlockedSpellsByUserId = unlockedSpellsByUserId
+	tpData.SpellLoadoutByUserId = spellLoadoutByUserId
 
 	for _, p in ipairs(players) do
 		if PlayerData.Save then

@@ -2,6 +2,212 @@
 
 This file tracks AI-made repo changes and the intended rollback path.
 
+## 2026-06-27 - Spell presentation and gameplay VFX pass
+
+### Scope
+
+- Added a shared presentation schema to spell definitions: icon glyph, art motif, lore copy, gameplay copy, visual direction, frame style, Witch spellbook accent, Codex category, fusion info, and VFX profile.
+- Authored unique presentation profiles for all 40 base spells and 7 combination spells in `Four Peaks`.
+- Extended Witch spellbook payloads, Inventory spell details, and Codex entries to consume presentation data from existing `SpellDefinitions` instead of duplicating copy in UI code.
+- Extended Level runtime spell stats and `SpellVFXEvent` payloads with compact `visualProfile` data used only for local VFX rendering.
+- Added client-side cast sigils and spell-profile accent geometry for projectiles, orbits, novas, zones, beams, and impacts without adding new remotes or per-spell loops.
+- Kept existing unlock, loadout, upgrade, combination, Codex, RemoteEvent, and persistent data names unchanged.
+
+### Files updated
+
+- `Four Peaks/ReplicatedStorage/ModuleScripts/SpellDefinitions.lua`
+- `Four Peaks/ReplicatedStorage/ModuleScripts/CodexDefinitions.lua`
+- `Four Peaks/ServerScriptService/Script/SpellService.lua`
+- `Four Peaks/ServerScriptService/Script/InventorySnapshot.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/WitchShopClient.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/WitchShopClient.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/InventoryController.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/InventoryController.lua`
+- `Level/ReplicatedStorage/ModuleScripts/SpellDefinitions.lua`
+- `Level/ReplicatedStorage/ModuleScript/SpellDefinitions.lua`
+- `Level/ServerScriptService/Script/SpellService.lua`
+- `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SpellVFXClient.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Four Peaks`: `game.ReplicatedStorage.ModuleScripts.SpellDefinitions`
+- `Four Peaks`: `game.ReplicatedStorage.ModuleScripts.CodexDefinitions`
+- `Four Peaks`: `game.ServerScriptService.Script.SpellService`
+- `Four Peaks`: `game.ServerScriptService.Script.InventorySnapshot`
+- `Four Peaks`: `game.StarterPlayer.StarterPlayerScripts.WitchShopClient`
+- `Four Peaks`: `game.StarterPlayer.StarterPlayerScripts.InventoryController`
+- `Four Peaks`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.WitchShopClient`
+- `Four Peaks`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.InventoryController`
+- `Level`: `game.ReplicatedStorage.ModuleScripts.SpellDefinitions`
+- `Level`: `game.ReplicatedStorage.ModuleScript.SpellDefinitions`
+- `Level`: `game.ServerScriptService.Script.SpellService`
+- `Level`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.SpellVFXClient`
+
+### Verification
+
+- Ran Studio `loadstring(...)` compile checks for all changed Four Peaks and Level Lua sources; all compiled successfully.
+- Fresh-required temporary Four Peaks `SpellDefinitions`: 47 spells, 80 shop products, all spells had presentation fields, and icon glyphs had no duplicates.
+- Verified `FireBolt_Standard` shop product carries icon/lore presentation data.
+- Fresh-required temporary Four Peaks `CodexDefinitions`: spell and combination entries build from presentation data, including `SolarFlare` fusion art motif.
+- Synced changed Four Peaks and Level live Studio objects through Roblox MCP.
+- Fresh-required temporary Level `SpellDefinitions`: 47 spells and runtime `visualProfile` was present for `FireBolt`.
+- Full manual Play verification of moment-to-moment VFX density, Witch panel readability at every viewport size, and multiplayer Codex browsing is still recommended.
+
+### Risks
+
+- UI art is procedural Roblox UI/parts, not final uploaded illustration assets.
+- Level uses the same presentation schema and generated runtime visual profiles, while the richer authored copy currently lives in the Four Peaks definition used by lobby UI/Codex.
+- Added VFX accent parts are short-lived and shared by existing events, but very dense combat should still be profiled in a full run.
+
+### Rollback
+
+- Revert the files listed above and resync the same live Studio objects.
+- If only gameplay VFX needs rollback, revert `Level/ServerScriptService/Script/SpellService.lua`, both Level `SpellDefinitions.lua` copies, and `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SpellVFXClient.lua`.
+
+## 2026-06-27 - Spellbook, spell loadout, combinations, and codex
+
+### Scope
+
+- Extended shared spell definitions with configurable spell loadout slot limit, combination metadata, stat-line helpers, upgrade-level summaries, loadout validation, and element damage summaries.
+- Added lobby Codex definitions built from existing spell, combination, weapon, enemy, boss, elite, and material config IDs.
+- Added persistent `PlayerData.spellLoadout`, `spellLoadoutConfigured`, and `Codex` fields in the existing `GlobalPlayerProgress_v1` profile, with old-profile migration and no new DataStore.
+- Extended the existing Witch shop UI into a searchable, filtered, paged spellbook that shows base stats, all upgrade levels, and possible combinations.
+- Added Spell Loadout and Codex tabs to the existing lobby Inventory UI, using the existing `RF_GetInventorySnapshot` and `InventoryAction` remotes.
+- Added server-side spell loadout validation for equip, unequip, reorder, and set actions.
+- Passed per-player unlocked spells and selected spell loadout through existing TeleportData from Four Peaks to Level.
+- Updated Level to apply `SpellLoadoutCSV`, offer only selected loadout spells, and offer combination spells only after all required base spells reach max level.
+- Added Codex discovery writes for spell unlocks, combination picks, defeated enemies, elites, bosses, and dropped materials.
+- Kept existing RemoteEvent/RemoteFunction names and persistent profile store names unchanged.
+
+### Files updated
+
+- `Four Peaks/ReplicatedStorage/ModuleScripts/SpellDefinitions.lua`
+- `Four Peaks/ReplicatedStorage/ModuleScripts/CodexDefinitions.lua`
+- `Four Peaks/ServerScriptService/ModuleScript/PlayerData.lua`
+- `Four Peaks/ServerScriptService/ModuleScript/PlayerStateStore.lua`
+- `Four Peaks/ServerScriptService/Script/SpellService.lua`
+- `Four Peaks/ServerScriptService/Script/InventorySnapshot.lua`
+- `Four Peaks/ServerScriptService/Script/InventoryService.lua`
+- `Four Peaks/ServerScriptService/Script/PortalToDungeon.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/WitchShopClient.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/InventoryController.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/WitchShopClient.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/InventoryController.lua`
+- `Level/ReplicatedStorage/ModuleScripts/SpellDefinitions.lua`
+- `Level/ReplicatedStorage/ModuleScript/SpellDefinitions.lua`
+- `Level/ServerScriptService/ModuleScript/PlayerData.lua`
+- `Level/ServerScriptService/Script/ReceiveTeleportLoadout.lua`
+- `Level/ServerScriptService/Script/ProgressService.lua`
+- `Level/ServerScriptService/Script/Model/WaveController.lua`
+- `Level/StarterGUI/UpgradesGUI/UpgradesClient.lua`
+- `Level/StarterGUI/UpgradesGUI.ScreenGui/UpgradesClient.localscript.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Four Peaks`: `game.ReplicatedStorage.ModuleScripts.SpellDefinitions`
+- `Four Peaks`: `game.ReplicatedStorage.ModuleScripts.CodexDefinitions`
+- `Four Peaks`: `game.ServerScriptService.ModuleScript.PlayerData`
+- `Four Peaks`: `game.ServerScriptService.ModuleScript.PlayerStateStore`
+- `Four Peaks`: `game.ServerScriptService.Script.SpellService`
+- `Four Peaks`: `game.ServerScriptService.Script.InventorySnapshot`
+- `Four Peaks`: `game.ServerScriptService.Script.InventoryService`
+- `Four Peaks`: `game.ServerScriptService.Script.PortalToDungeon`
+- `Four Peaks`: `game.StarterPlayer.StarterPlayerScripts.WitchShopClient`
+- `Four Peaks`: `game.StarterPlayer.StarterPlayerScripts.InventoryController`
+- `Four Peaks`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.WitchShopClient`
+- `Four Peaks`: `game.StarterPlayer.StarterPlayerScripts.LocalScript.InventoryController`
+- `Level`: `game.ReplicatedStorage.ModuleScripts.SpellDefinitions`
+- `Level`: `game.ReplicatedStorage.ModuleScript.SpellDefinitions`
+- `Level`: `game.ServerScriptService.ModuleScript.PlayerData`
+- `Level`: `game.ServerScriptService.Script.ReceiveTeleportLoadout`
+- `Level`: `game.ServerScriptService.Script.ProgressService`
+- `Level`: `game.ServerScriptService.Script.Model.WaveController`
+- `Level`: `game.StarterGui.UpgradesGUI.UpgradesClient`
+
+### Verification
+
+- Confirmed connected Studio instances and switched active Studio between `Four Peaks` and `Level` for targeted sync and checks.
+- Synced the files listed above into live Studio through local read-only HTTP and Roblox MCP.
+- Ran Studio `loadstring(...)` compile checks while syncing each changed live source; all Four Peaks sources compiled successfully.
+- Ran Studio `loadstring(...)` compile checks while syncing Level server/module sources and `StarterGui.UpgradesGUI.UpgradesClient`; all compiled successfully.
+- Verified Four Peaks `SpellDefinitions` in Studio: `GetLoadoutLimit()` returned `6`, locked `SolarBeam_Standard` was rejected from loadout validation, duplicate family variants were deduped, `WaterShard` normalized to `WaterShard_Standard`, `FireTornado` was not combination-ready at `Tornado` level 5, and became ready when both `FireBolt` and `Tornado` were level 6.
+- Verified Four Peaks `CodexDefinitions` built `159` entries and loadout element damage summary returned three buckets for a three-element loadout.
+- Verified Level `SpellDefinitions` with the same loadout and combination checks; results matched Four Peaks.
+- Ran `git diff --check -- "Four Peaks" "Level" CHANGELOG_AI.md`; no whitespace errors were reported, only existing LF/CRLF conversion warnings.
+- Checked Level Studio Output after sync; no new relevant errors were present.
+- Checked Four Peaks Studio Output after sync; no new relevant errors from the changed scripts were present. Existing bridge configuration messages and a DataStore queue warning were present.
+- Full interactive UI, multi-client party teleport, actual level-up combination offer selection, and live Codex discovery persistence still need a manual Play/multiplayer pass.
+
+### Risks
+
+- The Codex enemy, elite, and boss entries currently use stable mob type IDs from existing material definitions; new encounter families need matching definitions to display friendly Codex text.
+- Combination offers depend on spell attribute levels reaching each spell definition's `maxLevel`; any external script that bypasses those attributes can also bypass eligibility visibility.
+- Multi-client party teleport and UI refresh should still get a manual multiplayer Studio pass after this filesystem implementation.
+
+### Rollback
+
+- Revert the files listed above.
+- Remove `CodexDefinitions` from `ReplicatedStorage.ModuleScripts`.
+- Restore previous `SpellDefinitions`, `PlayerData`, Inventory, Witch shop, teleport, and Level progress scripts from git.
+- Existing profiles with new `spellLoadout`, `spellLoadoutConfigured`, or `Codex` fields can be left in DataStore; older code ignores those extra fields.
+
+## 2026-06-27 - Four Peaks lobby NPC outlines and player nameplates
+
+### Scope
+
+- Added a local Four Peaks NPC outline system using `Highlight` objects.
+- Highlight candidates are limited to top-level models under `Workspace.NPCs` that are known interactive lobby NPCs, have `TutorialNpcId`, or contain a `ProximityPrompt`.
+- The NPC outline is white, keeps fill invisible, fades in/out smoothly, supports multiple nearby NPCs, and uses one client render loop rather than one loop per NPC.
+- Added lobby player nameplates using `BillboardGui` above each character head, with display name above `Lv. <level>`.
+- Exposed the existing persistent `PlayerData.level` as the replicated `AccountLevel` player attribute through the existing `LobbyProgress` flow.
+- Added one lobby presentation config module for the NPC outline range and nameplate max distance.
+- Did not change `Level/`, persistent data structure, DataStores, RemoteEvents, RemoteFunctions, or existing remote names.
+
+### Files updated
+
+- `Four Peaks/ReplicatedStorage/ModuleScripts/LobbyPresentationConfig.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/LobbyNpcHighlights.lua`
+- `Four Peaks/StarterPlayer/StarterPlayerScripts/LobbyPlayerNameplates.lua`
+- `Four Peaks/ServerScriptService/Script/LobbyProgress.lua`
+- `CHANGELOG_AI.md`
+
+### Live Studio objects updated
+
+- `Four Peaks`: `game.ReplicatedStorage.ModuleScripts.LobbyPresentationConfig`
+- `Four Peaks`: `game.StarterPlayer.StarterPlayerScripts.LobbyNpcHighlights`
+- `Four Peaks`: `game.StarterPlayer.StarterPlayerScripts.LobbyPlayerNameplates`
+- `Four Peaks`: `game.ServerScriptService.Script.LobbyProgress`
+
+### Verification
+
+- Confirmed and re-set active Studio to `Four Peaks` before inspection and live sync.
+- Synced the four source files above into active Studio through Roblox MCP.
+- Ran Studio `loadstring(...)` compile checks for `LobbyPresentationConfig`, `LobbyNpcHighlights`, `LobbyPlayerNameplates`, and `LobbyProgress`; all returned `ok`.
+- In Play mode, verified existing interactive models `Blacksmith`, `Witch`, `Knight`, `CharacterCreatorNPC`, and `WeaponBannerNPC` received local `LobbyNpcHighlight`; active Studio did not currently include live `Workspace.NPCs.MissionNPC`.
+- Verified non-interactive `Workspace.NPCs.Rig` duplicates and `Workspace.NPCs.grzyb` did not receive highlights.
+- In Play mode, added two temporary prompt-based NPC models under `Workspace.NPCs`; both were highlighted at close range, with white outline and `FillTransparency = 1`.
+- Moved both temporary NPCs far outside range; both faded/disabled, with far outline transparency reaching `1`.
+- Verified one `LobbyPlayerNameplate` on the local player's head, name above level, `MaxDistance = 85`, and level text `Lv. 72` sourced from `AccountLevel`.
+- Verified a local `AccountLevel` attribute change from `72` to `79` updated the level label to `Lv. 79`, then restored to `Lv. 72`.
+- Triggered `LoadCharacter()` in Play mode; the respawned character had exactly one `LobbyPlayerNameplate`, with no duplicate BillboardGui.
+- Verified server-side `AccountLevel` returned to persistent `PlayerData.level = 72` through `LobbyProgress`.
+- Checked client and server logs for relevant warnings/errors from the new lobby scripts; none were present.
+- Ran `git diff --check` on `Four Peaks` and `CHANGELOG_AI.md`; only an existing LF/CRLF warning for `LobbyProgress.lua` was reported.
+- A true second-player join could not be spawned from the current single-client MCP Play session; the new client code does bind `Players.PlayerAdded` and was verified for existing-player setup in Play mode.
+
+### Risks
+
+- New prompt-based NPCs are detected automatically, but new interactive NPCs without a prompt, `TutorialNpcId`, or allowlisted name need one of those markers to receive the outline.
+- Multi-client join visibility should still get one manual multiplayer Studio pass when a multi-client test session is available.
+
+### Rollback
+
+- Remove `LobbyPresentationConfig`, `LobbyNpcHighlights`, and `LobbyPlayerNameplates` from live Studio and the repo.
+- Restore the previous `LobbyProgress` source without the `AccountLevel` attribute update.
+- Revert the files listed above and this changelog entry.
+
 ## 2026-06-22 - Poziom signed enemy root ground offset
 
 ### Scope

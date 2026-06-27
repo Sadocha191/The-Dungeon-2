@@ -99,6 +99,21 @@ do
 	end
 end
 
+local SpellDefs = {}
+do
+	local module = findModule(ReplicatedStorage, "SpellDefinitions")
+	if module then
+		local ok, result = pcall(require, module)
+		if ok and result then
+			SpellDefs = result
+		else
+			warn("[InventoryController] Failed to load SpellDefinitions")
+		end
+	else
+		warn("[InventoryController] Missing SpellDefinitions module")
+	end
+end
+
 local function hexToColor3(hex)
 	hex = tostring(hex or "")
 	hex = hex:gsub("#", "")
@@ -119,6 +134,13 @@ local function rarityColor(rarity)
 	local key = tostring(rarity or "")
 	local hex = (WeaponConfigs.RarityColors and WeaponConfigs.RarityColors[key]) or extraRarityColors[key]
 	return hexToColor3(hex or "#B0B0B0")
+end
+
+local function spellElementColor(element)
+	if SpellDefs.GetElementColor then
+		return SpellDefs.GetElementColor(element)
+	end
+	return Color3.fromRGB(190, 120, 255)
 end
 
 local function blendColor(fromColor, toColor, alpha)
@@ -379,7 +401,7 @@ tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
 local function createTabButton(tabId, labelText, accentColor)
 	local button = Instance.new("TextButton")
 	button.Name = tabId .. "Tab"
-	button.Size = UDim2.new(0.25, -6, 1, 0)
+	button.Size = UDim2.fromOffset(118, 44)
 	button.BackgroundColor3 = Color3.fromRGB(20, 24, 32)
 	button.BackgroundTransparency = 0.04
 	button.BorderSizePixel = 0
@@ -410,6 +432,8 @@ local function createTabButton(tabId, labelText, accentColor)
 end
 
 createTabButton("Weapons", "Weapons", Color3.fromRGB(96, 165, 250))
+createTabButton("SpellLoadout", "Spell Loadout", Color3.fromRGB(190, 120, 255))
+createTabButton("Codex", "Codex", Color3.fromRGB(255, 204, 126))
 createTabButton("MineCache", "Mine Cache", Color3.fromRGB(88, 196, 139))
 createTabButton("MonsterLoot", "Monster Loot", Color3.fromRGB(233, 174, 94))
 createTabButton("ForgeStock", "Forge Stock", Color3.fromRGB(176, 135, 255))
@@ -567,6 +591,7 @@ itemName.Parent = detailsScroll
 local itemDesc = Instance.new("TextLabel")
 itemDesc.BackgroundTransparency = 1
 itemDesc.Size = UDim2.new(1, 0, 0, 34)
+itemDesc.AutomaticSize = Enum.AutomaticSize.Y
 itemDesc.Font = Enum.Font.Gotham
 itemDesc.TextSize = 12
 itemDesc.TextColor3 = Color3.fromRGB(190, 190, 190)
@@ -597,7 +622,8 @@ statLine.Parent = detailsScroll
 
 local bonusStats = Instance.new("TextLabel")
 bonusStats.BackgroundTransparency = 1
-bonusStats.Size = UDim2.new(1, 0, 0, 34)
+bonusStats.Size = UDim2.new(1, 0, 0, 52)
+bonusStats.AutomaticSize = Enum.AutomaticSize.Y
 bonusStats.Font = Enum.Font.Gotham
 bonusStats.TextSize = 12
 bonusStats.TextColor3 = Color3.fromRGB(190, 190, 190)
@@ -618,7 +644,8 @@ passiveTitle.Parent = detailsScroll
 
 local passiveDesc = Instance.new("TextLabel")
 passiveDesc.BackgroundTransparency = 1
-passiveDesc.Size = UDim2.new(1, 0, 0, 40)
+passiveDesc.Size = UDim2.new(1, 0, 0, 92)
+passiveDesc.AutomaticSize = Enum.AutomaticSize.Y
 passiveDesc.Font = Enum.Font.Gotham
 passiveDesc.TextSize = 12
 passiveDesc.TextColor3 = Color3.fromRGB(190, 190, 190)
@@ -639,7 +666,8 @@ abilityTitle.Parent = detailsScroll
 
 local abilityDesc = Instance.new("TextLabel")
 abilityDesc.BackgroundTransparency = 1
-abilityDesc.Size = UDim2.new(1, 0, 0, 40)
+abilityDesc.Size = UDim2.new(1, 0, 0, 72)
+abilityDesc.AutomaticSize = Enum.AutomaticSize.Y
 abilityDesc.Font = Enum.Font.Gotham
 abilityDesc.TextSize = 12
 abilityDesc.TextColor3 = Color3.fromRGB(190, 190, 190)
@@ -647,6 +675,36 @@ abilityDesc.TextXAlignment = Enum.TextXAlignment.Left
 abilityDesc.TextWrapped = true
 abilityDesc.Text = "-"
 abilityDesc.Parent = detailsScroll
+
+local detailActions = Instance.new("Frame")
+detailActions.BackgroundTransparency = 1
+detailActions.Size = UDim2.new(1, 0, 0, 34)
+detailActions.Visible = false
+detailActions.Parent = detailsScroll
+
+local detailActionsLayout = Instance.new("UIListLayout", detailActions)
+detailActionsLayout.FillDirection = Enum.FillDirection.Horizontal
+detailActionsLayout.Padding = UDim.new(0, 8)
+detailActionsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local function makeDetailActionButton(label)
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.new(0.33, -6, 1, 0)
+	button.BackgroundColor3 = Color3.fromRGB(36, 42, 54)
+	button.BorderSizePixel = 0
+	button.Font = Enum.Font.GothamBold
+	button.TextSize = 11
+	button.TextColor3 = Color3.fromRGB(236, 242, 250)
+	button.Text = label
+	button.Parent = detailActions
+	Instance.new("UICorner", button).CornerRadius = UDim.new(0, 8)
+	addHover(button, button.BackgroundColor3, Color3.fromRGB(48, 56, 72))
+	return button
+end
+
+local spellEquipBtn = makeDetailActionButton("Equip")
+local spellMoveUpBtn = makeDetailActionButton("Up")
+local spellMoveDownBtn = makeDetailActionButton("Down")
 
 local function updateDetailsCanvas()
 	task.defer(function()
@@ -761,6 +819,20 @@ local favoriteBtn = makeContextButton("Favorite")
 local infoBtn = makeContextButton("Weapon Info")
 
 local inventoryItems = {}
+local spellSnapshot = {
+	entries = {},
+	loadout = {},
+	maxSlots = 0,
+	damageSummary = {},
+	combinations = {},
+}
+local spellEntries = {}
+local codexSnapshot = {
+	categories = {},
+	entries = {},
+	counts = {},
+}
+local codexEntries = {}
 local currentEntries = {}
 local currentTab = "Weapons"
 local selectedEntryIdByTab = {}
@@ -804,6 +876,24 @@ local TAB_CONFIGS = {
 		accent = Color3.fromRGB(96, 165, 250),
 		placeholderName = "Select a weapon",
 		placeholderDesc = "Pick a weapon slot to see its details.",
+	},
+	SpellLoadout = {
+		label = "Spell Loadout",
+		countSuffix = "known",
+		detailsTitle = "Spell Details",
+		emptyText = "No spells unlocked yet.",
+		accent = Color3.fromRGB(190, 120, 255),
+		placeholderName = "Select a spell",
+		placeholderDesc = "Pick an unlocked spell to equip it for your next run.",
+	},
+	Codex = {
+		label = "Codex",
+		countSuffix = "entries",
+		detailsTitle = "Codex Entry",
+		emptyText = "No codex entries available.",
+		accent = Color3.fromRGB(255, 204, 126),
+		placeholderName = "Select an entry",
+		placeholderDesc = "Pick a discovered entry to inspect it.",
 	},
 	MineCache = {
 		label = "Mine Cache",
@@ -849,7 +939,7 @@ local TAB_CONFIGS = {
 	},
 }
 
-local TAB_ORDER = { "Weapons", "MineCache", "MonsterLoot", "ForgeStock" }
+local TAB_ORDER = { "Weapons", "SpellLoadout", "Codex", "MineCache", "MonsterLoot", "ForgeStock" }
 
 local function getTabConfig(tabId)
 	return TAB_CONFIGS[tabId] or TAB_CONFIGS.Weapons
@@ -883,8 +973,103 @@ local function buildResourceEntries(entries)
 	return built
 end
 
+local function buildSpellEntries(entries)
+	local built = {}
+	for _, entry in ipairs(entries or {}) do
+		if typeof(entry) == "table" and typeof(entry.id) == "string" and entry.id ~= "" then
+			table.insert(built, {
+				id = entry.id,
+				productId = entry.productId or entry.id,
+				familyId = entry.familyId,
+				displayName = entry.displayName or entry.name or entry.id,
+				rarity = entry.rarity or entry.baseQuality or "Spell",
+				element = entry.element or "Physical",
+				attackType = entry.attackType,
+				spellType = entry.spellType,
+				description = entry.description or "",
+				iconGlyph = entry.iconGlyph,
+				artMotif = entry.artMotif,
+				loreDescription = entry.loreDescription,
+				gameplayDescription = entry.gameplayDescription,
+				visualDirection = entry.visualDirection,
+				frameStyle = entry.frameStyle,
+				codexCategory = entry.codexCategory,
+				witchbookAccent = entry.witchbookAccent,
+				presentation = entry.presentation or {},
+				visualProfile = entry.visualProfile or {},
+				unlocked = entry.unlocked == true,
+				equipped = entry.equipped == true,
+				statLines = entry.statLines or {},
+				upgradeLevels = entry.upgradeLevels or {},
+				combinations = entry.combinations or {},
+			})
+		end
+	end
+	table.sort(built, function(a, b)
+		if a.equipped ~= b.equipped then
+			return a.equipped
+		end
+		if a.unlocked ~= b.unlocked then
+			return a.unlocked
+		end
+		local ea = SpellDefs.ELEMENTS and SpellDefs.ELEMENTS[a.element]
+		local eb = SpellDefs.ELEMENTS and SpellDefs.ELEMENTS[b.element]
+		local oa = ea and ea.order or 99
+		local ob = eb and eb.order or 99
+		if oa ~= ob then
+			return oa < ob
+		end
+		return tostring(a.displayName) < tostring(b.displayName)
+	end)
+	return built
+end
+
+local function buildCodexEntries(entries)
+	local built = {}
+	for _, entry in ipairs(entries or {}) do
+		if typeof(entry) == "table" and typeof(entry.id) == "string" and entry.id ~= "" then
+			table.insert(built, {
+				id = entry.id,
+				category = entry.category or "Codex",
+				displayName = entry.displayName or entry.id,
+				description = entry.description or "",
+				rarity = entry.rarity or (entry.discovered and "Discovered" or "Locked"),
+				discovered = entry.discovered == true,
+				seen = entry.seen == true,
+				element = entry.element,
+				tags = entry.tags or {},
+				iconText = entry.iconText,
+				artMotif = entry.artMotif,
+				loreDescription = entry.loreDescription,
+				gameplayDescription = entry.gameplayDescription,
+				visualDirection = entry.visualDirection,
+				frameStyle = entry.frameStyle,
+				witchbookAccent = entry.witchbookAccent,
+				presentation = entry.presentation or {},
+				ingredients = entry.ingredients or {},
+			})
+		end
+	end
+	table.sort(built, function(a, b)
+		if a.discovered ~= b.discovered then
+			return a.discovered
+		end
+		if tostring(a.category) ~= tostring(b.category) then
+			return tostring(a.category) < tostring(b.category)
+		end
+		return tostring(a.displayName) < tostring(b.displayName)
+	end)
+	return built
+end
+
 local function getEntriesForTab(tabId)
 	local config = getTabConfig(tabId)
+	if tabId == "SpellLoadout" then
+		return spellEntries
+	end
+	if tabId == "Codex" then
+		return codexEntries
+	end
 	if not config.resourceKey then
 		return inventoryItems
 	end
@@ -1092,6 +1277,7 @@ end
 
 
 local function applyWeaponDetails(item)
+	detailActions.Visible = false
 	local config = getTabConfig("Weapons")
 	detailsTitle.Text = config.detailsTitle
 
@@ -1158,6 +1344,7 @@ local function applyWeaponDetails(item)
 end
 
 local function applyResourceDetails(entry)
+	detailActions.Visible = false
 	local config = getTabConfig(currentTab)
 	detailsTitle.Text = config.detailsTitle
 
@@ -1205,9 +1392,205 @@ local function applyResourceDetails(entry)
 	updateDetailsCanvas()
 end
 
+local function summarizeUpgradeLevels(levels)
+	local rows = {}
+	for _, levelInfo in ipairs(levels or {}) do
+		local statLines = levelInfo.statLines or {}
+		local firstLine = statLines[1] or "scales core stats"
+		table.insert(rows, ("Lv.%s: %s"):format(tostring(levelInfo.level or "?"), firstLine))
+		if #rows >= 6 then
+			break
+		end
+	end
+	return #rows > 0 and table.concat(rows, "\n") or "-"
+end
+
+local function summarizeCombinations(combinations)
+	local rows = {}
+	for _, combo in ipairs(combinations or {}) do
+		local result = SpellDefs.GetSpell and SpellDefs.GetSpell(combo.resultId) or nil
+		local resultName = result and result.name or tostring(combo.resultId or "?")
+		local ingredientNames = {}
+		for _, ingredient in ipairs(combo.ingredients or {}) do
+			local def = SpellDefs.GetSpell and SpellDefs.GetSpell(ingredient) or nil
+			table.insert(ingredientNames, def and def.name or tostring(ingredient))
+		end
+		table.insert(rows, ("%s: %s"):format(resultName, table.concat(ingredientNames, " + ")))
+	end
+	return #rows > 0 and table.concat(rows, "\n") or "No known combinations."
+end
+
+local function summarizeElementDamage()
+	local rows = {}
+	for _, entry in ipairs(spellSnapshot.damageSummary or {}) do
+		table.insert(rows, ("%s %.1f"):format(tostring(entry.element or "?"), tonumber(entry.damage) or 0))
+	end
+	return #rows > 0 and table.concat(rows, " | ") or "-"
+end
+
+local function getPresentationField(entry, key, fallback)
+	if not entry then
+		return fallback
+	end
+	local value = entry[key]
+	if value ~= nil and value ~= "" then
+		return value
+	end
+	local presentation = entry.presentation
+	if typeof(presentation) == "table" then
+		value = presentation[key]
+		if value ~= nil and value ~= "" then
+			return value
+		end
+	end
+	return fallback
+end
+
+local function formatSpellPresentation(entry)
+	local lore = getPresentationField(entry, "loreDescription", nil)
+	local gameplay = getPresentationField(entry, "gameplayDescription", nil)
+	local visual = getPresentationField(entry, "visualDirection", nil)
+	local motif = getPresentationField(entry, "artMotif", nil)
+	local rows = {}
+	if lore then
+		table.insert(rows, ("Lore: %s"):format(lore))
+	end
+	if gameplay then
+		table.insert(rows, ("Gameplay: %s"):format(gameplay))
+	end
+	if motif then
+		table.insert(rows, ("Art: %s"):format(motif))
+	end
+	if visual then
+		table.insert(rows, ("VFX: %s"):format(visual))
+	end
+	return #rows > 0 and table.concat(rows, "\n") or nil
+end
+
+local function applySpellDetails(entry)
+	local config = getTabConfig("SpellLoadout")
+	detailsTitle.Text = config.detailsTitle
+	detailActions.Visible = entry ~= nil
+
+	if not entry then
+		itemName.Text = config.placeholderName
+		itemName.TextColor3 = Color3.fromRGB(245, 245, 245)
+		itemDesc.Text = config.placeholderDesc
+		infoLine.Text = ("Loadout: %d/%d selected"):format(#(spellSnapshot.loadout or {}), tonumber(spellSnapshot.maxSlots) or 0)
+		infoLine.TextColor3 = Color3.fromRGB(200, 200, 200)
+		statLine.Text = "Status: -"
+		bonusStats.Text = ("Element Summary: %s"):format(summarizeElementDamage())
+		passiveTitle.Text = "Upgrade Levels"
+		passiveDesc.Text = "-"
+		abilityTitle.Text = "Combinations"
+		abilityDesc.Text = "-"
+		iconLabel.Text = "S"
+		iconFrame.BackgroundColor3 = Color3.fromRGB(30, 36, 46)
+		iconStroke.Color = config.accent
+		detailsPanelStroke.Color = blendColor(Color3.fromRGB(48, 56, 72), config.accent, 0.35)
+		detailsAccent.BackgroundColor3 = config.accent
+		updateDetailsCanvas()
+		return
+	end
+
+	local color = spellElementColor(entry.element)
+	itemName.Text = entry.displayName
+	itemName.TextColor3 = color
+	itemDesc.Text = getPresentationField(entry, "loreDescription", entry.description ~= "" and entry.description or "Unlocks this spell for run upgrade offers.")
+	infoLine.Text = ("Type: %s | Element: %s | Attack: %s"):format(entry.spellType or "-", entry.element or "-", entry.attackType or "-")
+	infoLine.TextColor3 = color
+	statLine.Text = ("Status: %s | Loadout %d/%d"):format(entry.equipped and "Equipped" or (entry.unlocked and "Unlocked" or "Locked"), #(spellSnapshot.loadout or {}), tonumber(spellSnapshot.maxSlots) or 0)
+	bonusStats.Text = ("Art: %s\nBase Stats: %s\nLoadout Elements: %s"):format(
+		getPresentationField(entry, "artMotif", "-"),
+		table.concat(entry.statLines or {}, " | "),
+		summarizeElementDamage()
+	)
+	passiveTitle.Text = "Gameplay and Upgrades"
+	passiveDesc.Text = ("%s\n\n%s"):format(
+		getPresentationField(entry, "gameplayDescription", "Unlocks this spell for run upgrade offers."),
+		summarizeUpgradeLevels(entry.upgradeLevels)
+	)
+	abilityTitle.Text = "Visual Direction and Combinations"
+	abilityDesc.Text = ("%s\n\n%s"):format(
+		getPresentationField(entry, "visualDirection", "-"),
+		summarizeCombinations(entry.combinations)
+	)
+
+	iconLabel.Text = getPresentationField(entry, "iconGlyph", string.upper((entry.element or "S"):sub(1, 1)))
+	iconFrame.BackgroundColor3 = blendColor(Color3.fromRGB(26, 30, 40), color, 0.18)
+	iconStroke.Color = color
+	detailsPanelStroke.Color = blendColor(Color3.fromRGB(48, 56, 72), color, 0.45)
+	detailsAccent.BackgroundColor3 = color
+
+	spellEquipBtn.Text = entry.equipped and "Unequip" or "Equip"
+	spellEquipBtn.Active = entry.unlocked
+	spellEquipBtn.AutoButtonColor = entry.unlocked
+	spellEquipBtn.TextTransparency = entry.unlocked and 0 or 0.45
+	spellMoveUpBtn.Active = entry.equipped
+	spellMoveDownBtn.Active = entry.equipped
+	spellMoveUpBtn.TextTransparency = entry.equipped and 0 or 0.45
+	spellMoveDownBtn.TextTransparency = entry.equipped and 0 or 0.45
+	updateDetailsCanvas()
+end
+
+local function applyCodexDetails(entry)
+	detailActions.Visible = false
+	local config = getTabConfig("Codex")
+	detailsTitle.Text = config.detailsTitle
+
+	if not entry then
+		itemName.Text = config.placeholderName
+		itemName.TextColor3 = Color3.fromRGB(245, 245, 245)
+		itemDesc.Text = config.placeholderDesc
+		infoLine.Text = "Category: - | Status: -"
+		infoLine.TextColor3 = Color3.fromRGB(200, 200, 200)
+		statLine.Text = "Discovery: -"
+		bonusStats.Text = "Progress: Select an entry."
+		passiveTitle.Text = "Tags"
+		passiveDesc.Text = "-"
+		abilityTitle.Text = "Notes"
+		abilityDesc.Text = "-"
+		iconLabel.Text = "C"
+		iconFrame.BackgroundColor3 = Color3.fromRGB(30, 36, 46)
+		iconStroke.Color = config.accent
+		detailsPanelStroke.Color = blendColor(Color3.fromRGB(48, 56, 72), config.accent, 0.35)
+		detailsAccent.BackgroundColor3 = config.accent
+		updateDetailsCanvas()
+		return
+	end
+
+	local color = entry.element and spellElementColor(entry.element) or (entry.discovered and config.accent or Color3.fromRGB(120, 126, 142))
+	itemName.Text = entry.displayName
+	itemName.TextColor3 = color
+	itemDesc.Text = getPresentationField(entry, "loreDescription", entry.description ~= "" and entry.description or (entry.discovered and "Discovered entry." or "Undiscovered entry."))
+	infoLine.Text = ("Category: %s | Status: %s"):format(entry.category or "-", entry.discovered and "Discovered" or "Locked")
+	infoLine.TextColor3 = color
+	statLine.Text = entry.seen and "Discovery: seen" or "Discovery: new or unseen"
+	local counts = codexSnapshot.counts and codexSnapshot.counts[entry.category]
+	if counts then
+		bonusStats.Text = ("Progress: %d/%d discovered\nArt: %s"):format(counts.discovered or 0, counts.total or 0, getPresentationField(entry, "artMotif", "-"))
+	else
+		bonusStats.Text = ("Progress: -\nArt: %s"):format(getPresentationField(entry, "artMotif", "-"))
+	end
+	passiveTitle.Text = "Gameplay"
+	passiveDesc.Text = getPresentationField(entry, "gameplayDescription", #(entry.tags or {}) > 0 and table.concat(entry.tags, ", ") or "-")
+	abilityTitle.Text = "Visual Direction"
+	abilityDesc.Text = getPresentationField(entry, "visualDirection", entry.discovered and "Stored permanently in account progress." or "Find this entry during runs or unlock it through progression.")
+	iconLabel.Text = getPresentationField(entry, "iconGlyph", string.upper((entry.iconText or entry.displayName or "C"):sub(1, 1)))
+	iconFrame.BackgroundColor3 = blendColor(Color3.fromRGB(26, 30, 40), color, 0.18)
+	iconStroke.Color = color
+	detailsPanelStroke.Color = blendColor(Color3.fromRGB(48, 56, 72), color, 0.45)
+	detailsAccent.BackgroundColor3 = color
+	updateDetailsCanvas()
+end
+
 local function applyDetails(entry)
 	if currentTab == "Weapons" then
 		applyWeaponDetails(entry)
+	elseif currentTab == "SpellLoadout" then
+		applySpellDetails(entry)
+	elseif currentTab == "Codex" then
+		applyCodexDetails(entry)
 	else
 		applyResourceDetails(entry)
 	end
@@ -1263,11 +1646,16 @@ local function refreshSlotVisual(slot, entry, selected)
 	local accent = config.accent
 	if currentTab == "Weapons" then
 		accent = rarityColor(entry and entry.rarity or "Common")
+	elseif currentTab == "SpellLoadout" and entry then
+		accent = spellElementColor(entry.element)
+	elseif currentTab == "Codex" and entry then
+		accent = entry.element and spellElementColor(entry.element) or (entry.discovered and config.accent or Color3.fromRGB(120, 126, 142))
 	elseif entry then
 		accent = getResourceColor(entry.id, config.accent)
 	end
 
-	local equipped = currentTab == "Weapons" and entry and entry.id == equippedWeaponId
+	local equipped = (currentTab == "Weapons" and entry and entry.id == equippedWeaponId)
+		or (currentTab == "SpellLoadout" and entry and entry.equipped == true)
 	local stroke = slot:FindFirstChild("Stroke")
 	if stroke and stroke:IsA("UIStroke") then
 		if selected then
@@ -1362,6 +1750,11 @@ local function rebuildSlots()
 		local def = entry.def
 		local rarity = currentTab == "Weapons" and (entry.rarity or (def and def.rarity) or "Common") or (entry.rarity or "Common")
 		local accent = currentTab == "Weapons" and rarityColor(rarity) or getResourceColor(entry.id, config.accent)
+		if currentTab == "SpellLoadout" then
+			accent = spellElementColor(entry.element)
+		elseif currentTab == "Codex" then
+			accent = entry.element and spellElementColor(entry.element) or (entry.discovered and config.accent or Color3.fromRGB(120, 126, 142))
+		end
 		local baseColor = blendColor(Color3.fromRGB(24, 28, 38), accent, 0.09)
 		local hoverColor = blendColor(baseColor, accent, 0.12)
 
@@ -1414,12 +1807,16 @@ local function rebuildSlots()
 		icon.TextColor3 = Color3.fromRGB(236, 242, 250)
 		if currentTab == "Weapons" then
 			icon.Text = def and def.weaponType and def.weaponType:sub(1, 1) or "?"
+		elseif currentTab == "SpellLoadout" then
+			icon.Text = string.upper((entry.element or "S"):sub(1, 1))
+		elseif currentTab == "Codex" then
+			icon.Text = string.upper((entry.iconText or entry.displayName or "C"):sub(1, 1))
 		else
 			icon.Text = string.upper((entry.displayName or entry.id or "?"):sub(1, 1))
 		end
 		icon.Parent = iconBubble
 
-		if currentTab == "Weapons" and entry.id == equippedWeaponId then
+		if (currentTab == "Weapons" and entry.id == equippedWeaponId) or (currentTab == "SpellLoadout" and entry.equipped) then
 			local equippedMark = Instance.new("TextLabel")
 			equippedMark.Name = "EquippedMark"
 			equippedMark.AnchorPoint = Vector2.new(1, 0)
@@ -1430,7 +1827,7 @@ local function rebuildSlots()
 			equippedMark.Font = Enum.Font.GothamBold
 			equippedMark.TextSize = 10
 			equippedMark.TextColor3 = Color3.fromRGB(255, 255, 255)
-			equippedMark.Text = "E"
+			equippedMark.Text = currentTab == "SpellLoadout" and "#" or "E"
 			equippedMark.Parent = iconBubble
 			Instance.new("UICorner", equippedMark).CornerRadius = UDim.new(0, 999)
 		end
@@ -1460,7 +1857,13 @@ local function rebuildSlots()
 		name.TextYAlignment = Enum.TextYAlignment.Top
 		name.TextWrapped = true
 		name.TextColor3 = accent
-		name.Text = currentTab == "Weapons" and (entry.displayName or (def and def.name) or entry.id) or (entry.displayName or formatResourceLabel(entry.id))
+		if currentTab == "Weapons" then
+			name.Text = entry.displayName or (def and def.name) or entry.id
+		elseif currentTab == "SpellLoadout" or currentTab == "Codex" then
+			name.Text = entry.displayName or entry.id
+		else
+			name.Text = entry.displayName or formatResourceLabel(entry.id)
+		end
 		name.Parent = slot
 
 		local rarityTag = Instance.new("TextLabel")
@@ -1474,6 +1877,10 @@ local function rebuildSlots()
 		rarityTag.TextColor3 = Color3.fromRGB(198, 206, 220)
 		if currentTab == "Weapons" then
 			rarityTag.Text = ("%s | Lv %d"):format(rarity, tonumber(entry.level) or 1)
+		elseif currentTab == "SpellLoadout" then
+			rarityTag.Text = ("%s | %s"):format(entry.element or "Spell", entry.equipped and "Equipped" or (entry.unlocked and "Unlocked" or "Locked"))
+		elseif currentTab == "Codex" then
+			rarityTag.Text = ("%s | %s"):format(entry.category or "Codex", entry.discovered and "Discovered" or "Locked")
 		else
 			rarityTag.Text = ("%s | x%d"):format(rarity, entry.amount or 0)
 		end
@@ -1490,6 +1897,10 @@ local function rebuildSlots()
 		statTag.TextColor3 = Color3.fromRGB(154, 165, 184)
 		if currentTab == "Weapons" then
 			statTag.Text = ("ATK %s"):format(tostring((entry.stats and entry.stats.ATK) or (def and def.baseDamage) or "-"))
+		elseif currentTab == "SpellLoadout" then
+			statTag.Text = (entry.statLines and entry.statLines[1]) or (entry.attackType or "Spell")
+		elseif currentTab == "Codex" then
+			statTag.Text = entry.discovered and "Persistent discovery" or "Undiscovered"
 		else
 			statTag.Text = ("Stored %d"):format(entry.amount or 0)
 		end
@@ -1616,6 +2027,18 @@ local function loadSnapshot()
 		end
 	end
 
+	spellSnapshot = payload.spells or spellSnapshot
+	spellSnapshot.entries = spellSnapshot.entries or {}
+	spellSnapshot.loadout = spellSnapshot.loadout or {}
+	spellSnapshot.damageSummary = spellSnapshot.damageSummary or {}
+	spellSnapshot.combinations = spellSnapshot.combinations or {}
+	spellEntries = buildSpellEntries(spellSnapshot.entries)
+
+	codexSnapshot = payload.codex or codexSnapshot
+	codexSnapshot.entries = codexSnapshot.entries or {}
+	codexSnapshot.counts = codexSnapshot.counts or {}
+	codexEntries = buildCodexEntries(codexSnapshot.entries)
+
 	updatePlayerInfo()
 	rebuildSlots()
 end
@@ -1628,6 +2051,19 @@ local function fireInventoryAction(actionType, payload)
 	local message = payload or {}
 	message.type = actionType
 	InventoryAction:FireServer(message)
+end
+
+local function getSelectedEntryForCurrentTab()
+	local selectedId = selectedEntryIdByTab[currentTab]
+	if not selectedId then
+		return nil
+	end
+	for _, entry in ipairs(currentEntries or {}) do
+		if entry.id == selectedId then
+			return entry
+		end
+	end
+	return nil
 end
 
 local function closeInventory()
@@ -1712,6 +2148,34 @@ infoBtn.MouseButton1Click:Connect(function()
 	if not item then return end
 	showInfoPopup(item.def)
 	hideContextMenu()
+end)
+
+spellEquipBtn.MouseButton1Click:Connect(function()
+	if currentTab ~= "SpellLoadout" then return end
+	local entry = getSelectedEntryForCurrentTab()
+	if not entry or not entry.unlocked then return end
+	if entry.equipped then
+		fireInventoryAction("spellLoadoutUnequip", { productId = entry.productId or entry.id })
+	else
+		fireInventoryAction("spellLoadoutEquip", { productId = entry.productId or entry.id })
+	end
+	task.delay(0.2, loadSnapshot)
+end)
+
+spellMoveUpBtn.MouseButton1Click:Connect(function()
+	if currentTab ~= "SpellLoadout" then return end
+	local entry = getSelectedEntryForCurrentTab()
+	if not entry or not entry.equipped then return end
+	fireInventoryAction("spellLoadoutMove", { productId = entry.productId or entry.id, direction = -1 })
+	task.delay(0.2, loadSnapshot)
+end)
+
+spellMoveDownBtn.MouseButton1Click:Connect(function()
+	if currentTab ~= "SpellLoadout" then return end
+	local entry = getSelectedEntryForCurrentTab()
+	if not entry or not entry.equipped then return end
+	fireInventoryAction("spellLoadoutMove", { productId = entry.productId or entry.id, direction = 1 })
+	task.delay(0.2, loadSnapshot)
 end)
 
 closeBtn.MouseButton1Click:Connect(function()

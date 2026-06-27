@@ -129,6 +129,7 @@ local function updateRerollButtonState()
 end
 
 -- movement lock
+local savedWalkSpeed, savedJumpPower, savedJumpHeight
 local movementLocked = false
 
 local function getHumanoid()
@@ -138,17 +139,24 @@ local function getHumanoid()
 end
 
 
-local function cancelCharacterMotion()
-	local hum = getHumanoid()
+local function applyHumanoidLock(hum, on)
 	if not hum then return end
-	hum:Move(Vector3.zero, true)
-	hum.Jump = false
+	if on then
+		hum.WalkSpeed = 0
+		hum.JumpPower = 0
+		hum.JumpHeight = 0
+	else
+		if savedWalkSpeed ~= nil then hum.WalkSpeed = savedWalkSpeed end
+		if savedJumpPower ~= nil then hum.JumpPower = savedJumpPower end
+		if savedJumpHeight ~= nil then hum.JumpHeight = savedJumpHeight end
+	end
 end
 
 local function lockMovement(on: boolean)
 	if on then
 		if movementLocked then
-			cancelCharacterMotion()
+			-- already locked (e.g. reroll re-renders offers). Don't overwrite saved values.
+			applyHumanoidLock(getHumanoid(), true)
 			return
 		end
 		movementLocked = true
@@ -164,10 +172,28 @@ local function lockMovement(on: boolean)
 			Enum.PlayerActions.CharacterRight,
 			Enum.PlayerActions.CharacterJump
 		)
-		cancelCharacterMotion()
+
+		local hum = getHumanoid()
+		if hum then
+			savedWalkSpeed = hum.WalkSpeed
+			savedJumpPower = hum.JumpPower
+			savedJumpHeight = hum.JumpHeight
+			applyHumanoidLock(hum, true)
+		end
 	else
 		movementLocked = false
 		ContextActionService:UnbindAction("UpgradeMenuLock")
+		applyHumanoidLock(getHumanoid(), false)
+		savedWalkSpeed, savedJumpPower, savedJumpHeight = nil, nil, nil
+	end
+end
+
+local function setBanishButtonState(on: boolean)
+	-- Prosty feedback bez przebudowy UI: przyciemnij/rozjaśnij
+	if on then
+		btnBanish.ImageTransparency = 0
+	else
+		btnBanish.ImageTransparency = 0
 	end
 end
 
@@ -218,20 +244,15 @@ local function mountCardInSlot(slot: Frame, offer)
 	local descLabel = card:WaitForChild("DescBox"):WaitForChild("Desc")
 	local accent = typeof(offer.color) == "Color3" and offer.color or Color3.fromRGB(255, 255, 255)
 
-	titleLabel.Text = string.format("%s\n%s", tostring(offer.name or offer.spellId or "Spell"), tostring(offer.subtitle or "Upgrade"))
+	local subtitle = tostring(offer.subtitle or "Upgrade")
+	if offer.offerType == "combination" then
+		subtitle = "COMBINATION"
+	end
+	titleLabel.Text = string.format("%s\n%s", tostring(offer.name or offer.spellId or "Spell"), subtitle)
 	titleLabel.TextColor3 = accent
 	descLabel.Text = tostring(offer.desc or "")
 
 	return card
-end
-
-local function setBanishButtonState(on: boolean)
-	-- Prosty feedback bez przebudowy UI: przyciemnij/rozjaśnij
-	if on then
-		btnBanish.ImageTransparency = 0
-	else
-		btnBanish.ImageTransparency = 0
-	end
 end
 
 local function renderOffers(token: string, offers: {any})
@@ -253,7 +274,7 @@ local function renderOffers(token: string, offers: {any})
 			local cardBtn = mountCardInSlot(slot, off)
 
 			cardBtn.MouseButton1Click:Connect(function()
-		if os.clock() < choiceLockedUntil then return end
+				if os.clock() < choiceLockedUntil then return end
 				if not currentToken then return end
 
 				if banishMode then

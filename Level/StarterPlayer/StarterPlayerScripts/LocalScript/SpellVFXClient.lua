@@ -223,6 +223,103 @@ local function addAmbientEmitter(parent, primary, secondary, rate, scale)
 	return emitter
 end
 
+local function getVisualProfile(stats)
+	if typeof(stats and stats.visualProfile) == "table" then
+		return stats.visualProfile
+	end
+	return {}
+end
+
+local function getProfileSeed(stats, profile)
+	local text = tostring(stats and stats.spellId or "")
+	if text == "" then
+		text = tostring(profile and profile.silhouette or "")
+	end
+	local total = 0
+	for index = 1, #text do
+		total += string.byte(text, index) or 0
+	end
+	return total
+end
+
+local function getProfileAccentCount(stats, profile)
+	local motifs = profile and profile.motifs
+	local motifCount = typeof(motifs) == "table" and #motifs or 0
+	local requested = tonumber(profile and profile.accentCount) or motifCount
+	local maxCount = stats and stats.isCombo and 5 or 3
+	return math.clamp(math.floor(requested), 2, maxCount)
+end
+
+local function addProfileAccents(model, baseCFrame, scale, primary, secondary, stats, mode)
+	local profile = getVisualProfile(stats)
+	local count = getProfileAccentCount(stats, profile)
+	local seed = getProfileSeed(stats, profile)
+	local comboBoost = stats and stats.isCombo and 1.18 or 1
+	local radius = (mode == "projectile" and 0.48 or mode == "beam" and 0.55 or 0.72) * scale * comboBoost
+
+	for index = 1, count do
+		local phase = ((index / count) * math.pi * 2) + ((seed % 37) * 0.07)
+		local color = index % 2 == 0 and secondary or primary
+		local alpha = mode == "beam" and 0.36 or 0.22
+		local size
+		local offset
+		local rotation
+		if mode == "projectile" or mode == "orbit" then
+			size = Vector3.new(0.08, 0.24 + (index * 0.03), 0.78 + ((seed % 5) * 0.04)) * scale
+			offset = Vector3.new(math.cos(phase) * radius, math.sin(phase) * radius, -0.18 + (index * 0.05))
+			rotation = CFrame.Angles(0, 0, phase)
+		elseif mode == "beam" then
+			size = Vector3.new(0.08, radius * 1.2, 0.32 + ((seed + index) % 4) * 0.08)
+			offset = Vector3.new(math.cos(phase) * radius, math.sin(phase) * radius, -0.4 + (index * 0.16))
+			rotation = CFrame.Angles(0, 0, phase)
+		else
+			size = Vector3.new(radius * 1.1, 0.08, 0.16 + ((seed + index) % 3) * 0.05)
+			offset = Vector3.new(math.cos(phase) * radius, 0.06, math.sin(phase) * radius)
+			rotation = CFrame.Angles(0, phase, 0)
+		end
+
+		local accent = ensurePart(model, ("SignatureAccent%d"):format(index), size, color, alpha, Enum.Material.Neon)
+		accent.CFrame = baseCFrame * CFrame.new(offset) * rotation
+	end
+end
+
+local function spawnCastVisual(origin, dir, stats)
+	if typeof(origin) ~= "Vector3" then
+		return
+	end
+
+	local primary, secondary = getVisualColors(stats)
+	local intensity = getVisualIntensity(stats)
+	local scale = math.clamp(0.78 + (intensity * 0.16), 0.85, 1.55)
+	local model = Instance.new("Model")
+	model.Name = string.format("%sCast", tostring(stats and stats.spellId or "Spell"))
+	model.Parent = vfxRoot
+
+	local flatDir = typeof(dir) == "Vector3" and Vector3.new(dir.X, 0, dir.Z) or Vector3.new(0, 0, -1)
+	if flatDir.Magnitude <= 0.01 then
+		flatDir = Vector3.new(0, 0, -1)
+	else
+		flatDir = flatDir.Unit
+	end
+	local base = CFrame.lookAt(origin, origin + flatDir)
+	local ring = ensurePart(model, "CastRing", Vector3.new(1.6, 0.08, 1.6) * scale, primary, 0.34, Enum.Material.Neon)
+	ring.Shape = Enum.PartType.Cylinder
+	ring.CFrame = CFrame.new(origin - Vector3.new(0, 0.9, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	local notch = ensurePart(model, "CastNotch", Vector3.new(0.18, 0.18, 0.72) * scale, secondary, 0.12, Enum.Material.Neon)
+	notch.CFrame = base * CFrame.new(0, -0.15, -0.95 * scale)
+
+	addProfileAccents(model, ring.CFrame, scale, primary, secondary, stats, "cast")
+	addBurstEmitter(notch, primary, secondary, stats and stats.isCombo and 12 or 7, math.clamp(scale * 0.55, 0.45, 1.0))
+	TweenService:Create(ring, TweenInfo.new(0.24, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+		Size = Vector3.new(2.5, 0.08, 2.5) * scale,
+		Transparency = 1,
+	}):Play()
+	TweenService:Create(notch, TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+		Transparency = 1,
+	}):Play()
+	Debris:AddItem(model, 0.32)
+end
+
 local function getWindBladeTemplate()
 	local assets = ReplicatedStorage:FindFirstChild("Assets")
 	local animations = assets and assets:FindFirstChild("Animations")
@@ -670,6 +767,8 @@ local function createOrbModel(id, cfg, index)
 		shell.CFrame = CFrame.new()
 	end
 
+	addProfileAccents(model, CFrame.new(), scale, primary, secondary, cfg, "orbit")
+
 	if level >= 2 then
 		local aura = ensurePart(model, "Aura", Vector3.new(1.14, 1.14, 1.14) * scale, brightenColor(primary, 0.08), alpha(0.48), Enum.Material.Glass, Enum.PartType.Ball)
 		aura.CFrame = CFrame.new()
@@ -720,6 +819,7 @@ local function spawnImpactVisual(pos, stats)
 	addPointLight(flash, primary, 2.8 + ((intensity - 1) * 1.1), 12 + math.floor((intensity - 1) * 4))
 	addBurstEmitter(flash, primary, secondary, math.clamp(math.floor(10 + (scale * 7) + ((stats.level or 1) * 2)), 10, 30), scale)
 	addAmbientEmitter(flash, primary, secondary, math.clamp(math.floor(10 + (intensity * 7)), 10, 24), math.clamp(scale * 0.55, 0.45, 1.5))
+	addProfileAccents(model, CFrame.new(pos), scale, primary, secondary, stats, "impact")
 
 	playTween(flash, 0.18, { Size = Vector3.new(2.4, 2.4, 2.4) * scale, Transparency = 1 }, Enum.EasingStyle.Quart)
 	playTween(shell, 0.24, { Size = Vector3.new(3.4, 3.4, 3.4) * scale, Transparency = 1 }, Enum.EasingStyle.Quart)
@@ -760,6 +860,7 @@ local function spawnRingVisual(pos, radius, duration, stats)
 
 	addPointLight(anchor, primary, 1.6 + ((intensity - 1) * 0.9), math.clamp((visualRadius * 2.4) + ((stats.level or 1) * 0.7), 10, 24))
 	addAmbientEmitter(anchor, primary, secondary, math.clamp(math.floor(8 + visualRadius + (intensity * 4)), 12, 24), math.clamp(visualRadius * 0.12 * intensity, 0.55, 1.6))
+	addProfileAccents(model, outer.CFrame, math.clamp(visualRadius * 0.22, 0.8, 2.2), primary, secondary, stats, "ring")
 	playTween(pulse, math.min(duration, 0.6), { Size = Vector3.new(visualRadius * 2.25, 0.12, visualRadius * 2.25), Transparency = 1 }, Enum.EasingStyle.Sine)
 
 	Debris:AddItem(model, duration)
@@ -785,6 +886,7 @@ local function spawnNovaVisual(pos, radius, stats)
 	addPointLight(core, primary, 2.6 + ((intensity - 1) * 1.15), math.clamp((visualRadius * 2.4) + ((stats.level or 1) * 0.7), 12, 26))
 	addBurstEmitter(core, primary, secondary, math.clamp(math.floor((visualRadius * 2.1) + ((stats.level or 1) * 2)), 14, 30), math.clamp(visualRadius * 0.1 * intensity, 0.9, 2.1))
 	addAmbientEmitter(core, primary, secondary, math.clamp(math.floor(10 + (intensity * 5)), 10, 22), math.clamp(visualRadius * 0.07 * intensity, 0.45, 1.3))
+	addProfileAccents(model, disk.CFrame, math.clamp(visualRadius * 0.18, 0.85, 2.0), primary, secondary, stats, "nova")
 
 	playTween(disk, 0.22, { Size = Vector3.new(visualRadius * 2.25, 0.35, visualRadius * 2.25), Transparency = 1 }, Enum.EasingStyle.Quart)
 	playTween(core, 0.24, { Size = Vector3.new(visualRadius * 1.35, visualRadius * 1.35, visualRadius * 1.35), Transparency = 1 }, Enum.EasingStyle.Quart)
@@ -820,6 +922,7 @@ local function spawnBeamVisual(origin, dir, range, width, duration, stats)
 
 	addPointLight(anchor, primary, 2.4 + ((intensity - 1) * 1.2), math.clamp((visualWidth * 4.4) + 8 + ((stats.level or 1) * 0.7), 10, 26))
 	addAmbientEmitter(anchor, primary, secondary, math.clamp(math.floor((visualWidth * 3.4) + (intensity * 4)), 12, 24), math.clamp(visualWidth * 0.18 * intensity, 0.5, 1.4))
+	addProfileAccents(model, beamCFrame, math.clamp(visualWidth * 0.65, 0.7, 2.2), primary, secondary, stats, "beam")
 
 	playTween(outer, duration, { Transparency = 0.9 }, Enum.EasingStyle.Sine)
 	playTween(core, duration, { Transparency = 1 }, Enum.EasingStyle.Sine)
@@ -945,6 +1048,8 @@ local function createProjectileVisual(stats, origin, dir)
 		shell.CFrame = CFrame.new()
 	end
 
+	addProfileAccents(model, CFrame.new(), visualScale, primary, secondary, stats, "projectile")
+
 	if level >= 2 then
 		local aura = ensurePart(model, "Aura", Vector3.new(1.38, 1.38, 1.38) * visualScale, brightenColor(primary, 0.08), 0.82, Enum.Material.Glass, Enum.PartType.Ball)
 		aura.CFrame = CFrame.new()
@@ -1053,6 +1158,7 @@ local function handlePayload(payload)
 		end
 	elseif action == "ring" then
 		if typeof(payload.pos) == "Vector3" then
+			spawnCastVisual(payload.pos + Vector3.new(0, 1.0, 0), Vector3.new(0, 0, -1), payload.stats or {})
 			spawnRingVisual(
 				payload.pos,
 				math.max(0.1, tonumber(payload.radius) or tonumber(payload.stats and payload.stats.radius) or 1),
@@ -1063,8 +1169,12 @@ local function handlePayload(payload)
 	elseif action == "nova" then
 		local spellId = tostring(payload.stats and payload.stats.spellId or "")
 		if isWindBladeSpellId(spellId) then
+			if typeof(payload.pos) == "Vector3" then
+				spawnCastVisual(payload.pos + Vector3.new(0, 1.0, 0), payload.dir, payload.stats or {})
+			end
 			spawnWindBladeCastVisual(payload)
 		elseif typeof(payload.pos) == "Vector3" then
+			spawnCastVisual(payload.pos + Vector3.new(0, 1.0, 0), payload.dir, payload.stats or {})
 			spawnNovaVisual(
 				payload.pos,
 				math.max(0.1, tonumber(payload.radius) or tonumber(payload.stats and payload.stats.radius) or 1),
@@ -1073,6 +1183,7 @@ local function handlePayload(payload)
 		end
 	elseif action == "beam" then
 		if typeof(payload.origin) == "Vector3" and typeof(payload.dir) == "Vector3" and payload.dir.Magnitude > 0.01 then
+			spawnCastVisual(payload.origin, payload.dir.Unit, payload.stats or {})
 			spawnBeamVisual(
 				payload.origin,
 				payload.dir.Unit,
@@ -1083,6 +1194,9 @@ local function handlePayload(payload)
 			)
 		end
 	elseif action == "projectile" then
+		if typeof(payload.origin) == "Vector3" and typeof(payload.dir) == "Vector3" then
+			spawnCastVisual(payload.origin, payload.dir, payload.stats or {})
+		end
 		spawnProjectileVisual(payload)
 	end
 end

@@ -743,6 +743,12 @@ local function addPersistentCount(plr: Player, bucketName: string, itemId: strin
 	end
 end
 
+local function discoverCodex(plr: Player, category: string, id: string, reason: string)
+	if PlayerData.DiscoverCodex then
+		PlayerData.DiscoverCodex(plr, category, id, reason)
+	end
+end
+
 local function awardPersistentMobDrops(mobType: string, isElite: boolean, isBoss: boolean)
 	local materialId = CraftingConfig.GetMobMaterialForMob(mobType)
 	local activePlayers = getActiveRunPlayers()
@@ -762,20 +768,25 @@ local function awardPersistentMobDrops(mobType: string, isElite: boolean, isBoss
 	end
 
 	for _, plr in ipairs(activePlayers) do
+		discoverCodex(plr, isBoss and "Bosses" or (isElite and "Elites" or "Enemies"), mobType, "mob_defeated")
 		if materialId then
 			local materialCount = isBoss and 3 or (isElite and 2 or 1)
 			addPersistentCount(plr, "mobMaterials", materialId, materialCount)
+			discoverCodex(plr, "Materials", materialId, "mob_drop")
 			PickupToastService.PushMaterial(plr, materialId, materialCount, "Mob Drop", "mobMaterials")
 		end
 		if crystalAward > 0 then
 			addPersistentCount(plr, "upgradeMaterials", CraftingConfig.UPGRADE_CRYSTAL_ID, crystalAward)
+			discoverCodex(plr, "Materials", CraftingConfig.UPGRADE_CRYSTAL_ID, "upgrade_drop")
 			PickupToastService.PushMaterial(plr, CraftingConfig.UPGRADE_CRYSTAL_ID, crystalAward, "Mob Drop", "upgradeMaterials")
 		end
 		if isBoss then
 			addPersistentCount(plr, "upgradeMaterials", CraftingConfig.BOSS_SPECIAL_ID, 1)
+			discoverCodex(plr, "Materials", CraftingConfig.BOSS_SPECIAL_ID, "boss_drop")
 			PickupToastService.PushMaterial(plr, CraftingConfig.BOSS_SPECIAL_ID, 1, "Boss Drop", "upgradeMaterials")
 		elseif isElite then
 			addPersistentCount(plr, "upgradeMaterials", CraftingConfig.ELITE_SPECIAL_ID, 1)
+			discoverCodex(plr, "Materials", CraftingConfig.ELITE_SPECIAL_ID, "elite_drop")
 			PickupToastService.PushMaterial(plr, CraftingConfig.ELITE_SPECIAL_ID, 1, "Elite Drop", "upgradeMaterials")
 		end
 	end

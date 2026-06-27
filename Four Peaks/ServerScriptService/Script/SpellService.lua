@@ -75,6 +75,23 @@ local function buildShopPayload(plr)
 				color = product.color,
 				owned = unlocked[product.id] == true,
 				desc = SpellDefs.DescribeShopProduct(product),
+				iconGlyph = product.iconGlyph,
+				artMotif = product.artMotif,
+				loreDescription = product.loreDescription,
+				gameplayDescription = product.gameplayDescription,
+				visualDirection = product.visualDirection,
+				frameStyle = product.frameStyle,
+				codexCategory = product.codexCategory,
+				witchbookAccent = product.witchbookAccent,
+				presentation = product.presentation or SpellDefs.GetPresentation(product),
+				visualProfile = product.visualProfile or SpellDefs.GetVisualProfile(product),
+				statLines = SpellDefs.GetSpellStatLines(product.familyId, {
+					level = 1,
+					baseMultiplier = product.baseMultiplier,
+					basePower = product.basePower,
+				}),
+				upgradeLevels = SpellDefs.GetSpellUpgradeLevels(product.familyId),
+				combinations = SpellDefs.GetSynergiesFor(product.familyId),
 			}
 		end
 	end
@@ -96,6 +113,10 @@ local function grantStarterSpellbook(plr)
 		data.spellsUnlocked[productId] = true
 		if not wasUnlocked then
 			PickupToastService.PushSpell(plr, productId, "Starter Spell", 1)
+			if PlayerData.DiscoverCodex then
+				local product = SpellDefs.GetProduct(productId)
+				PlayerData.DiscoverCodex(plr, "Spells", product and product.familyId or productId, "starter_spellbook")
+			end
 		end
 	end
 
@@ -130,6 +151,8 @@ WitchShopEvent.OnServerEvent:Connect(function(plr, payload)
 			type = "OPEN",
 			souls = tonumber(data.souls) or 0,
 			spells = buildShopPayload(plr),
+			loadout = PlayerData.ResolveSpellLoadout and PlayerData.ResolveSpellLoadout(plr) or {},
+			maxLoadoutSlots = SpellDefs.GetLoadoutLimit(),
 		})
 		return
 	end
@@ -164,6 +187,9 @@ WitchShopEvent.OnServerEvent:Connect(function(plr, payload)
 
 	data.souls = (tonumber(data.souls) or 0) - cost
 	data.spellsUnlocked[productId] = true
+	if PlayerData.DiscoverCodex then
+		PlayerData.DiscoverCodex(plr, "Spells", product.familyId, "witch_shop")
+	end
 	PlayerData.MarkDirty(plr)
 	PlayerData.Save(plr, false)
 	PickupToastService.PushSpell(plr, productId, "Spell Unlocked", 1)

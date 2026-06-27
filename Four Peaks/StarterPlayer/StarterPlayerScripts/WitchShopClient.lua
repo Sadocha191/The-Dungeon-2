@@ -12,6 +12,7 @@ local moduleRoot = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
 	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
 local UiResponsive = require(moduleRoot:WaitForChild("UiResponsive"))
+local SpellDefs = require(moduleRoot:WaitForChild("SpellDefinitions"))
 
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local WitchShopEvent = remoteEvents:WaitForChild("WitchShopEvent")
@@ -54,7 +55,7 @@ title.Font = Enum.Font.GothamBlack
 title.TextSize = 20
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.TextColor3 = Color3.fromRGB(245,245,245)
-title.Text = "Witch Shop"
+title.Text = "Witch Spellbook"
 title.Parent = panel
 
 local coinsLabel = Instance.new("TextLabel")
@@ -80,9 +81,38 @@ sortLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 sortLayout.Padding = UDim.new(0, 6)
 sortLayout.Parent = sortBar
 
+local searchBox = Instance.new("TextBox")
+searchBox.Position = UDim2.fromOffset(18, 104)
+searchBox.Size = UDim2.fromOffset(360, 28)
+searchBox.BackgroundColor3 = Color3.fromRGB(26, 24, 30)
+searchBox.BackgroundTransparency = 0.08
+searchBox.BorderSizePixel = 0
+searchBox.Font = Enum.Font.Gotham
+searchBox.TextSize = 12
+searchBox.TextColor3 = Color3.fromRGB(242, 238, 230)
+searchBox.PlaceholderText = "Search spells"
+searchBox.PlaceholderColor3 = Color3.fromRGB(150, 142, 155)
+searchBox.TextXAlignment = Enum.TextXAlignment.Left
+searchBox.ClearTextOnFocus = false
+searchBox.Text = ""
+searchBox.Parent = panel
+Instance.new("UICorner", searchBox).CornerRadius = UDim.new(0, 10)
+
+local filterBar = Instance.new("Frame")
+filterBar.Position = UDim2.fromOffset(18, 136)
+filterBar.Size = UDim2.fromOffset(360, 28)
+filterBar.BackgroundTransparency = 1
+filterBar.Parent = panel
+
+local filterLayout = Instance.new("UIListLayout")
+filterLayout.FillDirection = Enum.FillDirection.Horizontal
+filterLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+filterLayout.Padding = UDim.new(0, 5)
+filterLayout.Parent = filterBar
+
 local left = Instance.new("ScrollingFrame")
-left.Position = UDim2.fromOffset(18, 106)
-left.Size = UDim2.fromOffset(360, 294)
+left.Position = UDim2.fromOffset(18, 172)
+left.Size = UDim2.fromOffset(360, 196)
 left.BackgroundColor3 = Color3.fromRGB(20,20,24)
 left.BackgroundTransparency = 0.10
 left.BorderSizePixel = 0
@@ -93,6 +123,45 @@ Instance.new("UICorner", left).CornerRadius = UDim.new(0, 14)
 local leftLay = Instance.new("UIListLayout")
 leftLay.Padding = UDim.new(0, 8)
 leftLay.Parent = left
+
+local pageControls = Instance.new("Frame")
+pageControls.Position = UDim2.fromOffset(18, 378)
+pageControls.Size = UDim2.fromOffset(360, 28)
+pageControls.BackgroundTransparency = 1
+pageControls.Parent = panel
+
+local prevPageBtn = Instance.new("TextButton")
+prevPageBtn.Size = UDim2.fromOffset(76, 28)
+prevPageBtn.BackgroundColor3 = Color3.fromRGB(30,30,34)
+prevPageBtn.BorderSizePixel = 0
+prevPageBtn.Font = Enum.Font.GothamBold
+prevPageBtn.TextSize = 11
+prevPageBtn.TextColor3 = Color3.fromRGB(245,245,245)
+prevPageBtn.Text = "Prev"
+prevPageBtn.Parent = pageControls
+Instance.new("UICorner", prevPageBtn).CornerRadius = UDim.new(0, 10)
+
+local pageLabel = Instance.new("TextLabel")
+pageLabel.BackgroundTransparency = 1
+pageLabel.Position = UDim2.fromOffset(86, 0)
+pageLabel.Size = UDim2.fromOffset(188, 28)
+pageLabel.Font = Enum.Font.Gotham
+pageLabel.TextSize = 12
+pageLabel.TextColor3 = Color3.fromRGB(210,210,210)
+pageLabel.Text = "Page 1/1"
+pageLabel.Parent = pageControls
+
+local nextPageBtn = Instance.new("TextButton")
+nextPageBtn.Position = UDim2.fromOffset(284, 0)
+nextPageBtn.Size = UDim2.fromOffset(76, 28)
+nextPageBtn.BackgroundColor3 = Color3.fromRGB(30,30,34)
+nextPageBtn.BorderSizePixel = 0
+nextPageBtn.Font = Enum.Font.GothamBold
+nextPageBtn.TextSize = 11
+nextPageBtn.TextColor3 = Color3.fromRGB(245,245,245)
+nextPageBtn.Text = "Next"
+nextPageBtn.Parent = pageControls
+Instance.new("UICorner", nextPageBtn).CornerRadius = UDim.new(0, 10)
 
 local right = Instance.new("Frame")
 right.Position = UDim2.fromOffset(396, 70)
@@ -114,10 +183,67 @@ rName.TextColor3 = Color3.fromRGB(245,245,245)
 rName.Text = "Select a spell"
 rName.Parent = right
 
+local rArt = Instance.new("Frame")
+rArt.Position = UDim2.fromOffset(16, 44)
+rArt.Size = UDim2.new(1, -32, 0, 86)
+rArt.BackgroundColor3 = Color3.fromRGB(28, 26, 34)
+rArt.BackgroundTransparency = 0.16
+rArt.BorderSizePixel = 0
+rArt.Parent = right
+Instance.new("UICorner", rArt).CornerRadius = UDim.new(0, 12)
+local rArtStroke = Instance.new("UIStroke", rArt)
+rArtStroke.Color = Color3.fromRGB(90, 72, 120)
+rArtStroke.Thickness = 1
+
+local rArtGlyph = Instance.new("TextLabel")
+rArtGlyph.BackgroundTransparency = 1
+rArtGlyph.Position = UDim2.fromOffset(14, 10)
+rArtGlyph.Size = UDim2.fromOffset(78, 56)
+rArtGlyph.Font = Enum.Font.GothamBlack
+rArtGlyph.TextSize = 30
+rArtGlyph.TextColor3 = Color3.fromRGB(245, 245, 245)
+rArtGlyph.Text = "?"
+rArtGlyph.Parent = rArt
+
+local rArtMotif = Instance.new("TextLabel")
+rArtMotif.BackgroundTransparency = 1
+rArtMotif.Position = UDim2.fromOffset(100, 12)
+rArtMotif.Size = UDim2.new(1, -116, 0, 32)
+rArtMotif.Font = Enum.Font.GothamBold
+rArtMotif.TextSize = 13
+rArtMotif.TextColor3 = Color3.fromRGB(238, 235, 246)
+rArtMotif.TextXAlignment = Enum.TextXAlignment.Left
+rArtMotif.TextWrapped = true
+rArtMotif.Text = "No spell selected"
+rArtMotif.Parent = rArt
+
+local rArtFrameStyle = Instance.new("TextLabel")
+rArtFrameStyle.BackgroundTransparency = 1
+rArtFrameStyle.Position = UDim2.fromOffset(100, 48)
+rArtFrameStyle.Size = UDim2.new(1, -116, 0, 26)
+rArtFrameStyle.Font = Enum.Font.Gotham
+rArtFrameStyle.TextSize = 11
+rArtFrameStyle.TextColor3 = Color3.fromRGB(196, 190, 210)
+rArtFrameStyle.TextXAlignment = Enum.TextXAlignment.Left
+rArtFrameStyle.TextWrapped = true
+rArtFrameStyle.Text = "-"
+rArtFrameStyle.Parent = rArt
+
+local rScroll = Instance.new("ScrollingFrame")
+rScroll.BackgroundTransparency = 1
+rScroll.Position = UDim2.fromOffset(16, 140)
+rScroll.Size = UDim2.new(1,-32,1,-206)
+rScroll.BorderSizePixel = 0
+rScroll.ScrollBarThickness = 5
+rScroll.CanvasSize = UDim2.fromOffset(0, 0)
+rScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+rScroll.Parent = right
+
 local rInfo = Instance.new("TextLabel")
 rInfo.BackgroundTransparency = 1
-rInfo.Position = UDim2.fromOffset(16, 44)
-rInfo.Size = UDim2.new(1,-32,1,-110)
+rInfo.Position = UDim2.fromOffset(0, 0)
+rInfo.Size = UDim2.new(1,-8,0,0)
+rInfo.AutomaticSize = Enum.AutomaticSize.Y
 rInfo.Font = Enum.Font.Gotham
 rInfo.TextSize = 12
 rInfo.TextXAlignment = Enum.TextXAlignment.Left
@@ -125,7 +251,7 @@ rInfo.TextYAlignment = Enum.TextYAlignment.Top
 rInfo.TextColor3 = Color3.fromRGB(220,220,220)
 rInfo.TextWrapped = true
 rInfo.Text = ""
-rInfo.Parent = right
+rInfo.Parent = rScroll
 
 local buyBtn = Instance.new("TextButton")
 buyBtn.AnchorPoint = Vector2.new(0.5,1)
@@ -158,9 +284,30 @@ local selected = nil
 local currentCoins = 0
 local currentSpells = {}
 local sortButtons = {}
+local filterButtons = {}
 local sortState = { key = "name", ascending = true }
+local filterState = "all"
+local searchQuery = ""
+local pageIndex = 1
+local pageSize = 3
+local spellLess
 local addRow
 local setRight
+
+local function blendColor(a, b, alpha)
+	return Color3.new(
+		a.R + ((b.R - a.R) * alpha),
+		a.G + ((b.G - a.G) * alpha),
+		a.B + ((b.B - a.B) * alpha)
+	)
+end
+
+local function getSpellColor(spell)
+	if typeof(spell and spell.color) == "Color3" then
+		return spell.color
+	end
+	return SpellDefs.GetElementColor and SpellDefs.GetElementColor(spell and spell.element) or Color3.fromRGB(190, 120, 255)
+end
 
 local function tutorialComplete()
 	return plr:GetAttribute("TutorialComplete") == true
@@ -200,6 +347,15 @@ local SORT_LABELS = {
 	price = "Price",
 	element = "Element",
 	rarity = "Rarity",
+}
+
+local FILTER_LABELS = {
+	{ id = "all", label = "All" },
+	{ id = "unlocked", label = "Owned" },
+	{ id = "locked", label = "Locked" },
+	{ id = "element:Fire", label = "Fire" },
+	{ id = "element:Water", label = "Water" },
+	{ id = "combos", label = "Combo" },
 }
 
 local function refreshCanvas()
@@ -243,7 +399,62 @@ local function updateSortButtons()
 	end
 end
 
-local function spellLess(a, b)
+local function updateFilterButtons()
+	for key, button in pairs(filterButtons) do
+		local active = filterState == key
+		button.BackgroundColor3 = active and Color3.fromRGB(190, 120, 255) or Color3.fromRGB(30,30,34)
+		button.TextColor3 = active and Color3.fromRGB(10,10,12) or Color3.fromRGB(245,245,245)
+	end
+end
+
+local function matchesFilter(spell)
+	if filterState == "unlocked" then
+		return spell.owned == true
+	end
+	if filterState == "locked" then
+		return spell.owned ~= true
+	end
+	if filterState == "combos" then
+		return typeof(spell.combinations) == "table" and #spell.combinations > 0
+	end
+	local element = string.match(filterState, "^element:(.+)$")
+	if element then
+		return tostring(spell.element or "") == element
+	end
+	return true
+end
+
+local function matchesSearch(spell)
+	if searchQuery == "" then
+		return true
+	end
+	local haystack = string.lower(table.concat({
+		tostring(spell.displayName or spell.name or ""),
+		tostring(spell.element or ""),
+		tostring(spell.attackType or ""),
+		tostring(spell.spellType or ""),
+		tostring(spell.desc or ""),
+		tostring(spell.artMotif or ""),
+		tostring(spell.loreDescription or ""),
+		tostring(spell.gameplayDescription or ""),
+		tostring(spell.visualDirection or ""),
+		tostring(spell.witchbookAccent or ""),
+	}, " "))
+	return string.find(haystack, searchQuery, 1, true) ~= nil
+end
+
+local function buildFilteredSpells()
+	local filtered = {}
+	for _, spell in ipairs(currentSpells) do
+		if matchesFilter(spell) and matchesSearch(spell) then
+			table.insert(filtered, spell)
+		end
+	end
+	table.sort(filtered, spellLess)
+	return filtered
+end
+
+spellLess = function(a, b)
 	local key = sortState.key
 	local ascending = sortState.ascending
 
@@ -290,16 +501,25 @@ end
 
 local function renderList()
 	local selectedId = selected and selected.id or nil
-	table.sort(currentSpells, spellLess)
+	local filtered = buildFilteredSpells()
+	local totalPages = math.max(1, math.ceil(#filtered / pageSize))
+	pageIndex = math.clamp(pageIndex, 1, totalPages)
+	local startIndex = ((pageIndex - 1) * pageSize) + 1
+	local endIndex = math.min(#filtered, startIndex + pageSize - 1)
 
 	clearList()
-	for _, spell in ipairs(currentSpells) do
-		addRow(spell)
+	for index = startIndex, endIndex do
+		addRow(filtered[index])
 	end
+	pageLabel.Text = ("Page %d/%d  |  %d spells"):format(pageIndex, totalPages, #filtered)
+	prevPageBtn.Active = pageIndex > 1
+	nextPageBtn.Active = pageIndex < totalPages
+	prevPageBtn.BackgroundTransparency = pageIndex > 1 and 0 or 0.45
+	nextPageBtn.BackgroundTransparency = pageIndex < totalPages and 0 or 0.45
 	refreshCanvas()
 
 	if selectedId then
-		for _, spell in ipairs(currentSpells) do
+		for _, spell in ipairs(filtered) do
 			if spell.id == selectedId then
 				setRight(spell)
 				return
@@ -321,20 +541,62 @@ local function setSort(key)
 	renderList()
 end
 
+local function setFilter(key)
+	filterState = key
+	pageIndex = 1
+	updateFilterButtons()
+	renderList()
+end
+
+local function formatUpgradeLevels(levels)
+	local rows = {}
+	for _, levelInfo in ipairs(levels or {}) do
+		local statLines = levelInfo.statLines or {}
+		table.insert(rows, ("Lv.%s: %s"):format(tostring(levelInfo.level or "?"), table.concat(statLines, " | ")))
+	end
+	return #rows > 0 and table.concat(rows, "\n") or "Upgrade data unavailable."
+end
+
+local function formatCombinations(combinations)
+	local rows = {}
+	for _, combo in ipairs(combinations or {}) do
+		local result = SpellDefs.GetSpell(combo.resultId)
+		local ingredientNames = {}
+		for _, ingredient in ipairs(combo.ingredients or {}) do
+			local def = SpellDefs.GetSpell(ingredient)
+			table.insert(ingredientNames, def and def.name or tostring(ingredient))
+		end
+		table.insert(rows, ("%s = %s"):format(result and result.name or tostring(combo.resultId), table.concat(ingredientNames, " + ")))
+	end
+	return #rows > 0 and table.concat(rows, "\n") or "No known combinations."
+end
+
 setRight = function(spell)
 	selected = spell
 	if not spell then
 		rName.Text = "Select a spell"
 		rInfo.Text = ""
+		rArtGlyph.Text = "?"
+		rArtMotif.Text = "No spell selected"
+		rArtFrameStyle.Text = "-"
+		rArt.BackgroundColor3 = Color3.fromRGB(28, 26, 34)
+		rArtStroke.Color = Color3.fromRGB(90, 72, 120)
 		buyBtn.Text = "Buy"
 		buyBtn.BackgroundTransparency = 0.5
 		buyBtn.Active = false
 		return
 	end
 
+	local color = getSpellColor(spell)
 	rName.Text = tostring(spell.displayName or spell.name)
+	rArtGlyph.Text = tostring(spell.iconGlyph or (spell.element or "?"):sub(1, 2))
+	rArtGlyph.TextColor3 = color
+	rArtMotif.Text = tostring(spell.artMotif or "Signature spell motif")
+	rArtFrameStyle.Text = ("Frame: %s | Accent: %s"):format(tostring(spell.frameStyle or "-"), tostring(spell.witchbookAccent or "-"))
+	rArt.BackgroundColor3 = blendColor(Color3.fromRGB(20, 20, 24), color, 0.18)
+	rArtStroke.Color = color
 	rInfo.Text = string.format(
-		"Type: %s\nElement: %s\nAttack: %s\nRarity: %s\nBase Variant: %s\nCost: %d Souls\nStatus: %s\n\n%s",
+		"Type: %s\nElement: %s\nAttack: %s\nRarity: %s\nBase Variant: %s\nCost: %d Souls\nStatus: %s\n\nLore\n%s\n\nGameplay\n%s\n\nVisual Direction\n%s\n\nBase Stats\n%s\n\nUpgrade Levels\n%s\n\nCombinations\n%s",
 		tostring(spell.spellType or "Spell"),
 		tostring(spell.element or "-"),
 		tostring(spell.attackType or "-"),
@@ -342,7 +604,12 @@ setRight = function(spell)
 		tostring(spell.baseQuality or "Standard"),
 		tonumber(spell.costCoins) or 0,
 		spell.owned and "Owned" or "Locked",
-		tostring(spell.desc or "Unlocks the spell so it can appear during level up.")
+		tostring(spell.loreDescription or spell.desc or "Unlocks the spell so it can appear during level up."),
+		tostring(spell.gameplayDescription or spell.desc or "-"),
+		tostring(spell.visualDirection or "-"),
+		table.concat(spell.statLines or {}, " | "),
+		formatUpgradeLevels(spell.upgradeLevels),
+		formatCombinations(spell.combinations)
 	)
 
 	if spell.owned then
@@ -367,7 +634,8 @@ addRow = function(spell)
 	row.TextSize = 12
 	row.TextColor3 = Color3.fromRGB(230,230,230)
 	row.TextXAlignment = Enum.TextXAlignment.Left
-	row.Text = ("  %s  [%s | %s]  %s"):format(
+	row.Text = ("  %s  %s  [%s | %s]  %s"):format(
+		tostring(spell.iconGlyph or "*"),
 		getSpellName(spell),
 		tostring(spell.element or spell.category or "Spell"),
 		getSpellRarity(spell),
@@ -384,9 +652,11 @@ end
 local function openShop(payload)
 	currentCoins = tonumber(payload.souls) or 0
 	currentSpells = payload.spells or {}
+	pageIndex = 1
 	coinsLabel.Text = ("Souls: %d"):format(currentCoins)
 
 	updateSortButtons()
+	updateFilterButtons()
 	renderList()
 
 	gui.Enabled = true
@@ -434,6 +704,45 @@ for _, key in ipairs({ "name", "price", "element", "rarity" }) do
 end
 
 updateSortButtons()
+
+for _, filter in ipairs(FILTER_LABELS) do
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.fromOffset(52, 28)
+	button.BackgroundColor3 = Color3.fromRGB(30,30,34)
+	button.BorderSizePixel = 0
+	button.Font = Enum.Font.GothamBold
+	button.TextSize = 10
+	button.TextColor3 = Color3.fromRGB(245,245,245)
+	button.Text = filter.label
+	button.Parent = filterBar
+	Instance.new("UICorner", button).CornerRadius = UDim.new(0, 10)
+
+	button.MouseButton1Click:Connect(function()
+		setFilter(filter.id)
+	end)
+
+	filterButtons[filter.id] = button
+end
+
+updateFilterButtons()
+
+searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+	searchQuery = string.lower(tostring(searchBox.Text or ""))
+	pageIndex = 1
+	renderList()
+end)
+
+prevPageBtn.MouseButton1Click:Connect(function()
+	if pageIndex > 1 then
+		pageIndex -= 1
+		renderList()
+	end
+end)
+
+nextPageBtn.MouseButton1Click:Connect(function()
+	pageIndex += 1
+	renderList()
+end)
 
 UIS.InputBegan:Connect(function(inp, gp)
 	if gp then return end

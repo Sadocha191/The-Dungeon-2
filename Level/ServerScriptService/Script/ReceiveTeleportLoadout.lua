@@ -176,6 +176,29 @@ local function mapValueByUserId(map: any, userId: number): any
 	return nil
 end
 
+local function getPerPlayerListMap(tdata: any, primaryName: string): any
+	if typeof(tdata) ~= "table" then
+		return nil
+	end
+	local direct = tdata[primaryName]
+	if typeof(direct) == "table" then
+		return direct
+	end
+	return nil
+end
+
+local function resolvePerPlayerList(tdata: any, userId: number, rootName: string, mapName: string): any
+	if typeof(tdata) ~= "table" then
+		return nil
+	end
+	local map = getPerPlayerListMap(tdata, mapName)
+	local mine = mapValueByUserId(map, userId)
+	if typeof(mine) == "table" then
+		return mine
+	end
+	return tdata[rootName]
+end
+
 local function findPerPlayerPayload(tdata: any, userId: number): any
 	local map = getPerPlayerWeaponMap(tdata)
 	return mapValueByUserId(map, userId)
@@ -253,6 +276,27 @@ local function applyUnlockedSpells(plr: Player, unlocked: any)
 	end
 
 	plr:SetAttribute("UnlockedSpellsCSV", safeCSV(merged))
+	return merged
+end
+
+local function applySpellLoadout(plr: Player, loadout: any, unlockedList: any)
+	local explicitLoadout = typeof(loadout) == "table"
+	local unlockedMap = {}
+	for _, productId in ipairs(unlockedList or {}) do
+		if typeof(productId) == "string" and productId ~= "" then
+			unlockedMap[productId] = true
+		end
+	end
+
+	local validated = {}
+	if SpellDefs and SpellDefs.ValidateSpellLoadout then
+		validated = SpellDefs.ValidateSpellLoadout(loadout, unlockedMap)
+	end
+	if #validated == 0 and not explicitLoadout and SpellDefs and SpellDefs.BuildDefaultLoadout then
+		validated = SpellDefs.BuildDefaultLoadout(unlockedMap)
+	end
+	plr:SetAttribute("SpellLoadoutCSV", safeCSV(validated))
+	return validated
 end
 
 local processed: {[Player]: boolean} = {}
@@ -264,12 +308,13 @@ local function processPlayer(plr: Player)
 	processed[plr] = true
 
 	local tdata = getTeleportData(plr)
-	local weaponName, weaponEntry, unlocked = nil, nil, nil
+	local weaponName, weaponEntry, unlocked, spellLoadout = nil, nil, nil, nil
 	local runMode, partyId, partyLeader, levelKey = nil, nil, nil, nil
 
 	if typeof(tdata) == "table" then
 		weaponName, weaponEntry = resolveTeleportWeapon(tdata, plr.UserId)
-		unlocked = tdata.UnlockedSpells
+		unlocked = resolvePerPlayerList(tdata, plr.UserId, "UnlockedSpells", "UnlockedSpellsByUserId")
+		spellLoadout = resolvePerPlayerList(tdata, plr.UserId, "SpellLoadout", "SpellLoadoutByUserId")
 		runMode = tdata.RunMode
 		partyId = tdata.PartyId
 		partyLeader = tdata.PartyLeaderUserId
@@ -278,7 +323,8 @@ local function processPlayer(plr: Player)
 		print("[ReceiveTeleportLoadout] Missing TeleportData for", plr.Name, "- using saved/default loadout")
 	end
 
-	applyUnlockedSpells(plr, unlocked)
+	local mergedUnlocked = applyUnlockedSpells(plr, unlocked)
+	applySpellLoadout(plr, spellLoadout, mergedUnlocked)
 
 	if runMode == "Multi" or runMode == "Single" then
 		plr:SetAttribute("RunMode", runMode)

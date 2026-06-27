@@ -3,6 +3,8 @@ local SpellDefs = {}
 SpellDefs.MAX_MAGIC_RUN_SPELLS = 8
 SpellDefs.MAX_PHYSICAL_RUN_SPELLS = 4
 SpellDefs.MAX_RUN_SPELLS = SpellDefs.MAX_MAGIC_RUN_SPELLS + SpellDefs.MAX_PHYSICAL_RUN_SPELLS
+SpellDefs.SPELL_LOADOUT_MAX_SLOTS = 6
+SpellDefs.CODEX_HIDE_UNDISCOVERED_COMBO_DETAILS = true
 
 SpellDefs.RARITY_WEIGHTS = { Common = 0.52, Uncommon = 0.28, Rare = 0.14, Epic = 0.06 }
 SpellDefs.COLOR_BASE = Color3.fromRGB(120, 190, 255)
@@ -44,6 +46,7 @@ SpellDefs.SHOP_PRODUCTS = {}
 SpellDefs.SPELL_ORDER = {}
 SpellDefs.SHOP_ORDER = {}
 SpellDefs.SYNERGIES = {}
+SpellDefs.COMBINATIONS = {}
 SpellDefs.LEGACY_SPELL_IDS = {
 	GustBurst = "WindBlade",
 }
@@ -209,6 +212,8 @@ local UPGRADE_COPY_BY_SPELL = {
 	SolarFlare = "The flare reaches farther, burns brighter, and leaves enemies exposed to follow-up damage.",
 }
 
+SpellDefs.SPELL_PRESENTATION = {}
+
 local function copyTable(src)
 	local out = {}
 	for key, value in pairs(src or {}) do
@@ -232,6 +237,77 @@ end
 local function makeDescription(def)
 	local effect = EFFECTS[def.element] or EFFECTS.Physical
 	return string.format("%s %s", ATTACK_NOTES[def.attackType] or "Basic spell effect.", effect.note or "")
+end
+
+local function makeVisualDirection(presentation)
+	local parts = {
+		presentation.castVfx,
+		presentation.travelVfx,
+		presentation.impactVfx,
+		presentation.lingeringVfx,
+	}
+	local out = {}
+	for _, part in ipairs(parts) do
+		if typeof(part) == "string" and part ~= "" then
+			table.insert(out, part)
+		end
+	end
+	return table.concat(out, " -> ")
+end
+
+local function makePresentation(def)
+	local source = SpellDefs.SPELL_PRESENTATION[def.id] or {}
+	local presentation = copyTable(source)
+	local name = tostring(def.name or def.id or "Spell")
+	local fallbackIcon = string.upper(string.sub((def.id or name), 1, 2))
+	local element = tostring(def.element or "Spell")
+	local attackType = tostring(def.attackType or "spell")
+
+	presentation.iconGlyph = presentation.iconGlyph or fallbackIcon
+	presentation.artMotif = presentation.artMotif or string.format("%s signature %s form", name, attackType)
+	presentation.silhouette = presentation.silhouette or string.format("%s %s silhouette", name, attackType)
+	presentation.motion = presentation.motion or tostring(ATTACK_NOTES[def.attackType] or "distinct spell motion")
+	presentation.loreDescription = presentation.loreDescription or string.format("%s carries a distinct %s ritual mark.", name, string.lower(element))
+	presentation.gameplayDescription = presentation.gameplayDescription or makeDescription(def)
+	presentation.castVfx = presentation.castVfx or string.format("%s cast sigil", name)
+	presentation.travelVfx = presentation.travelVfx or string.format("%s %s trail", name, string.lower(attackType))
+	presentation.impactVfx = presentation.impactVfx or string.format("%s impact mark", name)
+	presentation.lingeringVfx = presentation.lingeringVfx or string.format("%s afterimage", name)
+	presentation.frameStyle = presentation.frameStyle or (def.isCombo and "fusion frame" or string.format("%s frame", string.lower(element)))
+	presentation.codexCategory = presentation.codexCategory or (def.isCombo and "Fusion Spell" or def.category)
+	presentation.witchbookAccent = presentation.witchbookAccent or element
+
+	local motifs = presentation.motifs
+	if typeof(motifs) ~= "table" or #motifs == 0 then
+		motifs = { presentation.artMotif, presentation.silhouette }
+	end
+	presentation.motifs = motifs
+	presentation.visualDirection = presentation.visualDirection or makeVisualDirection(presentation)
+
+	local profile = presentation.visualProfile
+	if typeof(profile) ~= "table" then
+		profile = {}
+	end
+	profile.silhouette = profile.silhouette or presentation.silhouette
+	profile.motion = profile.motion or presentation.motion
+	profile.castShape = profile.castShape or presentation.castVfx
+	profile.travelShape = profile.travelShape or presentation.travelVfx
+	profile.impactShape = profile.impactShape or presentation.impactVfx
+	profile.lingerShape = profile.lingerShape or presentation.lingeringVfx
+	profile.frameStyle = profile.frameStyle or presentation.frameStyle
+	profile.motifs = profile.motifs or copyTable(motifs)
+	profile.accentCount = tonumber(profile.accentCount) or (def.isCombo and 4 or 2)
+	profile.combo = def.isCombo == true
+	presentation.visualProfile = profile
+
+	if def.fusionIngredients and not presentation.fusionInfo then
+		presentation.fusionInfo = {
+			ingredients = copyTable(def.fusionIngredients),
+			resultId = def.id,
+		}
+	end
+
+	return presentation
 end
 
 local function makeUpgradeDescription(def)
@@ -271,6 +347,16 @@ local function addProduct(def, variantId, variant)
 		costCoins = cost,
 		costSouls = cost,
 		color = def.color,
+		iconGlyph = def.iconGlyph,
+		artMotif = def.artMotif,
+		loreDescription = def.loreDescription,
+		gameplayDescription = def.gameplayDescription,
+		visualDirection = def.visualDirection,
+		frameStyle = def.frameStyle,
+		codexCategory = def.codexCategory,
+		witchbookAccent = def.witchbookAccent,
+		visualProfile = copyTable(def.visualProfile or {}),
+		presentation = copyTable(def.presentation or {}),
 	}
 	table.insert(SpellDefs.SHOP_ORDER, productId)
 end
@@ -282,6 +368,17 @@ local function registerSpell(def)
 	def.displayColor = def.secondaryElement and blend(primaryColor, secondaryColor, 0.45) or primaryColor
 	def.category = def.category or makeCategory(def)
 	def.description = def.description or makeDescription(def)
+	local presentation = makePresentation(def)
+	def.presentation = presentation
+	def.iconGlyph = presentation.iconGlyph
+	def.artMotif = presentation.artMotif
+	def.loreDescription = presentation.loreDescription
+	def.gameplayDescription = presentation.gameplayDescription
+	def.visualDirection = presentation.visualDirection
+	def.frameStyle = presentation.frameStyle
+	def.codexCategory = presentation.codexCategory
+	def.witchbookAccent = presentation.witchbookAccent
+	def.visualProfile = copyTable(presentation.visualProfile or {})
 	def.maxLevel = def.maxLevel or 6
 	SpellDefs.SPELLS[def.id] = def
 	table.insert(SpellDefs.SPELL_ORDER, def.id)
@@ -292,12 +389,44 @@ local function registerSpell(def)
 	end
 end
 
-local function addSynergy(resultId, a, b)
-	table.insert(SpellDefs.SYNERGIES, {
-		resultId = resultId,
-		ingredients = { a, b },
-		key = (a < b) and (a .. "|" .. b) or (b .. "|" .. a),
-	})
+local function makeSynergyKey(ingredients)
+	local sorted = {}
+	for _, ingredient in ipairs(ingredients or {}) do
+		if typeof(ingredient) == "string" and ingredient ~= "" then
+			table.insert(sorted, normalizeSpellId(ingredient))
+		end
+	end
+	table.sort(sorted)
+	return table.concat(sorted, "|")
+end
+
+local function addSynergy(resultId, ...)
+	local ingredients = {}
+	local required = {}
+	for _, ingredient in ipairs({ ... }) do
+		local normalizedIngredient = normalizeSpellId(ingredient)
+		if typeof(normalizedIngredient) == "string" and normalizedIngredient ~= "" then
+			table.insert(ingredients, normalizedIngredient)
+			required[normalizedIngredient] = "MAX"
+		end
+	end
+
+	local normalizedResult = normalizeSpellId(resultId)
+	local synergy = {
+		id = normalizedResult,
+		Id = normalizedResult,
+		resultId = normalizedResult,
+		ResultSpell = normalizedResult,
+		resultSpell = normalizedResult,
+		ingredients = ingredients,
+		RequiredSpells = required,
+		RequiredLevel = "MAX",
+		ReplaceBaseSpells = true,
+		HiddenUntilDiscovered = false,
+		key = makeSynergyKey(ingredients),
+	}
+	table.insert(SpellDefs.SYNERGIES, synergy)
+	table.insert(SpellDefs.COMBINATIONS, synergy)
 end
 
 local function addBaseSpell(spec)
@@ -325,6 +454,7 @@ local function addComboSpell(spec)
 		runtime = spec[6],
 		base = false,
 		isCombo = true,
+		fusionIngredients = { spec[7], spec[8] },
 		description = string.format("Synergy spell created by merging %s and %s. %s", spec[7], spec[8], ATTACK_NOTES[spec[5]] or ""),
 	})
 	addSynergy(spec[1], spec[7], spec[8])
@@ -389,9 +519,13 @@ end
 
 local SYNERGY_LOOKUP = {}
 local SYNERGY_BY_INGREDIENT = {}
+local COMBINATION_BY_ID = {}
+local COMBINATION_BY_RESULT = {}
 
 for _, synergy in ipairs(SpellDefs.SYNERGIES) do
 	SYNERGY_LOOKUP[synergy.key] = synergy
+	COMBINATION_BY_ID[synergy.id] = synergy
+	COMBINATION_BY_RESULT[synergy.resultId] = synergy
 	for _, ingredient in ipairs(synergy.ingredients) do
 		SYNERGY_BY_INGREDIENT[ingredient] = SYNERGY_BY_INGREDIENT[ingredient] or {}
 		table.insert(SYNERGY_BY_INGREDIENT[ingredient], synergy)
@@ -444,6 +578,39 @@ function SpellDefs.GetSpellColor(spellIdOrDef)
 	return (def and def.displayColor) or (def and def.color) or SpellDefs.COLOR_BASE
 end
 
+function SpellDefs.GetPresentation(spellIdOrDef)
+	local def = typeof(spellIdOrDef) == "string" and (SpellDefs.GetSpell(spellIdOrDef) or SpellDefs.GetProduct(spellIdOrDef)) or spellIdOrDef
+	return def and copyTable(def.presentation or {}) or {}
+end
+
+function SpellDefs.GetVisualProfile(spellIdOrDef)
+	local def = typeof(spellIdOrDef) == "string" and (SpellDefs.GetSpell(spellIdOrDef) or SpellDefs.GetProduct(spellIdOrDef)) or spellIdOrDef
+	return def and copyTable(def.visualProfile or (def.presentation and def.presentation.visualProfile) or {}) or {}
+end
+
+function SpellDefs.GetSpellArtData(spellIdOrDef)
+	local def = typeof(spellIdOrDef) == "string" and (SpellDefs.GetSpell(spellIdOrDef) or SpellDefs.GetProduct(spellIdOrDef)) or spellIdOrDef
+	if not def then
+		return {}
+	end
+	local presentation = def.presentation or {}
+	return {
+		iconGlyph = def.iconGlyph or presentation.iconGlyph,
+		artMotif = def.artMotif or presentation.artMotif,
+		frameStyle = def.frameStyle or presentation.frameStyle,
+		witchbookAccent = def.witchbookAccent or presentation.witchbookAccent,
+		color = SpellDefs.GetSpellColor(def),
+	}
+end
+
+function SpellDefs.DescribeVisualDirection(spellIdOrDef)
+	local def = typeof(spellIdOrDef) == "string" and (SpellDefs.GetSpell(spellIdOrDef) or SpellDefs.GetProduct(spellIdOrDef)) or spellIdOrDef
+	if not def then
+		return ""
+	end
+	return def.visualDirection or (def.presentation and def.presentation.visualDirection) or ""
+end
+
 function SpellDefs.GetTypeLimit(spellType)
 	return spellType == "Physical" and SpellDefs.MAX_PHYSICAL_RUN_SPELLS or SpellDefs.MAX_MAGIC_RUN_SPELLS
 end
@@ -452,6 +619,9 @@ function SpellDefs.ResolveUnlockedProducts(unlockedIds)
 	local strongest = {}
 	for _, id in ipairs(unlockedIds or {}) do
 		local product = SpellDefs.GetProduct(id)
+		if not product and typeof(id) == "string" then
+			product = SpellDefs.GetProduct(("%s_Standard"):format(normalizeSpellId(id)))
+		end
 		if product then
 			local current = strongest[product.familyId]
 			if not current or (SpellDefs.BASE_VARIANT_QUALITIES[product.baseQuality].basePower > SpellDefs.BASE_VARIANT_QUALITIES[current.baseQuality].basePower) then
@@ -468,7 +638,7 @@ function SpellDefs.GetSynergyResult(a, b)
 	if typeof(a) ~= "string" or typeof(b) ~= "string" or a == "" or b == "" then
 		return nil
 	end
-	local key = (a < b) and (a .. "|" .. b) or (b .. "|" .. a)
+	local key = makeSynergyKey({ a, b })
 	local synergy = SYNERGY_LOOKUP[key]
 	return synergy and synergy.resultId or nil
 end
@@ -507,7 +677,7 @@ function SpellDefs.DescribeShopProduct(productIdOrDef)
 	local product = typeof(productIdOrDef) == "string" and SpellDefs.GetProduct(productIdOrDef) or productIdOrDef
 	if not product then return "" end
 	local variant = SpellDefs.BASE_VARIANT_QUALITIES[product.baseQuality]
-	return string.format("%s\n%s\n%s\nStronger variants start with better baseline stats and build potential.", product.category, variant and variant.label or "Base Variant", product.description or "")
+	return string.format("%s\n%s\n%s\nVisual: %s\nStronger variants start with better baseline stats and build potential.", product.category, variant and variant.label or "Base Variant", product.gameplayDescription or product.description or "", product.visualDirection or "")
 end
 
 function SpellDefs.DescribeNewOffer(productIdOrDef)
@@ -522,7 +692,7 @@ function SpellDefs.DescribeUpgradeOffer(spellIdOrDef, qualityId, currentLevel)
 	if not def then return "" end
 	local quality = SpellDefs.UPGRADE_QUALITIES[qualityId] or SpellDefs.UPGRADE_QUALITIES.Common
 	local nextLevel = math.clamp((currentLevel or 0) + 1, 1, def.maxLevel or 6)
-	return string.format("%s\n%s (+%.2f power)\nLv.%d: %s", def.category, quality.bonusText, quality.power, nextLevel, makeUpgradeDescription(def))
+	return string.format("%s\n%s (+%.2f power)\nLv.%d: %s\nVisual: %s", def.category, quality.bonusText, quality.power, nextLevel, makeUpgradeDescription(def), def.visualDirection or "")
 end
 
 function SpellDefs.ComputeRuntimeStats(spellIdOrDef, state)
@@ -597,6 +767,12 @@ function SpellDefs.ComputeRuntimeStats(spellIdOrDef, state)
 	end
 	runtime.visualColor = SpellDefs.GetSpellColor(def)
 	runtime.visualSecondaryColor = def.secondaryElement and SpellDefs.GetElementColor(def.secondaryElement) or blend(runtime.visualColor, Color3.new(1, 1, 1), def.spellType == "Physical" and 0.18 or 0.34)
+	runtime.iconGlyph = def.iconGlyph
+	runtime.artMotif = def.artMotif
+	runtime.visualDirection = def.visualDirection
+	runtime.visualProfile = copyTable(def.visualProfile or {})
+	runtime.presentation = copyTable(def.presentation or {})
+	runtime.isCombo = def.isCombo == true
 	local effects = copyTable(EFFECTS[def.element] or {})
 	if def.secondaryElement then
 		for key, value in pairs(EFFECTS[def.secondaryElement] or {}) do
@@ -628,6 +804,282 @@ function SpellDefs.GetQualityOrder()
 	for _, id in ipairs(QUALITY_ORDER) do
 		table.insert(out, id)
 	end
+	return out
+end
+
+function SpellDefs.GetLoadoutLimit()
+	return SpellDefs.SPELL_LOADOUT_MAX_SLOTS
+end
+
+function SpellDefs.ProductToSpellId(productId)
+	local product = SpellDefs.GetProduct(productId)
+	if product then
+		return product.familyId
+	end
+	return normalizeSpellId(productId)
+end
+
+function SpellDefs.NormalizeLoadoutProductId(id)
+	if typeof(id) == "table" then
+		id = id.id or id.productId or id.ProductId or id.spellId or id.SpellId
+	end
+	if typeof(id) ~= "string" or id == "" then
+		return nil
+	end
+	local productId = normalizeProductId(id)
+	if SpellDefs.GetProduct(productId) then
+		return productId
+	end
+	local familyId = normalizeSpellId(productId)
+	local standardId = ("%s_Standard"):format(familyId)
+	if SpellDefs.GetProduct(standardId) then
+		return standardId
+	end
+	return nil
+end
+
+local function unlockedContains(unlockedMap, productId)
+	if typeof(unlockedMap) ~= "table" then
+		return false
+	end
+	if unlockedMap[productId] == true then
+		return true
+	end
+	local product = SpellDefs.GetProduct(productId)
+	if product and unlockedMap[product.familyId] == true then
+		return true
+	end
+	return false
+end
+
+function SpellDefs.ValidateSpellLoadout(rawLoadout, unlockedMap)
+	local out = {}
+	local seenFamilies = {}
+	local limit = SpellDefs.GetLoadoutLimit()
+
+	if typeof(rawLoadout) ~= "table" then
+		return out
+	end
+
+	for _, rawId in ipairs(rawLoadout) do
+		local productId = SpellDefs.NormalizeLoadoutProductId(rawId)
+		local product = productId and SpellDefs.GetProduct(productId) or nil
+		if product and unlockedContains(unlockedMap, productId) and not seenFamilies[product.familyId] then
+			seenFamilies[product.familyId] = true
+			table.insert(out, productId)
+			if #out >= limit then
+				break
+			end
+		end
+	end
+
+	return out
+end
+
+function SpellDefs.BuildDefaultLoadout(unlockedMap)
+	local out = {}
+	local seen = {}
+	local limit = SpellDefs.GetLoadoutLimit()
+
+	local function tryAdd(productId)
+		local normalized = SpellDefs.NormalizeLoadoutProductId(productId)
+		local product = normalized and SpellDefs.GetProduct(normalized) or nil
+		if product and unlockedContains(unlockedMap, normalized) and not seen[product.familyId] then
+			seen[product.familyId] = true
+			table.insert(out, normalized)
+		end
+	end
+
+	for _, productId in ipairs(SpellDefs.BASE_STARTER or {}) do
+		tryAdd(productId)
+		if #out >= limit then
+			return out
+		end
+	end
+
+	local unlockedList = {}
+	if typeof(unlockedMap) == "table" then
+		for id, value in pairs(unlockedMap) do
+			if value == true and typeof(id) == "string" then
+				table.insert(unlockedList, id)
+			end
+		end
+	end
+	table.sort(unlockedList)
+	for _, productId in ipairs(unlockedList) do
+		tryAdd(productId)
+		if #out >= limit then
+			break
+		end
+	end
+
+	return out
+end
+
+local function fmtNumber(value, decimals)
+	local n = tonumber(value) or 0
+	if math.abs(n - math.floor(n + 0.5)) < 0.01 then
+		return tostring(math.floor(n + 0.5))
+	end
+	return string.format("%." .. tostring(decimals or 1) .. "f", n)
+end
+
+function SpellDefs.GetSpellStatLines(spellIdOrDef, state)
+	local def = typeof(spellIdOrDef) == "string" and SpellDefs.GetSpell(spellIdOrDef) or spellIdOrDef
+	local stats = SpellDefs.ComputeRuntimeStats(def, state or { level = 1 })
+	if not def or not stats then
+		return {}
+	end
+
+	local lines = {
+		("Damage %s"):format(fmtNumber(stats.damage, 1)),
+		("Cooldown %ss"):format(fmtNumber(stats.cooldown, 2)),
+	}
+	if stats.count and stats.count > 1 then
+		table.insert(lines, ("Count %d"):format(stats.count))
+	end
+	if stats.pierce and stats.pierce > 0 then
+		table.insert(lines, ("Pierce %d"):format(stats.pierce))
+	end
+	if stats.radius and stats.radius > 0 then
+		table.insert(lines, ("Radius %s"):format(fmtNumber(stats.radius, 1)))
+	end
+	if stats.range and stats.range > 0 then
+		table.insert(lines, ("Range %s"):format(fmtNumber(stats.range, 1)))
+	end
+	if stats.duration and stats.duration > 0 then
+		table.insert(lines, ("Duration %ss"):format(fmtNumber(stats.duration, 1)))
+	end
+	return lines
+end
+
+function SpellDefs.GetSpellUpgradeLevels(spellId)
+	local def = SpellDefs.GetSpell(spellId)
+	local out = {}
+	if not def then
+		return out
+	end
+	for level = 1, tonumber(def.maxLevel) or 6 do
+		table.insert(out, {
+			level = level,
+			statLines = SpellDefs.GetSpellStatLines(def, { level = level }),
+		})
+	end
+	return out
+end
+
+function SpellDefs.GetCombinationList()
+	local out = {}
+	for _, combo in ipairs(SpellDefs.COMBINATIONS) do
+		table.insert(out, combo)
+	end
+	return out
+end
+
+function SpellDefs.GetCombinationById(comboId)
+	return COMBINATION_BY_ID[normalizeSpellId(comboId)]
+end
+
+function SpellDefs.GetCombinationForResult(resultId)
+	return COMBINATION_BY_RESULT[normalizeSpellId(resultId)]
+end
+
+local function readLevel(levelSource, spellId)
+	if type(levelSource) == "function" then
+		return tonumber(levelSource(spellId)) or 0
+	end
+	if typeof(levelSource) == "table" then
+		return tonumber(levelSource[spellId]) or 0
+	end
+	return 0
+end
+
+function SpellDefs.CanOfferCombination(comboOrId, levelSource, hasResult)
+	local combo = typeof(comboOrId) == "table" and comboOrId or SpellDefs.GetCombinationById(comboOrId)
+	if not combo then
+		return false
+	end
+
+	local resultId = combo.resultId
+	if type(hasResult) == "function" and hasResult(resultId) then
+		return false
+	elseif typeof(hasResult) == "table" and hasResult[resultId] == true then
+		return false
+	elseif getmetatable(hasResult) == nil and hasResult == true then
+		return false
+	end
+
+	for _, ingredient in ipairs(combo.ingredients or {}) do
+		local def = SpellDefs.GetSpell(ingredient)
+		local maxLevel = tonumber(def and def.maxLevel) or 6
+		if readLevel(levelSource, ingredient) < maxLevel then
+			return false
+		end
+	end
+	return true
+end
+
+function SpellDefs.DescribeCombination(comboOrId)
+	local combo = typeof(comboOrId) == "table" and comboOrId or SpellDefs.GetCombinationById(comboOrId)
+	if not combo then
+		return ""
+	end
+	local resultDef = SpellDefs.GetSpell(combo.resultId)
+	local parts = {}
+	for _, ingredient in ipairs(combo.ingredients or {}) do
+		local def = SpellDefs.GetSpell(ingredient)
+		local maxLevel = tonumber(def and def.maxLevel) or 6
+		table.insert(parts, ("%s Lv.%d"):format(def and def.name or ingredient, maxLevel))
+	end
+	local resultName = resultDef and resultDef.name or combo.resultId
+	local replaceText = combo.ReplaceBaseSpells ~= false and "Replaces its base spells when chosen." or "Keeps its base spells when chosen."
+	return ("Requires %s.\nResult: %s.\n%s"):format(table.concat(parts, " + "), resultName, replaceText)
+end
+
+function SpellDefs.GetCombinationStatus(comboOrId, levelSource, discoveredMap)
+	local combo = typeof(comboOrId) == "table" and comboOrId or SpellDefs.GetCombinationById(comboOrId)
+	if not combo then
+		return "unknown"
+	end
+	if typeof(discoveredMap) == "table" and discoveredMap[combo.id] == true then
+		return "discovered"
+	end
+	if SpellDefs.CanOfferCombination(combo, levelSource, false) then
+		return "ready"
+	end
+	return "locked"
+end
+
+function SpellDefs.SummarizeDamageByElement(productIds)
+	local totals = {}
+	for _, rawId in ipairs(productIds or {}) do
+		local productId = SpellDefs.NormalizeLoadoutProductId(rawId)
+		local product = productId and SpellDefs.GetProduct(productId) or nil
+		local def = product and SpellDefs.GetSpell(product.familyId) or nil
+		if product and def then
+			local stats = SpellDefs.ComputeRuntimeStats(def, {
+				level = 1,
+				baseMultiplier = product.baseMultiplier,
+				basePower = product.basePower,
+			})
+			local element = def.element or "Physical"
+			totals[element] = (totals[element] or 0) + math.max(0, tonumber(stats and stats.damage) or 0)
+		end
+	end
+
+	local out = {}
+	for element, damage in pairs(totals) do
+		table.insert(out, {
+			element = element,
+			damage = math.floor(damage * 10 + 0.5) / 10,
+			color = SpellDefs.GetElementColor(element),
+		})
+	end
+	table.sort(out, function(a, b)
+		local oa = SpellDefs.ELEMENTS[a.element] and SpellDefs.ELEMENTS[a.element].order or 99
+		local ob = SpellDefs.ELEMENTS[b.element] and SpellDefs.ELEMENTS[b.element].order or 99
+		return oa < ob
+	end)
 	return out
 end
 

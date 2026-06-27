@@ -61,6 +61,11 @@ local function defaultState()
 		OwnedWeapons = {},
 		FavoriteWeapons = {},
 		OwnedSpells = {},
+		SpellLoadout = {},
+		Codex = {
+			Discovered = {},
+			Seen = {},
+		},
 
 		WeaponInstances = {},
 		EquippedWeaponInstanceId = nil,
@@ -92,6 +97,10 @@ local function ensureSchema(data: any)
 	if typeof(data.OwnedWeapons) ~= "table" then data.OwnedWeapons = {} end
 	if typeof(data.FavoriteWeapons) ~= "table" then data.FavoriteWeapons = {} end
 	if typeof(data.OwnedSpells) ~= "table" then data.OwnedSpells = {} end
+	if typeof(data.SpellLoadout) ~= "table" then data.SpellLoadout = {} end
+	if typeof(data.Codex) ~= "table" then data.Codex = { Discovered = {}, Seen = {} } end
+	if typeof(data.Codex.Discovered) ~= "table" then data.Codex.Discovered = {} end
+	if typeof(data.Codex.Seen) ~= "table" then data.Codex.Seen = {} end
 
 	data.StarterWeaponClaimed = data.StarterWeaponClaimed == true
 	if data.StarterWeaponName ~= nil then data.StarterWeaponName = tostring(data.StarterWeaponName) end
@@ -294,6 +303,37 @@ function Store.EnsureOwnedSpell(player: Player, spellId: string)
 	end
 
 	Store.MarkDirty(player, "spell")
+end
+
+function Store.GetSpellLoadout(player: Player)
+	local data = Store.Get(player) or Store.Load(player)
+	local out = {}
+	if typeof(data.SpellLoadout) ~= "table" then
+		return out
+	end
+	for _, id in ipairs(data.SpellLoadout) do
+		if typeof(id) == "string" and id ~= "" then
+			table.insert(out, id)
+		end
+	end
+	return out
+end
+
+function Store.SetSpellLoadout(player: Player, loadout: {any})
+	local data = Store.Get(player) or Store.Load(player)
+	local out = {}
+	local seen = {}
+	for _, id in ipairs(loadout or {}) do
+		if typeof(id) == "string" and id ~= "" and not seen[id] then
+			seen[id] = true
+			table.insert(out, id)
+		end
+	end
+	data.SpellLoadout = out
+	if typeof(data.Profile) == "table" then
+		data.Profile.SpellLoadout = out
+	end
+	Store.MarkDirty(player, "spell_loadout")
 end
 
 -- ==== API: Starter weapon (kompat) ====

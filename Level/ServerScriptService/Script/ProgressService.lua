@@ -497,8 +497,8 @@ PlayerProgressEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 		syncHud(plr)
 	end
 end)
-local function parseUnlocked(plr: Player): {string}
-	local csv = plr:GetAttribute("UnlockedSpellsCSV")
+local function parseUnlocked(plr: Player, attributeName: string?): {string}
+	local csv = plr:GetAttribute(attributeName or "UnlockedSpellsCSV")
 	if typeof(csv) ~= "string" or csv == "" then return {} end
 	local out = {}
 
@@ -606,6 +606,7 @@ local function canOffer(plr: Player, id: string): boolean
 	local lv = getSpellLevel(plr, id)
 	local maxLv = tonumber(def.maxLevel) or 1
 	if lv >= maxLv then return false end
+	if lv == 0 and def.isCombo then return false end
 
 	local activeSet = buildActiveSet(plr)
 	if lv == 0 and SpellDefs.IsIngredientBlockedByCombo and SpellDefs.IsIngredientBlockedByCombo(id, activeSet) then
@@ -728,7 +729,34 @@ local function rollRarity(weights: table): string
 end
 
 local function strongestUnlockedProducts(plr: Player)
+	local loadout = parseUnlocked(plr, "SpellLoadoutCSV")
+	if #loadout > 0 then
+		return SpellDefs.ResolveUnlockedProducts(loadout)
+	end
 	return SpellDefs.ResolveUnlockedProducts(parseUnlocked(plr))
+end
+
+local function canOfferCombination(plr: Player, combo: any): boolean
+	if not combo or not SpellDefs or not SpellDefs.CanOfferCombination then
+		return false
+	end
+	local resultId = tostring(combo.resultId or "")
+	if resultId == "" then
+		return false
+	end
+	local r = getRun(plr)
+	if r.banished and r.banished[resultId] then
+		return false
+	end
+	return SpellDefs.CanOfferCombination(
+		combo,
+		function(spellId)
+			return getSpellLevel(plr, spellId)
+		end,
+		function(spellId)
+			return getSpellLevel(plr, spellId) > 0
+		end
+	)
 end
 
 local function buildElementCounts(activeSet: {[string]: boolean}): {[string]: number}
@@ -798,6 +826,21 @@ local function buildOfferCandidates(plr: Player)
 		end
 	end
 
+	if SpellDefs.GetCombinationList then
+		for _, combo in ipairs(SpellDefs.GetCombinationList()) do
+			local resultId = combo.resultId
+			if not seen[resultId] and canOfferCombination(plr, combo) then
+				candidates[#candidates + 1] = {
+					spellId = resultId,
+					offerType = "combination",
+					combinationId = combo.id,
+					score = candidateScore(plr, resultId, "upgrade", activeSet, elementCounts) + 3.0,
+				}
+				seen[resultId] = true
+			end
+		end
+	end
+
 	return candidates, activeSet
 end
 
@@ -841,7 +884,15 @@ local function makeOfferPayload(plr: Player, candidate: any, activeSet: {[string
 		synergyResult = synergyResult,
 	}
 
-	if candidate.offerType == "new" then
+	if candidate.offerType == "combination" then
+		local combo = SpellDefs.GetCombinationById and SpellDefs.GetCombinationById(candidate.combinationId) or nil
+		payload.quality = "Epic"
+		payload.cardQuality = "Epic"
+		payload.subtitle = "Combination"
+		payload.combinationId = candidate.combinationId
+		payload.replaceBaseSpells = combo and combo.ReplaceBaseSpells ~= false or true
+		payload.desc = SpellDefs.DescribeCombination and SpellDefs.DescribeCombination(combo) or (def.description or "")
+	elseif candidate.offerType == "new" then
 		local product = SpellDefs.GetProduct(candidate.productId)
 		if not product then
 			return nil
@@ -966,6 +1017,35 @@ SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 		if id == "" then return end
 		local offer = offered(id)
 		if not offer then return end
+
+		if offer.offerType == "combination" then
+			local combo = SpellDefs.GetCombinationById and SpellDefs.GetCombinationById(tostring(offer.combinationId or "")) or nil
+			if not canOfferCombination(plr, combo) then return end
+
+			local resultUpgradePower = 1.25
+			local resultBaseMultiplier = 1
+			local resultBasePower = 1.0
+			for _, ingredient in ipairs(combo.ingredients or {}) do
+				resultUpgradePower += getSpellUpgradePower(plr, ingredient)
+				resultBaseMultiplier = math.max(resultBaseMultiplier, getSpellBaseMultiplier(plr, ingredient))
+				resultBasePower = math.max(resultBasePower, getSpellBasePower(plr, ingredient))
+			end
+			if combo.ReplaceBaseSpells ~= false then
+				for _, ingredient in ipairs(combo.ingredients or {}) do
+					clearSpellState(plr, ingredient)
+				end
+			end
+			setSpellState(plr, id, 1, resultUpgradePower, resultBaseMultiplier + 0.08, resultBasePower + 0.75)
+			if PlayerData.DiscoverCodex then
+				PlayerData.DiscoverCodex(plr, "Combinations", combo.id, "spell_combination")
+			end
+			syncSpellMissionMilestones(plr)
+			missionAdd(plr, "UPGRADES_CHOSEN", 1)
+			pending[plr.UserId] = nil
+			finishUpgrade(plr)
+			return
+		end
+
 		if not canOffer(plr, id) then return end
 
 		if offer.offerType == "new" then
@@ -986,7 +1066,6 @@ SpellEvent.OnServerEvent:Connect(function(plr: Player, payload: any)
 			)
 		end
 
-		resolveSynergies(plr)
 		syncSpellMissionMilestones(plr)
 
 		-- Missions: count picked upgrades
@@ -1564,4 +1643,3 @@ Players.PlayerRemoving:Connect(function(plr: Player)
 end)
 
 print("[ProgressService] Ready (v15)")
-

@@ -3,6 +3,8 @@ local SpellDefs = {}
 SpellDefs.MAX_MAGIC_RUN_SPELLS = 8
 SpellDefs.MAX_PHYSICAL_RUN_SPELLS = 4
 SpellDefs.MAX_RUN_SPELLS = SpellDefs.MAX_MAGIC_RUN_SPELLS + SpellDefs.MAX_PHYSICAL_RUN_SPELLS
+SpellDefs.SPELL_LOADOUT_MAX_SLOTS = 6
+SpellDefs.CODEX_HIDE_UNDISCOVERED_COMBO_DETAILS = true
 
 SpellDefs.RARITY_WEIGHTS = { Common = 0.52, Uncommon = 0.28, Rare = 0.14, Epic = 0.06 }
 SpellDefs.COLOR_BASE = Color3.fromRGB(120, 190, 255)
@@ -44,9 +46,34 @@ SpellDefs.SHOP_PRODUCTS = {}
 SpellDefs.SPELL_ORDER = {}
 SpellDefs.SHOP_ORDER = {}
 SpellDefs.SYNERGIES = {}
+SpellDefs.COMBINATIONS = {}
+SpellDefs.LEGACY_SPELL_IDS = {
+	GustBurst = "WindBlade",
+}
+SpellDefs.LEGACY_PRODUCT_IDS = {
+	GustBurst_Standard = "WindBlade_Standard",
+	GustBurst_Amplified = "WindBlade_Amplified",
+}
 
 local BASE_VARIANT_ORDER = { "Standard", "Amplified" }
 local QUALITY_ORDER = { "Common", "Uncommon", "Rare", "Epic" }
+
+local function normalizeSpellId(id)
+	if typeof(id) ~= "string" or id == "" then
+		return id
+	end
+	return SpellDefs.LEGACY_SPELL_IDS[id] or id
+end
+
+local function normalizeProductId(id)
+	if typeof(id) ~= "string" or id == "" then
+		return id
+	end
+	return SpellDefs.LEGACY_PRODUCT_IDS[id] or id
+end
+
+SpellDefs.NormalizeSpellId = normalizeSpellId
+SpellDefs.NormalizeProductId = normalizeProductId
 
 local EFFECTS = {
 	Fire = { dot = { kind = "Burn", dps = 4.5, duration = 2.2 }, note = "Applies burn damage over time." },
@@ -136,6 +163,761 @@ local UPGRADE_COPY_BY_SPELL = {
 	SolarFlare = "The flare reaches farther, burns brighter, and leaves enemies exposed to follow-up damage.",
 }
 
+SpellDefs.SPELL_PRESENTATION = {
+	FireBolt = {
+		iconGlyph = "FB",
+		artMotif = "forked ember comet",
+		silhouette = "comet",
+		motion = "quick arcing shot with twin ember tails",
+		loreDescription = "A candle-flame curse compressed into a fast hunting spark.",
+		gameplayDescription = "Single-target opener that fires quickly and applies burn pressure.",
+		castVfx = "palm spark and ember snap",
+		travelVfx = "forked comet with two coal tails",
+		impactVfx = "white-hot pop with falling embers",
+		lingeringVfx = "short smoke bite on the target",
+		frameStyle = "charred brass",
+		codexCategory = "Elemental Projectile",
+		witchbookAccent = "ember ink",
+		motifs = { "split tail", "coal flecks" },
+	},
+	EmberOrbit = {
+		iconGlyph = "EO",
+		artMotif = "two lantern embers in a guardian loop",
+		silhouette = "lantern orbit",
+		motion = "steady orbit with bobbing coal cores",
+		loreDescription = "Old watch-lights that circle their keeper and nip at anything too close.",
+		gameplayDescription = "Close-range defensive orbit that keeps nearby enemies burning.",
+		castVfx = "small ring of lantern sparks",
+		travelVfx = "embers circling like tiny watch lamps",
+		impactVfx = "coal kiss and red ash spray",
+		lingeringVfx = "thin ember trail around the player",
+		frameStyle = "smoked glass",
+		codexCategory = "Elemental Orbit",
+		witchbookAccent = "lantern red",
+		motifs = { "lantern core", "ash loop" },
+	},
+	FlameBurst = {
+		iconGlyph = "FL",
+		artMotif = "opened furnace flower",
+		silhouette = "petal blast",
+		motion = "short inhale followed by a petal-shaped flare",
+		loreDescription = "A furnace bloom that opens for one violent heartbeat.",
+		gameplayDescription = "Point-blank burst that clears space and leaves burning enemies behind.",
+		castVfx = "heat shimmer ring under the caster",
+		travelVfx = "expanding fire petals",
+		impactVfx = "flower-shaped blast and ash plume",
+		lingeringVfx = "scorched petal marks on the ground",
+		frameStyle = "furnace iron",
+		codexCategory = "Elemental Nova",
+		witchbookAccent = "molten orange",
+		motifs = { "furnace flower", "petal flare" },
+	},
+	ScorchField = {
+		iconGlyph = "SC",
+		artMotif = "cracked kiln circle",
+		silhouette = "burning field",
+		motion = "ground cracks glow outward in an uneven circle",
+		loreDescription = "A witch-mark that turns the floor into a patient kiln.",
+		gameplayDescription = "Enemy-targeted zone that rewards holding packs inside sustained burn damage.",
+		castVfx = "charcoal sigil under the target",
+		travelVfx = "rising heat ribbons",
+		impactVfx = "kiln cracks opening in the floor",
+		lingeringVfx = "low fire licking along cracked seams",
+		frameStyle = "blackened stone",
+		codexCategory = "Elemental Zone",
+		witchbookAccent = "kiln glow",
+		motifs = { "cracked kiln", "heat ribbons" },
+	},
+	InfernoBeam = {
+		iconGlyph = "IB",
+		artMotif = "dragon-breath lance",
+		silhouette = "flame lance",
+		motion = "narrow ignition that fattens into a roaring line",
+		loreDescription = "A stolen breath from the first furnace, shaped into a lance.",
+		gameplayDescription = "Sustained line attack for burning a lane through dense enemies.",
+		castVfx = "bright throat of flame at the caster",
+		travelVfx = "braided flame lance",
+		impactVfx = "searing bead at the beam tip",
+		lingeringVfx = "floating soot sparks along the lane",
+		frameStyle = "molten spine",
+		codexCategory = "Elemental Beam",
+		witchbookAccent = "furnace gold",
+		motifs = { "braided flame", "soot sparks" },
+	},
+	VoltNeedle = {
+		iconGlyph = "VN",
+		artMotif = "tailor needle of lightning",
+		silhouette = "needle",
+		motion = "needle-straight shot with jittering side arcs",
+		loreDescription = "A storm-thread pulled tight enough to pierce armor.",
+		gameplayDescription = "Fast projectile with brief shock control on contact.",
+		castVfx = "static pinch between two points",
+		travelVfx = "thin needle with sawtooth arcs",
+		impactVfx = "pinpoint flash and split fork",
+		lingeringVfx = "tiny static stitches on the enemy",
+		frameStyle = "etched copper",
+		codexCategory = "Elemental Projectile",
+		witchbookAccent = "storm yellow",
+		motifs = { "sawtooth arcs", "static stitches" },
+	},
+	StaticHalo = {
+		iconGlyph = "SH",
+		artMotif = "broken crown of charged teeth",
+		silhouette = "jagged halo",
+		motion = "quick orbit with snapping electrical gaps",
+		loreDescription = "A cracked crown that refuses to sit still.",
+		gameplayDescription = "Orbiting shock ring that interrupts close threats.",
+		castVfx = "crown teeth blink around the player",
+		travelVfx = "jagged halo segments",
+		impactVfx = "short stun spark between halo teeth",
+		lingeringVfx = "blue-white static ticks",
+		frameStyle = "copper crown",
+		codexCategory = "Elemental Orbit",
+		witchbookAccent = "charged copper",
+		motifs = { "crown teeth", "static ticks" },
+	},
+	ShockBurst = {
+		iconGlyph = "SB",
+		artMotif = "shattered bell of thunder",
+		silhouette = "bell shockwave",
+		motion = "compressed pulse that rings outward",
+		loreDescription = "A silent bell that only enemies hear.",
+		gameplayDescription = "Radial shock burst for interrupting a surrounding pack.",
+		castVfx = "small bell outline underfoot",
+		travelVfx = "flat ringing wave",
+		impactVfx = "bell-crack lightning spokes",
+		lingeringVfx = "fading vibration bars",
+		frameStyle = "storm bronze",
+		codexCategory = "Elemental Nova",
+		witchbookAccent = "bell gold",
+		motifs = { "bell crack", "vibration bars" },
+	},
+	StormField = {
+		iconGlyph = "ST",
+		artMotif = "square storm grid",
+		silhouette = "storm grid",
+		motion = "cells flicker on and off inside the zone",
+		loreDescription = "A storm caged into a grid so it can be placed like a trap.",
+		gameplayDescription = "Targeted zone that repeatedly shocks and controls enemies.",
+		castVfx = "grid tile snaps into place",
+		travelVfx = "rain of small electric ticks",
+		impactVfx = "cell-by-cell lightning strikes",
+		lingeringVfx = "crackling storm lattice",
+		frameStyle = "black copper lattice",
+		codexCategory = "Elemental Zone",
+		witchbookAccent = "storm grid",
+		motifs = { "storm lattice", "cell sparks" },
+	},
+	ThunderRay = {
+		iconGlyph = "TR",
+		artMotif = "forked tuning rod",
+		silhouette = "forked ray",
+		motion = "rigid beam with forked side lashes",
+		loreDescription = "A tuning rod aimed at the heart of a storm.",
+		gameplayDescription = "Sustained lightning ray that drills through a lane and shocks targets.",
+		castVfx = "forked rod flash at the hand",
+		travelVfx = "straight ray with side lashes",
+		impactVfx = "branching tip split",
+		lingeringVfx = "fading ozone beads",
+		frameStyle = "polished copper",
+		codexCategory = "Elemental Beam",
+		witchbookAccent = "ozone blue",
+		motifs = { "forked rod", "side lashes" },
+	},
+	GaleKnife = {
+		iconGlyph = "GK",
+		artMotif = "glass-thin wind dagger",
+		silhouette = "knife",
+		motion = "fast slicing shot with feathered wake",
+		loreDescription = "A blade made from the edge of a mountain gust.",
+		gameplayDescription = "Piercing projectile that cuts through early lines of enemies.",
+		castVfx = "thin cut in the air",
+		travelVfx = "white knife with feather wake",
+		impactVfx = "clean slash mark and air pop",
+		lingeringVfx = "brief feather motes",
+		frameStyle = "pale bone",
+		codexCategory = "Elemental Projectile",
+		witchbookAccent = "high wind",
+		motifs = { "feather wake", "air cut" },
+	},
+	WindRing = {
+		iconGlyph = "WR",
+		artMotif = "paper fan circle",
+		silhouette = "fan ring",
+		motion = "folded gusts rotate like a paper fan",
+		loreDescription = "A folded wind charm that opens only when danger crowds in.",
+		gameplayDescription = "Orbit that knocks enemies back while sweeping a wider perimeter.",
+		castVfx = "fan ribs unfold around the player",
+		travelVfx = "rotating paper-fan gusts",
+		impactVfx = "soft shove and pale slash",
+		lingeringVfx = "curling air ribbons",
+		frameStyle = "white lacquer",
+		codexCategory = "Elemental Orbit",
+		witchbookAccent = "wind white",
+		motifs = { "fan ribs", "air ribbons" },
+	},
+	WindBlade = {
+		iconGlyph = "WB",
+		artMotif = "crescent cutter",
+		silhouette = "crescent",
+		motion = "visible wind slash sweeps forward from the caster",
+		loreDescription = "A crescent of pressure sharpened by a practiced wrist.",
+		gameplayDescription = "Directional nova slash that gives the air family a stronger cast feel.",
+		castVfx = "drawn crescent before release",
+		travelVfx = "wide pale blade arc",
+		impactVfx = "gust impact with slice particles",
+		lingeringVfx = "thin crescent afterimage",
+		frameStyle = "silver reed",
+		codexCategory = "Elemental Nova",
+		witchbookAccent = "blade wind",
+		motifs = { "crescent arc", "slash motes" },
+	},
+	Tornado = {
+		iconGlyph = "TO",
+		artMotif = "rope funnel",
+		silhouette = "funnel",
+		motion = "spiral column that tugs inward",
+		loreDescription = "A wandering rope of sky tied to the battlefield.",
+		gameplayDescription = "Pulling zone that groups enemies while dealing repeated air damage.",
+		castVfx = "small dust knot at target point",
+		travelVfx = "stacked funnel rings",
+		impactVfx = "dust lift and spiral pull",
+		lingeringVfx = "visible funnel boundary",
+		frameStyle = "storm cloth",
+		codexCategory = "Elemental Zone",
+		witchbookAccent = "dust white",
+		motifs = { "funnel rings", "dust knot" },
+	},
+	Jetstream = {
+		iconGlyph = "JS",
+		artMotif = "racing wind corridor",
+		silhouette = "wind lane",
+		motion = "flat high-speed corridor with streak lines",
+		loreDescription = "The straight road a storm takes when it is late.",
+		gameplayDescription = "Long beam-like gust that pushes and damages enemies in a lane.",
+		castVfx = "compressed air gate",
+		travelVfx = "streaked wind corridor",
+		impactVfx = "white pressure burst at the front",
+		lingeringVfx = "speed lines fading down the lane",
+		frameStyle = "brushed silver",
+		codexCategory = "Elemental Beam",
+		witchbookAccent = "jet white",
+		motifs = { "speed lines", "air gate" },
+	},
+	WaterShard = {
+		iconGlyph = "WS",
+		artMotif = "blue glass shard",
+		silhouette = "water shard",
+		motion = "heavy droplet shard with a curved wake",
+		loreDescription = "A splinter of river glass, cold enough to slow a heartbeat.",
+		gameplayDescription = "Reliable projectile that slows targets on hit.",
+		castVfx = "droplet gathers into a shard",
+		travelVfx = "blue shard with curved wake",
+		impactVfx = "splash chip and frost mist",
+		lingeringVfx = "wet glimmer on the target",
+		frameStyle = "river glass",
+		codexCategory = "Elemental Projectile",
+		witchbookAccent = "river blue",
+		motifs = { "curved wake", "frost mist" },
+	},
+	TideOrbit = {
+		iconGlyph = "TI",
+		artMotif = "moon-tide droplets",
+		silhouette = "droplet orbit",
+		motion = "two droplets rise and fall like a tide chart",
+		loreDescription = "A pocket tide that keeps returning to its witch.",
+		gameplayDescription = "Orbiting water that slows enemies crossing its ring.",
+		castVfx = "small moon ripple around feet",
+		travelVfx = "droplets on a rising tide path",
+		impactVfx = "soft splash and chill mark",
+		lingeringVfx = "ripple ring around the player",
+		frameStyle = "moonlit silver",
+		codexCategory = "Elemental Orbit",
+		witchbookAccent = "moon tide",
+		motifs = { "moon ripple", "tide droplets" },
+	},
+	FrostSplash = {
+		iconGlyph = "FS",
+		artMotif = "bursting ice lily",
+		silhouette = "ice splash",
+		motion = "cold splash blooms outward in pointed petals",
+		loreDescription = "A pond flower frozen at the exact moment it breaks.",
+		gameplayDescription = "Burst control spell that slows enemies around the player.",
+		castVfx = "cold ring and small vapor breath",
+		travelVfx = "ice-lily splash",
+		impactVfx = "pointed frost petals",
+		lingeringVfx = "low freezing mist",
+		frameStyle = "frosted silver",
+		codexCategory = "Elemental Nova",
+		witchbookAccent = "ice lily",
+		motifs = { "ice petals", "freezing mist" },
+	},
+	RiptidePool = {
+		iconGlyph = "RP",
+		artMotif = "spiral current pool",
+		silhouette = "whirlpool",
+		motion = "flat spiral current with moving inner bands",
+		loreDescription = "A small ocean argument placed under an enemy's feet.",
+		gameplayDescription = "Targeted water zone that slows and chips enemies over time.",
+		castVfx = "pool spiral opens",
+		travelVfx = "rotating current bands",
+		impactVfx = "inward splash line",
+		lingeringVfx = "visible whirlpool edge",
+		frameStyle = "dark pearl",
+		codexCategory = "Elemental Zone",
+		witchbookAccent = "deep current",
+		motifs = { "current bands", "whirlpool edge" },
+	},
+	TidalBeam = {
+		iconGlyph = "TB",
+		artMotif = "pressurized wave column",
+		silhouette = "wave beam",
+		motion = "streaming column with crest marks along the top",
+		loreDescription = "A tide forced through the eye of a needle.",
+		gameplayDescription = "Sustained water beam that slows enemies caught in its line.",
+		castVfx = "crest curls at the caster",
+		travelVfx = "wave column with white crests",
+		impactVfx = "spray burst at the tip",
+		lingeringVfx = "falling droplets down the lane",
+		frameStyle = "blue enamel",
+		codexCategory = "Elemental Beam",
+		witchbookAccent = "wave crest",
+		motifs = { "white crests", "falling droplets" },
+	},
+	StoneSpike = {
+		iconGlyph = "SK",
+		artMotif = "chiseled green stone lance",
+		silhouette = "stone lance",
+		motion = "heavy straight shot with tumbling grit",
+		loreDescription = "A mountain tooth broken loose and taught to fly.",
+		gameplayDescription = "Heavier projectile that hits hard and staggers enemies.",
+		castVfx = "stone chip lifts from the ground",
+		travelVfx = "rough stone lance with grit wake",
+		impactVfx = "rock chip burst",
+		lingeringVfx = "small cracked mark",
+		frameStyle = "moss stone",
+		codexCategory = "Elemental Projectile",
+		witchbookAccent = "moss green",
+		motifs = { "grit wake", "mountain tooth" },
+	},
+	RockOrbit = {
+		iconGlyph = "RO",
+		artMotif = "two moon rocks on iron paths",
+		silhouette = "boulder orbit",
+		motion = "weighty orbit with slow rolling spin",
+		loreDescription = "Little boulders that remember the hill they rolled down.",
+		gameplayDescription = "Slower orbit with heavier hits and stagger value.",
+		castVfx = "stones pull up into orbit",
+		travelVfx = "rolling rocks with dust halos",
+		impactVfx = "blunt chip and dust puff",
+		lingeringVfx = "dust ring around the caster",
+		frameStyle = "ironstone",
+		codexCategory = "Elemental Orbit",
+		witchbookAccent = "dust green",
+		motifs = { "dust halos", "rolling stone" },
+	},
+	QuakeBurst = {
+		iconGlyph = "QB",
+		artMotif = "broken tectonic plate",
+		silhouette = "quake plate",
+		motion = "ground plate snaps upward then settles",
+		loreDescription = "A borrowed shrug from the deep rock below.",
+		gameplayDescription = "High-impact nova that staggers enemies around the player.",
+		castVfx = "fault seam draws underfoot",
+		travelVfx = "radial plate lift",
+		impactVfx = "chunk burst and dust wall",
+		lingeringVfx = "short ground crack",
+		frameStyle = "basalt rim",
+		codexCategory = "Elemental Nova",
+		witchbookAccent = "basalt green",
+		motifs = { "fault seam", "dust wall" },
+	},
+	BramblePatch = {
+		iconGlyph = "BP",
+		artMotif = "thorned root snare",
+		silhouette = "bramble snare",
+		motion = "roots crawl outward in crooked lanes",
+		loreDescription = "A hungry patch of roots that mistakes monsters for rain.",
+		gameplayDescription = "Zone that punishes enemies standing in a thorny patch.",
+		castVfx = "seed mark splits open",
+		travelVfx = "crooked root lanes",
+		impactVfx = "thorn snap and leaf dust",
+		lingeringVfx = "visible bramble boundary",
+		frameStyle = "thornwood",
+		codexCategory = "Elemental Zone",
+		witchbookAccent = "root green",
+		motifs = { "root lanes", "thorn snap" },
+	},
+	FaultLine = {
+		iconGlyph = "FX",
+		artMotif = "straight cracked ridge",
+		silhouette = "fault beam",
+		motion = "ground line splits forward in hard segments",
+		loreDescription = "A map of where the earth would rather break.",
+		gameplayDescription = "Wide line attack that batters enemies along the crack.",
+		castVfx = "stone ridge rises at the caster",
+		travelVfx = "segmented crack racing forward",
+		impactVfx = "rock teeth at the line end",
+		lingeringVfx = "fading fracture glow",
+		frameStyle = "split slate",
+		codexCategory = "Elemental Beam",
+		witchbookAccent = "fault green",
+		motifs = { "segmented crack", "rock teeth" },
+	},
+	VoidShard = {
+		iconGlyph = "VS",
+		artMotif = "missing-piece crystal",
+		silhouette = "void shard",
+		motion = "dark shard slides forward with delayed purple echo",
+		loreDescription = "A fragment shaped like the space left after something was taken.",
+		gameplayDescription = "Piercing projectile that pulls and exposes enemies for follow-up damage.",
+		castVfx = "small absence opens in the hand",
+		travelVfx = "black shard with purple echo",
+		impactVfx = "inward pop and violet tear",
+		lingeringVfx = "short vulnerability mark",
+		frameStyle = "obsidian violet",
+		codexCategory = "Elemental Projectile",
+		witchbookAccent = "void violet",
+		motifs = { "delayed echo", "violet tear" },
+	},
+	AbyssHalo = {
+		iconGlyph = "AH",
+		artMotif = "eclipse ring",
+		silhouette = "eclipse orbit",
+		motion = "dark orbit with a bright rim chasing it",
+		loreDescription = "An eclipse small enough to be worn as protection.",
+		gameplayDescription = "Orbit that destabilizes nearby enemies and sets up burst damage.",
+		castVfx = "eclipse rim closes around the player",
+		travelVfx = "dark halo with bright rim",
+		impactVfx = "soft implosion touch",
+		lingeringVfx = "purple orbit smear",
+		frameStyle = "eclipse metal",
+		codexCategory = "Elemental Orbit",
+		witchbookAccent = "eclipse violet",
+		motifs = { "bright rim", "implosion touch" },
+	},
+	NullBurst = {
+		iconGlyph = "NB",
+		artMotif = "inverted star collapse",
+		silhouette = "collapse star",
+		motion = "draws inward for a beat, then snaps outward",
+		loreDescription = "A star that learned how to fall in every direction.",
+		gameplayDescription = "Void nova that exposes surrounding enemies to more damage.",
+		castVfx = "inward star lines",
+		travelVfx = "negative-space pulse",
+		impactVfx = "collapse snap and purple spikes",
+		lingeringVfx = "thin vulnerability ring",
+		frameStyle = "black star",
+		codexCategory = "Elemental Nova",
+		witchbookAccent = "null purple",
+		motifs = { "inward star", "purple spikes" },
+	},
+	Singularity = {
+		iconGlyph = "SG",
+		artMotif = "black well with silver rim",
+		silhouette = "gravity well",
+		motion = "flat well pulls particles inward",
+		loreDescription = "A tiny argument with gravity that gravity usually wins.",
+		gameplayDescription = "Pulling zone that groups enemies and increases follow-up damage windows.",
+		castVfx = "silver rim circles the target",
+		travelVfx = "particles dragged inward",
+		impactVfx = "well opens with a dark pulse",
+		lingeringVfx = "visible inward pull bands",
+		frameStyle = "silver void rim",
+		codexCategory = "Elemental Zone",
+		witchbookAccent = "gravity violet",
+		motifs = { "inward bands", "silver rim" },
+	},
+	EntropyRay = {
+		iconGlyph = "ER",
+		artMotif = "unraveling thread beam",
+		silhouette = "unravel ray",
+		motion = "beam frays at the edges as it travels",
+		loreDescription = "A line of undoing, pulled loose from the edge of a spell.",
+		gameplayDescription = "Void beam that opens enemies to heavier follow-up damage.",
+		castVfx = "thread knot pulls tight",
+		travelVfx = "dark ray with frayed edges",
+		impactVfx = "unraveling thread burst",
+		lingeringVfx = "loose violet threads",
+		frameStyle = "frayed obsidian",
+		codexCategory = "Elemental Beam",
+		witchbookAccent = "thread violet",
+		motifs = { "frayed edges", "thread knot" },
+	},
+	RadiantBolt = {
+		iconGlyph = "RB",
+		artMotif = "sun nail",
+		silhouette = "radiant nail",
+		motion = "straight golden nail with small halo wake",
+		loreDescription = "A nail of daylight hammered through shadow.",
+		gameplayDescription = "Piercing projectile that marks enemies to take more damage.",
+		castVfx = "small halo stamp",
+		travelVfx = "gold nail with halo wake",
+		impactVfx = "bright nail-head flash",
+		lingeringVfx = "mark glyph on the enemy",
+		frameStyle = "sun gilt",
+		codexCategory = "Elemental Projectile",
+		witchbookAccent = "day gold",
+		motifs = { "halo wake", "mark glyph" },
+	},
+	HaloOrbit = {
+		iconGlyph = "HO",
+		artMotif = "saint ring with twin sparks",
+		silhouette = "clean halo",
+		motion = "smooth orbit with measured holy ticks",
+		loreDescription = "A small oath of light that keeps circling back.",
+		gameplayDescription = "Orbit that repeatedly marks close enemies for more damage.",
+		castVfx = "halo locks above the player",
+		travelVfx = "clean ring with twin sparks",
+		impactVfx = "soft gold brand",
+		lingeringVfx = "thin aureole trail",
+		frameStyle = "gilded ivory",
+		codexCategory = "Elemental Orbit",
+		witchbookAccent = "aureole gold",
+		motifs = { "aureole trail", "gold brand" },
+	},
+	Sunburst = {
+		iconGlyph = "SU",
+		artMotif = "many-point sun seal",
+		silhouette = "sun seal",
+		motion = "gold spokes snap outward from a bright center",
+		loreDescription = "A sunrise folded into a seal and released all at once.",
+		gameplayDescription = "Radial light burst that brands a crowd for follow-up damage.",
+		castVfx = "sun seal ignites underfoot",
+		travelVfx = "many-point gold spokes",
+		impactVfx = "bright corona pop",
+		lingeringVfx = "small sun marks",
+		frameStyle = "sun ivory",
+		codexCategory = "Elemental Nova",
+		witchbookAccent = "corona gold",
+		motifs = { "gold spokes", "sun marks" },
+	},
+	ConsecratedGround = {
+		iconGlyph = "CG",
+		artMotif = "cathedral floor seal",
+		silhouette = "sanctuary seal",
+		motion = "geometric floor lines fill with gold",
+		loreDescription = "A borrowed square of sanctuary drawn under hostile feet.",
+		gameplayDescription = "Light zone that deals damage and amplifies follow-up hits.",
+		castVfx = "floor seal draws in straight strokes",
+		travelVfx = "ordered gold lattice",
+		impactVfx = "sanctuary lines ignite",
+		lingeringVfx = "readable holy boundary",
+		frameStyle = "cathedral glass",
+		codexCategory = "Elemental Zone",
+		witchbookAccent = "sanctuary gold",
+		motifs = { "gold lattice", "holy boundary" },
+	},
+	SolarBeam = {
+		iconGlyph = "SL",
+		artMotif = "pillar of noon light",
+		silhouette = "solar pillar",
+		motion = "clean white-gold column with heat shimmer",
+		loreDescription = "Noon narrowed into a single merciless line.",
+		gameplayDescription = "Sustained light beam that pierces lanes and marks targets.",
+		castVfx = "solar aperture opens",
+		travelVfx = "white-gold column",
+		impactVfx = "sun bead at the beam tip",
+		lingeringVfx = "gold motes in the lane",
+		frameStyle = "polished ivory",
+		codexCategory = "Elemental Beam",
+		witchbookAccent = "noon gold",
+		motifs = { "solar aperture", "gold motes" },
+	},
+	AxeThrow = {
+		iconGlyph = "AX",
+		artMotif = "notched throwing axe",
+		silhouette = "spinning axe",
+		motion = "metal spin with a heavy forward wobble",
+		loreDescription = "A practical answer to magic: throw the sharp thing very well.",
+		gameplayDescription = "Physical projectile with chunky hits and bleed pressure.",
+		castVfx = "metal glint at shoulder height",
+		travelVfx = "spinning axe with grey trail",
+		impactVfx = "metal chop and red chip",
+		lingeringVfx = "short bleed slash",
+		frameStyle = "worn steel",
+		codexCategory = "Physical Projectile",
+		witchbookAccent = "steel grey",
+		motifs = { "metal spin", "bleed slash" },
+	},
+	GuardHammers = {
+		iconGlyph = "GH",
+		artMotif = "paired watch hammers",
+		silhouette = "hammer orbit",
+		motion = "two hammers circle like patient sentries",
+		loreDescription = "The oath of a guard translated into blunt metal.",
+		gameplayDescription = "Physical orbit that protects the player with heavy bleed hits.",
+		castVfx = "two hammer heads rise into formation",
+		travelVfx = "paired hammer orbit",
+		impactVfx = "heavy clang and chip sparks",
+		lingeringVfx = "dull steel trail",
+		frameStyle = "guard steel",
+		codexCategory = "Physical Orbit",
+		witchbookAccent = "iron blue",
+		motifs = { "paired hammers", "chip sparks" },
+	},
+	GroundSlam = {
+		iconGlyph = "GS",
+		artMotif = "shockplate stomp",
+		silhouette = "slam plate",
+		motion = "downward force ring with chunky debris",
+		loreDescription = "A refusal to share the ground with monsters.",
+		gameplayDescription = "Physical nova that crushes and bleeds nearby enemies.",
+		castVfx = "raised boot-ring shadow",
+		travelVfx = "low shockplate",
+		impactVfx = "debris pop and dust punch",
+		lingeringVfx = "round impact scar",
+		frameStyle = "dented iron",
+		codexCategory = "Physical Nova",
+		witchbookAccent = "impact grey",
+		motifs = { "shockplate", "impact scar" },
+	},
+	CaltropField = {
+		iconGlyph = "CF",
+		artMotif = "scattered four-point spikes",
+		silhouette = "spike field",
+		motion = "spikes blink into a practical hazard grid",
+		loreDescription = "A trapmaker's handful of bad decisions.",
+		gameplayDescription = "Physical zone that shreds enemies crossing the field.",
+		castVfx = "small spikes toss outward",
+		travelVfx = "hazard grid of four-point spikes",
+		impactVfx = "sharp metal pricks",
+		lingeringVfx = "readable caltrop field",
+		frameStyle = "scratched iron",
+		codexCategory = "Physical Zone",
+		witchbookAccent = "trap steel",
+		motifs = { "four-point spikes", "hazard grid" },
+	},
+	WhirlwindSlash = {
+		iconGlyph = "WW",
+		artMotif = "wide sword wheel",
+		silhouette = "slash wheel",
+		motion = "broad melee lane that reads as a spinning cut",
+		loreDescription = "A sword swing stretched until it becomes weather.",
+		gameplayDescription = "Short, wide physical beam that carves enemies in front of the player.",
+		castVfx = "blade wheel flashes at the caster",
+		travelVfx = "wide rotating slash lane",
+		impactVfx = "steel arc and chip sparks",
+		lingeringVfx = "grey cut afterimage",
+		frameStyle = "polished steel",
+		codexCategory = "Physical Beam",
+		witchbookAccent = "blade grey",
+		motifs = { "blade wheel", "cut afterimage" },
+	},
+	FireTornado = {
+		iconGlyph = "FT",
+		artMotif = "burning rope funnel",
+		silhouette = "fusion funnel",
+		motion = "air funnel wrapped in climbing flame bands",
+		loreDescription = "Wind gives fire a spine, and the flame learns how to hunt in circles.",
+		gameplayDescription = "Fusion zone that pulls enemies into a burning tornado.",
+		castVfx = "fire and wind sigils braid together",
+		travelVfx = "spiral flame funnel",
+		impactVfx = "ember cyclone bite",
+		lingeringVfx = "hot spiral boundary",
+		frameStyle = "fused ember silver",
+		codexCategory = "Fusion Zone",
+		witchbookAccent = "ember gale",
+		motifs = { "braided sigils", "flame funnel" },
+	},
+	StormSurge = {
+		iconGlyph = "SR",
+		artMotif = "electrified breaker wave",
+		silhouette = "storm wave",
+		motion = "water pool flashes with lightning veins",
+		loreDescription = "A tide that stole thunder and kept it in its foam.",
+		gameplayDescription = "Fusion zone that slows and shocks enemies over repeated ticks.",
+		castVfx = "wave crest crossed by lightning",
+		travelVfx = "charged breaker bands",
+		impactVfx = "splash strike and electric foam",
+		lingeringVfx = "storm foam grid",
+		frameStyle = "charged pearl",
+		codexCategory = "Fusion Zone",
+		witchbookAccent = "storm tide",
+		motifs = { "electric foam", "breaker bands" },
+	},
+	MagmaCrash = {
+		iconGlyph = "MC",
+		artMotif = "lava meteor plate",
+		silhouette = "magma impact",
+		motion = "heavy molten plate slams outward",
+		loreDescription = "Earth holds the furnace door while fire kicks it open.",
+		gameplayDescription = "Fusion nova with a brutal burning stagger radius.",
+		castVfx = "molten crack gathers underfoot",
+		travelVfx = "rising lava plate",
+		impactVfx = "magma plate crash and ember rocks",
+		lingeringVfx = "hot cracks fading to black",
+		frameStyle = "lava basalt",
+		codexCategory = "Fusion Nova",
+		witchbookAccent = "magma red",
+		motifs = { "lava plate", "ember rocks" },
+	},
+	RadiantTempest = {
+		iconGlyph = "RT",
+		artMotif = "holy storm compass",
+		silhouette = "radiant cyclone",
+		motion = "gold compass spokes spin inside a wind zone",
+		loreDescription = "A storm taught manners by a sanctuary bell.",
+		gameplayDescription = "Fusion zone that tosses enemies while marking them for damage.",
+		castVfx = "compass rose and gust seal overlap",
+		travelVfx = "gold cyclone spokes",
+		impactVfx = "bright gust brand",
+		lingeringVfx = "compass boundary in the storm",
+		frameStyle = "gilded silver",
+		codexCategory = "Fusion Zone",
+		witchbookAccent = "holy gale",
+		motifs = { "compass rose", "gold cyclone" },
+	},
+	VoidFlood = {
+		iconGlyph = "VF",
+		artMotif = "black current whirl",
+		silhouette = "void tide",
+		motion = "dark water pulls inward with purple undertow",
+		loreDescription = "A flood from the place where rivers disappear.",
+		gameplayDescription = "Fusion zone that drags, slows, and exposes packs.",
+		castVfx = "water ring sinks into a void rim",
+		travelVfx = "black current with purple undertow",
+		impactVfx = "inward splash collapse",
+		lingeringVfx = "undertow bands",
+		frameStyle = "black pearl",
+		codexCategory = "Fusion Zone",
+		witchbookAccent = "undertow violet",
+		motifs = { "void rim", "undertow bands" },
+	},
+	ThunderQuake = {
+		iconGlyph = "TQ",
+		artMotif = "charged fault hammer",
+		silhouette = "shock fracture",
+		motion = "earth crack detonates with lightning teeth",
+		loreDescription = "The ground breaks first; the thunder arrives to sign its name.",
+		gameplayDescription = "Fusion nova that stuns and staggers a wide circle.",
+		castVfx = "fault seam charges yellow",
+		travelVfx = "radial crack with lightning teeth",
+		impactVfx = "electric stone burst",
+		lingeringVfx = "charged fracture lines",
+		frameStyle = "copper basalt",
+		codexCategory = "Fusion Nova",
+		witchbookAccent = "storm stone",
+		motifs = { "lightning teeth", "charged fracture" },
+	},
+	SolarFlare = {
+		iconGlyph = "XR",
+		artMotif = "white-hot solar lance",
+		silhouette = "solar flare beam",
+		motion = "sun beam with licking fire corona",
+		loreDescription = "Daylight and fire agree to stop being subtle.",
+		gameplayDescription = "Fusion beam that burns and exposes everything in a lane.",
+		castVfx = "sun aperture ringed by flame",
+		travelVfx = "white-hot lance with fire corona",
+		impactVfx = "flare bead and ember halo",
+		lingeringVfx = "gold ash in the lane",
+		frameStyle = "solar enamel",
+		codexCategory = "Fusion Beam",
+		witchbookAccent = "solar fire",
+		motifs = { "fire corona", "gold ash" },
+	},
+}
+
 local function copyTable(src)
 	local out = {}
 	for key, value in pairs(src or {}) do
@@ -159,6 +941,75 @@ end
 local function makeDescription(def)
 	local effect = EFFECTS[def.element] or EFFECTS.Physical
 	return string.format("%s %s", ATTACK_NOTES[def.attackType] or "Basic spell effect.", effect.note or "")
+end
+
+local function makeVisualDirection(presentation)
+	local parts = {
+		presentation.castVfx,
+		presentation.travelVfx,
+		presentation.impactVfx,
+		presentation.lingeringVfx,
+	}
+	local out = {}
+	for _, part in ipairs(parts) do
+		if typeof(part) == "string" and part ~= "" then
+			table.insert(out, part)
+		end
+	end
+	return table.concat(out, " -> ")
+end
+
+local function makePresentation(def)
+	local source = SpellDefs.SPELL_PRESENTATION[def.id] or {}
+	local presentation = copyTable(source)
+	local name = tostring(def.name or def.id or "Spell")
+	local fallbackIcon = string.upper(string.sub((def.id or name), 1, 2))
+
+	presentation.iconGlyph = presentation.iconGlyph or fallbackIcon
+	presentation.artMotif = presentation.artMotif or string.format("%s %s motif", def.element or "Spell", def.attackType or "spell")
+	presentation.silhouette = presentation.silhouette or tostring(def.attackType or "spell")
+	presentation.motion = presentation.motion or tostring(ATTACK_NOTES[def.attackType] or "distinct spell motion")
+	presentation.loreDescription = presentation.loreDescription or string.format("%s carries a signature %s ritual mark.", name, string.lower(tostring(def.element or "spell")))
+	presentation.gameplayDescription = presentation.gameplayDescription or makeDescription(def)
+	presentation.castVfx = presentation.castVfx or "signature cast sigil"
+	presentation.travelVfx = presentation.travelVfx or presentation.motion
+	presentation.impactVfx = presentation.impactVfx or "clear impact flash"
+	presentation.lingeringVfx = presentation.lingeringVfx or "brief readable afterimage"
+	presentation.frameStyle = presentation.frameStyle or (def.isCombo and "fusion frame" or string.format("%s frame", string.lower(tostring(def.element or "spell"))))
+	presentation.codexCategory = presentation.codexCategory or (def.isCombo and "Fusion Spell" or def.category)
+	presentation.witchbookAccent = presentation.witchbookAccent or tostring(def.element or "Spell")
+
+	local motifs = presentation.motifs
+	if typeof(motifs) ~= "table" or #motifs == 0 then
+		motifs = { presentation.artMotif, presentation.silhouette }
+	end
+	presentation.motifs = motifs
+	presentation.visualDirection = presentation.visualDirection or makeVisualDirection(presentation)
+
+	local profile = presentation.visualProfile
+	if typeof(profile) ~= "table" then
+		profile = {}
+	end
+	profile.silhouette = profile.silhouette or presentation.silhouette
+	profile.motion = profile.motion or presentation.motion
+	profile.castShape = profile.castShape or presentation.castVfx
+	profile.travelShape = profile.travelShape or presentation.travelVfx
+	profile.impactShape = profile.impactShape or presentation.impactVfx
+	profile.lingerShape = profile.lingerShape or presentation.lingeringVfx
+	profile.frameStyle = profile.frameStyle or presentation.frameStyle
+	profile.motifs = profile.motifs or copyTable(motifs)
+	profile.accentCount = tonumber(profile.accentCount) or (def.isCombo and 4 or 2)
+	profile.combo = def.isCombo == true
+	presentation.visualProfile = profile
+
+	if def.fusionIngredients and not presentation.fusionInfo then
+		presentation.fusionInfo = {
+			ingredients = copyTable(def.fusionIngredients),
+			resultId = def.id,
+		}
+	end
+
+	return presentation
 end
 
 local function makeUpgradeDescription(def)
@@ -198,6 +1049,16 @@ local function addProduct(def, variantId, variant)
 		costCoins = cost,
 		costSouls = cost,
 		color = def.color,
+		iconGlyph = def.iconGlyph,
+		artMotif = def.artMotif,
+		loreDescription = def.loreDescription,
+		gameplayDescription = def.gameplayDescription,
+		visualDirection = def.visualDirection,
+		frameStyle = def.frameStyle,
+		codexCategory = def.codexCategory,
+		witchbookAccent = def.witchbookAccent,
+		visualProfile = copyTable(def.visualProfile or {}),
+		presentation = copyTable(def.presentation or {}),
 	}
 	table.insert(SpellDefs.SHOP_ORDER, productId)
 end
@@ -209,6 +1070,17 @@ local function registerSpell(def)
 	def.displayColor = def.secondaryElement and blend(primaryColor, secondaryColor, 0.45) or primaryColor
 	def.category = def.category or makeCategory(def)
 	def.description = def.description or makeDescription(def)
+	local presentation = makePresentation(def)
+	def.presentation = presentation
+	def.iconGlyph = presentation.iconGlyph
+	def.artMotif = presentation.artMotif
+	def.loreDescription = presentation.loreDescription
+	def.gameplayDescription = presentation.gameplayDescription
+	def.visualDirection = presentation.visualDirection
+	def.frameStyle = presentation.frameStyle
+	def.codexCategory = presentation.codexCategory
+	def.witchbookAccent = presentation.witchbookAccent
+	def.visualProfile = copyTable(presentation.visualProfile or {})
 	def.maxLevel = def.maxLevel or 6
 	SpellDefs.SPELLS[def.id] = def
 	table.insert(SpellDefs.SPELL_ORDER, def.id)
@@ -219,12 +1091,44 @@ local function registerSpell(def)
 	end
 end
 
-local function addSynergy(resultId, a, b)
-	table.insert(SpellDefs.SYNERGIES, {
-		resultId = resultId,
-		ingredients = { a, b },
-		key = (a < b) and (a .. "|" .. b) or (b .. "|" .. a),
-	})
+local function makeSynergyKey(ingredients)
+	local sorted = {}
+	for _, ingredient in ipairs(ingredients or {}) do
+		if typeof(ingredient) == "string" and ingredient ~= "" then
+			table.insert(sorted, normalizeSpellId(ingredient))
+		end
+	end
+	table.sort(sorted)
+	return table.concat(sorted, "|")
+end
+
+local function addSynergy(resultId, ...)
+	local ingredients = {}
+	local required = {}
+	for _, ingredient in ipairs({ ... }) do
+		local normalizedIngredient = normalizeSpellId(ingredient)
+		if typeof(normalizedIngredient) == "string" and normalizedIngredient ~= "" then
+			table.insert(ingredients, normalizedIngredient)
+			required[normalizedIngredient] = "MAX"
+		end
+	end
+
+	local normalizedResult = normalizeSpellId(resultId)
+	local synergy = {
+		id = normalizedResult,
+		Id = normalizedResult,
+		resultId = normalizedResult,
+		ResultSpell = normalizedResult,
+		resultSpell = normalizedResult,
+		ingredients = ingredients,
+		RequiredSpells = required,
+		RequiredLevel = "MAX",
+		ReplaceBaseSpells = true,
+		HiddenUntilDiscovered = false,
+		key = makeSynergyKey(ingredients),
+	}
+	table.insert(SpellDefs.SYNERGIES, synergy)
+	table.insert(SpellDefs.COMBINATIONS, synergy)
 end
 
 local function addBaseSpell(spec)
@@ -252,6 +1156,7 @@ local function addComboSpell(spec)
 		runtime = spec[6],
 		base = false,
 		isCombo = true,
+		fusionIngredients = { spec[7], spec[8] },
 		description = string.format("Synergy spell created by merging %s and %s. %s", spec[7], spec[8], ATTACK_NOTES[spec[5]] or ""),
 	})
 	addSynergy(spec[1], spec[7], spec[8])
@@ -316,9 +1221,13 @@ end
 
 local SYNERGY_LOOKUP = {}
 local SYNERGY_BY_INGREDIENT = {}
+local COMBINATION_BY_ID = {}
+local COMBINATION_BY_RESULT = {}
 
 for _, synergy in ipairs(SpellDefs.SYNERGIES) do
 	SYNERGY_LOOKUP[synergy.key] = synergy
+	COMBINATION_BY_ID[synergy.id] = synergy
+	COMBINATION_BY_RESULT[synergy.resultId] = synergy
 	for _, ingredient in ipairs(synergy.ingredients) do
 		SYNERGY_BY_INGREDIENT[ingredient] = SYNERGY_BY_INGREDIENT[ingredient] or {}
 		table.insert(SYNERGY_BY_INGREDIENT[ingredient], synergy)
@@ -326,15 +1235,15 @@ for _, synergy in ipairs(SpellDefs.SYNERGIES) do
 end
 
 function SpellDefs.Get(id)
-	return SpellDefs.SPELLS[id] or SpellDefs.SHOP_PRODUCTS[id]
+	return SpellDefs.SPELLS[normalizeSpellId(id)] or SpellDefs.SHOP_PRODUCTS[normalizeProductId(id)]
 end
 
 function SpellDefs.GetSpell(id)
-	return SpellDefs.SPELLS[id]
+	return SpellDefs.SPELLS[normalizeSpellId(id)]
 end
 
 function SpellDefs.GetProduct(id)
-	return SpellDefs.SHOP_PRODUCTS[id]
+	return SpellDefs.SHOP_PRODUCTS[normalizeProductId(id)]
 end
 
 function SpellDefs.IsValid(id)
@@ -367,6 +1276,39 @@ function SpellDefs.GetSpellColor(spellIdOrDef)
 	return (def and def.displayColor) or (def and def.color) or SpellDefs.COLOR_BASE
 end
 
+function SpellDefs.GetPresentation(spellIdOrDef)
+	local def = typeof(spellIdOrDef) == "string" and (SpellDefs.GetSpell(spellIdOrDef) or SpellDefs.GetProduct(spellIdOrDef)) or spellIdOrDef
+	return def and copyTable(def.presentation or {}) or {}
+end
+
+function SpellDefs.GetVisualProfile(spellIdOrDef)
+	local def = typeof(spellIdOrDef) == "string" and (SpellDefs.GetSpell(spellIdOrDef) or SpellDefs.GetProduct(spellIdOrDef)) or spellIdOrDef
+	return def and copyTable(def.visualProfile or (def.presentation and def.presentation.visualProfile) or {}) or {}
+end
+
+function SpellDefs.GetSpellArtData(spellIdOrDef)
+	local def = typeof(spellIdOrDef) == "string" and (SpellDefs.GetSpell(spellIdOrDef) or SpellDefs.GetProduct(spellIdOrDef)) or spellIdOrDef
+	if not def then
+		return {}
+	end
+	local presentation = def.presentation or {}
+	return {
+		iconGlyph = def.iconGlyph or presentation.iconGlyph,
+		artMotif = def.artMotif or presentation.artMotif,
+		frameStyle = def.frameStyle or presentation.frameStyle,
+		witchbookAccent = def.witchbookAccent or presentation.witchbookAccent,
+		color = SpellDefs.GetSpellColor(def),
+	}
+end
+
+function SpellDefs.DescribeVisualDirection(spellIdOrDef)
+	local def = typeof(spellIdOrDef) == "string" and (SpellDefs.GetSpell(spellIdOrDef) or SpellDefs.GetProduct(spellIdOrDef)) or spellIdOrDef
+	if not def then
+		return ""
+	end
+	return def.visualDirection or (def.presentation and def.presentation.visualDirection) or ""
+end
+
 function SpellDefs.GetTypeLimit(spellType)
 	return spellType == "Physical" and SpellDefs.MAX_PHYSICAL_RUN_SPELLS or SpellDefs.MAX_MAGIC_RUN_SPELLS
 end
@@ -374,7 +1316,10 @@ end
 function SpellDefs.ResolveUnlockedProducts(unlockedIds)
 	local strongest = {}
 	for _, id in ipairs(unlockedIds or {}) do
-		local product = SpellDefs.SHOP_PRODUCTS[id]
+		local product = SpellDefs.GetProduct(id)
+		if not product and typeof(id) == "string" then
+			product = SpellDefs.GetProduct(("%s_Standard"):format(normalizeSpellId(id)))
+		end
 		if product then
 			local current = strongest[product.familyId]
 			if not current or (SpellDefs.BASE_VARIANT_QUALITIES[product.baseQuality].basePower > SpellDefs.BASE_VARIANT_QUALITIES[current.baseQuality].basePower) then
@@ -389,14 +1334,14 @@ function SpellDefs.GetSynergyResult(a, b)
 	if typeof(a) ~= "string" or typeof(b) ~= "string" or a == "" or b == "" then
 		return nil
 	end
-	local key = (a < b) and (a .. "|" .. b) or (b .. "|" .. a)
+	local key = makeSynergyKey({ a, b })
 	local synergy = SYNERGY_LOOKUP[key]
 	return synergy and synergy.resultId or nil
 end
 
 function SpellDefs.GetSynergiesFor(spellId)
 	local out = {}
-	for _, synergy in ipairs(SYNERGY_BY_INGREDIENT[spellId] or {}) do
+	for _, synergy in ipairs(SYNERGY_BY_INGREDIENT[normalizeSpellId(spellId)] or {}) do
 		table.insert(out, synergy)
 	end
 	return out
@@ -425,7 +1370,7 @@ function SpellDefs.DescribeShopProduct(productIdOrDef)
 	local product = typeof(productIdOrDef) == "string" and SpellDefs.GetProduct(productIdOrDef) or productIdOrDef
 	if not product then return "" end
 	local variant = SpellDefs.BASE_VARIANT_QUALITIES[product.baseQuality]
-	return string.format("%s\n%s\n%s\nStronger variants start with better baseline stats and build potential.", product.category, variant and variant.label or "Base Variant", product.description or "")
+	return string.format("%s\n%s\n%s\nVisual: %s\nStronger variants start with better baseline stats and build potential.", product.category, variant and variant.label or "Base Variant", product.gameplayDescription or product.description or "", product.visualDirection or "")
 end
 
 function SpellDefs.DescribeNewOffer(productIdOrDef)
@@ -440,7 +1385,7 @@ function SpellDefs.DescribeUpgradeOffer(spellIdOrDef, qualityId, currentLevel)
 	if not def then return "" end
 	local quality = SpellDefs.UPGRADE_QUALITIES[qualityId] or SpellDefs.UPGRADE_QUALITIES.Common
 	local nextLevel = math.clamp((currentLevel or 0) + 1, 1, def.maxLevel or 6)
-	return string.format("%s\n%s (+%.2f power)\nLv.%d: %s", def.category, quality.bonusText, quality.power, nextLevel, makeUpgradeDescription(def))
+	return string.format("%s\n%s (+%.2f power)\nLv.%d: %s\nVisual: %s", def.category, quality.bonusText, quality.power, nextLevel, makeUpgradeDescription(def), def.visualDirection or "")
 end
 
 function SpellDefs.ComputeRuntimeStats(spellIdOrDef, state)
@@ -470,7 +1415,20 @@ function SpellDefs.ComputeRuntimeStats(spellIdOrDef, state)
 	runtime.basePower = basePower
 	runtime.upgradePower = upgradePower
 	runtime.effectPower = 1 + ((level - 1) * 0.08) + (upgradePower * 0.06) + (basePower * 0.03)
+	runtime.spellId = def.id
+	runtime.spellName = def.name
+	runtime.element = def.element
+	runtime.secondaryElement = def.secondaryElement
+	runtime.attackType = def.attackType
+	runtime.spellType = def.spellType
 	runtime.visualColor = SpellDefs.GetSpellColor(def)
+	runtime.visualSecondaryColor = def.secondaryElement and SpellDefs.GetElementColor(def.secondaryElement) or blend(runtime.visualColor, Color3.new(1, 1, 1), def.spellType == "Physical" and 0.18 or 0.34)
+	runtime.iconGlyph = def.iconGlyph
+	runtime.artMotif = def.artMotif
+	runtime.visualDirection = def.visualDirection
+	runtime.visualProfile = copyTable(def.visualProfile or {})
+	runtime.presentation = copyTable(def.presentation or {})
+	runtime.isCombo = def.isCombo == true
 	local effects = copyTable(EFFECTS[def.element] or {})
 	if def.secondaryElement then
 		for key, value in pairs(EFFECTS[def.secondaryElement] or {}) do
@@ -502,6 +1460,282 @@ function SpellDefs.GetQualityOrder()
 	for _, id in ipairs(QUALITY_ORDER) do
 		table.insert(out, id)
 	end
+	return out
+end
+
+function SpellDefs.GetLoadoutLimit()
+	return SpellDefs.SPELL_LOADOUT_MAX_SLOTS
+end
+
+function SpellDefs.ProductToSpellId(productId)
+	local product = SpellDefs.GetProduct(productId)
+	if product then
+		return product.familyId
+	end
+	return normalizeSpellId(productId)
+end
+
+function SpellDefs.NormalizeLoadoutProductId(id)
+	if typeof(id) == "table" then
+		id = id.id or id.productId or id.ProductId or id.spellId or id.SpellId
+	end
+	if typeof(id) ~= "string" or id == "" then
+		return nil
+	end
+	local productId = normalizeProductId(id)
+	if SpellDefs.GetProduct(productId) then
+		return productId
+	end
+	local familyId = normalizeSpellId(productId)
+	local standardId = ("%s_Standard"):format(familyId)
+	if SpellDefs.GetProduct(standardId) then
+		return standardId
+	end
+	return nil
+end
+
+local function unlockedContains(unlockedMap, productId)
+	if typeof(unlockedMap) ~= "table" then
+		return false
+	end
+	if unlockedMap[productId] == true then
+		return true
+	end
+	local product = SpellDefs.GetProduct(productId)
+	if product and unlockedMap[product.familyId] == true then
+		return true
+	end
+	return false
+end
+
+function SpellDefs.ValidateSpellLoadout(rawLoadout, unlockedMap)
+	local out = {}
+	local seenFamilies = {}
+	local limit = SpellDefs.GetLoadoutLimit()
+
+	if typeof(rawLoadout) ~= "table" then
+		return out
+	end
+
+	for _, rawId in ipairs(rawLoadout) do
+		local productId = SpellDefs.NormalizeLoadoutProductId(rawId)
+		local product = productId and SpellDefs.GetProduct(productId) or nil
+		if product and unlockedContains(unlockedMap, productId) and not seenFamilies[product.familyId] then
+			seenFamilies[product.familyId] = true
+			table.insert(out, productId)
+			if #out >= limit then
+				break
+			end
+		end
+	end
+
+	return out
+end
+
+function SpellDefs.BuildDefaultLoadout(unlockedMap)
+	local out = {}
+	local seen = {}
+	local limit = SpellDefs.GetLoadoutLimit()
+
+	local function tryAdd(productId)
+		local normalized = SpellDefs.NormalizeLoadoutProductId(productId)
+		local product = normalized and SpellDefs.GetProduct(normalized) or nil
+		if product and unlockedContains(unlockedMap, normalized) and not seen[product.familyId] then
+			seen[product.familyId] = true
+			table.insert(out, normalized)
+		end
+	end
+
+	for _, productId in ipairs(SpellDefs.BASE_STARTER or {}) do
+		tryAdd(productId)
+		if #out >= limit then
+			return out
+		end
+	end
+
+	local unlockedList = {}
+	if typeof(unlockedMap) == "table" then
+		for id, value in pairs(unlockedMap) do
+			if value == true and typeof(id) == "string" then
+				table.insert(unlockedList, id)
+			end
+		end
+	end
+	table.sort(unlockedList)
+	for _, productId in ipairs(unlockedList) do
+		tryAdd(productId)
+		if #out >= limit then
+			break
+		end
+	end
+
+	return out
+end
+
+local function fmtNumber(value, decimals)
+	local n = tonumber(value) or 0
+	if math.abs(n - math.floor(n + 0.5)) < 0.01 then
+		return tostring(math.floor(n + 0.5))
+	end
+	return string.format("%." .. tostring(decimals or 1) .. "f", n)
+end
+
+function SpellDefs.GetSpellStatLines(spellIdOrDef, state)
+	local def = typeof(spellIdOrDef) == "string" and SpellDefs.GetSpell(spellIdOrDef) or spellIdOrDef
+	local stats = SpellDefs.ComputeRuntimeStats(def, state or { level = 1 })
+	if not def or not stats then
+		return {}
+	end
+
+	local lines = {
+		("Damage %s"):format(fmtNumber(stats.damage, 1)),
+		("Cooldown %ss"):format(fmtNumber(stats.cooldown, 2)),
+	}
+	if stats.count and stats.count > 1 then
+		table.insert(lines, ("Count %d"):format(stats.count))
+	end
+	if stats.pierce and stats.pierce > 0 then
+		table.insert(lines, ("Pierce %d"):format(stats.pierce))
+	end
+	if stats.radius and stats.radius > 0 then
+		table.insert(lines, ("Radius %s"):format(fmtNumber(stats.radius, 1)))
+	end
+	if stats.range and stats.range > 0 then
+		table.insert(lines, ("Range %s"):format(fmtNumber(stats.range, 1)))
+	end
+	if stats.duration and stats.duration > 0 then
+		table.insert(lines, ("Duration %ss"):format(fmtNumber(stats.duration, 1)))
+	end
+	return lines
+end
+
+function SpellDefs.GetSpellUpgradeLevels(spellId)
+	local def = SpellDefs.GetSpell(spellId)
+	local out = {}
+	if not def then
+		return out
+	end
+	for level = 1, tonumber(def.maxLevel) or 6 do
+		table.insert(out, {
+			level = level,
+			statLines = SpellDefs.GetSpellStatLines(def, { level = level }),
+		})
+	end
+	return out
+end
+
+function SpellDefs.GetCombinationList()
+	local out = {}
+	for _, combo in ipairs(SpellDefs.COMBINATIONS) do
+		table.insert(out, combo)
+	end
+	return out
+end
+
+function SpellDefs.GetCombinationById(comboId)
+	return COMBINATION_BY_ID[normalizeSpellId(comboId)]
+end
+
+function SpellDefs.GetCombinationForResult(resultId)
+	return COMBINATION_BY_RESULT[normalizeSpellId(resultId)]
+end
+
+local function readLevel(levelSource, spellId)
+	if type(levelSource) == "function" then
+		return tonumber(levelSource(spellId)) or 0
+	end
+	if typeof(levelSource) == "table" then
+		return tonumber(levelSource[spellId]) or 0
+	end
+	return 0
+end
+
+function SpellDefs.CanOfferCombination(comboOrId, levelSource, hasResult)
+	local combo = typeof(comboOrId) == "table" and comboOrId or SpellDefs.GetCombinationById(comboOrId)
+	if not combo then
+		return false
+	end
+
+	local resultId = combo.resultId
+	if type(hasResult) == "function" and hasResult(resultId) then
+		return false
+	elseif typeof(hasResult) == "table" and hasResult[resultId] == true then
+		return false
+	elseif getmetatable(hasResult) == nil and hasResult == true then
+		return false
+	end
+
+	for _, ingredient in ipairs(combo.ingredients or {}) do
+		local def = SpellDefs.GetSpell(ingredient)
+		local maxLevel = tonumber(def and def.maxLevel) or 6
+		if readLevel(levelSource, ingredient) < maxLevel then
+			return false
+		end
+	end
+	return true
+end
+
+function SpellDefs.DescribeCombination(comboOrId)
+	local combo = typeof(comboOrId) == "table" and comboOrId or SpellDefs.GetCombinationById(comboOrId)
+	if not combo then
+		return ""
+	end
+	local resultDef = SpellDefs.GetSpell(combo.resultId)
+	local parts = {}
+	for _, ingredient in ipairs(combo.ingredients or {}) do
+		local def = SpellDefs.GetSpell(ingredient)
+		local maxLevel = tonumber(def and def.maxLevel) or 6
+		table.insert(parts, ("%s Lv.%d"):format(def and def.name or ingredient, maxLevel))
+	end
+	local resultName = resultDef and resultDef.name or combo.resultId
+	local replaceText = combo.ReplaceBaseSpells ~= false and "Replaces its base spells when chosen." or "Keeps its base spells when chosen."
+	return ("Requires %s.\nResult: %s.\n%s"):format(table.concat(parts, " + "), resultName, replaceText)
+end
+
+function SpellDefs.GetCombinationStatus(comboOrId, levelSource, discoveredMap)
+	local combo = typeof(comboOrId) == "table" and comboOrId or SpellDefs.GetCombinationById(comboOrId)
+	if not combo then
+		return "unknown"
+	end
+	if typeof(discoveredMap) == "table" and discoveredMap[combo.id] == true then
+		return "discovered"
+	end
+	if SpellDefs.CanOfferCombination(combo, levelSource, false) then
+		return "ready"
+	end
+	return "locked"
+end
+
+function SpellDefs.SummarizeDamageByElement(productIds)
+	local totals = {}
+	for _, rawId in ipairs(productIds or {}) do
+		local productId = SpellDefs.NormalizeLoadoutProductId(rawId)
+		local product = productId and SpellDefs.GetProduct(productId) or nil
+		local def = product and SpellDefs.GetSpell(product.familyId) or nil
+		if product and def then
+			local stats = SpellDefs.ComputeRuntimeStats(def, {
+				level = 1,
+				baseMultiplier = product.baseMultiplier,
+				basePower = product.basePower,
+			})
+			local element = def.element or "Physical"
+			totals[element] = (totals[element] or 0) + math.max(0, tonumber(stats and stats.damage) or 0)
+		end
+	end
+
+	local out = {}
+	for element, damage in pairs(totals) do
+		table.insert(out, {
+			element = element,
+			damage = math.floor(damage * 10 + 0.5) / 10,
+			color = SpellDefs.GetElementColor(element),
+		})
+	end
+	table.sort(out, function(a, b)
+		local oa = SpellDefs.ELEMENTS[a.element] and SpellDefs.ELEMENTS[a.element].order or 99
+		local ob = SpellDefs.ELEMENTS[b.element] and SpellDefs.ELEMENTS[b.element].order or 99
+		return oa < ob
+	end)
 	return out
 end
 

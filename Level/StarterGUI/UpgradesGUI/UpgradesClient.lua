@@ -244,7 +244,11 @@ local function mountCardInSlot(slot: Frame, offer)
 	local descLabel = card:WaitForChild("DescBox"):WaitForChild("Desc")
 	local accent = typeof(offer.color) == "Color3" and offer.color or Color3.fromRGB(255, 255, 255)
 
-	titleLabel.Text = string.format("%s\n%s", tostring(offer.name or offer.spellId or "Spell"), tostring(offer.subtitle or "Upgrade"))
+	local subtitle = tostring(offer.subtitle or "Upgrade")
+	if offer.offerType == "combination" then
+		subtitle = "COMBINATION"
+	end
+	titleLabel.Text = string.format("%s\n%s", tostring(offer.name or offer.spellId or "Spell"), subtitle)
 	titleLabel.TextColor3 = accent
 	descLabel.Text = tostring(offer.desc or "")
 

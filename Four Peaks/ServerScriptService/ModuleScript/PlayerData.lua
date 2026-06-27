@@ -3,6 +3,7 @@
 
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local store = DataStoreService:GetDataStore("GlobalPlayerProgress_v1")
 local legacyStore = DataStoreService:GetDataStore("GlobalProfile_v4")
 
@@ -10,6 +11,26 @@ local PlayerData = {}
 PlayerData._cache = {}
 PlayerData._dirty = {}
 PlayerData._saving = {}
+
+local replicatedModules = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+local SpellDefs = nil
+if replicatedModules and replicatedModules:FindFirstChild("SpellDefinitions") then
+	local ok, result = pcall(require, replicatedModules.SpellDefinitions)
+	if ok then
+		SpellDefs = result
+	end
+end
+
+local CODEX_CATEGORIES = {
+	"Spells",
+	"Combinations",
+	"Enemies",
+	"Elites",
+	"Bosses",
+	"Weapons",
+	"Materials",
+}
 
 local function defaultCraftingData()
 	return {
@@ -41,6 +62,19 @@ local function defaultGuildData()
 		Role = nil,
 		JoinedAt = 0,
 		Contribution = 0,
+	}
+end
+
+local function defaultCodexData()
+	local discovered = {}
+	local seen = {}
+	for _, category in ipairs(CODEX_CATEGORIES) do
+		discovered[category] = {}
+		seen[category] = {}
+	end
+	return {
+		Discovered = discovered,
+		Seen = seen,
 	}
 end
 
@@ -115,6 +149,9 @@ local function defaultProfile()
 		tutorialCompleted = false,
 		spellbookUnlocked = false,
 		spellsUnlocked = {}, -- [spellId] = true
+		spellLoadout = {},
+		spellLoadoutConfigured = false,
+		Codex = defaultCodexData(),
 
 		-- Loadout (weapon entries: { id, level, rarity, stats })
 		Loadout = {},
@@ -287,6 +324,40 @@ local function sanitizeEventStats(raw)
 			end
 		end
 	end
+	return out
+end
+
+local function sanitizeBoolIdMap(raw)
+	local out = {}
+	if typeof(raw) ~= "table" then
+		return out
+	end
+	for key, value in pairs(raw) do
+		if typeof(key) == "string" and key ~= "" and value == true then
+			out[key] = true
+		end
+	end
+	return out
+end
+
+local function sanitizeCodex(raw)
+	local out = defaultCodexData()
+	if typeof(raw) ~= "table" then
+		return out
+	end
+
+	local discovered = typeof(raw.Discovered) == "table" and raw.Discovered or raw.discovered
+	local seen = typeof(raw.Seen) == "table" and raw.Seen or raw.seen
+
+	for _, category in ipairs(CODEX_CATEGORIES) do
+		if typeof(discovered) == "table" then
+			out.Discovered[category] = sanitizeBoolIdMap(discovered[category])
+		end
+		if typeof(seen) == "table" then
+			out.Seen[category] = sanitizeBoolIdMap(seen[category])
+		end
+	end
+
 	return out
 end
 
@@ -492,6 +563,9 @@ function PlayerData.Get(plr)
 	if typeof(data.spellsUnlocked) ~= "table" then
 		data.spellsUnlocked = {}
 	end
+	data.spellLoadout = sanitizeStringList(data.spellLoadout)
+	data.spellLoadoutConfigured = data.spellLoadoutConfigured == true
+	data.Codex = sanitizeCodex(data.Codex)
 
 	PlayerData._cache[uid] = data
 	PlayerData._dirty[uid] = false
@@ -504,6 +578,120 @@ end
 
 function PlayerData.MarkDirty(plr)
 	PlayerData._dirty[plr.UserId] = true
+end
+
+local function validateSpellLoadout(rawLoadout, unlocked)
+	if SpellDefs and SpellDefs.ValidateSpellLoadout then
+		return SpellDefs.ValidateSpellLoadout(rawLoadout, unlocked)
+	end
+	return sanitizeStringList(rawLoadout)
+end
+
+function PlayerData.GetSpellLoadout(plr)
+	local data = PlayerData.Get(plr)
+	data.spellLoadout = validateSpellLoadout(data.spellLoadout, data.spellsUnlocked)
+	return sanitizeStringList(data.spellLoadout)
+end
+
+function PlayerData.ResolveSpellLoadout(plr)
+	local data = PlayerData.Get(plr)
+	local loadout = validateSpellLoadout(data.spellLoadout, data.spellsUnlocked)
+	if #loadout > 0 or data.spellLoadoutConfigured == true then
+		return loadout
+	end
+	if SpellDefs and SpellDefs.BuildDefaultLoadout then
+		return SpellDefs.BuildDefaultLoadout(data.spellsUnlocked)
+	end
+	return {}
+end
+
+function PlayerData.SetSpellLoadout(plr, rawLoadout)
+	local data = PlayerData.Get(plr)
+	local nextLoadout = validateSpellLoadout(rawLoadout, data.spellsUnlocked)
+	local current = validateSpellLoadout(data.spellLoadout, data.spellsUnlocked)
+
+	local changed = #nextLoadout ~= #current
+	if not changed then
+		for index, id in ipairs(nextLoadout) do
+			if current[index] ~= id then
+				changed = true
+				break
+			end
+		end
+	end
+
+	if changed then
+		data.spellLoadout = nextLoadout
+	end
+	if data.spellLoadoutConfigured ~= true then
+		changed = true
+	end
+	data.spellLoadoutConfigured = true
+	if changed then
+		PlayerData.MarkDirty(plr)
+	end
+	return nextLoadout, changed
+end
+
+local function normalizeCodexCategory(category)
+	category = tostring(category or "")
+	for _, known in ipairs(CODEX_CATEGORIES) do
+		if string.lower(known) == string.lower(category) then
+			return known
+		end
+	end
+	return nil
+end
+
+function PlayerData.DiscoverCodex(plr, category, id, _reason)
+	category = normalizeCodexCategory(category)
+	if not category or typeof(id) ~= "string" or id == "" then
+		return false
+	end
+	local data = PlayerData.Get(plr)
+	data.Codex = sanitizeCodex(data.Codex)
+	local bucket = data.Codex.Discovered[category]
+	if bucket[id] == true then
+		return false
+	end
+	bucket[id] = true
+	PlayerData.MarkDirty(plr)
+	return true
+end
+
+function PlayerData.MarkCodexSeen(plr, category, id)
+	category = normalizeCodexCategory(category)
+	if not category or typeof(id) ~= "string" or id == "" then
+		return false
+	end
+	local data = PlayerData.Get(plr)
+	data.Codex = sanitizeCodex(data.Codex)
+	local bucket = data.Codex.Seen[category]
+	if bucket[id] == true then
+		return false
+	end
+	bucket[id] = true
+	PlayerData.MarkDirty(plr)
+	return true
+end
+
+function PlayerData.GetCodexSnapshot(plr)
+	local data = PlayerData.Get(plr)
+	data.Codex = sanitizeCodex(data.Codex)
+	local snapshot = defaultCodexData()
+	for _, category in ipairs(CODEX_CATEGORIES) do
+		for id, value in pairs(data.Codex.Discovered[category] or {}) do
+			if value == true then
+				snapshot.Discovered[category][id] = true
+			end
+		end
+		for id, value in pairs(data.Codex.Seen[category] or {}) do
+			if value == true then
+				snapshot.Seen[category][id] = true
+			end
+		end
+	end
+	return snapshot
 end
 
 function PlayerData.GetLevelRecordsSnapshot(plr): {[string]: any}
