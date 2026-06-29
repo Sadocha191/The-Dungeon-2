@@ -6,6 +6,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local sharedModules = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:WaitForChild("ModuleScripts")
 local StatsConfig = require(sharedModules:WaitForChild("Stats"):WaitForChild("StatsConfig"))
 local NpcService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("NpcService"))
+local RunDefenseState = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("Stats"):WaitForChild("RunDefenseState"))
 
 local PauseState = ReplicatedStorage:FindFirstChild("PauseState") or ReplicatedStorage:WaitForChild("PauseState")
 local RunStarted = ReplicatedStorage:FindFirstChild("RunStarted") or ReplicatedStorage:WaitForChild("RunStarted")
@@ -69,28 +70,15 @@ local function ensureState(player)
 	state = {
 		modifiers = {},
 		currentStats = cloneTable(DEFAULTS),
-		persistentShield = 0,
-		temporaryShield = 0,
-		currentOverheal = 0,
-		specialFlags = {},
-		specialEffects = {},
 		lastAppliedMaxHp = DEFAULTS.MaxHP,
 	}
 	playerStates[player] = state
 	return state
 end
 
-local function getTotalShield(state)
-	return math.max(0, (tonumber(state.persistentShield) or 0) + (tonumber(state.temporaryShield) or 0))
-end
-
-local function syncDynamicAttributes(player, state)
-	local legacyShield = state.specialFlags.BlockShieldGain == true and 0 or math.max(0, getLegacyNumberAttr(player, "ShrineShieldCurrent", 0))
-	player:SetAttribute("RunCurrentShield", getTotalShield(state) + legacyShield)
-	player:SetAttribute("RunPersistentShield", math.max(0, tonumber(state.persistentShield) or 0))
-	player:SetAttribute("RunTemporaryShield", math.max(0, tonumber(state.temporaryShield) or 0))
-	player:SetAttribute("RunCurrentOverheal", math.max(0, tonumber(state.currentOverheal) or 0))
-	player:SetAttribute("RunBlocksShieldGain", state.specialFlags.BlockShieldGain == true)
+local function syncDynamicAttributes(player)
+	local legacyShield = RunDefenseState.IsBlockShieldGain(player) == true and 0 or math.max(0, getLegacyNumberAttr(player, "ShrineShieldCurrent", 0))
+	RunDefenseState.SyncAttributes(player, legacyShield)
 end
 
 local function applyHumanoidStats(player, state, options)
@@ -155,7 +143,7 @@ local function rebuildStats(player, options)
 	nextStats.PickupRange += DEFAULTS.PickupRange * math.max(0, getLegacyNumberAttr(player, "ShrinePickupRangeBonus", 0))
 	nextStats.PowerupMultiplier += math.max(0, getLegacyNumberAttr(player, "ShrinePowerupMult", 1) - 1)
 
-	if state.specialFlags.BlockShieldGain == true then
+	if RunDefenseState.IsBlockShieldGain(player) == true then
 		player:SetAttribute("ShrineShieldCurrent", 0)
 		player:SetAttribute("ShrineShieldMax", 0)
 		nextStats.Shield = 0
@@ -168,19 +156,9 @@ local function rebuildStats(player, options)
 
 	state.currentStats = nextStats
 
-	local shieldDelta = nextStats.Shield - (previousStats.Shield or 0)
-	if state.specialFlags.BlockShieldGain == true then
-		state.persistentShield = 0
-		state.temporaryShield = 0
-	elseif shieldDelta > 0 then
-		state.persistentShield = math.min(nextStats.Shield, state.persistentShield + shieldDelta)
-	elseif shieldDelta < 0 then
-		state.persistentShield = math.max(0, math.min(nextStats.Shield, state.persistentShield + shieldDelta))
-	end
-	state.persistentShield = math.clamp(state.persistentShield, 0, math.max(0, nextStats.Shield))
-	state.currentOverheal = math.clamp(state.currentOverheal, 0, math.max(0, nextStats.Overheal))
+	RunDefenseState.ReconcileStats(player, previousStats.Shield or 0, nextStats.Shield, nextStats.Overheal)
 
-	syncDynamicAttributes(player, state)
+	syncDynamicAttributes(player)
 	applyHumanoidStats(player, state, options)
 
 	local changedStats = {}
@@ -197,27 +175,13 @@ local function rebuildStats(player, options)
 	return nextStats, changedStats
 end
 
-local function consumeAngelDebt(player, state)
-	local bucket = state.specialEffects.AngelDebt
-	if type(bucket) ~= "table" then
-		return false
-	end
-
-	local sourceId, effectData
-	for candidateSourceId, candidateData in pairs(bucket) do
-		sourceId = candidateSourceId
-		effectData = candidateData
-		break
-	end
+local function consumeAngelDebt(player)
+	local sourceId, effectData = RunDefenseState.ConsumeLethalPrevention(player)
 	if not sourceId or not effectData then
 		return false
 	end
 
 	local triggerMaxHp = RunStatsService.GetStat(player, "MaxHP")
-	bucket[sourceId] = nil
-	if next(bucket) == nil then
-		state.specialEffects.AngelDebt = nil
-	end
 
 	RunStatsService.RemoveModifier(player, sourceId)
 
@@ -249,12 +213,8 @@ function RunStatsService.ResetPlayer(player)
 	local state = ensureState(player)
 	state.modifiers = {}
 	state.currentStats = cloneTable(DEFAULTS)
-	state.persistentShield = DEFAULTS.Shield
-	state.temporaryShield = 0
-	state.currentOverheal = 0
-	state.specialFlags = {}
-	state.specialEffects = {}
 	state.lastAppliedMaxHp = DEFAULTS.MaxHP
+	RunDefenseState.Reset(player, DEFAULTS.Shield)
 
 	rebuildStats(player, {
 		ResetHealth = true,
@@ -281,50 +241,37 @@ function RunStatsService.RemoveModifier(player, sourceId)
 	end
 
 	state.modifiers[sourceId] = nil
-
-	if type(state.specialEffects.AngelDebt) == "table" then
-		state.specialEffects.AngelDebt[sourceId] = nil
-		if next(state.specialEffects.AngelDebt) == nil then
-			state.specialEffects.AngelDebt = nil
-		end
-	end
+	RunDefenseState.UnregisterLethalPrevention(player, sourceId)
 
 	return rebuildStats(player)
 end
 
 function RunStatsService.RegisterSpecialEffect(player, sourceId, itemId, specialEffect)
-	local state = ensureState(player)
+	ensureState(player)
 	if typeof(specialEffect) ~= "table" then
 		return
 	end
 
 	local effectType = tostring(specialEffect.Type or "")
 	if effectType == "AngelDebt" then
-		state.specialEffects.AngelDebt = state.specialEffects.AngelDebt or {}
-		state.specialEffects.AngelDebt[sourceId] = {
-			ItemId = itemId,
-			SourceId = sourceId,
-		}
+		RunDefenseState.RegisterLethalPrevention(player, sourceId, itemId)
 	elseif effectType == "BloodMoonContract" then
-		state.specialFlags.BlockShieldGain = specialEffect.BlockShieldGain == true
+		RunDefenseState.SetBlockShieldGain(player, specialEffect.BlockShieldGain == true)
 		rebuildStats(player)
 	end
 end
 
 function RunStatsService.UnregisterSpecialEffect(player, sourceId, specialEffect)
-	local state = ensureState(player)
+	ensureState(player)
 	if typeof(specialEffect) ~= "table" then
 		return
 	end
 
 	local effectType = tostring(specialEffect.Type or "")
-	if effectType == "AngelDebt" and type(state.specialEffects.AngelDebt) == "table" then
-		state.specialEffects.AngelDebt[sourceId] = nil
-		if next(state.specialEffects.AngelDebt) == nil then
-			state.specialEffects.AngelDebt = nil
-		end
+	if effectType == "AngelDebt" then
+		RunDefenseState.UnregisterLethalPrevention(player, sourceId)
 	elseif effectType == "BloodMoonContract" then
-		state.specialFlags.BlockShieldGain = false
+		RunDefenseState.SetBlockShieldGain(player, false)
 		rebuildStats(player)
 	end
 end
@@ -343,12 +290,13 @@ function RunStatsService.GetAllStats(player)
 end
 
 function RunStatsService.GetCurrentShield(player)
-	local state = ensureState(player)
-	return getTotalShield(state) + math.max(0, getLegacyNumberAttr(player, "ShrineShieldCurrent", 0))
+	ensureState(player)
+	return RunDefenseState.GetCurrentShield(player, getLegacyNumberAttr(player, "ShrineShieldCurrent", 0))
 end
 
 function RunStatsService.GetCurrentOverheal(player)
-	return math.max(0, tonumber(ensureState(player).currentOverheal) or 0)
+	ensureState(player)
+	return RunDefenseState.GetCurrentOverheal(player)
 end
 
 function RunStatsService.GetAverageStat(statName)
@@ -367,38 +315,16 @@ function RunStatsService.GetAverageStat(statName)
 end
 
 function RunStatsService.AddShield(player, amount, allowTemporaryOverflow)
-	local state = ensureState(player)
+	ensureState(player)
 	local numericAmount = tonumber(amount) or 0
 	if numericAmount == 0 then
-		return getTotalShield(state)
+		return RunDefenseState.GetTotalShield(player)
 	end
 
-	if numericAmount > 0 and state.specialFlags.BlockShieldGain == true then
-		syncDynamicAttributes(player, state)
-		return getTotalShield(state)
-	end
-
-	if numericAmount > 0 then
-		if allowTemporaryOverflow == true then
-			state.temporaryShield += numericAmount
-		else
-			local shieldCap = math.max(0, RunStatsService.GetStat(player, "Shield"))
-			state.persistentShield = math.clamp(state.persistentShield + numericAmount, 0, shieldCap)
-		end
-	else
-		local remaining = math.abs(numericAmount)
-		if state.temporaryShield > 0 then
-			local used = math.min(state.temporaryShield, remaining)
-			state.temporaryShield -= used
-			remaining -= used
-		end
-		if remaining > 0 then
-			state.persistentShield = math.max(0, state.persistentShield - remaining)
-		end
-	end
-
-	syncDynamicAttributes(player, state)
-	return getTotalShield(state)
+	local shieldCap = math.max(0, RunStatsService.GetStat(player, "Shield"))
+	local totalShield = RunDefenseState.AddShield(player, numericAmount, shieldCap, allowTemporaryOverflow)
+	syncDynamicAttributes(player)
+	return totalShield
 end
 
 function RunStatsService.HealPlayer(player, amount)
@@ -412,7 +338,7 @@ function RunStatsService.HealPlayer(player, amount)
 		return 0
 	end
 
-	local state = ensureState(player)
+	ensureState(player)
 	local maxHp = RunStatsService.GetStat(player, "MaxHP")
 	local healed = math.min(numericAmount, math.max(0, maxHp - humanoid.Health))
 	if healed > 0 then
@@ -423,13 +349,11 @@ function RunStatsService.HealPlayer(player, amount)
 	if remaining > 0 then
 		local overhealCap = math.max(0, RunStatsService.GetStat(player, "Overheal"))
 		if overhealCap > 0 then
-			local beforeOverheal = state.currentOverheal
-			state.currentOverheal = math.clamp(state.currentOverheal + remaining, 0, overhealCap)
-			healed += (state.currentOverheal - beforeOverheal)
+			healed += RunDefenseState.AddOverheal(player, remaining, overhealCap)
 		end
 	end
 
-	syncDynamicAttributes(player, state)
+	syncDynamicAttributes(player)
 	return healed
 end
 
@@ -448,7 +372,7 @@ function RunStatsService.ApplyDamageToPlayer(player, amount, source)
 		return 0
 	end
 
-	local state = ensureState(player)
+	ensureState(player)
 	local evasionChance = math.max(0, RunStatsService.GetStat(player, "Evasion"))
 	if evasionChance > 0 and math.random() < evasionChance then
 		print(string.format("[RunStatsService] %s evaded incoming damage", player.Name))
@@ -458,7 +382,7 @@ function RunStatsService.ApplyDamageToPlayer(player, amount, source)
 	local armor = math.clamp(RunStatsService.GetStat(player, "Armor"), 0, 0.80)
 	incoming *= (1 - armor)
 
-	local legacyShield = state.specialFlags.BlockShieldGain == true and 0 or math.max(0, getLegacyNumberAttr(player, "ShrineShieldCurrent", 0))
+	local legacyShield = RunDefenseState.IsBlockShieldGain(player) == true and 0 or math.max(0, getLegacyNumberAttr(player, "ShrineShieldCurrent", 0))
 	if legacyShield > 0 and incoming > 0 then
 		local absorbed = math.min(legacyShield, incoming)
 		legacyShield -= absorbed
@@ -466,28 +390,12 @@ function RunStatsService.ApplyDamageToPlayer(player, amount, source)
 		player:SetAttribute("ShrineShieldCurrent", legacyShield)
 	end
 
-	if state.temporaryShield > 0 and incoming > 0 then
-		local absorbed = math.min(state.temporaryShield, incoming)
-		state.temporaryShield -= absorbed
-		incoming -= absorbed
-	end
-
-	if state.persistentShield > 0 and incoming > 0 then
-		local absorbed = math.min(state.persistentShield, incoming)
-		state.persistentShield -= absorbed
-		incoming -= absorbed
-	end
-
-	if state.currentOverheal > 0 and incoming > 0 then
-		local absorbed = math.min(state.currentOverheal, incoming)
-		state.currentOverheal -= absorbed
-		incoming -= absorbed
-	end
+	incoming = RunDefenseState.AbsorbRunDefense(player, incoming)
 
 	if incoming > 0 then
 		local lethal = incoming >= humanoid.Health
-		if lethal and consumeAngelDebt(player, state) then
-			syncDynamicAttributes(player, state)
+		if lethal and consumeAngelDebt(player) then
+			syncDynamicAttributes(player)
 			return amount
 		end
 		humanoid:TakeDamage(incoming)
@@ -502,7 +410,7 @@ function RunStatsService.ApplyDamageToPlayer(player, amount, source)
 		})
 	end
 
-	syncDynamicAttributes(player, state)
+	syncDynamicAttributes(player)
 	return incoming
 end
 
@@ -526,6 +434,7 @@ end)
 
 Players.PlayerRemoving:Connect(function(player)
 	playerStates[player] = nil
+	RunDefenseState.Forget(player)
 end)
 
 for _, player in ipairs(Players:GetPlayers()) do
@@ -561,7 +470,7 @@ RunService.Heartbeat:Connect(function(dt)
 			if regen > 0 then
 				RunStatsService.HealPlayer(player, regen * dt)
 			end
-			syncDynamicAttributes(player, ensureState(player))
+			syncDynamicAttributes(player)
 		end
 	end
 end)

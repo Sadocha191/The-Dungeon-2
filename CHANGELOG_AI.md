@@ -15,6 +15,7 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-06-29** — Poziom RunDefenseState defensive state extraction
 - **2026-06-29** — Poziom DebugStressTools Studio-only guard
 - **2026-06-28** — Studio-to-repo chest, upgrade, inventory, and Slime sync
 - **2026-06-27** — Spell presentation and gameplay VFX pass

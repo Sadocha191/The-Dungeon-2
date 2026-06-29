@@ -2,6 +2,47 @@
 
 Pełne wpisy zmian AI z miesiąca 2026-06. Kolejność zachowuje oryginalny plik.
 
+## 2026-06-29 - Poziom RunDefenseState defensive state extraction
+
+### Scope
+
+- Added `Level` `RunDefenseState` as a neutral defensive-state module for persistent shield, temporary shield, overheal, block shield gain, and Angel's Debt lethal-prevention records.
+- Updated `RunStatsService` to keep the existing public API and incoming damage pipeline while delegating shield, overheal, block shield, and Angel's Debt state operations to `RunDefenseState`.
+- Kept `_G.ApplyDamageToPlayer`, `ShrineService`, `DebugStressTools`, `NpcService`, `WaveController`, RemoteEvents, attribute names, damage order, shield/overheal/Angel's Debt math, and runtime loops unchanged.
+
+### Files updated
+
+- `Level/ServerScriptService/ModuleScript/Stats/RunDefenseState.lua`
+- `Level/ServerScriptService/ModuleScript/Stats/RunStatsService.lua`
+- `CHANGELOG_AI.md`
+- `docs/changelog/CHANGELOG_AI_2026-06.md`
+
+### Live Studio objects updated
+
+- `Level`: `game.ServerScriptService.ModuleScript.Stats.RunDefenseState`
+- `Level`: `game.ServerScriptService.ModuleScript.Stats.RunStatsService`
+
+### Verification
+
+- Confirmed connected Studio instances and set active Studio to `Level`.
+- Audited all `RunStatsService` reads and writes of `persistentShield`, `temporaryShield`, `currentOverheal`, `specialFlags.BlockShieldGain`, `specialEffects.AngelDebt`, and dynamic shield/overheal attributes before editing.
+- Confirmed `RunDefenseState` has no `require()` dependencies and does not require `RunStatsService`, `DamageService`, `NpcService`, or `ShrineService`.
+- Verified Studio `loadstring` compilation for `RunDefenseState` and `RunStatsService`.
+- Verified repo and Studio source checksum parity for both changed scripts.
+- Ran a short `Level` Play server test through public `RunStatsService` API covering temporary shield gain/absorption, persistent shield stat rebuild/clamp, overheal gain/absorption, Blood Moon shield blocking/unregister, and Angel's Debt lethal prevention.
+- Checked that no new `_G` writer and no new runtime loop were added; the existing `RunStatsService` `Heartbeat` remained unchanged.
+- Ran `git diff --check`; it reported only LF/CRLF conversion warnings on touched text files.
+
+### Risks
+
+- Angel's Debt still consumes the first entry returned by `pairs`, matching the previous unordered-table behavior.
+- Already-running Studio play sessions need a fresh server/module require to pick up the extracted state module.
+
+### Rollback
+
+- Revert `RunStatsService.lua`, delete `RunDefenseState.lua`, and revert this changelog entry.
+- In live `Level`, restore the previous source of `game.ServerScriptService.ModuleScript.Stats.RunStatsService` and remove `game.ServerScriptService.ModuleScript.Stats.RunDefenseState`.
+
 ## 2026-06-29 - Poziom DebugStressTools Studio-only guard
 
 ### Scope
