@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -19,8 +20,11 @@ local CHEST_MODEL_NAME = "skrzynia"
 local CHEST_ITEM_IMAGE_NAME = "Item"
 local CHEST_OPEN_ANIMATION_NAME = "OpenAnimation"
 local CHEST_OPEN_ANIMATION_ID = "rbxassetid://128606196135074"
-local CHEST_OPEN_ANIMATION_DURATION = 2.02
-local CHEST_OPEN_ANIMATION_DELAY = 0.5
+local CHEST_ROLL_START_DELAY = 1
+local CHEST_ROLL_MIN_STEP = 0.07
+local CHEST_ROLL_MAX_STEP = 0.18
+local CHEST_REVEAL_FAILSAFE_TIMEOUT = 12
+local CHEST_TAKE_RESPONSE_TIMEOUT = 5
 
 local rng = Random.new()
 
@@ -208,11 +212,18 @@ local skipRoll = false
 local activeRollSession = 0
 local usingChestOpeningGui = false
 local chestOpeningTrack = nil
+local chestOpeningTrackConnections = {}
 local boundChestOpeningItem = nil
 local chestOpeningItemConnection = nil
 local boundChestOpeningTakeButton = nil
 local chestOpeningTakeConnection = nil
+local chestOpeningActionFrame = nil
+local chestOpeningActionButton = nil
+local chestOpeningActionStatus = nil
+local chestOpeningRevealNow = nil
+local takeRequestSerial = 0
 local setChestOpeningTakeEnabled
+local setChestOpeningActionState
 
 local function getChestOpeningGui()
 	local openingGui = playerGui:FindFirstChild(CHEST_OPENING_GUI_NAME)
@@ -484,14 +495,12 @@ local function getItemIconImage(rarity, itemName)
 		return nil
 	end
 
+	local curlyApostrophe = utf8.char(0x2019)
 	local candidateNames = {
 		itemName,
-		string.gsub(itemName, "'", "’"),
-		string.gsub(itemName, "’", "'"),
+		string.gsub(itemName, "'", curlyApostrophe),
+		string.gsub(itemName, curlyApostrophe, "'"),
 	}
-
-	table.insert(candidateNames, string.gsub(itemName, "'", utf8.char(0x2019)))
-	table.insert(candidateNames, string.gsub(itemName, utf8.char(0x2019), "'"))
 
 	for _, candidateName in ipairs(candidateNames) do
 		local iconSource = rarityFolder:FindFirstChild(candidateName)
@@ -592,16 +601,149 @@ local function attemptTakeReward()
 
 	uiState = "taking"
 	takePending = true
+	takeRequestSerial += 1
+
+	local requestSerial = takeRequestSerial
+	local requestSession = activeRollSession
+	local requestToken = currentToken
+
 	setTakeEnabled(false)
 	takeButton.Text = "TAKING..."
 	statusText.Text = "Taking reward..."
+
+	if usingChestOpeningGui and setChestOpeningActionState then
+		local openingGui = getChestOpeningGui()
+		if openingGui then
+			setChestOpeningActionState(openingGui, true, false, "TAKING...", "Waiting for the server...")
+		end
+	end
+
 	chestItemEvent:FireServer({
 		type = "takeReward",
 		token = currentToken,
 	})
+
+	-- Never leave the player trapped forever if the server response is delayed or lost.
+	-- The same token can be retried; the server remains authoritative over the actual grant.
+	task.delay(CHEST_TAKE_RESPONSE_TIMEOUT, function()
+		if requestSerial ~= takeRequestSerial then
+			return
+		end
+		if activeRollSession ~= requestSession or currentToken ~= requestToken then
+			return
+		end
+		if uiState ~= "taking" then
+			return
+		end
+
+		uiState = "revealed"
+		takePending = false
+		setTakeEnabled(true)
+		takeButton.Text = "TAKE"
+		statusText.Text = "No server response. Press TAKE to retry."
+
+		if usingChestOpeningGui and setChestOpeningActionState then
+			local openingGui = getChestOpeningGui()
+			if openingGui then
+				setChestOpeningActionState(openingGui, true, true, "TAKE REWARD", "No response. Click again to retry.")
+			end
+		end
+	end)
+end
+
+local function ensureChestOpeningActionUi(openingGui)
+	if chestOpeningActionFrame and chestOpeningActionFrame.Parent == openingGui then
+		return chestOpeningActionFrame, chestOpeningActionButton, chestOpeningActionStatus
+	end
+
+	if chestOpeningActionFrame then
+		chestOpeningActionFrame:Destroy()
+	end
+
+	local frame = Instance.new("Frame")
+	frame.Name = "ChestRewardActions"
+	frame.AnchorPoint = Vector2.new(0.5, 1)
+	frame.Position = UDim2.new(0.5, 0, 1, -36)
+	frame.Size = UDim2.fromOffset(360, 76)
+	frame.BackgroundColor3 = Color3.fromRGB(13, 17, 25)
+	frame.BackgroundTransparency = 0.08
+	frame.BorderSizePixel = 0
+	frame.Visible = false
+	frame.ZIndex = 100
+	frame.Parent = openingGui
+
+	local frameCorner = Instance.new("UICorner")
+	frameCorner.CornerRadius = UDim.new(0, 16)
+	frameCorner.Parent = frame
+
+	local frameStroke = Instance.new("UIStroke")
+	frameStroke.Color = Color3.fromRGB(225, 191, 92)
+	frameStroke.Transparency = 0.15
+	frameStroke.Thickness = 1.5
+	frameStroke.Parent = frame
+
+	local actionButton = Instance.new("TextButton")
+	actionButton.Name = "TakeRewardAction"
+	actionButton.AnchorPoint = Vector2.new(0.5, 0)
+	actionButton.Position = UDim2.new(0.5, 0, 0, 8)
+	actionButton.Size = UDim2.fromOffset(320, 40)
+	actionButton.BackgroundColor3 = Color3.fromRGB(225, 191, 92)
+	actionButton.BorderSizePixel = 0
+	actionButton.AutoButtonColor = true
+	actionButton.Font = Enum.Font.GothamBold
+	actionButton.Text = "TAKE REWARD"
+	actionButton.TextColor3 = Color3.fromRGB(20, 17, 12)
+	actionButton.TextSize = 16
+	actionButton.ZIndex = 101
+	actionButton.Parent = frame
+
+	local actionCorner = Instance.new("UICorner")
+	actionCorner.CornerRadius = UDim.new(0, 12)
+	actionCorner.Parent = actionButton
+
+	local actionStatus = Instance.new("TextLabel")
+	actionStatus.Name = "Status"
+	actionStatus.BackgroundTransparency = 1
+	actionStatus.Position = UDim2.fromOffset(12, 51)
+	actionStatus.Size = UDim2.new(1, -24, 0, 18)
+	actionStatus.Font = Enum.Font.Gotham
+	actionStatus.Text = "Click the reward or press Space."
+	actionStatus.TextColor3 = Color3.fromRGB(205, 211, 224)
+	actionStatus.TextSize = 11
+	actionStatus.TextXAlignment = Enum.TextXAlignment.Center
+	actionStatus.ZIndex = 101
+	actionStatus.Parent = frame
+
+	actionButton.MouseButton1Click:Connect(function()
+		attemptTakeReward()
+	end)
+
+	chestOpeningActionFrame = frame
+	chestOpeningActionButton = actionButton
+	chestOpeningActionStatus = actionStatus
+	return frame, actionButton, actionStatus
+end
+
+setChestOpeningActionState = function(openingGui, visible, enabled, buttonText, statusMessage)
+	local frame, actionButton, actionStatus = ensureChestOpeningActionUi(openingGui)
+	frame.Visible = visible == true
+	actionButton.Visible = visible == true
+	actionButton.Active = enabled == true
+	actionButton.AutoButtonColor = enabled == true
+	actionButton.BackgroundTransparency = enabled and 0 or 0.35
+	actionButton.Text = buttonText or "TAKE REWARD"
+	actionStatus.Text = statusMessage or "Click the reward or press Space."
+end
+
+local function clearChestOpeningTrackConnections()
+	for _, connection in ipairs(chestOpeningTrackConnections) do
+		connection:Disconnect()
+	end
+	table.clear(chestOpeningTrackConnections)
 end
 
 local function stopChestOpeningTrack()
+	clearChestOpeningTrackConnections()
 	if chestOpeningTrack then
 		pcall(function()
 			chestOpeningTrack:Stop(0)
@@ -613,10 +755,16 @@ end
 
 local function hideChestOpeningGui()
 	stopChestOpeningTrack()
+	chestOpeningRevealNow = nil
 	usingChestOpeningGui = false
+	takeRequestSerial += 1
 
 	local openingGui = getChestOpeningGui()
 	if openingGui then
+		if setChestOpeningActionState then
+			setChestOpeningActionState(openingGui, false, false, "TAKE REWARD", "")
+		end
+
 		local itemImage = openingGui:FindFirstChild(CHEST_ITEM_IMAGE_NAME, true)
 		if itemImage and itemImage:IsA("ImageLabel") then
 			setChestOpeningTakeEnabled(itemImage, false)
@@ -706,37 +854,6 @@ function setChestOpeningTakeEnabled(itemImage, enabled)
 	takeButton.Visible = enabled
 end
 
-local function getChestOpeningTrackDuration(track)
-	local timeoutAt = os.clock() + 1
-	while track and track.Length <= 0 and os.clock() < timeoutAt do
-		task.wait()
-	end
-	if track and track.Length > 0 then
-		return track.Length
-	end
-	return CHEST_OPEN_ANIMATION_DURATION
-end
-
-local function freezeChestOpeningTrack(track, duration)
-	if not track then
-		return
-	end
-
-	pcall(function()
-		local targetPosition = tonumber(duration) or CHEST_OPEN_ANIMATION_DURATION
-		if track.Length and track.Length > 0 then
-			targetPosition = math.min(track.Length, targetPosition)
-		end
-		targetPosition = math.max(0, targetPosition - (1 / 60))
-
-		if not track.IsPlaying then
-			track:Play(0, 1, 0)
-		end
-		track.TimePosition = targetPosition
-		track:AdjustSpeed(0)
-	end)
-end
-
 local function playChestOpeningAnimation(chestModel)
 	stopChestOpeningTrack()
 
@@ -758,8 +875,58 @@ local function playChestOpeningAnimation(chestModel)
 	return track
 end
 
+local function ensureChestRollScale(itemImage)
+	local scale = itemImage:FindFirstChild("ChestRollScale")
+	if scale and scale:IsA("UIScale") then
+		return scale
+	end
+	if scale then
+		scale:Destroy()
+	end
+
+	scale = Instance.new("UIScale")
+	scale.Name = "ChestRollScale"
+	scale.Scale = 1
+	scale.Parent = itemImage
+	return scale
+end
+
+local function setChestRollPreview(itemImage, previewData, payload, rollIndex)
+	local iconImageId = getPreviewIconImage(previewData, payload)
+	local accent = ChestItemConfig.RarityColors[previewData.Rarity] or Color3.new(1, 1, 1)
+	local scale = ensureChestRollScale(itemImage)
+
+	showGuiAncestors(itemImage, nil)
+	itemImage.BackgroundTransparency = 1
+	itemImage.Image = iconImageId or "rbxasset://textures/ui/GuiImagePlaceholder.png"
+	itemImage.ImageColor3 = iconImageId and Color3.new(1, 1, 1) or accent
+	itemImage.ImageTransparency = 0
+	itemImage.ScaleType = Enum.ScaleType.Fit
+	itemImage.Visible = true
+	itemImage.Rotation = (rollIndex % 2 == 0) and -5 or 5
+	setChestOpeningTakeEnabled(itemImage, false)
+
+	scale.Scale = 0.78
+	TweenService:Create(scale, TweenInfo.new(0.1, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	TweenService:Create(itemImage, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Rotation = 0 }):Play()
+end
+
+local function holdChestAtFinalFrame(track)
+	if not track or track.Length <= 0 then
+		return
+	end
+
+	pcall(function()
+		track:Play(0, 1, 0)
+		track.TimePosition = math.max(0, track.Length - (1 / 60))
+		track:AdjustSpeed(0)
+	end)
+end
+
 local function revealChestOpeningItem(itemImage, previewData, payload)
 	local iconImageId = getPreviewIconImage(previewData, payload)
+	local scale = ensureChestRollScale(itemImage)
+
 	showGuiAncestors(itemImage, nil)
 	itemImage.BackgroundTransparency = 1
 	itemImage.Image = iconImageId or "rbxasset://textures/ui/GuiImagePlaceholder.png"
@@ -767,11 +934,19 @@ local function revealChestOpeningItem(itemImage, previewData, payload)
 	itemImage.ImageTransparency = 0
 	itemImage.ScaleType = Enum.ScaleType.Fit
 	itemImage.Visible = true
+	itemImage.Rotation = -8
 	setChestOpeningTakeEnabled(itemImage, true)
+
+	scale.Scale = 0.62
+	TweenService:Create(scale, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	TweenService:Create(itemImage, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Rotation = 0 }):Play()
 end
 
 local function showChestOpeningReward(sessionId, payload, openingGui, itemImage, chestModel)
-	local _, finalPreview = buildRollSequence(payload)
+	local rollSequence, finalPreview = buildRollSequence(payload)
+	local revealCommitted = false
+	local track = nil
+	local rollState = { Active = false }
 
 	usingChestOpeningGui = true
 	gui.Enabled = false
@@ -779,35 +954,105 @@ local function showChestOpeningReward(sessionId, payload, openingGui, itemImage,
 	itemImage.Image = ""
 	itemImage.ImageTransparency = 0
 	itemImage.Visible = false
+	itemImage.Rotation = 0
 	bindChestOpeningItem(itemImage)
 	setChestOpeningTakeEnabled(itemImage, false)
+	setChestOpeningActionState(openingGui, false, false, "TAKE REWARD", "")
 	setRollingState()
 
-	task.delay(CHEST_OPEN_ANIMATION_DELAY, function()
+	local function revealNow(holdFinalPose)
+		if revealCommitted then
+			return
+		end
 		if activeRollSession ~= sessionId or not usingChestOpeningGui then
 			return
 		end
 
-		local track = playChestOpeningAnimation(chestModel)
-		local duration = getChestOpeningTrackDuration(track)
-		task.delay(duration, function()
-			if activeRollSession ~= sessionId or not usingChestOpeningGui then
-				return
-			end
+		revealCommitted = true
+		rollState.Active = false
+		chestOpeningRevealNow = nil
+		clearChestOpeningTrackConnections()
 
-			freezeChestOpeningTrack(track, duration)
-			revealChestOpeningItem(itemImage, finalPreview, payload)
-			setRevealState(payload)
+		if holdFinalPose then
+			holdChestAtFinalFrame(track)
+		end
+
+		revealChestOpeningItem(itemImage, finalPreview, payload)
+		setChestOpeningActionState(openingGui, true, true, "TAKE REWARD", "Click the reward or press Space.")
+		setRevealState(payload)
+	end
+
+	chestOpeningRevealNow = function()
+		-- The authored chest animation cannot be skipped. This fallback only reveals
+		-- when the track has already stopped or failed to start.
+		if not track or not track.IsPlaying then
+			revealNow(false)
+		end
+	end
+
+	-- Start the chest animation immediately. There is no artificial opening delay
+	-- and no hard-coded animation duration. Natural Ended/Stopped events decide
+	-- when the final reward is revealed.
+	track = playChestOpeningAnimation(chestModel)
+	if not track then
+		revealNow(false)
+		return
+	end
+
+	rollState.Active = true
+
+	-- Start the item draw exactly one second after the chest animation begins.
+	-- The preview cycles until the chest animation finishes, then lands on the
+	-- real server-selected reward.
+	task.delay(CHEST_ROLL_START_DELAY, function()
+		if revealCommitted or activeRollSession ~= sessionId or not usingChestOpeningGui then
+			return
+		end
+
+		local rollIndex = 1
+		local rollStartedAt = os.clock()
+		while rollState.Active and activeRollSession == sessionId and usingChestOpeningGui do
+			local preview = rollSequence[((rollIndex - 1) % #rollSequence) + 1]
+			setChestRollPreview(itemImage, preview, payload, rollIndex)
+			rollIndex += 1
+
+			local elapsed = os.clock() - rollStartedAt
+			local step = math.min(CHEST_ROLL_MAX_STEP, CHEST_ROLL_MIN_STEP + (elapsed * 0.035))
+			task.wait(step)
+		end
+	end)
+
+	local function onAnimationFinished()
+		revealNow(true)
+	end
+
+	table.insert(chestOpeningTrackConnections, track.Ended:Connect(onAnimationFinished))
+	table.insert(chestOpeningTrackConnections, track.Stopped:Connect(onAnimationFinished))
+
+	-- Last-resort safety only. Normal flow always waits for the full animation.
+	task.delay(CHEST_REVEAL_FAILSAFE_TIMEOUT, function()
+		if revealCommitted or activeRollSession ~= sessionId or not usingChestOpeningGui then
+			return
+		end
+
+		warn("[ChestRewardClient] Chest animation did not finish; forcing reward reveal")
+		pcall(function()
+			if track and track.IsPlaying then
+				track:Stop(0)
+			end
 		end)
+		revealNow(false)
 	end)
 end
 
 local function hideReward()
 	activeRollSession += 1
+	takeRequestSerial += 1
 	currentToken = nil
 	takePending = false
 	uiState = "hidden"
 	skipRoll = false
+	chestOpeningRevealNow = nil
 	hideChestOpeningGui()
 	gui.Enabled = false
 	takeButton.Text = "TAKE"
@@ -838,10 +1083,13 @@ local function startRollAnimation(sessionId, payload)
 end
 
 local function showReward(payload)
+	-- Clean up any previous local sequence before starting a new one.
+	hideChestOpeningGui()
 	activeRollSession += 1
 	local sessionId = activeRollSession
 
 	currentToken = payload.token
+	takePending = false
 	skipRoll = false
 	local openingGui, itemImage, chestModel = getChestOpeningParts()
 	if openingGui and itemImage and chestModel then
@@ -876,8 +1124,10 @@ UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
 
 	if uiState == "rolling" then
 		if usingChestOpeningGui then
+			-- Do not interrupt the authored chest animation. It must play in full.
 			return
 		end
+
 		skipRoll = true
 		statusText.Text = "Skipping chest draw..."
 	elseif uiState == "revealed" then

@@ -1,110 +1,64 @@
 # The Dungeon 2
 
-The Dungeon 2 is a Roblox survivors action RPG built around two connected experiences: a persistent lobby and high-pressure dungeon runs. Players prepare in town, enter a hostile biome, survive escalating enemy pressure, collect materials and rewards, then bring that progress back into the long-term meta loop.
+The Dungeon 2 to Roblox survivors action RPG złożony z połączonych place'ów: trwałego lobby, właściwego dungeonu/runu oraz osobnego miejsca gildii.
 
-The project takes inspiration from Vampire Survivors, Megabonk, and dark fantasy dungeon crawlers, but leans harder into exploration, loot routing, portal progression, and account-based progression between runs.
+Gracz przygotowuje postać i ekwipunek w lobby, wchodzi do dungeonu, walczy automatycznymi atakami, zbiera materiały i nagrody, a następnie przenosi progres z powrotem do warstwy meta.
 
-## Core Pillars
+## Główne części projektu
 
-- A lobby that matters, with progression systems that persist beyond a single match
-- Auto-attack combat focused on movement, positioning, upgrades, and survival pressure
-- Dark fantasy runs built around exploration, scaling enemy density, and boss finishes
-- Weapon progression through crafting, upgrading, recipes, and long-term collection
-- A connected loop where success in the dungeon feeds directly back into the lobby
+- `Four Peaks/` — lobby, profile, inventory, crafting, misje, party, eventy i teleport do runu.
+- `Level/` — combat, NPC, spelle, fale, bossy, dropy, chesty i zakończenie runu.
+- `Guild/` — guild castle i systemy związane z gildią.
+- `roblox/` — dodatkowy mirror/parity snapshot wybranych struktur Studio; nie zakładaj, że jest jedynym aktywnym źródłem kodu.
+- `src/` i `default.project.json` — minimalny bootstrap Rojo, niepełny mirror gry.
 
-## Current Gameplay Slice
+Przy rozbieżności między repo a aktywnym Roblox Studio traktuj Studio jako źródło prawdy, dopóki konkretna ścieżka nie zostanie zweryfikowana.
 
-### Lobby (`Four Peaks`)
+## Dobre punkty wejścia
 
-The lobby is the backbone of the game's meta progression. The current project includes systems for:
+### Lobby
 
-- tutorial and onboarding flow
-- character creation and race selection
-- inventory, weapon ownership, and equipment syncing
-- blacksmith crafting, recipe unlocks, upgrades, and selling
-- rotating daily and weekly missions
-- mining routes and material gathering
-- party flow, level selection, and dungeon teleporting
-- banner and NPC-driven shop systems
-
-### Dungeon (`Level`)
-
-The combat place is built around survivors-style pressure and automatic attacking. The current project includes systems for:
-
-- time-based enemy escalation instead of fixed waves
-- weapon archetypes across swords, scythes, halberds, bows, pistols, and staves
-- level-up offers with reroll, skip, banish, and spell selection
-- elite pressure spikes and late-run boss flow
-- chests, shrines, pickups, reward reveals, and mission tracking
-- persistent drops and progression hooks that feed rewards back to the lobby
-
-## World And Content
-
-Current level definitions include:
-
-- Ashen Wastes
-- Hollow Marsh
-- Blightmoor
-- Shattered Highlands
-- Dreadwood
-
-The current enemy roster in the combat place includes:
-
-- Slime
-- Zombie
-- Skeleton
-- Goblin
-- Warewolf
-- Harp
-- Demon
-- LandShark
-- Golem
-- Knight
-- Ent
-
-Example weapon lineup currently present in the repo includes:
-
-- Knight's Oath
-- Hunter's Longbow
-- Warden's Halberd
-- Reaper's Crescent
-- Excalion, Blade of Kings
-- Harvest of the End
-- Archmage's Worldstaff
-- Kingslayer Handcannon
-
-## Repo Layout
-
-This repository is organized around place snapshots, not a single Rojo-first source tree.
-
-- `Four Peaks/` - lobby place snapshot with meta progression, NPC systems, missions, crafting, and teleport flow
-- `Level/` - combat place snapshot with enemy spawning, run systems, combat logic, rewards, and mission hooks
-- `src/` - minimal Rojo bootstrap/example source tree
-- `default.project.json` - lightweight Rojo project file for `src/`, not the primary workflow for the full game
-
-If you are looking for the main gameplay code, start in `Four Peaks` for lobby systems and `Level` for run systems.
-
-## Good Entry Points
-
-Useful files for understanding the current architecture:
-
+- `Four Peaks/ServerScriptService/Script/PortalToDungeon.lua`
+- `Four Peaks/ServerScriptService/Script/InventoryService.lua`
 - `Four Peaks/ServerScriptService/Script/BlacksmithService.lua`
 - `Four Peaks/ServerScriptService/ModuleScript/CraftingService.lua`
-- `Four Peaks/ServerScriptService/ModuleScript/MissionService.lua`
-- `Four Peaks/ServerScriptService/Script/PortalToDungeon.lua`
-- `Level/ServerScriptService/Script/Model.model/WaveController.lua`
+- `Four Peaks/ServerScriptService/ModuleScript/PlayerData.lua`
+- `Four Peaks/ServerScriptService/ModuleScript/PlayerStateStore.lua`
+
+### Dungeon
+
+- `Level/ServerScriptService/Script/RunReadyGate.server.lua`
 - `Level/ServerScriptService/Script/ProgressService.lua`
+- `Level/ServerScriptService/Script/Model/WaveController.lua`
+- `Level/ServerScriptService/ModuleScript/NpcService.lua`
 - `Level/ServerScriptService/Script/WeaponCombat.server.lua`
 - `Level/ServerScriptService/Script/SpellService.lua`
+- `Level/ServerScriptService/Script/DropService.lua`
 
-## Development Notes
+### Guild
 
-- `Four Peaks` and `Level` are separate place snapshots and should be treated as different sides of the same game
-- `src/` is not a full mirror of the live project
-- When making changes, verify that you are editing the correct side:
-  - `Four Peaks` for lobby and meta systems
-  - `Level` for combat and run logic
+- `Guild/ServerScriptService/Script/GuildPlace.server.lua`
+- `Guild/StarterPlayer/StarterPlayerScripts/LocalScript/GuildCastleClient.lua`
 
-## Status
+## Dokumentacja
 
-The Dungeon 2 is an active in-development Roblox project. The current codebase already contains the backbone for the lobby-to-run loop, and ongoing work is focused on combat pacing, progression depth, content expansion, and polish.
+- `AGENTS.md` — obowiązujące zasady pracy Codexa/AI.
+- `docs/PROJECT_CODE_GUIDE.md` — mapa systemów, danych, remotes i przepływów.
+- `docs/ARCHITECTURE_PERFORMANCE.md` — zasady projektowania i wydajności.
+- `docs/ROBLOX_REPO_SYNC.md` — synchronizacja Roblox Studio z repo.
+- `docs/REVIEW_CHECKLIST.md` — kontrola przed zakończeniem zadania.
+- `docs/AUDYT_OPTYMALIZACJI_PROJEKTU.md` — audyt dużych skryptów i bottlenecków.
+- `CHANGELOG_AI.md` — indeks historii zmian AI.
+
+Dokumenty w `docs/archive/` są historyczne i nie stanowią aktualnych instrukcji operacyjnych.
+
+## Workflow
+
+1. Sprawdź właściwy place i aktywną instancję Roblox Studio.
+2. Zweryfikuj aktywną ścieżkę skryptu oraz możliwe duplikaty.
+3. Zrób wąski plan dla większych zmian.
+4. Wprowadź najmniejszą bezpieczną zmianę.
+5. Wykonaj compile check i test w Studio.
+6. Zapisz zmianę w miesięcznym changelogu.
+
+Szczegółowe zasady znajdują się w `AGENTS.md`.

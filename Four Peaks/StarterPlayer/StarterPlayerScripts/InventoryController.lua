@@ -1,2196 +1,2543 @@
 -- LOCALSCRIPT: InventoryController.client.lua
--- GDZIE: StarterPlayer/StarterPlayerScripts/InventoryController (LocalScript)
--- CO: UI ekwipunku lobby (layout mockup + styl gry)
+-- GDZIE: Four Peaks/StarterPlayer/StarterPlayerScripts/InventoryController
+-- CO: Kompletny remake ekwipunku lobby: podglad postaci, ikony, filtry, sortowanie,
+--     porownanie broni, loadout spelli, materialy i Codex.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
-local plr = Players.LocalPlayer
-local pg = plr:WaitForChild("PlayerGui")
-local moduleRoot = ReplicatedStorage:FindFirstChild("ModuleScripts")
-	or ReplicatedStorage:FindFirstChild("ModuleScript")
-	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
-	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
-local UiResponsive = require(moduleRoot:WaitForChild("UiResponsive"))
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 
-local function waitForChild(parent, name, timeout)
-	local found = parent:FindFirstChild(name)
-	if found then
-		return found
-	end
-	local start = os.clock()
-	while os.clock() - start < (timeout or 5) do
-		found = parent:FindFirstChild(name)
-		if found then
-			return found
+-- Only one InventoryController may control InventoryGui. Older copies left in
+-- nested folders can wait for obsolete UI objects and consume the same inputs.
+task.defer(function()
+	local playerScripts = player:WaitForChild("PlayerScripts")
+	for _, other in ipairs(playerScripts:GetDescendants()) do
+		if other ~= script and other:IsA("LocalScript") and other.Name == "InventoryController" then
+			pcall(function()
+				other.Enabled = false
+			end)
+			warn("[InventoryController] Disabled duplicate controller:", other:GetFullName())
 		end
-		task.wait(0.1)
 	end
-	return nil
-end
+end)
 
-local remoteEvents = waitForChild(ReplicatedStorage, "RemoteEvents", 5)
-local PlayerProgressEvent = remoteEvents and waitForChild(remoteEvents, "PlayerProgressEvent", 5)
-local InventoryAction = remoteEvents and remoteEvents:FindFirstChild("InventoryAction")
-
-local remoteFunctions = waitForChild(ReplicatedStorage, "RemoteFunctions", 5)
-local GetInventorySnapshot = remoteFunctions and remoteFunctions:FindFirstChild("RF_GetInventorySnapshot")
-
-local function findModule(root, name)
-	local direct = root:FindFirstChild(name)
+local function findModule(name)
+	local direct = ReplicatedStorage:FindFirstChild(name)
 	if direct and direct:IsA("ModuleScript") then
 		return direct
 	end
-	local moduleFolder = root:FindFirstChild("ModuleScripts")
-		or root:FindFirstChild("ModuleScript")
-	if moduleFolder then
-		local nested = moduleFolder:FindFirstChild(name, true)
-		if nested and nested:IsA("ModuleScript") then
-			return nested
+	for _, folderName in ipairs({ "ModuleScripts", "ModuleScript" }) do
+		local folder = ReplicatedStorage:FindFirstChild(folderName)
+		local found = folder and folder:FindFirstChild(name, true)
+		if found and found:IsA("ModuleScript") then
+			return found
 		end
 	end
 	return nil
 end
 
-local WeaponConfigs = {}
-do
-	local module = findModule(ReplicatedStorage, "WeaponConfigs")
-	if module then
-		local ok, result = pcall(require, module)
-		if ok and result then
-			WeaponConfigs = result
-		else
-			warn("[InventoryController] Failed to load WeaponConfigs")
-		end
-	else
-		warn("[InventoryController] Missing WeaponConfigs module")
+local function safeRequire(name, fallback)
+	local module = findModule(name)
+	if not module then
+		warn("[InventoryController] Missing module:", name)
+		return fallback
 	end
+	local ok, result = pcall(require, module)
+	if not ok then
+		warn("[InventoryController] Failed to require", name, result)
+		return fallback
+	end
+	return result
 end
 
-local Races = { Defs = {} }
-do
-	local module = findModule(ReplicatedStorage, "Races")
-	if module then
-		local ok, result = pcall(require, module)
-		if ok and result then
-			Races = result
-		else
-			warn("[InventoryController] Failed to load Races")
-		end
-	else
-		warn("[InventoryController] Missing Races module")
-	end
-end
+local UiResponsive = safeRequire("UiResponsive", {})
+local WeaponConfigs = safeRequire("WeaponConfigs", { Defs = {}, List = {} })
+local Races = safeRequire("Races", { Defs = {} })
+local CraftingConfig = safeRequire("CraftingConfig", {})
+local SpellDefs = safeRequire("SpellDefinitions", {})
+local MaterialDefinitions = safeRequire("MaterialDefinitions", nil)
 
-local CraftingConfig = {}
-do
-	local module = findModule(ReplicatedStorage, "CraftingConfig")
-	if module then
-		local ok, result = pcall(require, module)
-		if ok and result then
-			CraftingConfig = result
-		else
-			warn("[InventoryController] Failed to load CraftingConfig")
-		end
-	else
-		warn("[InventoryController] Missing CraftingConfig module")
-	end
-end
+local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents", 10)
+local remoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions", 10)
+local InventoryAction = remoteEvents and remoteEvents:WaitForChild("InventoryAction", 10)
+local InventorySync = remoteEvents and remoteEvents:FindFirstChild("InventorySync")
+local PlayerProgressEvent = remoteEvents and remoteEvents:FindFirstChild("PlayerProgressEvent")
+local GetInventorySnapshot = remoteFunctions and remoteFunctions:WaitForChild("RF_GetInventorySnapshot", 10)
 
-local SpellDefs = {}
-do
-	local module = findModule(ReplicatedStorage, "SpellDefinitions")
-	if module then
-		local ok, result = pcall(require, module)
-		if ok and result then
-			SpellDefs = result
-		else
-			warn("[InventoryController] Failed to load SpellDefinitions")
-		end
-	else
-		warn("[InventoryController] Missing SpellDefinitions module")
-	end
-end
-
-local function hexToColor3(hex)
-	hex = tostring(hex or "")
-	hex = hex:gsub("#", "")
-	if #hex ~= 6 then
-		return Color3.fromRGB(255, 255, 255)
-	end
-	local r = tonumber(hex:sub(1, 2), 16) or 255
-	local g = tonumber(hex:sub(3, 4), 16) or 255
-	local b = tonumber(hex:sub(5, 6), 16) or 255
-	return Color3.fromRGB(r, g, b)
-end
-
-local extraRarityColors = {
-	Uncommon = "#73C991",
+local THEME = {
+	background = Color3.fromRGB(8, 10, 15),
+	panel = Color3.fromRGB(15, 18, 26),
+	panelAlt = Color3.fromRGB(20, 24, 34),
+	panelSoft = Color3.fromRGB(25, 30, 42),
+	card = Color3.fromRGB(25, 30, 42),
+	cardHover = Color3.fromRGB(31, 38, 53),
+	stroke = Color3.fromRGB(51, 60, 78),
+	strokeSoft = Color3.fromRGB(40, 48, 64),
+	text = Color3.fromRGB(240, 244, 251),
+	muted = Color3.fromRGB(153, 165, 186),
+	mutedDark = Color3.fromRGB(108, 119, 139),
+	accent = Color3.fromRGB(98, 165, 255),
+	purple = Color3.fromRGB(190, 120, 255),
+	gold = Color3.fromRGB(255, 194, 92),
+	green = Color3.fromRGB(92, 207, 139),
+	red = Color3.fromRGB(235, 91, 91),
+	orange = Color3.fromRGB(255, 146, 72),
 }
 
-local function rarityColor(rarity)
-	local key = tostring(rarity or "")
-	local hex = (WeaponConfigs.RarityColors and WeaponConfigs.RarityColors[key]) or extraRarityColors[key]
-	return hexToColor3(hex or "#B0B0B0")
-end
+local RARITY_ORDER = {
+	Common = 1,
+	Uncommon = 2,
+	Rare = 3,
+	Epic = 4,
+	Legendary = 5,
+	Mythic = 6,
+	Mythical = 6,
+}
 
-local function spellElementColor(element)
-	if SpellDefs.GetElementColor then
-		return SpellDefs.GetElementColor(element)
+local RARITY_COLORS = {
+	Common = Color3.fromRGB(176, 184, 198),
+	Uncommon = Color3.fromRGB(99, 191, 119),
+	Rare = Color3.fromRGB(83, 161, 255),
+	Epic = Color3.fromRGB(178, 104, 255),
+	Legendary = Color3.fromRGB(255, 173, 55),
+	Mythic = Color3.fromRGB(255, 70, 82),
+	Mythical = Color3.fromRGB(255, 70, 82),
+}
+
+local ELEMENT_COLORS = {
+	Fire = Color3.fromRGB(255, 91, 55),
+	Electricity = Color3.fromRGB(255, 226, 76),
+	Electric = Color3.fromRGB(255, 226, 76),
+	Air = Color3.fromRGB(181, 218, 228),
+	Water = Color3.fromRGB(73, 157, 255),
+	Earth = Color3.fromRGB(112, 171, 81),
+	Void = Color3.fromRGB(159, 91, 236),
+	Light = Color3.fromRGB(255, 232, 153),
+	Physical = Color3.fromRGB(180, 180, 188),
+}
+
+local function create(className, props, parent)
+	local object = Instance.new(className)
+	for key, value in pairs(props or {}) do
+		object[key] = value
 	end
-	return Color3.fromRGB(190, 120, 255)
+	object.Parent = parent
+	return object
 end
 
-local function blendColor(fromColor, toColor, alpha)
+local function addCorner(parent, radius)
+	return create("UICorner", { CornerRadius = UDim.new(0, radius or 10) }, parent)
+end
+
+local function addStroke(parent, color, thickness, transparency)
+	return create("UIStroke", {
+		Color = color or THEME.stroke,
+		Thickness = thickness or 1,
+		Transparency = transparency or 0,
+	}, parent)
+end
+
+local function addPadding(parent, left, right, top, bottom)
+	return create("UIPadding", {
+		PaddingLeft = UDim.new(0, left or 0),
+		PaddingRight = UDim.new(0, right or left or 0),
+		PaddingTop = UDim.new(0, top or left or 0),
+		PaddingBottom = UDim.new(0, bottom or top or left or 0),
+	}, parent)
+end
+
+local function blend(a, b, alpha)
 	return Color3.new(
-		fromColor.R + (toColor.R - fromColor.R) * alpha,
-		fromColor.G + (toColor.G - fromColor.G) * alpha,
-		fromColor.B + (toColor.B - fromColor.B) * alpha
+		a.R + (b.R - a.R) * alpha,
+		a.G + (b.G - a.G) * alpha,
+		a.B + (b.B - a.B) * alpha
 	)
 end
 
-local function addHover(frame, normalColor, hoverColor)
-	frame.MouseEnter:Connect(function()
-		TweenService:Create(frame, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			BackgroundColor3 = hoverColor,
+local function formatNumber(value)
+	local n = tonumber(value) or 0
+	if math.abs(n) >= 1000000 then
+		return string.format("%.1fm", n / 1000000)
+	elseif math.abs(n) >= 1000 then
+		return string.format("%.1fk", n / 1000)
+	elseif math.abs(n - math.floor(n + 0.5)) < 0.01 then
+		return tostring(math.floor(n + 0.5))
+	end
+	return string.format("%.1f", n)
+end
+
+local function normalizeSearch(value)
+	return string.lower(tostring(value or "")):gsub("[%p%s]+", " ")
+end
+
+local function textContains(haystack, needle)
+	needle = normalizeSearch(needle)
+	if needle == "" then
+		return true
+	end
+	return string.find(normalizeSearch(haystack), needle, 1, true) ~= nil
+end
+
+local function safeColor(value, fallback)
+	return typeof(value) == "Color3" and value or fallback
+end
+
+local function getRarityColor(rarity)
+	return RARITY_COLORS[tostring(rarity or "Common")] or RARITY_COLORS.Common
+end
+
+local function getElementColor(element)
+	if SpellDefs.GetElementColor then
+		local ok, result = pcall(SpellDefs.GetElementColor, element)
+		if ok and typeof(result) == "Color3" then
+			return result
+		end
+	end
+	return ELEMENT_COLORS[tostring(element or "")] or THEME.accent
+end
+
+local function hoverColor(button, normal, hover)
+	button.MouseEnter:Connect(function()
+		TweenService:Create(button, TweenInfo.new(0.12, Enum.EasingStyle.Quad), {
+			BackgroundColor3 = hover,
 		}):Play()
 	end)
-	frame.MouseLeave:Connect(function()
-		TweenService:Create(frame, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			BackgroundColor3 = normalColor,
+	button.MouseLeave:Connect(function()
+		TweenService:Create(button, TweenInfo.new(0.12, Enum.EasingStyle.Quad), {
+			BackgroundColor3 = normal,
 		}):Play()
 	end)
 end
 
-local inventoryGui = pg:WaitForChild("InventoryGui")
+local function clearChildren(parent, keepClasses)
+	keepClasses = keepClasses or {}
+	for _, child in ipairs(parent:GetChildren()) do
+		if not keepClasses[child.ClassName] then
+			child:Destroy()
+		end
+	end
+end
+
+local imageFolderCache = {}
+local imageIndexCache = {}
+
+local function readImageReference(object)
+	if not object then
+		return nil
+	end
+	if object:IsA("StringValue") then
+		return object.Value ~= "" and object.Value or nil
+	elseif object:IsA("ImageLabel") or object:IsA("ImageButton") then
+		return object.Image ~= "" and object.Image or nil
+	elseif object:IsA("Decal") or object:IsA("Texture") then
+		return object.Texture ~= "" and object.Texture or nil
+	end
+	return nil
+end
+
+local function buildImageIndex(folderName)
+	local folder = ReplicatedStorage:FindFirstChild(folderName)
+	if not folder then
+		return nil
+	end
+	if imageFolderCache[folderName] == folder and imageIndexCache[folderName] then
+		return imageIndexCache[folderName]
+	end
+	local index = {}
+	for _, object in ipairs(folder:GetDescendants()) do
+		local asset = readImageReference(object)
+		if asset then
+			local key = string.lower(object.Name)
+			index[key] = index[key] or asset
+			index[key:gsub("[%s_%-]", "")] = index[key:gsub("[%s_%-]", "")] or asset
+		end
+	end
+	local direct = readImageReference(folder)
+	if direct then
+		index[string.lower(folder.Name)] = direct
+	end
+	imageFolderCache[folderName] = folder
+	imageIndexCache[folderName] = index
+	return index
+end
+
+local function resolveImage(folderName, candidates)
+	local index = buildImageIndex(folderName)
+	if not index then
+		return nil
+	end
+	for _, raw in ipairs(candidates or {}) do
+		if typeof(raw) == "string" and raw ~= "" then
+			local key = string.lower(raw)
+			local asset = index[key] or index[key:gsub("[%s_%-]", "")]
+			if asset then
+				return asset
+			end
+		end
+	end
+	return nil
+end
+
+local function weaponImage(entry)
+	local def = entry and entry.def or nil
+	local candidates = {
+		entry and entry.weaponId,
+		entry and entry.displayName,
+		def and def.iconName,
+		def and def.name,
+		def and def.id,
+		def and def.categoryIconName,
+	}
+	for _, fallback in ipairs((def and def.iconFallbackNames) or {}) do
+		table.insert(candidates, fallback)
+	end
+	return resolveImage("WeaponIcons", candidates)
+end
+
+local function materialImage(entry)
+	if MaterialDefinitions and MaterialDefinitions.GetAssetRef then
+		local ok, asset = pcall(MaterialDefinitions.GetAssetRef, entry.id)
+		if ok and typeof(asset) == "string" and asset ~= "" then
+			return asset
+		end
+	end
+	return resolveImage("MaterialIcons", { entry.id, entry.displayName, entry.iconName })
+end
+
+local function spellImage(entry)
+	local direct = resolveImage("SpellIcons", {
+		entry and entry.familyId,
+		entry and entry.id,
+		entry and entry.displayName,
+		entry and entry.name,
+		entry and entry.iconGlyph,
+	})
+	if direct then
+		return direct
+	end
+	return resolveImage("ElementIcons", { entry and entry.element })
+end
+
+local function codexImage(entry)
+	if not entry then
+		return nil
+	end
+	local sourceId = entry.entryId or entry.id
+	if entry.category == "Weapons" then
+		return weaponImage({ weaponId = sourceId, displayName = entry.displayName, def = WeaponConfigs.Get and WeaponConfigs.Get(sourceId) })
+	elseif entry.category == "Materials" then
+		local copy = {}
+		for key, value in pairs(entry) do copy[key] = value end
+		copy.id = sourceId
+		return materialImage(copy)
+	elseif entry.category == "Spells" or entry.category == "Combinations" then
+		return spellImage(entry)
+	end
+	return resolveImage("CodexIcons", { entry.id, entry.displayName, entry.category })
+end
+
+local inventoryGui = playerGui:WaitForChild("InventoryGui")
 inventoryGui.Enabled = false
 inventoryGui.ResetOnSpawn = false
 inventoryGui.IgnoreGuiInset = false
 inventoryGui:SetAttribute("Modal", true)
 
-local overlay = inventoryGui:WaitForChild("overlay")
+local overlay = inventoryGui:FindFirstChild("overlay")
+if not overlay or not overlay:IsA("Frame") then
+	if overlay then overlay:Destroy() end
+	overlay = create("Frame", { Name = "overlay" }, inventoryGui)
+end
 overlay.Size = UDim2.fromScale(1, 1)
-overlay.BackgroundColor3 = Color3.fromRGB(8, 8, 10)
-overlay.BackgroundTransparency = 0.35
+overlay.BackgroundColor3 = Color3.fromRGB(4, 5, 8)
+overlay.BackgroundTransparency = 0.25
 overlay.BorderSizePixel = 0
-overlay.Parent = inventoryGui
+clearChildren(overlay)
 
-local panel = overlay:WaitForChild("panel")
-panel.AnchorPoint = Vector2.new(0.5, 0.5)
-panel.Position = UDim2.fromScale(0.5, 0.5)
-panel.Size = UDim2.fromScale(0.9, 0.9)
-panel.BackgroundColor3 = Color3.fromRGB(16, 18, 24)
-panel.BackgroundTransparency = 0.06
-panel.BorderSizePixel = 0
-panel.Parent = overlay
-Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 16)
-local panelSizeConstraint = Instance.new("UISizeConstraint", panel)
-panelSizeConstraint.MaxSize = Vector2.new(1120, 620)
-local panelAspect = Instance.new("UIAspectRatioConstraint", panel)
-panelAspect.AspectRatio = 1120 / 620
-panelAspect.DominantAxis = Enum.DominantAxis.Height
-local panelStroke = Instance.new("UIStroke", panel)
-panelStroke.Color = Color3.fromRGB(40, 40, 48)
-panelStroke.Thickness = 1
-UiResponsive.attachCenteredPanel(panel, Vector2.new(1120, 620))
-
-local title = Instance.new("TextLabel")
-title.BackgroundTransparency = 1
-title.Position = UDim2.fromOffset(24, 16)
-title.Size = UDim2.new(1, -80, 0, 28)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 20
-title.TextColor3 = Color3.fromRGB(245, 245, 245)
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.Text = "Inventory"
-title.Parent = panel
-
-local closeBtn = Instance.new("TextButton")
-closeBtn.AnchorPoint = Vector2.new(1, 0)
-closeBtn.Position = UDim2.new(1, -16, 0, 16)
-closeBtn.Size = UDim2.fromOffset(28, 28)
-closeBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
-closeBtn.BorderSizePixel = 0
-closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 14
-closeBtn.TextColor3 = Color3.fromRGB(210, 210, 210)
-closeBtn.Text = "X"
-closeBtn.Parent = panel
-Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 10)
-addHover(closeBtn, closeBtn.BackgroundColor3, Color3.fromRGB(38, 38, 48))
-
-local body = Instance.new("Frame")
-body.Position = UDim2.fromOffset(20, 56)
-body.Size = UDim2.new(1, -40, 1, -76)
-body.BackgroundTransparency = 1
-body.Parent = panel
-
-local bodyLayout = Instance.new("UIListLayout", body)
-bodyLayout.FillDirection = Enum.FillDirection.Horizontal
-bodyLayout.Padding = UDim.new(0, 16)
-
-local leftColumn = Instance.new("Frame")
-leftColumn.Size = UDim2.new(0, 272, 1, 0)
-leftColumn.BackgroundTransparency = 1
-leftColumn.Parent = body
-
-local leftLayout = Instance.new("UIListLayout", leftColumn)
-leftLayout.FillDirection = Enum.FillDirection.Vertical
-leftLayout.Padding = UDim.new(0, 16)
-leftLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-local playerPanel = Instance.new("ScrollingFrame")
-playerPanel.Size = UDim2.new(1, 0, 1, 0)
-playerPanel.BackgroundColor3 = Color3.fromRGB(20, 24, 32)
-playerPanel.BackgroundTransparency = 0.08
-playerPanel.BorderSizePixel = 0
-playerPanel.ScrollBarThickness = 6
-playerPanel.CanvasSize = UDim2.fromOffset(0, 0)
-playerPanel.AutomaticCanvasSize = Enum.AutomaticSize.Y
-playerPanel.LayoutOrder = 1
-playerPanel.Parent = leftColumn
-Instance.new("UICorner", playerPanel).CornerRadius = UDim.new(0, 12)
-local playerPanelStroke = Instance.new("UIStroke", playerPanel)
-playerPanelStroke.Color = Color3.fromRGB(48, 56, 72)
-playerPanelStroke.Thickness = 1
-local playerPad = Instance.new("UIPadding", playerPanel)
-playerPad.PaddingTop = UDim.new(0, 16)
-playerPad.PaddingBottom = UDim.new(0, 16)
-playerPad.PaddingLeft = UDim.new(0, 16)
-playerPad.PaddingRight = UDim.new(0, 16)
-local playerLayout = Instance.new("UIListLayout", playerPanel)
-playerLayout.Padding = UDim.new(0, 6)
-playerLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-local playerName = Instance.new("TextLabel")
-playerName.BackgroundTransparency = 1
-playerName.Size = UDim2.new(1, 0, 0, 20)
-playerName.Font = Enum.Font.GothamBold
-playerName.TextSize = 16
-playerName.TextColor3 = Color3.fromRGB(240, 240, 240)
-playerName.TextXAlignment = Enum.TextXAlignment.Left
-playerName.LayoutOrder = 1
-playerName.Text = "PlayerName - Lv. 1"
-playerName.Parent = playerPanel
-
-local expWrap = Instance.new("Frame")
-expWrap.BackgroundTransparency = 1
-expWrap.Size = UDim2.new(1, 0, 0, 26)
-expWrap.LayoutOrder = 2
-expWrap.Parent = playerPanel
-
-local expLabel = Instance.new("TextLabel")
-expLabel.BackgroundTransparency = 1
-expLabel.Size = UDim2.new(1, 0, 0, 14)
-expLabel.Font = Enum.Font.Gotham
-expLabel.TextSize = 12
-expLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-expLabel.TextXAlignment = Enum.TextXAlignment.Left
-expLabel.Text = "EXP: 0/0"
-expLabel.Parent = expWrap
-
-local expBack = Instance.new("Frame")
-expBack.Position = UDim2.fromOffset(0, 16)
-expBack.Size = UDim2.new(1, 0, 0, 8)
-expBack.BackgroundColor3 = Color3.fromRGB(40, 40, 44)
-expBack.BorderSizePixel = 0
-expBack.Parent = expWrap
-Instance.new("UICorner", expBack).CornerRadius = UDim.new(0, 999)
-
-local expFill = Instance.new("Frame")
-expFill.Size = UDim2.new(0, 0, 1, 0)
-expFill.BackgroundColor3 = Color3.fromRGB(96, 165, 250)
-expFill.BorderSizePixel = 0
-expFill.Parent = expBack
-Instance.new("UICorner", expFill).CornerRadius = UDim.new(0, 999)
-
-local raceLabel = Instance.new("TextLabel")
-raceLabel.BackgroundTransparency = 1
-raceLabel.Size = UDim2.new(1, 0, 0, 16)
-raceLabel.Font = Enum.Font.Gotham
-raceLabel.TextSize = 13
-raceLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-raceLabel.TextXAlignment = Enum.TextXAlignment.Left
-raceLabel.LayoutOrder = 3
-raceLabel.Text = "Race: -"
-raceLabel.Parent = playerPanel
-
-local statsList = Instance.new("Frame")
-statsList.BackgroundTransparency = 1
-statsList.Size = UDim2.new(1, 0, 0, 126)
-statsList.LayoutOrder = 4
-statsList.Parent = playerPanel
-local statsLayout = Instance.new("UIListLayout", statsList)
-statsLayout.Padding = UDim.new(0, 4)
-
-local function makeStatRow(labelText)
-	local row = Instance.new("TextLabel")
-	row.BackgroundTransparency = 1
-	row.Size = UDim2.new(1, 0, 0, 14)
-	row.Font = Enum.Font.Gotham
-	row.TextSize = 12
-	row.TextXAlignment = Enum.TextXAlignment.Left
-	row.TextColor3 = Color3.fromRGB(200, 200, 200)
-	row.Text = labelText
-	row.Parent = statsList
-	return row
+local panel = create("Frame", {
+	Name = "RemakePanel",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromScale(0.94, 0.9),
+	BackgroundColor3 = THEME.panel,
+	BorderSizePixel = 0,
+}, overlay)
+addCorner(panel, 16)
+addStroke(panel, Color3.fromRGB(46, 55, 72), 1)
+create("UISizeConstraint", {
+	MinSize = Vector2.new(880, 520),
+	MaxSize = Vector2.new(1280, 720),
+}, panel)
+if UiResponsive.attachCenteredPanel then
+	pcall(UiResponsive.attachCenteredPanel, panel, Vector2.new(1280, 720))
 end
 
-local statRows = {
-	HP = makeStatRow("HP: -"),
-	ATK = makeStatRow("ATK: -"),
-	DEF = makeStatRow("DEF: -"),
-	LIFESTEAL = makeStatRow("Lifesteal: -"),
-	CRIT_RATE = makeStatRow("Crit Rate: -"),
-	CRIT_DMG = makeStatRow("Crit DMG: -"),
-	SPEED = makeStatRow("Speed: -"),
+local header = create("Frame", {
+	Name = "Header",
+	Size = UDim2.new(1, 0, 0, 58),
+	BackgroundTransparency = 1,
+}, panel)
+
+local title = create("TextLabel", {
+	Position = UDim2.fromOffset(22, 11),
+	Size = UDim2.new(0, 250, 0, 24),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "Inventory",
+	TextColor3 = THEME.text,
+	TextSize = 20,
+	TextXAlignment = Enum.TextXAlignment.Left,
+}, header)
+
+local subtitle = create("TextLabel", {
+	Position = UDim2.fromOffset(22, 34),
+	Size = UDim2.new(0, 420, 0, 16),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.Gotham,
+	Text = "Build, compare and prepare for the next run",
+	TextColor3 = THEME.muted,
+	TextSize = 11,
+	TextXAlignment = Enum.TextXAlignment.Left,
+}, header)
+
+local closeButton = create("TextButton", {
+	AnchorPoint = Vector2.new(1, 0.5),
+	Position = UDim2.new(1, -16, 0.5, 0),
+	Size = UDim2.fromOffset(32, 32),
+	BackgroundColor3 = THEME.panelSoft,
+	BorderSizePixel = 0,
+	Font = Enum.Font.GothamBold,
+	Text = "×",
+	TextColor3 = THEME.text,
+	TextSize = 20,
+	AutoButtonColor = false,
+}, header)
+addCorner(closeButton, 10)
+hoverColor(closeButton, THEME.panelSoft, Color3.fromRGB(48, 54, 70))
+
+local headerLine = create("Frame", {
+	Position = UDim2.new(0, 18, 1, -1),
+	Size = UDim2.new(1, -36, 0, 1),
+	BackgroundColor3 = THEME.strokeSoft,
+	BorderSizePixel = 0,
+}, header)
+
+local body = create("Frame", {
+	Position = UDim2.fromOffset(18, 66),
+	Size = UDim2.new(1, -36, 1, -84),
+	BackgroundTransparency = 1,
+}, panel)
+local bodyLayout = create("UIListLayout", {
+	FillDirection = Enum.FillDirection.Horizontal,
+	Padding = UDim.new(0, 12),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, body)
+
+local leftColumn = create("ScrollingFrame", {
+	Name = "PlayerColumn",
+	LayoutOrder = 1,
+	Size = UDim2.new(0, 248, 1, 0),
+	BackgroundColor3 = THEME.panelAlt,
+	BorderSizePixel = 0,
+	ScrollBarThickness = 4,
+	ScrollBarImageColor3 = THEME.mutedDark,
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	CanvasSize = UDim2.fromOffset(0, 0),
+}, body)
+addCorner(leftColumn, 12)
+addStroke(leftColumn, THEME.strokeSoft, 1)
+addPadding(leftColumn, 12, 12, 12, 12)
+
+local leftLayout = create("UIListLayout", {
+	Padding = UDim.new(0, 9),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, leftColumn)
+
+local playerTitle = create("TextLabel", {
+	LayoutOrder = 1,
+	Size = UDim2.new(1, 0, 0, 20),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = player.DisplayName,
+	TextColor3 = THEME.text,
+	TextSize = 14,
+	TextXAlignment = Enum.TextXAlignment.Left,
+}, leftColumn)
+
+local playerMeta = create("TextLabel", {
+	LayoutOrder = 2,
+	Size = UDim2.new(1, 0, 0, 16),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.Gotham,
+	Text = "Lv. 1 • Race: -",
+	TextColor3 = THEME.muted,
+	TextSize = 11,
+	TextXAlignment = Enum.TextXAlignment.Left,
+}, leftColumn)
+
+local expWrap = create("Frame", {
+	LayoutOrder = 3,
+	Size = UDim2.new(1, 0, 0, 20),
+	BackgroundTransparency = 1,
+}, leftColumn)
+local expText = create("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 11),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.Gotham,
+	Text = "EXP 0 / 1",
+	TextColor3 = THEME.muted,
+	TextSize = 9,
+	TextXAlignment = Enum.TextXAlignment.Left,
+}, expWrap)
+local expBack = create("Frame", {
+	Position = UDim2.fromOffset(0, 13),
+	Size = UDim2.new(1, 0, 0, 6),
+	BackgroundColor3 = Color3.fromRGB(42, 48, 61),
+	BorderSizePixel = 0,
+}, expWrap)
+addCorner(expBack, 999)
+local expFill = create("Frame", {
+	Size = UDim2.new(0, 0, 1, 0),
+	BackgroundColor3 = THEME.accent,
+	BorderSizePixel = 0,
+}, expBack)
+addCorner(expFill, 999)
+
+local viewportFrame = create("ViewportFrame", {
+	Name = "CharacterPreview",
+	LayoutOrder = 4,
+	Size = UDim2.new(1, 0, 0, 220),
+	BackgroundColor3 = Color3.fromRGB(11, 14, 21),
+	BorderSizePixel = 0,
+	Ambient = Color3.fromRGB(170, 180, 205),
+	LightColor = Color3.fromRGB(255, 244, 224),
+	LightDirection = Vector3.new(-1, -1, -1),
+}, leftColumn)
+addCorner(viewportFrame, 10)
+addStroke(viewportFrame, THEME.strokeSoft, 1)
+local viewportGradient = create("UIGradient", {
+	Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(22, 31, 48)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 12, 18)),
+	}),
+	Rotation = 90,
+}, viewportFrame)
+
+local viewportHint = create("TextLabel", {
+	AnchorPoint = Vector2.new(0.5, 1),
+	Position = UDim2.new(0.5, 0, 1, -7),
+	Size = UDim2.new(1, -14, 0, 14),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.Gotham,
+	Text = "Drag to rotate",
+	TextColor3 = Color3.fromRGB(122, 135, 157),
+	TextSize = 9,
+}, viewportFrame)
+
+local viewportWorld = create("WorldModel", { Name = "PreviewWorld" }, viewportFrame)
+local viewportCamera = create("Camera", { FieldOfView = 34 }, viewportFrame)
+viewportFrame.CurrentCamera = viewportCamera
+local previewModel = nil
+local previewPivotOffset = CFrame.new()
+local previewSize = Vector3.new(4, 6, 2)
+local previewYaw = math.rad(18)
+local previewDragging = false
+local previewLastX = 0
+
+local statsCard = create("Frame", {
+	LayoutOrder = 5,
+	Size = UDim2.new(1, 0, 0, 118),
+	BackgroundColor3 = Color3.fromRGB(17, 21, 30),
+	BorderSizePixel = 0,
+}, leftColumn)
+addCorner(statsCard, 9)
+addStroke(statsCard, THEME.strokeSoft, 1)
+addPadding(statsCard, 9, 9, 8, 8)
+local statsGrid = create("UIGridLayout", {
+	CellSize = UDim2.new(0.5, -4, 0, 24),
+	CellPadding = UDim2.fromOffset(8, 4),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, statsCard)
+
+local statLabels = {}
+local STAT_DISPLAY = {
+	{ "HP", "HP" },
+	{ "ATK", "ATK" },
+	{ "DEF", "DEF" },
+	{ "CRIT_RATE", "Crit" },
+	{ "CRIT_DMG", "Crit DMG" },
+	{ "LIFESTEAL", "Lifesteal" },
+	{ "SPD", "Speed" },
 }
+for index, spec in ipairs(STAT_DISPLAY) do
+	local cell = create("Frame", {
+		LayoutOrder = index,
+		BackgroundTransparency = 1,
+	}, statsCard)
+	local key = spec[1]
+	create("TextLabel", {
+		Size = UDim2.new(0.56, 0, 1, 0),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.Gotham,
+		Text = spec[2],
+		TextColor3 = THEME.muted,
+		TextSize = 9,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, cell)
+	statLabels[key] = create("TextLabel", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(1, 0),
+		Size = UDim2.new(0.44, 0, 1, 0),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		Text = "0",
+		TextColor3 = THEME.text,
+		TextSize = 10,
+		TextXAlignment = Enum.TextXAlignment.Right,
+	}, cell)
+end
 
-local currenciesFrame = Instance.new("Frame")
-currenciesFrame.BackgroundTransparency = 1
-currenciesFrame.Size = UDim2.new(1, 0, 0, 34)
-currenciesFrame.LayoutOrder = 5
-currenciesFrame.Parent = playerPanel
-currenciesFrame.LayoutOrder = 999
+local currencyCard = create("Frame", {
+	LayoutOrder = 6,
+	Size = UDim2.new(1, 0, 0, 48),
+	BackgroundColor3 = Color3.fromRGB(17, 21, 30),
+	BorderSizePixel = 0,
+}, leftColumn)
+addCorner(currencyCard, 9)
+addStroke(currencyCard, THEME.strokeSoft, 1)
+addPadding(currencyCard, 9, 9, 6, 6)
+local currencyText = create("TextLabel", {
+	Size = UDim2.fromScale(1, 1),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.Gotham,
+	Text = "Silver 0   Souls 0\nWP 0   Tickets 0",
+	TextColor3 = THEME.muted,
+	TextSize = 10,
+	TextWrapped = true,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Center,
+}, currencyCard)
 
-local coinsLabel = Instance.new("TextLabel")
-coinsLabel.BackgroundTransparency = 1
-coinsLabel.Size = UDim2.new(1, 0, 0, 16)
-coinsLabel.Font = Enum.Font.Gotham
-coinsLabel.TextSize = 13
-coinsLabel.TextColor3 = Color3.fromRGB(235, 235, 235)
-coinsLabel.TextXAlignment = Enum.TextXAlignment.Left
-coinsLabel.Text = "Silver: 0"
-coinsLabel.Parent = currenciesFrame
+local centerColumn = create("Frame", {
+	Name = "ContentColumn",
+	LayoutOrder = 2,
+	Size = UDim2.new(1, -602, 1, 0),
+	BackgroundTransparency = 1,
+}, body)
+local centerLayout = create("UIListLayout", {
+	Padding = UDim.new(0, 9),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, centerColumn)
 
-local wpLabel = Instance.new("TextLabel")
-wpLabel.BackgroundTransparency = 1
-wpLabel.Position = UDim2.fromOffset(0, 18)
-wpLabel.Size = UDim2.new(1, 0, 0, 16)
-wpLabel.Font = Enum.Font.Gotham
-wpLabel.TextSize = 12
-wpLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-wpLabel.TextXAlignment = Enum.TextXAlignment.Left
-wpLabel.Text = "WP: 0"
-wpLabel.Parent = currenciesFrame
+local tabBar = create("Frame", {
+	LayoutOrder = 1,
+	Size = UDim2.new(1, 0, 0, 42),
+	BackgroundTransparency = 1,
+}, centerColumn)
+local tabLayout = create("UIListLayout", {
+	FillDirection = Enum.FillDirection.Horizontal,
+	Padding = UDim.new(0, 7),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, tabBar)
 
-local rightColumn = Instance.new("Frame")
-rightColumn.Size = UDim2.new(1, -288, 1, 0)
-rightColumn.BackgroundTransparency = 1
-rightColumn.Parent = body
+local toolbar = create("Frame", {
+	LayoutOrder = 2,
+	Size = UDim2.new(1, 0, 0, 40),
+	BackgroundTransparency = 1,
+}, centerColumn)
 
-local rightLayout = Instance.new("UIListLayout", rightColumn)
-rightLayout.FillDirection = Enum.FillDirection.Vertical
-rightLayout.Padding = UDim.new(0, 12)
-rightLayout.SortOrder = Enum.SortOrder.LayoutOrder
+local searchBox = create("TextBox", {
+	Position = UDim2.fromOffset(0, 0),
+	Size = UDim2.new(1, -284, 1, 0),
+	BackgroundColor3 = THEME.panelAlt,
+	BorderSizePixel = 0,
+	ClearTextOnFocus = false,
+	Font = Enum.Font.Gotham,
+	PlaceholderText = "Search inventory...",
+	PlaceholderColor3 = THEME.mutedDark,
+	Text = "",
+	TextColor3 = THEME.text,
+	TextSize = 11,
+	TextXAlignment = Enum.TextXAlignment.Left,
+}, toolbar)
+addCorner(searchBox, 9)
+addStroke(searchBox, THEME.strokeSoft, 1)
+addPadding(searchBox, 12, 12, 0, 0)
+
+local sortButton = create("TextButton", {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, 0, 0, 0),
+	Size = UDim2.fromOffset(92, 40),
+	BackgroundColor3 = THEME.panelAlt,
+	BorderSizePixel = 0,
+	Font = Enum.Font.GothamMedium,
+	Text = "Sort",
+	TextColor3 = THEME.text,
+	TextSize = 10,
+	AutoButtonColor = false,
+}, toolbar)
+addCorner(sortButton, 9)
+addStroke(sortButton, THEME.strokeSoft, 1)
+hoverColor(sortButton, THEME.panelAlt, THEME.panelSoft)
+
+local filterButtonB = create("TextButton", {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -99, 0, 0),
+	Size = UDim2.fromOffset(88, 40),
+	BackgroundColor3 = THEME.panelAlt,
+	BorderSizePixel = 0,
+	Font = Enum.Font.GothamMedium,
+	Text = "Filter B",
+	TextColor3 = THEME.text,
+	TextSize = 9,
+	AutoButtonColor = false,
+}, toolbar)
+addCorner(filterButtonB, 9)
+addStroke(filterButtonB, THEME.strokeSoft, 1)
+hoverColor(filterButtonB, THEME.panelAlt, THEME.panelSoft)
+
+local filterButtonA = create("TextButton", {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -194, 0, 0),
+	Size = UDim2.fromOffset(88, 40),
+	BackgroundColor3 = THEME.panelAlt,
+	BorderSizePixel = 0,
+	Font = Enum.Font.GothamMedium,
+	Text = "Filter A",
+	TextColor3 = THEME.text,
+	TextSize = 9,
+	AutoButtonColor = false,
+}, toolbar)
+addCorner(filterButtonA, 9)
+addStroke(filterButtonA, THEME.strokeSoft, 1)
+hoverColor(filterButtonA, THEME.panelAlt, THEME.panelSoft)
+
+local auxiliaryPanel = create("Frame", {
+	LayoutOrder = 3,
+	Size = UDim2.new(1, 0, 0, 0),
+	BackgroundColor3 = THEME.panelAlt,
+	BorderSizePixel = 0,
+	Visible = false,
+	ClipsDescendants = true,
+}, centerColumn)
+addCorner(auxiliaryPanel, 11)
+addStroke(auxiliaryPanel, THEME.strokeSoft, 1)
+
+local contentCard = create("Frame", {
+	LayoutOrder = 4,
+	Size = UDim2.new(1, 0, 1, -100),
+	BackgroundColor3 = THEME.panelAlt,
+	BorderSizePixel = 0,
+}, centerColumn)
+addCorner(contentCard, 12)
+addStroke(contentCard, THEME.strokeSoft, 1)
+
+local contentHeader = create("Frame", {
+	Size = UDim2.new(1, 0, 0, 38),
+	BackgroundTransparency = 1,
+}, contentCard)
+local contentTitle = create("TextLabel", {
+	Position = UDim2.fromOffset(12, 8),
+	Size = UDim2.new(1, -130, 0, 22),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "Weapons",
+	TextColor3 = THEME.text,
+	TextSize = 13,
+	TextXAlignment = Enum.TextXAlignment.Left,
+}, contentHeader)
+local contentCount = create("TextLabel", {
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -12, 0, 9),
+	Size = UDim2.new(0, 110, 0, 18),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.Gotham,
+	Text = "0 items",
+	TextColor3 = THEME.muted,
+	TextSize = 9,
+	TextXAlignment = Enum.TextXAlignment.Right,
+}, contentHeader)
+
+local gridScroll = create("ScrollingFrame", {
+	Name = "GridScroll",
+	Position = UDim2.fromOffset(8, 38),
+	Size = UDim2.new(1, -16, 1, -46),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	ScrollBarThickness = 5,
+	ScrollBarImageColor3 = THEME.mutedDark,
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	CanvasSize = UDim2.fromOffset(0, 0),
+}, contentCard)
+local gridLayout = create("UIGridLayout", {
+	CellSize = UDim2.fromOffset(160, 176),
+	CellPadding = UDim2.fromOffset(9, 9),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, gridScroll)
+
+local emptyState = create("TextLabel", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.new(1, -40, 0, 60),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamMedium,
+	Text = "No items match these filters.",
+	TextColor3 = THEME.muted,
+	TextSize = 12,
+	TextWrapped = true,
+	Visible = false,
+	ZIndex = 5,
+}, contentCard)
+
+local rightColumn = create("Frame", {
+	Name = "DetailsColumn",
+	LayoutOrder = 3,
+	Size = UDim2.new(0, 330, 1, 0),
+	BackgroundColor3 = THEME.panelAlt,
+	BorderSizePixel = 0,
+}, body)
+addCorner(rightColumn, 12)
+local rightStroke = addStroke(rightColumn, THEME.strokeSoft, 1)
+
+local detailsAccent = create("Frame", {
+	Size = UDim2.new(1, 0, 0, 4),
+	BackgroundColor3 = THEME.accent,
+	BorderSizePixel = 0,
+}, rightColumn)
+addCorner(detailsAccent, 11)
+
+local detailHeader = create("Frame", {
+	Position = UDim2.fromOffset(14, 14),
+	Size = UDim2.new(1, -28, 0, 98),
+	BackgroundTransparency = 1,
+}, rightColumn)
+local detailIcon = create("Frame", {
+	Size = UDim2.fromOffset(82, 82),
+	BackgroundColor3 = THEME.panelSoft,
+	BorderSizePixel = 0,
+}, detailHeader)
+addCorner(detailIcon, 12)
+local detailIconStroke = addStroke(detailIcon, THEME.stroke, 1)
+local detailIconImage = create("ImageLabel", {
+	Position = UDim2.fromOffset(7, 7),
+	Size = UDim2.new(1, -14, 1, -14),
+	BackgroundTransparency = 1,
+	Image = "",
+	ScaleType = Enum.ScaleType.Fit,
+	Visible = false,
+}, detailIcon)
+local detailIconGlyph = create("TextLabel", {
+	Size = UDim2.fromScale(1, 1),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "?",
+	TextColor3 = THEME.text,
+	TextSize = 24,
+}, detailIcon)
+
+local detailName = create("TextLabel", {
+	Position = UDim2.fromOffset(94, 3),
+	Size = UDim2.new(1, -94, 0, 44),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "Select an item",
+	TextColor3 = THEME.text,
+	TextSize = 15,
+	TextWrapped = true,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Top,
+}, detailHeader)
+local detailMeta = create("TextLabel", {
+	Position = UDim2.fromOffset(94, 50),
+	Size = UDim2.new(1, -94, 0, 38),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.Gotham,
+	Text = "Choose an item to inspect it.",
+	TextColor3 = THEME.muted,
+	TextSize = 10,
+	TextWrapped = true,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Top,
+}, detailHeader)
+
+local detailScroll = create("ScrollingFrame", {
+	Position = UDim2.fromOffset(14, 118),
+	Size = UDim2.new(1, -28, 1, -180),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	ScrollBarThickness = 5,
+	ScrollBarImageColor3 = THEME.mutedDark,
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	CanvasSize = UDim2.fromOffset(0, 0),
+}, rightColumn)
+local detailList = create("UIListLayout", {
+	Padding = UDim.new(0, 8),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, detailScroll)
+
+local actionBar = create("Frame", {
+	AnchorPoint = Vector2.new(0, 1),
+	Position = UDim2.new(0, 14, 1, -14),
+	Size = UDim2.new(1, -28, 0, 48),
+	BackgroundTransparency = 1,
+}, rightColumn)
+local actionLayout = create("UIListLayout", {
+	FillDirection = Enum.FillDirection.Horizontal,
+	HorizontalAlignment = Enum.HorizontalAlignment.Right,
+	Padding = UDim.new(0, 7),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, actionBar)
 
 local tabButtons = {}
-
-local tabBar = Instance.new("Frame")
-tabBar.Size = UDim2.new(1, 0, 0, 44)
-tabBar.BackgroundTransparency = 1
-tabBar.Parent = rightColumn
-
-local tabLayout = Instance.new("UIListLayout", tabBar)
-tabLayout.FillDirection = Enum.FillDirection.Horizontal
-tabLayout.Padding = UDim.new(0, 8)
-tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-local function createTabButton(tabId, labelText, accentColor)
-	local button = Instance.new("TextButton")
-	button.Name = tabId .. "Tab"
-	button.Size = UDim2.fromOffset(118, 44)
-	button.BackgroundColor3 = Color3.fromRGB(20, 24, 32)
-	button.BackgroundTransparency = 0.04
-	button.BorderSizePixel = 0
-	button.AutoButtonColor = false
-	button.Font = Enum.Font.GothamBold
-	button.TextSize = 13
-	button.TextColor3 = Color3.fromRGB(182, 192, 210)
-	button.Text = labelText
-	button.Parent = tabBar
-	Instance.new("UICorner", button).CornerRadius = UDim.new(0, 12)
-
-	local stroke = Instance.new("UIStroke", button)
-	stroke.Name = "Stroke"
-	stroke.Color = Color3.fromRGB(48, 56, 72)
-	stroke.Thickness = 1
-
-	local accent = Instance.new("Frame")
-	accent.Name = "Accent"
-	accent.Size = UDim2.new(1, 0, 0, 4)
-	accent.BackgroundColor3 = accentColor
-	accent.BorderSizePixel = 0
-	accent.Visible = false
-	accent.Parent = button
-	Instance.new("UICorner", accent).CornerRadius = UDim.new(0, 12)
-
-	tabButtons[tabId] = button
-	return button
-end
-
-createTabButton("Weapons", "Weapons", Color3.fromRGB(96, 165, 250))
-createTabButton("SpellLoadout", "Spell Loadout", Color3.fromRGB(190, 120, 255))
-createTabButton("Codex", "Codex", Color3.fromRGB(255, 204, 126))
-createTabButton("MineCache", "Mine Cache", Color3.fromRGB(88, 196, 139))
-createTabButton("MonsterLoot", "Monster Loot", Color3.fromRGB(233, 174, 94))
-createTabButton("ForgeStock", "Forge Stock", Color3.fromRGB(176, 135, 255))
-
-local inventorySection = Instance.new("Frame")
-inventorySection.Size = UDim2.new(1, 0, 1, -56)
-inventorySection.BackgroundTransparency = 1
-inventorySection.Parent = rightColumn
-
-local inventorySectionLayout = Instance.new("UIListLayout", inventorySection)
-inventorySectionLayout.FillDirection = Enum.FillDirection.Horizontal
-inventorySectionLayout.Padding = UDim.new(0, 16)
-inventorySectionLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-local gridPanel = Instance.new("Frame")
-gridPanel.Size = UDim2.new(0.68, -8, 1, 0)
-gridPanel.BackgroundColor3 = Color3.fromRGB(20, 24, 32)
-gridPanel.BackgroundTransparency = 0.08
-gridPanel.BorderSizePixel = 0
-gridPanel.Parent = inventorySection
-Instance.new("UICorner", gridPanel).CornerRadius = UDim.new(0, 12)
-local gridPanelStroke = Instance.new("UIStroke", gridPanel)
-gridPanelStroke.Color = Color3.fromRGB(48, 56, 72)
-gridPanelStroke.Thickness = 1
-local gridPad = Instance.new("UIPadding", gridPanel)
-gridPad.PaddingTop = UDim.new(0, 16)
-gridPad.PaddingBottom = UDim.new(0, 16)
-gridPad.PaddingLeft = UDim.new(0, 16)
-gridPad.PaddingRight = UDim.new(0, 16)
-
-local gridTitle = Instance.new("TextLabel")
-gridTitle.BackgroundTransparency = 1
-gridTitle.Size = UDim2.new(1, -150, 0, 20)
-gridTitle.Font = Enum.Font.GothamBold
-gridTitle.TextSize = 16
-gridTitle.TextColor3 = Color3.fromRGB(235, 239, 246)
-gridTitle.TextXAlignment = Enum.TextXAlignment.Left
-gridTitle.Text = "Weapons"
-gridTitle.Parent = gridPanel
-
-local gridCountLabel = Instance.new("TextLabel")
-gridCountLabel.AnchorPoint = Vector2.new(1, 0)
-gridCountLabel.Position = UDim2.new(1, 0, 0, 2)
-gridCountLabel.Size = UDim2.fromOffset(140, 16)
-gridCountLabel.BackgroundTransparency = 1
-gridCountLabel.Font = Enum.Font.Gotham
-gridCountLabel.TextSize = 11
-gridCountLabel.TextColor3 = Color3.fromRGB(154, 165, 184)
-gridCountLabel.TextXAlignment = Enum.TextXAlignment.Right
-gridCountLabel.Text = "0 collected"
-gridCountLabel.Parent = gridPanel
-
-local slotsFrame = Instance.new("ScrollingFrame")
-slotsFrame.BackgroundTransparency = 1
-slotsFrame.Position = UDim2.fromOffset(0, 42)
-slotsFrame.Size = UDim2.new(1, 0, 1, -42)
-slotsFrame.ScrollBarThickness = 6
-slotsFrame.BorderSizePixel = 0
-slotsFrame.CanvasSize = UDim2.fromOffset(0, 0)
-slotsFrame.Parent = gridPanel
-
-local slotsLayout = Instance.new("UIGridLayout", slotsFrame)
-slotsLayout.CellPadding = UDim2.fromOffset(12, 12)
-slotsLayout.CellSize = UDim2.fromOffset(128, 148)
-slotsLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-local emptyLabel = Instance.new("TextLabel")
-emptyLabel.BackgroundTransparency = 1
-emptyLabel.Position = UDim2.fromOffset(0, 42)
-emptyLabel.Size = UDim2.new(1, 0, 1, -42)
-emptyLabel.Font = Enum.Font.Gotham
-emptyLabel.TextSize = 14
-emptyLabel.TextColor3 = Color3.fromRGB(160, 170, 188)
-emptyLabel.Text = "No weapons yet."
-emptyLabel.TextWrapped = true
-emptyLabel.TextXAlignment = Enum.TextXAlignment.Center
-emptyLabel.TextYAlignment = Enum.TextYAlignment.Center
-emptyLabel.Visible = false
-emptyLabel.Parent = gridPanel
-
-local detailsPanel = Instance.new("Frame")
-detailsPanel.Size = UDim2.new(0.32, -8, 1, 0)
-detailsPanel.BackgroundColor3 = Color3.fromRGB(20, 24, 32)
-detailsPanel.BackgroundTransparency = 0.08
-detailsPanel.BorderSizePixel = 0
-detailsPanel.Parent = inventorySection
-Instance.new("UICorner", detailsPanel).CornerRadius = UDim.new(0, 12)
-local detailsPanelStroke = Instance.new("UIStroke", detailsPanel)
-detailsPanelStroke.Color = Color3.fromRGB(48, 56, 72)
-detailsPanelStroke.Thickness = 1
-local detailsAccent = Instance.new("Frame")
-detailsAccent.Size = UDim2.new(1, 0, 0, 4)
-detailsAccent.BackgroundColor3 = Color3.fromRGB(96, 165, 250)
-detailsAccent.BorderSizePixel = 0
-detailsAccent.Parent = detailsPanel
-Instance.new("UICorner", detailsAccent).CornerRadius = UDim.new(0, 10)
-local detailsPad = Instance.new("UIPadding", detailsPanel)
-detailsPad.PaddingTop = UDim.new(0, 16)
-detailsPad.PaddingBottom = UDim.new(0, 16)
-detailsPad.PaddingLeft = UDim.new(0, 16)
-detailsPad.PaddingRight = UDim.new(0, 16)
-
-local detailsTitle = Instance.new("TextLabel")
-detailsTitle.BackgroundTransparency = 1
-detailsTitle.Size = UDim2.new(1, 0, 0, 18)
-detailsTitle.Font = Enum.Font.GothamBold
-detailsTitle.TextSize = 14
-detailsTitle.TextColor3 = Color3.fromRGB(235, 239, 246)
-detailsTitle.TextXAlignment = Enum.TextXAlignment.Left
-detailsTitle.Text = "Item Details"
-detailsTitle.Parent = detailsPanel
-
-local detailsScroll = Instance.new("ScrollingFrame")
-detailsScroll.BackgroundTransparency = 1
-detailsScroll.Position = UDim2.fromOffset(0, 26)
-detailsScroll.Size = UDim2.new(1, 0, 1, -26)
-detailsScroll.ScrollBarThickness = 6
-detailsScroll.BorderSizePixel = 0
-detailsScroll.CanvasSize = UDim2.fromOffset(0, 0)
-detailsScroll.Parent = detailsPanel
-
-local detailsLayout = Instance.new("UIListLayout", detailsScroll)
-detailsLayout.Padding = UDim.new(0, 8)
-
-local iconFrame = Instance.new("Frame")
-iconFrame.Size = UDim2.fromOffset(72, 72)
-iconFrame.BackgroundColor3 = Color3.fromRGB(30, 36, 46)
-iconFrame.BorderSizePixel = 0
-iconFrame.Parent = detailsScroll
-Instance.new("UICorner", iconFrame).CornerRadius = UDim.new(0, 12)
-local iconStroke = Instance.new("UIStroke", iconFrame)
-iconStroke.Color = Color3.fromRGB(50, 50, 64)
-iconStroke.Thickness = 1
-
-local iconLabel = Instance.new("TextLabel")
-iconLabel.BackgroundTransparency = 1
-iconLabel.Size = UDim2.new(1, 0, 1, 0)
-iconLabel.Font = Enum.Font.GothamBold
-iconLabel.TextSize = 20
-iconLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-iconLabel.Text = "?"
-iconLabel.Parent = iconFrame
-
-local itemName = Instance.new("TextLabel")
-itemName.BackgroundTransparency = 1
-itemName.Size = UDim2.new(1, 0, 0, 20)
-itemName.Font = Enum.Font.GothamBold
-itemName.TextSize = 16
-itemName.TextColor3 = Color3.fromRGB(245, 245, 245)
-itemName.TextXAlignment = Enum.TextXAlignment.Left
-itemName.TextWrapped = true
-itemName.Text = "Select an item"
-itemName.Parent = detailsScroll
-
-local itemDesc = Instance.new("TextLabel")
-itemDesc.BackgroundTransparency = 1
-itemDesc.Size = UDim2.new(1, 0, 0, 34)
-itemDesc.AutomaticSize = Enum.AutomaticSize.Y
-itemDesc.Font = Enum.Font.Gotham
-itemDesc.TextSize = 12
-itemDesc.TextColor3 = Color3.fromRGB(190, 190, 190)
-itemDesc.TextXAlignment = Enum.TextXAlignment.Left
-itemDesc.TextWrapped = true
-itemDesc.Text = "Pick a tab and slot to see its details."
-itemDesc.Parent = detailsScroll
-
-local infoLine = Instance.new("TextLabel")
-infoLine.BackgroundTransparency = 1
-infoLine.Size = UDim2.new(1, 0, 0, 18)
-infoLine.Font = Enum.Font.Gotham
-infoLine.TextSize = 12
-infoLine.TextColor3 = Color3.fromRGB(200, 200, 200)
-infoLine.TextXAlignment = Enum.TextXAlignment.Left
-infoLine.Text = "Category: - | Rarity: -"
-infoLine.Parent = detailsScroll
-
-local statLine = Instance.new("TextLabel")
-statLine.BackgroundTransparency = 1
-statLine.Size = UDim2.new(1, 0, 0, 18)
-statLine.Font = Enum.Font.Gotham
-statLine.TextSize = 12
-statLine.TextColor3 = Color3.fromRGB(200, 200, 200)
-statLine.TextXAlignment = Enum.TextXAlignment.Left
-statLine.Text = "Count: -"
-statLine.Parent = detailsScroll
-
-local bonusStats = Instance.new("TextLabel")
-bonusStats.BackgroundTransparency = 1
-bonusStats.Size = UDim2.new(1, 0, 0, 52)
-bonusStats.AutomaticSize = Enum.AutomaticSize.Y
-bonusStats.Font = Enum.Font.Gotham
-bonusStats.TextSize = 12
-bonusStats.TextColor3 = Color3.fromRGB(190, 190, 190)
-bonusStats.TextXAlignment = Enum.TextXAlignment.Left
-bonusStats.TextWrapped = true
-bonusStats.Text = "Summary: -"
-bonusStats.Parent = detailsScroll
-
-local passiveTitle = Instance.new("TextLabel")
-passiveTitle.BackgroundTransparency = 1
-passiveTitle.Size = UDim2.new(1, 0, 0, 16)
-passiveTitle.Font = Enum.Font.GothamBold
-passiveTitle.TextSize = 12
-passiveTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
-passiveTitle.TextXAlignment = Enum.TextXAlignment.Left
-passiveTitle.Text = "Usage"
-passiveTitle.Parent = detailsScroll
-
-local passiveDesc = Instance.new("TextLabel")
-passiveDesc.BackgroundTransparency = 1
-passiveDesc.Size = UDim2.new(1, 0, 0, 92)
-passiveDesc.AutomaticSize = Enum.AutomaticSize.Y
-passiveDesc.Font = Enum.Font.Gotham
-passiveDesc.TextSize = 12
-passiveDesc.TextColor3 = Color3.fromRGB(190, 190, 190)
-passiveDesc.TextXAlignment = Enum.TextXAlignment.Left
-passiveDesc.TextWrapped = true
-passiveDesc.Text = "-"
-passiveDesc.Parent = detailsScroll
-
-local abilityTitle = Instance.new("TextLabel")
-abilityTitle.BackgroundTransparency = 1
-abilityTitle.Size = UDim2.new(1, 0, 0, 16)
-abilityTitle.Font = Enum.Font.GothamBold
-abilityTitle.TextSize = 12
-abilityTitle.TextColor3 = Color3.fromRGB(230, 230, 230)
-abilityTitle.TextXAlignment = Enum.TextXAlignment.Left
-abilityTitle.Text = "Notes"
-abilityTitle.Parent = detailsScroll
-
-local abilityDesc = Instance.new("TextLabel")
-abilityDesc.BackgroundTransparency = 1
-abilityDesc.Size = UDim2.new(1, 0, 0, 72)
-abilityDesc.AutomaticSize = Enum.AutomaticSize.Y
-abilityDesc.Font = Enum.Font.Gotham
-abilityDesc.TextSize = 12
-abilityDesc.TextColor3 = Color3.fromRGB(190, 190, 190)
-abilityDesc.TextXAlignment = Enum.TextXAlignment.Left
-abilityDesc.TextWrapped = true
-abilityDesc.Text = "-"
-abilityDesc.Parent = detailsScroll
-
-local detailActions = Instance.new("Frame")
-detailActions.BackgroundTransparency = 1
-detailActions.Size = UDim2.new(1, 0, 0, 34)
-detailActions.Visible = false
-detailActions.Parent = detailsScroll
-
-local detailActionsLayout = Instance.new("UIListLayout", detailActions)
-detailActionsLayout.FillDirection = Enum.FillDirection.Horizontal
-detailActionsLayout.Padding = UDim.new(0, 8)
-detailActionsLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-local function makeDetailActionButton(label)
-	local button = Instance.new("TextButton")
-	button.Size = UDim2.new(0.33, -6, 1, 0)
-	button.BackgroundColor3 = Color3.fromRGB(36, 42, 54)
-	button.BorderSizePixel = 0
-	button.Font = Enum.Font.GothamBold
-	button.TextSize = 11
-	button.TextColor3 = Color3.fromRGB(236, 242, 250)
-	button.Text = label
-	button.Parent = detailActions
-	Instance.new("UICorner", button).CornerRadius = UDim.new(0, 8)
-	addHover(button, button.BackgroundColor3, Color3.fromRGB(48, 56, 72))
-	return button
-end
-
-local spellEquipBtn = makeDetailActionButton("Equip")
-local spellMoveUpBtn = makeDetailActionButton("Up")
-local spellMoveDownBtn = makeDetailActionButton("Down")
-
-local function updateDetailsCanvas()
-	task.defer(function()
-		detailsScroll.CanvasSize = UDim2.fromOffset(0, detailsLayout.AbsoluteContentSize.Y + 8)
-	end)
-end
-
-updateDetailsCanvas()
-
-local infoOverlay = Instance.new("Frame")
-infoOverlay.Size = UDim2.fromScale(1, 1)
-infoOverlay.BackgroundColor3 = Color3.fromRGB(8, 8, 10)
-infoOverlay.BackgroundTransparency = 0.35
-infoOverlay.BorderSizePixel = 0
-infoOverlay.Visible = false
-infoOverlay.Parent = inventoryGui
-
-local infoPanel = Instance.new("Frame")
-infoPanel.AnchorPoint = Vector2.new(0.5, 0.5)
-infoPanel.Position = UDim2.fromScale(0.5, 0.5)
-infoPanel.Size = UDim2.fromOffset(420, 240)
-infoPanel.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
-infoPanel.BackgroundTransparency = 0.06
-infoPanel.BorderSizePixel = 0
-infoPanel.Parent = infoOverlay
-Instance.new("UICorner", infoPanel).CornerRadius = UDim.new(0, 14)
-local infoStroke = Instance.new("UIStroke", infoPanel)
-infoStroke.Color = Color3.fromRGB(40, 40, 48)
-infoStroke.Thickness = 1
-
-local infoTitle = Instance.new("TextLabel")
-infoTitle.BackgroundTransparency = 1
-infoTitle.Position = UDim2.fromOffset(20, 16)
-infoTitle.Size = UDim2.new(1, -40, 0, 18)
-infoTitle.Font = Enum.Font.GothamBold
-infoTitle.TextSize = 14
-infoTitle.TextColor3 = Color3.fromRGB(235, 235, 235)
-infoTitle.TextXAlignment = Enum.TextXAlignment.Left
-infoTitle.Text = "Weapon Info"
-infoTitle.Parent = infoPanel
-
-local infoBody = Instance.new("TextLabel")
-infoBody.BackgroundTransparency = 1
-infoBody.Position = UDim2.fromOffset(20, 44)
-infoBody.Size = UDim2.new(1, -40, 1, -88)
-infoBody.Font = Enum.Font.Gotham
-infoBody.TextSize = 12
-infoBody.TextColor3 = Color3.fromRGB(200, 200, 200)
-infoBody.TextXAlignment = Enum.TextXAlignment.Left
-infoBody.TextYAlignment = Enum.TextYAlignment.Top
-infoBody.TextWrapped = true
-infoBody.Text = "-"
-infoBody.Parent = infoPanel
-
-local infoClose = Instance.new("TextButton")
-infoClose.AnchorPoint = Vector2.new(1, 0)
-infoClose.Position = UDim2.new(1, -16, 0, 16)
-infoClose.Size = UDim2.fromOffset(28, 28)
-infoClose.BackgroundColor3 = Color3.fromRGB(40, 40, 52)
-infoClose.BorderSizePixel = 0
-infoClose.Font = Enum.Font.GothamBold
-infoClose.TextSize = 12
-infoClose.TextColor3 = Color3.fromRGB(230, 230, 230)
-infoClose.Text = "X"
-infoClose.Parent = infoPanel
-Instance.new("UICorner", infoClose).CornerRadius = UDim.new(0, 10)
-addHover(infoClose, infoClose.BackgroundColor3, Color3.fromRGB(52, 52, 66))
-
-infoClose.MouseButton1Click:Connect(function()
-	infoOverlay.Visible = false
-end)
-
-local contextMenu = Instance.new("Frame")
-contextMenu.Size = UDim2.fromOffset(150, 190)
-contextMenu.BackgroundColor3 = Color3.fromRGB(22, 22, 30)
-contextMenu.BackgroundTransparency = 0.06
-contextMenu.BorderSizePixel = 0
-contextMenu.Visible = false
-contextMenu.Parent = inventoryGui
-Instance.new("UICorner", contextMenu).CornerRadius = UDim.new(0, 10)
-local contextStroke = Instance.new("UIStroke", contextMenu)
-contextStroke.Color = Color3.fromRGB(50, 50, 64)
-contextStroke.Thickness = 1
-
-local contextLayout = Instance.new("UIListLayout", contextMenu)
-contextLayout.Padding = UDim.new(0, 6)
-local contextPad = Instance.new("UIPadding", contextMenu)
-contextPad.PaddingTop = UDim.new(0, 6)
-contextPad.PaddingBottom = UDim.new(0, 6)
-contextPad.PaddingLeft = UDim.new(0, 6)
-contextPad.PaddingRight = UDim.new(0, 6)
-
-local function makeContextButton(label)
-	local button = Instance.new("TextButton")
-	button.Size = UDim2.new(1, -12, 0, 28)
-	button.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-	button.BorderSizePixel = 0
-	button.Font = Enum.Font.GothamBold
-	button.TextSize = 12
-	button.TextColor3 = Color3.fromRGB(230, 230, 230)
-	button.Text = label
-	button.Parent = contextMenu
-	Instance.new("UICorner", button).CornerRadius = UDim.new(0, 8)
-	addHover(button, button.BackgroundColor3, Color3.fromRGB(40, 40, 52))
-	return button
-end
-
-local equipBtn = makeContextButton("Equip")
-local sellBtn = makeContextButton("Sell")
-local upgradeBtn = makeContextButton("Upgrade")
-local favoriteBtn = makeContextButton("Favorite")
-local infoBtn = makeContextButton("Weapon Info")
-
-local inventoryItems = {}
-local spellSnapshot = {
-	entries = {},
-	loadout = {},
-	maxSlots = 0,
-	damageSummary = {},
-	combinations = {},
+local TAB_DEFS = {
+	{ id = "Weapons", label = "Weapons", accent = THEME.accent },
+	{ id = "Spells", label = "Spell Loadout", accent = THEME.purple },
+	{ id = "Materials", label = "Materials", accent = THEME.green },
+	{ id = "Codex", label = "Codex", accent = THEME.gold },
 }
+for index, tab in ipairs(TAB_DEFS) do
+	local button = create("TextButton", {
+		LayoutOrder = index,
+		Size = UDim2.new(0.25, -6, 1, 0),
+		BackgroundColor3 = THEME.panelAlt,
+		BorderSizePixel = 0,
+		Font = Enum.Font.GothamBold,
+		Text = tab.label,
+		TextColor3 = THEME.muted,
+		TextSize = 10,
+		AutoButtonColor = false,
+	}, tabBar)
+	addCorner(button, 9)
+	local accent = create("Frame", {
+		Name = "Accent",
+		Size = UDim2.new(1, 0, 0, 3),
+		BackgroundColor3 = tab.accent,
+		BorderSizePixel = 0,
+		Visible = false,
+	}, button)
+	addCorner(accent, 9)
+	tabButtons[tab.id] = button
+end
+
+local toast = create("TextLabel", {
+	AnchorPoint = Vector2.new(0.5, 1),
+	Position = UDim2.new(0.5, 0, 1, -14),
+	Size = UDim2.fromOffset(320, 38),
+	BackgroundColor3 = Color3.fromRGB(20, 24, 32),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	Font = Enum.Font.GothamMedium,
+	Text = "",
+	TextColor3 = THEME.text,
+	TextSize = 11,
+	Visible = false,
+	ZIndex = 30,
+}, panel)
+addCorner(toast, 10)
+local toastStroke = addStroke(toast, THEME.stroke, 1, 1)
+
+local confirmOverlay = create("Frame", {
+	Size = UDim2.fromScale(1, 1),
+	BackgroundColor3 = Color3.fromRGB(2, 3, 5),
+	BackgroundTransparency = 0.35,
+	BorderSizePixel = 0,
+	Visible = false,
+	ZIndex = 50,
+}, panel)
+local confirmBox = create("Frame", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(400, 210),
+	BackgroundColor3 = THEME.panel,
+	BorderSizePixel = 0,
+	ZIndex = 51,
+}, confirmOverlay)
+addCorner(confirmBox, 14)
+addStroke(confirmBox, THEME.stroke, 1)
+local confirmTitle = create("TextLabel", {
+	Position = UDim2.fromOffset(18, 18),
+	Size = UDim2.new(1, -36, 0, 26),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "Sell weapon?",
+	TextColor3 = THEME.text,
+	TextSize = 17,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	ZIndex = 52,
+}, confirmBox)
+local confirmBody = create("TextLabel", {
+	Position = UDim2.fromOffset(18, 56),
+	Size = UDim2.new(1, -36, 0, 80),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.Gotham,
+	Text = "This action cannot be undone.",
+	TextColor3 = THEME.muted,
+	TextSize = 12,
+	TextWrapped = true,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Top,
+	ZIndex = 52,
+}, confirmBox)
+local confirmCancel = create("TextButton", {
+	AnchorPoint = Vector2.new(1, 1),
+	Position = UDim2.new(1, -142, 1, -18),
+	Size = UDim2.fromOffset(110, 38),
+	BackgroundColor3 = THEME.panelSoft,
+	BorderSizePixel = 0,
+	Font = Enum.Font.GothamBold,
+	Text = "Cancel",
+	TextColor3 = THEME.text,
+	TextSize = 11,
+	ZIndex = 52,
+	AutoButtonColor = false,
+}, confirmBox)
+addCorner(confirmCancel, 9)
+local confirmAccept = create("TextButton", {
+	AnchorPoint = Vector2.new(1, 1),
+	Position = UDim2.new(1, -18, 1, -18),
+	Size = UDim2.fromOffset(116, 38),
+	BackgroundColor3 = THEME.red,
+	BorderSizePixel = 0,
+	Font = Enum.Font.GothamBold,
+	Text = "Sell",
+	TextColor3 = Color3.new(1, 1, 1),
+	TextSize = 11,
+	ZIndex = 52,
+	AutoButtonColor = false,
+}, confirmBox)
+addCorner(confirmAccept, 9)
+
+local snapshot = {}
+local weaponEntries = {}
 local spellEntries = {}
-local codexSnapshot = {
-	categories = {},
-	entries = {},
-	counts = {},
-}
+local materialEntries = {}
 local codexEntries = {}
 local currentEntries = {}
+local selectedIds = {}
+local selectedEntry = nil
 local currentTab = "Weapons"
-local selectedEntryIdByTab = {}
-local equippedWeaponId
-local contextIndex
-local weaponPoints = 0
-local souls = 0
-local tickets = 0
-local inventoryResources = {
-	mineResources = {},
-	mobMaterials = {},
-	upgradeMaterials = {},
+local level = 1
+local xp = 0
+local nextXp = 1
+local currencies = { Silver = 0, Souls = 0, WeaponPoints = 0, Tickets = 0 }
+local equippedWeaponId = nil
+local toastToken = 0
+local pendingConfirm = nil
+local lastClickById = {}
+
+local filters = {
+	Weapons = { a = "All", b = "All" },
+	Spells = { a = "All", b = "All" },
+	Materials = { a = "All", b = "All" },
+	Codex = { a = "All", b = "All" },
 }
-local level, xp, nextXp, coins = 1, 0, 120, 0
 
-local resourceMetaById = {}
-for _, def in ipairs(CraftingConfig.MINE_RESOURCE_DEFS or {}) do
-	if typeof(def) == "table" and typeof(def.id) == "string" then
-		resourceMetaById[def.id] = {
-			rarity = def.rarity,
-		}
-	end
-end
+local sortIndices = {
+	Weapons = 1,
+	Spells = 1,
+	Materials = 1,
+	Codex = 1,
+}
 
-for _, def in ipairs(CraftingConfig.MOB_MATERIAL_DEFS or {}) do
-	if typeof(def) == "table" and typeof(def.id) == "string" then
-		resourceMetaById[def.id] = resourceMetaById[def.id] or {}
-	end
-end
+local SORT_OPTIONS = {
+	Weapons = { "Equipped", "Rarity", "Level", "ATK", "Name" },
+	Spells = { "Equipped", "Element", "Damage", "Name" },
+	Materials = { "Amount", "Rarity", "Name" },
+	Codex = { "Discovered", "Category", "Name" },
+}
 
-resourceMetaById[CraftingConfig.UPGRADE_CRYSTAL_ID or "Upgrade Crystal"] = { rarity = "Rare" }
-resourceMetaById[CraftingConfig.ELITE_SPECIAL_ID or "Elite Sigil"] = { rarity = "Epic" }
-resourceMetaById[CraftingConfig.BOSS_SPECIAL_ID or "Boss Core"] = { rarity = "Legendary" }
-
-local TAB_CONFIGS = {
+local FILTER_OPTIONS = {
 	Weapons = {
-		label = "Weapons",
-		countSuffix = "collected",
-		detailsTitle = "Weapon Details",
-		emptyText = "No weapons yet.",
-		accent = Color3.fromRGB(96, 165, 250),
-		placeholderName = "Select a weapon",
-		placeholderDesc = "Pick a weapon slot to see its details.",
+		aLabel = "Type",
+		a = { "All", "Sword", "Scythe", "Halberd", "Bow", "Staff", "Pistol" },
+		bLabel = "Rarity",
+		b = { "All", "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythical" },
 	},
-	SpellLoadout = {
-		label = "Spell Loadout",
-		countSuffix = "known",
-		detailsTitle = "Spell Details",
-		emptyText = "No spells unlocked yet.",
-		accent = Color3.fromRGB(190, 120, 255),
-		placeholderName = "Select a spell",
-		placeholderDesc = "Pick an unlocked spell to equip it for your next run.",
+	Spells = {
+		aLabel = "Element",
+		a = { "All", "Fire", "Electricity", "Air", "Water", "Earth", "Void", "Light", "Physical" },
+		bLabel = "Status",
+		b = { "All", "Equipped", "Unlocked", "Locked" },
+	},
+	Materials = {
+		aLabel = "Source",
+		a = { "All", "Mine", "Monster", "Forge" },
+		bLabel = "Rarity",
+		b = { "All", "Common", "Uncommon", "Rare", "Epic", "Legendary" },
 	},
 	Codex = {
-		label = "Codex",
-		countSuffix = "entries",
-		detailsTitle = "Codex Entry",
-		emptyText = "No codex entries available.",
-		accent = Color3.fromRGB(255, 204, 126),
-		placeholderName = "Select an entry",
-		placeholderDesc = "Pick a discovered entry to inspect it.",
-	},
-	MineCache = {
-		label = "Mine Cache",
-		countSuffix = "types stored",
-		detailsTitle = "Mine Cache",
-		emptyText = "No ore or crystals stored.",
-		accent = Color3.fromRGB(88, 196, 139),
-		resourceKey = "mineResources",
-		placeholderName = "Select a material",
-		placeholderDesc = "Pick a stored material to see its count and usage.",
-		usageTitle = "Used For",
-		usageText = "Ore, crystals and mine finds used in crafting, trading and future recipes.",
-		notesTitle = "Storage",
-		notesText = "This tab shows everything currently stored in your mine cache.",
-	},
-	MonsterLoot = {
-		label = "Monster Loot",
-		countSuffix = "types stored",
-		detailsTitle = "Monster Loot",
-		emptyText = "No monster materials stored.",
-		accent = Color3.fromRGB(233, 174, 94),
-		resourceKey = "mobMaterials",
-		placeholderName = "Select a material",
-		placeholderDesc = "Pick a drop to see its count and usage.",
-		usageTitle = "Used For",
-		usageText = "Drops from enemies used in recipes, trades and progression systems.",
-		notesTitle = "Storage",
-		notesText = "This tab shows everything currently stored from defeated monsters.",
-	},
-	ForgeStock = {
-		label = "Forge Stock",
-		countSuffix = "types stored",
-		detailsTitle = "Forge Stock",
-		emptyText = "No forge stock stored.",
-		accent = Color3.fromRGB(176, 135, 255),
-		resourceKey = "upgradeMaterials",
-		placeholderName = "Select a material",
-		placeholderDesc = "Pick a forge material to see its count and usage.",
-		usageTitle = "Used For",
-		usageText = "Special upgrade stock reserved for forging, enhancing and late-game crafting.",
-		notesTitle = "Storage",
-		notesText = "This tab shows everything currently stored for the forge.",
+		aLabel = "Category",
+		a = { "All", "Spells", "Combinations", "Enemies", "Elites", "Bosses", "Weapons", "Materials" },
+		bLabel = "Status",
+		b = { "All", "Discovered", "Undiscovered" },
 	},
 }
 
-local TAB_ORDER = { "Weapons", "SpellLoadout", "Codex", "MineCache", "MonsterLoot", "ForgeStock" }
-
-local function getTabConfig(tabId)
-	return TAB_CONFIGS[tabId] or TAB_CONFIGS.Weapons
-end
-
-local function formatResourceLabel(resourceId)
-	return tostring(resourceId or "Unknown"):gsub("_", " ")
-end
-
-local function buildResourceEntries(entries)
-	local built = {}
-	for _, entry in ipairs(entries or {}) do
-		if typeof(entry) == "table" then
-			local resourceId = tostring(entry.id or entry.name or "")
-			if resourceId ~= "" then
-				table.insert(built, {
-					id = resourceId,
-					displayName = formatResourceLabel(resourceId),
-					amount = math.max(0, math.floor(tonumber(entry.amount) or 0)),
-					rarity = resourceMetaById[resourceId] and resourceMetaById[resourceId].rarity or nil,
-				})
-			end
-		end
-	end
-	table.sort(built, function(a, b)
-		if a.amount == b.amount then
-			return a.displayName < b.displayName
-		end
-		return a.amount > b.amount
-	end)
-	return built
-end
-
-local function buildSpellEntries(entries)
-	local built = {}
-	for _, entry in ipairs(entries or {}) do
-		if typeof(entry) == "table" and typeof(entry.id) == "string" and entry.id ~= "" then
-			table.insert(built, {
-				id = entry.id,
-				productId = entry.productId or entry.id,
-				familyId = entry.familyId,
-				displayName = entry.displayName or entry.name or entry.id,
-				rarity = entry.rarity or entry.baseQuality or "Spell",
-				element = entry.element or "Physical",
-				attackType = entry.attackType,
-				spellType = entry.spellType,
-				description = entry.description or "",
-				iconGlyph = entry.iconGlyph,
-				artMotif = entry.artMotif,
-				loreDescription = entry.loreDescription,
-				gameplayDescription = entry.gameplayDescription,
-				visualDirection = entry.visualDirection,
-				frameStyle = entry.frameStyle,
-				codexCategory = entry.codexCategory,
-				witchbookAccent = entry.witchbookAccent,
-				presentation = entry.presentation or {},
-				visualProfile = entry.visualProfile or {},
-				unlocked = entry.unlocked == true,
-				equipped = entry.equipped == true,
-				statLines = entry.statLines or {},
-				upgradeLevels = entry.upgradeLevels or {},
-				combinations = entry.combinations or {},
-			})
-		end
-	end
-	table.sort(built, function(a, b)
-		if a.equipped ~= b.equipped then
-			return a.equipped
-		end
-		if a.unlocked ~= b.unlocked then
-			return a.unlocked
-		end
-		local ea = SpellDefs.ELEMENTS and SpellDefs.ELEMENTS[a.element]
-		local eb = SpellDefs.ELEMENTS and SpellDefs.ELEMENTS[b.element]
-		local oa = ea and ea.order or 99
-		local ob = eb and eb.order or 99
-		if oa ~= ob then
-			return oa < ob
-		end
-		return tostring(a.displayName) < tostring(b.displayName)
-	end)
-	return built
-end
-
-local function buildCodexEntries(entries)
-	local built = {}
-	for _, entry in ipairs(entries or {}) do
-		if typeof(entry) == "table" and typeof(entry.id) == "string" and entry.id ~= "" then
-			table.insert(built, {
-				id = entry.id,
-				category = entry.category or "Codex",
-				displayName = entry.displayName or entry.id,
-				description = entry.description or "",
-				rarity = entry.rarity or (entry.discovered and "Discovered" or "Locked"),
-				discovered = entry.discovered == true,
-				seen = entry.seen == true,
-				element = entry.element,
-				tags = entry.tags or {},
-				iconText = entry.iconText,
-				artMotif = entry.artMotif,
-				loreDescription = entry.loreDescription,
-				gameplayDescription = entry.gameplayDescription,
-				visualDirection = entry.visualDirection,
-				frameStyle = entry.frameStyle,
-				witchbookAccent = entry.witchbookAccent,
-				presentation = entry.presentation or {},
-				ingredients = entry.ingredients or {},
-			})
-		end
-	end
-	table.sort(built, function(a, b)
-		if a.discovered ~= b.discovered then
-			return a.discovered
-		end
-		if tostring(a.category) ~= tostring(b.category) then
-			return tostring(a.category) < tostring(b.category)
-		end
-		return tostring(a.displayName) < tostring(b.displayName)
-	end)
-	return built
-end
-
-local function getEntriesForTab(tabId)
-	local config = getTabConfig(tabId)
-	if tabId == "SpellLoadout" then
-		return spellEntries
-	end
-	if tabId == "Codex" then
-		return codexEntries
-	end
-	if not config.resourceKey then
-		return inventoryItems
-	end
-	return buildResourceEntries(inventoryResources[config.resourceKey])
-end
-
-local function clearTextRows(container)
-	for _, child in ipairs(container:GetChildren()) do
-		if child:IsA("TextLabel") then
-			child:Destroy()
+local materialUses = {}
+for _, recipe in ipairs(CraftingConfig.Recipes or {}) do
+	for _, requirement in ipairs(recipe.materials or {}) do
+		local id = requirement.id
+		if typeof(id) == "string" and id ~= "" then
+			materialUses[id] = materialUses[id] or {}
+			table.insert(materialUses[id], recipe.weaponId or recipe.recipeId or "Unknown recipe")
 		end
 	end
 end
+materialUses[CraftingConfig.UPGRADE_CRYSTAL_ID or "Upgrade Crystal"] = { "Weapon upgrades" }
+materialUses[CraftingConfig.ELITE_SPECIAL_ID or "Elite Sigil"] = { "High-level weapon upgrades" }
+materialUses[CraftingConfig.BOSS_SPECIAL_ID or "Boss Core"] = { "Endgame weapon upgrades" }
 
-local function addCardRow(container, order, text, color)
-	local row = Instance.new("TextLabel")
-	row.BackgroundTransparency = 1
-	row.Size = UDim2.new(1, 0, 0, 16)
-	row.Font = Enum.Font.Gotham
-	row.TextSize = 11
-	row.TextColor3 = color or Color3.fromRGB(220, 226, 238)
-	row.TextXAlignment = Enum.TextXAlignment.Left
-	row.TextWrapped = false
-	row.LayoutOrder = order
-	row.Text = text
-	row.Parent = container
-	return row
-end
-
-local function getResourceColor(resourceId, fallbackColor)
-	local meta = resourceMetaById[resourceId]
-	if meta and meta.rarity then
-		return rarityColor(meta.rarity)
-	end
-	return fallbackColor or Color3.fromRGB(220, 226, 238)
-end
-
-local function totalAmount(entries)
-	local total = 0
-	for _, entry in ipairs(entries or {}) do
-		total += math.max(0, math.floor(tonumber(entry.amount) or 0))
-	end
-	return total
-end
-
-local function renderEntryCard(body, subtitleLabel, entries, emptyText, fallbackColor)
-	clearTextRows(body)
-
-	if typeof(entries) ~= "table" or #entries == 0 then
-		subtitleLabel.Text = "Nothing stored"
-		addCardRow(body, 1, emptyText, Color3.fromRGB(145, 153, 171))
-		return
-	end
-
-	subtitleLabel.Text = ("%d types | %d total"):format(#entries, totalAmount(entries))
-	local limit = 4
-	for index = 1, math.min(#entries, limit) do
-		local entry = entries[index]
-		addCardRow(
-			body,
-			index,
-			("%s x%d"):format(tostring(entry.id or "?"), math.max(0, math.floor(tonumber(entry.amount) or 0))),
-			getResourceColor(entry.id, fallbackColor)
-		)
-	end
-	if #entries > limit then
-		addCardRow(body, limit + 1, ("+%d more types"):format(#entries - limit), Color3.fromRGB(154, 165, 184))
-	end
-end
-
-local function renderWalletCard()
-	clearTextRows(walletBody)
-	walletSubtitle.Text = "Lobby balances"
-	addCardRow(walletBody, 1, ("Silver: %d"):format(coins), Color3.fromRGB(242, 198, 92))
-	addCardRow(walletBody, 2, ("Souls: %d"):format(souls), Color3.fromRGB(134, 164, 255))
-	addCardRow(walletBody, 3, ("WP: %d"):format(weaponPoints), Color3.fromRGB(111, 218, 255))
-	addCardRow(walletBody, 4, ("Tickets: %d"):format(tickets), Color3.fromRGB(226, 232, 242))
-end
-
-local function renderResourceCards()
-	renderWalletCard()
-	renderEntryCard(mineBody, mineSubtitle, inventoryResources.mineResources, "No ore or crystals", Color3.fromRGB(88, 196, 139))
-	renderEntryCard(mobBody, mobSubtitle, inventoryResources.mobMaterials, "No monster materials", Color3.fromRGB(233, 174, 94))
-	renderEntryCard(upgradeBody, upgradeSubtitle, inventoryResources.upgradeMaterials, "No upgrade stock", Color3.fromRGB(176, 135, 255))
-end
-
-local function formatStats(stats)
-	if typeof(stats) ~= "table" then
-		return "Bonus Stats: -"
-	end
-	local parts = {}
-	if stats.HP and stats.HP ~= 0 then
-		table.insert(parts, ("HP %+d"):format(stats.HP))
-	end
-	if stats.ATK and stats.ATK ~= 0 then
-		table.insert(parts, ("ATK %+d"):format(stats.ATK))
-	end
-	if stats.DEF and stats.DEF ~= 0 then
-		table.insert(parts, ("DEF %+d"):format(stats.DEF))
-	end
-	if stats.LIFESTEAL and stats.LIFESTEAL ~= 0 then
-		table.insert(parts, ("Life Steal %+d%%"):format(stats.LIFESTEAL))
-	end
-	if stats.CRIT_RATE and stats.CRIT_RATE ~= 0 then
-		table.insert(parts, ("Crit Rate %+d%%"):format(stats.CRIT_RATE))
-	end
-	if stats.CRIT_DMG and stats.CRIT_DMG ~= 0 then
-		table.insert(parts, ("Crit DMG %+d%%"):format(stats.CRIT_DMG))
-	end
-	if stats.SPD and stats.SPD ~= 0 then
-		table.insert(parts, ("Speed %+d%%"):format(stats.SPD))
-	end
-	if #parts == 0 then
-		return "Bonus Stats: -"
-	end
-	return "Bonus Stats: " .. table.concat(parts, " | ")
-end
-
-local function formatStatsShort(stats)
-	if typeof(stats) ~= "table" then
-		return "Bonus Stats: -"
-	end
-	local parts = {}
-	if stats.HP and stats.HP ~= 0 then
-		table.insert(parts, ("HP %+d"):format(stats.HP))
-	end
-	if stats.DEF and stats.DEF ~= 0 then
-		table.insert(parts, ("DEF %+d"):format(stats.DEF))
-	end
-	if stats.CRIT_RATE and stats.CRIT_RATE ~= 0 then
-		table.insert(parts, ("Crit %+d%%"):format(stats.CRIT_RATE))
-	end
-	if stats.CRIT_DMG and stats.CRIT_DMG ~= 0 then
-		table.insert(parts, ("Crit DMG %+d%%"):format(stats.CRIT_DMG))
-	end
-	if stats.LIFESTEAL and stats.LIFESTEAL ~= 0 then
-		table.insert(parts, ("LS %+d%%"):format(stats.LIFESTEAL))
-	end
-	if stats.SPD and stats.SPD ~= 0 then
-		table.insert(parts, ("SPD %+d%%"):format(stats.SPD))
-	end
-	if #parts == 0 then
-		return "Bonus Stats: -"
-	end
-	return "Bonus Stats: " .. table.concat(parts, " | ")
-end
-
-local function refreshFinalStats(raceName)
-	local raceDef = Races.Defs and Races.Defs[raceName or ""]
-	local raceStats = raceDef and raceDef.stats or {}
-	local equippedItem
-	if equippedWeaponId then
-		for _, it in ipairs(inventoryItems) do
-			if it.id == equippedWeaponId then
-				equippedItem = it
-				break
-			end
-		end
-	end
-	local weaponDef = equippedItem and equippedItem.def or nil
-	local weaponStats = (equippedItem and equippedItem.stats) or (weaponDef and weaponDef.stats) or {}
-	local weaponATK = (equippedItem and equippedItem.stats and equippedItem.stats.ATK) or (weaponDef and weaponDef.baseDamage) or 0
-
-	local function getRaceStat(key)
-		return tonumber(raceStats[key]) or 0
-	end
-
-	local function getWeaponStat(key)
-		return tonumber(weaponStats[key]) or 0
-	end
-
-	local hp = getRaceStat("HP") + getWeaponStat("HP")
-	local atk = weaponATK
-		+ getRaceStat("PhysicalPower")
-		+ getRaceStat("MagicPower")
-		+ getRaceStat("STR")
-	local def = getRaceStat("Armor") + getWeaponStat("DEF")
-	local lifesteal = getRaceStat("LifeSteal") + getWeaponStat("LIFESTEAL")
-	local critRate = getRaceStat("CritChance") + getWeaponStat("CRIT_RATE")
-	local critDmg = getRaceStat("CritDmg") + getWeaponStat("CRIT_DMG")
-	local speed = getRaceStat("MoveSpeed") + getWeaponStat("SPD")
-
-	statRows.HP.Text = ("HP: %d"):format(hp)
-	statRows.ATK.Text = ("ATK: %d"):format(atk)
-	statRows.DEF.Text = ("DEF: %d"):format(def)
-	statRows.LIFESTEAL.Text = ("Lifesteal: %d%%"):format(lifesteal)
-	statRows.CRIT_RATE.Text = ("Crit Rate: %d%%"):format(critRate)
-	statRows.CRIT_DMG.Text = ("Crit DMG: %d%%"):format(critDmg)
-	statRows.SPEED.Text = ("Speed: %d%%"):format(speed)
-end
-
-local function updatePlayerInfo()
-	playerName.Text = ("%s - Lv. %d"):format(plr.Name, level)
-	expLabel.Text = ("EXP: %d/%d"):format(xp, math.max(1, nextXp))
-	local pct = math.clamp(xp / math.max(1, nextXp), 0, 1)
-	TweenService:Create(expFill, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Size = UDim2.new(pct, 0, 1, 0),
+local function showToast(message, color)
+	toastToken += 1
+	local token = toastToken
+	toast.Text = tostring(message or "")
+	toast.BackgroundColor3 = blend(Color3.fromRGB(20, 24, 32), color or THEME.accent, 0.18)
+	toastStroke.Color = color or THEME.accent
+	toast.Visible = true
+	toast.BackgroundTransparency = 1
+	toast.TextTransparency = 1
+	toastStroke.Transparency = 1
+	TweenService:Create(toast, TweenInfo.new(0.16), {
+		BackgroundTransparency = 0.04,
+		TextTransparency = 0,
 	}):Play()
-	local raceName = tostring(plr:GetAttribute("Race") or "-")
-	raceLabel.Text = ("Race: %s"):format(raceName)
-	refreshFinalStats(raceName)
-	coinsLabel.Text = ("Silver: %d | Souls: %d"):format(coins, souls)
-	wpLabel.Text = ("WP: %d | Tickets: %d"):format(weaponPoints, tickets)
-end
-
-
-local function applyWeaponDetails(item)
-	detailActions.Visible = false
-	local config = getTabConfig("Weapons")
-	detailsTitle.Text = config.detailsTitle
-
-	if not item or not item.def then
-		itemName.Text = config.placeholderName
-		itemName.TextColor3 = Color3.fromRGB(245, 245, 245)
-		itemDesc.Text = config.placeholderDesc
-		infoLine.Text = "Type: - | Rarity: -"
-		infoLine.TextColor3 = Color3.fromRGB(200, 200, 200)
-		statLine.Text = "Level: - | ATK: -"
-		bonusStats.Text = "Bonus Stats: -"
-		passiveTitle.Text = "Passive"
-		passiveDesc.Text = "-"
-		abilityTitle.Text = "Ability"
-		abilityDesc.Text = "-"
-		iconLabel.Text = "?"
-		iconFrame.BackgroundColor3 = Color3.fromRGB(30, 36, 46)
-		iconStroke.Color = Color3.fromRGB(50, 50, 64)
-		detailsPanelStroke.Color = Color3.fromRGB(48, 56, 72)
-		detailsAccent.BackgroundColor3 = config.accent
-		updateDetailsCanvas()
-		return
-	end
-
-	local def = item.def
-	local rarity = item.rarity or def.rarity or "Common"
-	local color = rarityColor(rarity)
-	itemName.Text = item.displayName or def.name or def.id or "Unknown"
-	itemName.TextColor3 = color
-	itemDesc.Text = def.description or def.passiveDescription or def.abilityDescription or "No description."
-	infoLine.Text = ("Type: %s | Rarity: %s"):format(def.weaponType or "-", rarity)
-	infoLine.TextColor3 = color
-
-	local lvl = tonumber(item.level) or 1
-	local maxLvl = tonumber(item.maxLevel) or def.maxLevel or "-"
-	local atk = (item.stats and item.stats.ATK) or def.baseDamage or "-"
-	statLine.Text = ("Level: %s/%s | ATK: %s"):format(tostring(lvl), tostring(maxLvl), tostring(atk))
-	bonusStats.Text = formatStats(item.stats or def.stats)
-
-	local passiveName = def.passiveName or ""
-	if passiveName ~= "" then
-		passiveTitle.Text = ("Passive: %s"):format(passiveName)
-		passiveDesc.Text = def.passiveDescription or "-"
-	else
-		passiveTitle.Text = "Passive"
-		passiveDesc.Text = "-"
-	end
-
-	local abilityName = def.abilityName or ""
-	if abilityName ~= "" then
-		abilityTitle.Text = ("Ability: %s"):format(abilityName)
-		abilityDesc.Text = def.abilityDescription or "-"
-	else
-		abilityTitle.Text = "Ability"
-		abilityDesc.Text = "-"
-	end
-
-	iconLabel.Text = def.weaponType and def.weaponType:sub(1, 1) or "?"
-	iconFrame.BackgroundColor3 = blendColor(Color3.fromRGB(26, 30, 40), color, 0.18)
-	iconStroke.Color = color
-	detailsPanelStroke.Color = blendColor(Color3.fromRGB(48, 56, 72), color, 0.45)
-	detailsAccent.BackgroundColor3 = color
-	updateDetailsCanvas()
-end
-
-local function applyResourceDetails(entry)
-	detailActions.Visible = false
-	local config = getTabConfig(currentTab)
-	detailsTitle.Text = config.detailsTitle
-
-	if not entry then
-		itemName.Text = config.placeholderName
-		itemName.TextColor3 = Color3.fromRGB(245, 245, 245)
-		itemDesc.Text = config.placeholderDesc
-		infoLine.Text = ("Category: %s | Rarity: -"):format(config.label)
-		infoLine.TextColor3 = Color3.fromRGB(200, 200, 200)
-		statLine.Text = "Count: -"
-		bonusStats.Text = "Summary: Select a stored item."
-		passiveTitle.Text = config.usageTitle or "Usage"
-		passiveDesc.Text = config.usageText or "-"
-		abilityTitle.Text = config.notesTitle or "Notes"
-		abilityDesc.Text = config.notesText or "-"
-		iconLabel.Text = "?"
-		iconFrame.BackgroundColor3 = Color3.fromRGB(30, 36, 46)
-		iconStroke.Color = Color3.fromRGB(50, 50, 64)
-		detailsPanelStroke.Color = blendColor(Color3.fromRGB(48, 56, 72), config.accent, 0.35)
-		detailsAccent.BackgroundColor3 = config.accent
-		updateDetailsCanvas()
-		return
-	end
-
-	local rarity = entry.rarity or "Common"
-	local color = getResourceColor(entry.id, config.accent)
-	itemName.Text = entry.displayName or formatResourceLabel(entry.id)
-	itemName.TextColor3 = color
-	itemDesc.Text = config.placeholderDesc
-	infoLine.Text = ("Category: %s | Rarity: %s"):format(config.label, rarity)
-	infoLine.TextColor3 = color
-	statLine.Text = ("Count: %d"):format(entry.amount or 0)
-	bonusStats.Text = ("Summary: %d stored in %s."):format(entry.amount or 0, config.label)
-	passiveTitle.Text = config.usageTitle or "Usage"
-	passiveDesc.Text = config.usageText or "-"
-	abilityTitle.Text = config.notesTitle or "Notes"
-	abilityDesc.Text = ("%s Current amount: %d."):format(config.notesText or "Stored in your inventory.", entry.amount or 0)
-
-	local iconText = (entry.displayName or entry.id or "?"):sub(1, 1)
-	iconLabel.Text = iconText ~= "" and string.upper(iconText) or "?"
-	iconFrame.BackgroundColor3 = blendColor(Color3.fromRGB(26, 30, 40), color, 0.18)
-	iconStroke.Color = color
-	detailsPanelStroke.Color = blendColor(Color3.fromRGB(48, 56, 72), color, 0.45)
-	detailsAccent.BackgroundColor3 = color
-	updateDetailsCanvas()
-end
-
-local function summarizeUpgradeLevels(levels)
-	local rows = {}
-	for _, levelInfo in ipairs(levels or {}) do
-		local statLines = levelInfo.statLines or {}
-		local firstLine = statLines[1] or "scales core stats"
-		table.insert(rows, ("Lv.%s: %s"):format(tostring(levelInfo.level or "?"), firstLine))
-		if #rows >= 6 then
-			break
+	TweenService:Create(toastStroke, TweenInfo.new(0.16), { Transparency = 0 }):Play()
+	task.delay(2.2, function()
+		if token ~= toastToken then return end
+		local fade = TweenService:Create(toast, TweenInfo.new(0.2), {
+			BackgroundTransparency = 1,
+			TextTransparency = 1,
+		})
+		TweenService:Create(toastStroke, TweenInfo.new(0.2), { Transparency = 1 }):Play()
+		fade:Play()
+		fade.Completed:Wait()
+		if token == toastToken then
+			toast.Visible = false
 		end
-	end
-	return #rows > 0 and table.concat(rows, "\n") or "-"
-end
-
-local function summarizeCombinations(combinations)
-	local rows = {}
-	for _, combo in ipairs(combinations or {}) do
-		local result = SpellDefs.GetSpell and SpellDefs.GetSpell(combo.resultId) or nil
-		local resultName = result and result.name or tostring(combo.resultId or "?")
-		local ingredientNames = {}
-		for _, ingredient in ipairs(combo.ingredients or {}) do
-			local def = SpellDefs.GetSpell and SpellDefs.GetSpell(ingredient) or nil
-			table.insert(ingredientNames, def and def.name or tostring(ingredient))
-		end
-		table.insert(rows, ("%s: %s"):format(resultName, table.concat(ingredientNames, " + ")))
-	end
-	return #rows > 0 and table.concat(rows, "\n") or "No known combinations."
-end
-
-local function summarizeElementDamage()
-	local rows = {}
-	for _, entry in ipairs(spellSnapshot.damageSummary or {}) do
-		table.insert(rows, ("%s %.1f"):format(tostring(entry.element or "?"), tonumber(entry.damage) or 0))
-	end
-	return #rows > 0 and table.concat(rows, " | ") or "-"
-end
-
-local function getPresentationField(entry, key, fallback)
-	if not entry then
-		return fallback
-	end
-	local value = entry[key]
-	if value ~= nil and value ~= "" then
-		return value
-	end
-	local presentation = entry.presentation
-	if typeof(presentation) == "table" then
-		value = presentation[key]
-		if value ~= nil and value ~= "" then
-			return value
-		end
-	end
-	return fallback
-end
-
-local function formatSpellPresentation(entry)
-	local lore = getPresentationField(entry, "loreDescription", nil)
-	local gameplay = getPresentationField(entry, "gameplayDescription", nil)
-	local visual = getPresentationField(entry, "visualDirection", nil)
-	local motif = getPresentationField(entry, "artMotif", nil)
-	local rows = {}
-	if lore then
-		table.insert(rows, ("Lore: %s"):format(lore))
-	end
-	if gameplay then
-		table.insert(rows, ("Gameplay: %s"):format(gameplay))
-	end
-	if motif then
-		table.insert(rows, ("Art: %s"):format(motif))
-	end
-	if visual then
-		table.insert(rows, ("VFX: %s"):format(visual))
-	end
-	return #rows > 0 and table.concat(rows, "\n") or nil
-end
-
-local function applySpellDetails(entry)
-	local config = getTabConfig("SpellLoadout")
-	detailsTitle.Text = config.detailsTitle
-	detailActions.Visible = entry ~= nil
-
-	if not entry then
-		itemName.Text = config.placeholderName
-		itemName.TextColor3 = Color3.fromRGB(245, 245, 245)
-		itemDesc.Text = config.placeholderDesc
-		infoLine.Text = ("Loadout: %d/%d selected"):format(#(spellSnapshot.loadout or {}), tonumber(spellSnapshot.maxSlots) or 0)
-		infoLine.TextColor3 = Color3.fromRGB(200, 200, 200)
-		statLine.Text = "Status: -"
-		bonusStats.Text = ("Element Summary: %s"):format(summarizeElementDamage())
-		passiveTitle.Text = "Upgrade Levels"
-		passiveDesc.Text = "-"
-		abilityTitle.Text = "Combinations"
-		abilityDesc.Text = "-"
-		iconLabel.Text = "S"
-		iconFrame.BackgroundColor3 = Color3.fromRGB(30, 36, 46)
-		iconStroke.Color = config.accent
-		detailsPanelStroke.Color = blendColor(Color3.fromRGB(48, 56, 72), config.accent, 0.35)
-		detailsAccent.BackgroundColor3 = config.accent
-		updateDetailsCanvas()
-		return
-	end
-
-	local color = spellElementColor(entry.element)
-	itemName.Text = entry.displayName
-	itemName.TextColor3 = color
-	itemDesc.Text = getPresentationField(entry, "loreDescription", entry.description ~= "" and entry.description or "Unlocks this spell for run upgrade offers.")
-	infoLine.Text = ("Type: %s | Element: %s | Attack: %s"):format(entry.spellType or "-", entry.element or "-", entry.attackType or "-")
-	infoLine.TextColor3 = color
-	statLine.Text = ("Status: %s | Loadout %d/%d"):format(entry.equipped and "Equipped" or (entry.unlocked and "Unlocked" or "Locked"), #(spellSnapshot.loadout or {}), tonumber(spellSnapshot.maxSlots) or 0)
-	bonusStats.Text = ("Art: %s\nBase Stats: %s\nLoadout Elements: %s"):format(
-		getPresentationField(entry, "artMotif", "-"),
-		table.concat(entry.statLines or {}, " | "),
-		summarizeElementDamage()
-	)
-	passiveTitle.Text = "Gameplay and Upgrades"
-	passiveDesc.Text = ("%s\n\n%s"):format(
-		getPresentationField(entry, "gameplayDescription", "Unlocks this spell for run upgrade offers."),
-		summarizeUpgradeLevels(entry.upgradeLevels)
-	)
-	abilityTitle.Text = "Visual Direction and Combinations"
-	abilityDesc.Text = ("%s\n\n%s"):format(
-		getPresentationField(entry, "visualDirection", "-"),
-		summarizeCombinations(entry.combinations)
-	)
-
-	iconLabel.Text = getPresentationField(entry, "iconGlyph", string.upper((entry.element or "S"):sub(1, 1)))
-	iconFrame.BackgroundColor3 = blendColor(Color3.fromRGB(26, 30, 40), color, 0.18)
-	iconStroke.Color = color
-	detailsPanelStroke.Color = blendColor(Color3.fromRGB(48, 56, 72), color, 0.45)
-	detailsAccent.BackgroundColor3 = color
-
-	spellEquipBtn.Text = entry.equipped and "Unequip" or "Equip"
-	spellEquipBtn.Active = entry.unlocked
-	spellEquipBtn.AutoButtonColor = entry.unlocked
-	spellEquipBtn.TextTransparency = entry.unlocked and 0 or 0.45
-	spellMoveUpBtn.Active = entry.equipped
-	spellMoveDownBtn.Active = entry.equipped
-	spellMoveUpBtn.TextTransparency = entry.equipped and 0 or 0.45
-	spellMoveDownBtn.TextTransparency = entry.equipped and 0 or 0.45
-	updateDetailsCanvas()
-end
-
-local function applyCodexDetails(entry)
-	detailActions.Visible = false
-	local config = getTabConfig("Codex")
-	detailsTitle.Text = config.detailsTitle
-
-	if not entry then
-		itemName.Text = config.placeholderName
-		itemName.TextColor3 = Color3.fromRGB(245, 245, 245)
-		itemDesc.Text = config.placeholderDesc
-		infoLine.Text = "Category: - | Status: -"
-		infoLine.TextColor3 = Color3.fromRGB(200, 200, 200)
-		statLine.Text = "Discovery: -"
-		bonusStats.Text = "Progress: Select an entry."
-		passiveTitle.Text = "Tags"
-		passiveDesc.Text = "-"
-		abilityTitle.Text = "Notes"
-		abilityDesc.Text = "-"
-		iconLabel.Text = "C"
-		iconFrame.BackgroundColor3 = Color3.fromRGB(30, 36, 46)
-		iconStroke.Color = config.accent
-		detailsPanelStroke.Color = blendColor(Color3.fromRGB(48, 56, 72), config.accent, 0.35)
-		detailsAccent.BackgroundColor3 = config.accent
-		updateDetailsCanvas()
-		return
-	end
-
-	local color = entry.element and spellElementColor(entry.element) or (entry.discovered and config.accent or Color3.fromRGB(120, 126, 142))
-	itemName.Text = entry.displayName
-	itemName.TextColor3 = color
-	itemDesc.Text = getPresentationField(entry, "loreDescription", entry.description ~= "" and entry.description or (entry.discovered and "Discovered entry." or "Undiscovered entry."))
-	infoLine.Text = ("Category: %s | Status: %s"):format(entry.category or "-", entry.discovered and "Discovered" or "Locked")
-	infoLine.TextColor3 = color
-	statLine.Text = entry.seen and "Discovery: seen" or "Discovery: new or unseen"
-	local counts = codexSnapshot.counts and codexSnapshot.counts[entry.category]
-	if counts then
-		bonusStats.Text = ("Progress: %d/%d discovered\nArt: %s"):format(counts.discovered or 0, counts.total or 0, getPresentationField(entry, "artMotif", "-"))
-	else
-		bonusStats.Text = ("Progress: -\nArt: %s"):format(getPresentationField(entry, "artMotif", "-"))
-	end
-	passiveTitle.Text = "Gameplay"
-	passiveDesc.Text = getPresentationField(entry, "gameplayDescription", #(entry.tags or {}) > 0 and table.concat(entry.tags, ", ") or "-")
-	abilityTitle.Text = "Visual Direction"
-	abilityDesc.Text = getPresentationField(entry, "visualDirection", entry.discovered and "Stored permanently in account progress." or "Find this entry during runs or unlock it through progression.")
-	iconLabel.Text = getPresentationField(entry, "iconGlyph", string.upper((entry.iconText or entry.displayName or "C"):sub(1, 1)))
-	iconFrame.BackgroundColor3 = blendColor(Color3.fromRGB(26, 30, 40), color, 0.18)
-	iconStroke.Color = color
-	detailsPanelStroke.Color = blendColor(Color3.fromRGB(48, 56, 72), color, 0.45)
-	detailsAccent.BackgroundColor3 = color
-	updateDetailsCanvas()
-end
-
-local function applyDetails(entry)
-	if currentTab == "Weapons" then
-		applyWeaponDetails(entry)
-	elseif currentTab == "SpellLoadout" then
-		applySpellDetails(entry)
-	elseif currentTab == "Codex" then
-		applyCodexDetails(entry)
-	else
-		applyResourceDetails(entry)
-	end
-end
-
-local function hideContextMenu()
-	contextMenu.Visible = false
-	contextIndex = nil
-end
-
-local function showInfoPopup(def)
-	if not def then
-		return
-	end
-	infoTitle.Text = def.name or "Weapon Info"
-	local parts = {}
-	if def.passiveName and def.passiveName ~= "" then
-		table.insert(parts, ("Passive: %s\n%s"):format(def.passiveName, def.passiveDescription or "-"))
-	end
-	if def.abilityName and def.abilityName ~= "" then
-		table.insert(parts, ("Ability: %s\n%s"):format(def.abilityName, def.abilityDescription or "-"))
-	end
-	if #parts == 0 then
-		infoBody.Text = "No passive or ability details."
-	else
-		infoBody.Text = table.concat(parts, "\n\n")
-	end
-	infoOverlay.Visible = true
-end
-
-local function showContextMenu(index, screenPos)
-	if currentTab ~= "Weapons" then
-		return
-	end
-	contextIndex = index
-	local item = inventoryItems[index]
-	if not item then
-		return
-	end
-	favoriteBtn.Text = item.favorite and "Unfavorite" or "Favorite"
-
-	local menuSize = contextMenu.AbsoluteSize
-	local x = math.clamp(screenPos.X, 10, workspace.CurrentCamera.ViewportSize.X - menuSize.X - 10)
-	local y = math.clamp(screenPos.Y, 10, workspace.CurrentCamera.ViewportSize.Y - menuSize.Y - 10)
-	contextMenu.Position = UDim2.fromOffset(x, y)
-	contextMenu.Visible = true
-end
-
-local slotWidgets = {}
-
-local function refreshSlotVisual(slot, entry, selected)
-	local config = getTabConfig(currentTab)
-	local accent = config.accent
-	if currentTab == "Weapons" then
-		accent = rarityColor(entry and entry.rarity or "Common")
-	elseif currentTab == "SpellLoadout" and entry then
-		accent = spellElementColor(entry.element)
-	elseif currentTab == "Codex" and entry then
-		accent = entry.element and spellElementColor(entry.element) or (entry.discovered and config.accent or Color3.fromRGB(120, 126, 142))
-	elseif entry then
-		accent = getResourceColor(entry.id, config.accent)
-	end
-
-	local equipped = (currentTab == "Weapons" and entry and entry.id == equippedWeaponId)
-		or (currentTab == "SpellLoadout" and entry and entry.equipped == true)
-	local stroke = slot:FindFirstChild("Stroke")
-	if stroke and stroke:IsA("UIStroke") then
-		if selected then
-			stroke.Color = accent
-			stroke.Thickness = 2
-		elseif equipped then
-			stroke.Color = blendColor(Color3.fromRGB(48, 56, 72), accent, 0.65)
-			stroke.Thickness = 2
-		else
-			stroke.Color = blendColor(Color3.fromRGB(48, 56, 72), accent, 0.35)
-			stroke.Thickness = 1
-		end
-	end
-
-	local glow = slot:FindFirstChild("SelectedGlow")
-	if glow and glow:IsA("Frame") then
-		glow.BackgroundColor3 = accent
-		glow.Visible = selected
-	end
-
-	local iconBubble = slot:FindFirstChild("IconBubble")
-	if iconBubble and iconBubble:IsA("Frame") then
-		iconBubble.BackgroundColor3 = blendColor(Color3.fromRGB(24, 28, 38), accent, equipped and 0.38 or (selected and 0.3 or 0.24))
-		local iconStroke = iconBubble:FindFirstChild("IconStroke")
-		if iconStroke and iconStroke:IsA("UIStroke") then
-			iconStroke.Color = equipped and accent or blendColor(Color3.fromRGB(48, 56, 72), accent, selected and 0.55 or 0.25)
-			iconStroke.Thickness = equipped and 2 or 1
-		end
-		local equippedMark = iconBubble:FindFirstChild("EquippedMark")
-		if equippedMark and equippedMark:IsA("TextLabel") then
-			equippedMark.Visible = equipped
-		end
-	end
-end
-
-local function refreshTabButtons()
-	local activeConfig = getTabConfig(currentTab)
-	gridTitle.Text = activeConfig.label
-	emptyLabel.Text = activeConfig.emptyText
-	gridPanelStroke.Color = blendColor(Color3.fromRGB(48, 56, 72), activeConfig.accent, 0.35)
-
-	for _, tabId in ipairs(TAB_ORDER) do
-		local button = tabButtons[tabId]
-		if button then
-			local config = getTabConfig(tabId)
-			local active = tabId == currentTab
-			button.BackgroundColor3 = active and blendColor(Color3.fromRGB(20, 24, 32), config.accent, 0.22) or Color3.fromRGB(20, 24, 32)
-			button.TextColor3 = active and Color3.fromRGB(245, 247, 250) or Color3.fromRGB(182, 192, 210)
-
-			local stroke = button:FindFirstChild("Stroke")
-			if stroke and stroke:IsA("UIStroke") then
-				stroke.Color = active and blendColor(Color3.fromRGB(48, 56, 72), config.accent, 0.65) or Color3.fromRGB(48, 56, 72)
-				stroke.Thickness = active and 2 or 1
-			end
-
-			local accent = button:FindFirstChild("Accent")
-			if accent and accent:IsA("Frame") then
-				accent.BackgroundColor3 = config.accent
-				accent.Visible = active
-			end
-		end
-	end
-end
-
-local function setSelected(index)
-	local entry = currentEntries[index]
-	selectedEntryIdByTab[currentTab] = entry and entry.id or nil
-
-	for i, slot in ipairs(slotWidgets) do
-		refreshSlotVisual(slot, currentEntries[i], i == index)
-	end
-
-	applyDetails(entry)
-	hideContextMenu()
-end
-
-local function rebuildSlots()
-	for _, child in ipairs(slotsFrame:GetChildren()) do
-		if child:IsA("TextButton") then
-			child:Destroy()
-		end
-	end
-	slotWidgets = {}
-	currentEntries = getEntriesForTab(currentTab)
-
-	local config = getTabConfig(currentTab)
-	refreshTabButtons()
-	emptyLabel.Visible = #currentEntries == 0
-	gridCountLabel.Text = ("%d %s"):format(#currentEntries, config.countSuffix)
-
-	for index, entry in ipairs(currentEntries) do
-		local def = entry.def
-		local rarity = currentTab == "Weapons" and (entry.rarity or (def and def.rarity) or "Common") or (entry.rarity or "Common")
-		local accent = currentTab == "Weapons" and rarityColor(rarity) or getResourceColor(entry.id, config.accent)
-		if currentTab == "SpellLoadout" then
-			accent = spellElementColor(entry.element)
-		elseif currentTab == "Codex" then
-			accent = entry.element and spellElementColor(entry.element) or (entry.discovered and config.accent or Color3.fromRGB(120, 126, 142))
-		end
-		local baseColor = blendColor(Color3.fromRGB(24, 28, 38), accent, 0.09)
-		local hoverColor = blendColor(baseColor, accent, 0.12)
-
-		local slot = Instance.new("TextButton")
-		slot.Name = "Slot_" .. index
-		slot.Size = UDim2.fromOffset(128, 148)
-		slot.BackgroundColor3 = baseColor
-		slot.BorderSizePixel = 0
-		slot.Text = ""
-		slot.AutoButtonColor = false
-		slot.Parent = slotsFrame
-		Instance.new("UICorner", slot).CornerRadius = UDim.new(0, 12)
-
-		local stroke = Instance.new("UIStroke")
-		stroke.Name = "Stroke"
-		stroke.Color = blendColor(Color3.fromRGB(48, 56, 72), accent, 0.35)
-		stroke.Thickness = 1
-		stroke.Parent = slot
-
-		local glow = Instance.new("Frame")
-		glow.Name = "SelectedGlow"
-		glow.Size = UDim2.new(1, 0, 1, 0)
-		glow.BackgroundColor3 = accent
-		glow.BackgroundTransparency = 0.88
-		glow.BorderSizePixel = 0
-		glow.Visible = false
-		glow.Parent = slot
-		Instance.new("UICorner", glow).CornerRadius = UDim.new(0, 12)
-
-		local iconBubble = Instance.new("Frame")
-		iconBubble.Name = "IconBubble"
-		iconBubble.Position = UDim2.fromOffset(10, 10)
-		iconBubble.Size = UDim2.fromOffset(38, 38)
-		iconBubble.BackgroundColor3 = blendColor(Color3.fromRGB(24, 28, 38), accent, 0.24)
-		iconBubble.BorderSizePixel = 0
-		iconBubble.Parent = slot
-		Instance.new("UICorner", iconBubble).CornerRadius = UDim.new(0, 10)
-
-		local iconBubbleStroke = Instance.new("UIStroke")
-		iconBubbleStroke.Name = "IconStroke"
-		iconBubbleStroke.Color = blendColor(Color3.fromRGB(48, 56, 72), accent, 0.25)
-		iconBubbleStroke.Thickness = 1
-		iconBubbleStroke.Parent = iconBubble
-
-		local icon = Instance.new("TextLabel")
-		icon.BackgroundTransparency = 1
-		icon.Size = UDim2.fromScale(1, 1)
-		icon.Font = Enum.Font.GothamBold
-		icon.TextSize = 16
-		icon.TextColor3 = Color3.fromRGB(236, 242, 250)
-		if currentTab == "Weapons" then
-			icon.Text = def and def.weaponType and def.weaponType:sub(1, 1) or "?"
-		elseif currentTab == "SpellLoadout" then
-			icon.Text = string.upper((entry.element or "S"):sub(1, 1))
-		elseif currentTab == "Codex" then
-			icon.Text = string.upper((entry.iconText or entry.displayName or "C"):sub(1, 1))
-		else
-			icon.Text = string.upper((entry.displayName or entry.id or "?"):sub(1, 1))
-		end
-		icon.Parent = iconBubble
-
-		if (currentTab == "Weapons" and entry.id == equippedWeaponId) or (currentTab == "SpellLoadout" and entry.equipped) then
-			local equippedMark = Instance.new("TextLabel")
-			equippedMark.Name = "EquippedMark"
-			equippedMark.AnchorPoint = Vector2.new(1, 0)
-			equippedMark.Position = UDim2.new(1, -4, 0, 4)
-			equippedMark.Size = UDim2.fromOffset(16, 16)
-			equippedMark.BackgroundColor3 = accent
-			equippedMark.BorderSizePixel = 0
-			equippedMark.Font = Enum.Font.GothamBold
-			equippedMark.TextSize = 10
-			equippedMark.TextColor3 = Color3.fromRGB(255, 255, 255)
-			equippedMark.Text = currentTab == "SpellLoadout" and "#" or "E"
-			equippedMark.Parent = iconBubble
-			Instance.new("UICorner", equippedMark).CornerRadius = UDim.new(0, 999)
-		end
-
-		if currentTab == "Weapons" and entry.favorite then
-			local favoriteTag = Instance.new("TextLabel")
-			favoriteTag.AnchorPoint = Vector2.new(1, 0)
-			favoriteTag.Position = UDim2.new(1, -10, 0, 10)
-			favoriteTag.Size = UDim2.fromOffset(18, 18)
-			favoriteTag.BackgroundColor3 = Color3.fromRGB(255, 210, 96)
-			favoriteTag.BorderSizePixel = 0
-			favoriteTag.Font = Enum.Font.GothamBold
-			favoriteTag.TextSize = 10
-			favoriteTag.TextColor3 = Color3.fromRGB(30, 24, 10)
-			favoriteTag.Text = "F"
-			favoriteTag.Parent = slot
-			Instance.new("UICorner", favoriteTag).CornerRadius = UDim.new(0, 6)
-		end
-
-		local name = Instance.new("TextLabel")
-		name.BackgroundTransparency = 1
-		name.Position = UDim2.fromOffset(10, 56)
-		name.Size = UDim2.new(1, -20, 0, 42)
-		name.Font = Enum.Font.GothamBold
-		name.TextSize = 12
-		name.TextXAlignment = Enum.TextXAlignment.Left
-		name.TextYAlignment = Enum.TextYAlignment.Top
-		name.TextWrapped = true
-		name.TextColor3 = accent
-		if currentTab == "Weapons" then
-			name.Text = entry.displayName or (def and def.name) or entry.id
-		elseif currentTab == "SpellLoadout" or currentTab == "Codex" then
-			name.Text = entry.displayName or entry.id
-		else
-			name.Text = entry.displayName or formatResourceLabel(entry.id)
-		end
-		name.Parent = slot
-
-		local rarityTag = Instance.new("TextLabel")
-		rarityTag.BackgroundTransparency = 1
-		rarityTag.AnchorPoint = Vector2.new(0, 1)
-		rarityTag.Position = UDim2.new(0, 10, 1, -28)
-		rarityTag.Size = UDim2.new(1, -20, 0, 14)
-		rarityTag.Font = Enum.Font.Gotham
-		rarityTag.TextSize = 11
-		rarityTag.TextXAlignment = Enum.TextXAlignment.Left
-		rarityTag.TextColor3 = Color3.fromRGB(198, 206, 220)
-		if currentTab == "Weapons" then
-			rarityTag.Text = ("%s | Lv %d"):format(rarity, tonumber(entry.level) or 1)
-		elseif currentTab == "SpellLoadout" then
-			rarityTag.Text = ("%s | %s"):format(entry.element or "Spell", entry.equipped and "Equipped" or (entry.unlocked and "Unlocked" or "Locked"))
-		elseif currentTab == "Codex" then
-			rarityTag.Text = ("%s | %s"):format(entry.category or "Codex", entry.discovered and "Discovered" or "Locked")
-		else
-			rarityTag.Text = ("%s | x%d"):format(rarity, entry.amount or 0)
-		end
-		rarityTag.Parent = slot
-
-		local statTag = Instance.new("TextLabel")
-		statTag.BackgroundTransparency = 1
-		statTag.AnchorPoint = Vector2.new(0, 1)
-		statTag.Position = UDim2.new(0, 10, 1, -10)
-		statTag.Size = UDim2.new(1, -20, 0, 14)
-		statTag.Font = Enum.Font.Gotham
-		statTag.TextSize = 10
-		statTag.TextXAlignment = Enum.TextXAlignment.Left
-		statTag.TextColor3 = Color3.fromRGB(154, 165, 184)
-		if currentTab == "Weapons" then
-			statTag.Text = ("ATK %s"):format(tostring((entry.stats and entry.stats.ATK) or (def and def.baseDamage) or "-"))
-		elseif currentTab == "SpellLoadout" then
-			statTag.Text = (entry.statLines and entry.statLines[1]) or (entry.attackType or "Spell")
-		elseif currentTab == "Codex" then
-			statTag.Text = entry.discovered and "Persistent discovery" or "Undiscovered"
-		else
-			statTag.Text = ("Stored %d"):format(entry.amount or 0)
-		end
-		statTag.Parent = slot
-
-		addHover(slot, baseColor, hoverColor)
-		slot.MouseButton1Click:Connect(function()
-			setSelected(index)
-		end)
-
-		if currentTab == "Weapons" then
-			slot.MouseButton2Click:Connect(function()
-				setSelected(index)
-				showContextMenu(index, UserInputService:GetMouseLocation())
-			end)
-		end
-
-		slotWidgets[index] = slot
-	end
-
-	task.defer(function()
-		slotsFrame.CanvasSize = UDim2.fromOffset(0, slotsLayout.AbsoluteContentSize.Y + 12)
 	end)
-
-	local selectedId = selectedEntryIdByTab[currentTab]
-	local selectedSlotIndex
-	if selectedId then
-		for index, entry in ipairs(currentEntries) do
-			if entry.id == selectedId then
-				selectedSlotIndex = index
-				break
-			end
-		end
-	end
-
-	if not selectedSlotIndex and #currentEntries > 0 then
-		selectedSlotIndex = 1
-	end
-
-	if selectedSlotIndex then
-		setSelected(selectedSlotIndex)
-	else
-		selectedEntryIdByTab[currentTab] = nil
-		applyDetails(nil)
-		hideContextMenu()
-	end
-end
-
-local function setActiveTab(tabId)
-	if not TAB_CONFIGS[tabId] then
-		return
-	end
-	if currentTab == tabId then
-		refreshTabButtons()
-		return
-	end
-
-	currentTab = tabId
-	hideContextMenu()
-	rebuildSlots()
-end
-
-for _, tabId in ipairs(TAB_ORDER) do
-	local button = tabButtons[tabId]
-	if button then
-		button.MouseButton1Click:Connect(function()
-			setActiveTab(tabId)
-		end)
-	end
-end
-
-local function loadSnapshot()
-	if not GetInventorySnapshot then
-		warn("[InventoryController] RF_GetInventorySnapshot missing")
-		return
-	end
-	local ok, payload = pcall(function()
-		return GetInventorySnapshot:InvokeServer()
-	end)
-	if not ok or typeof(payload) ~= "table" then
-		warn("[InventoryController] Failed to load snapshot")
-		return
-	end
-
-	local info = payload.playerInfo or {}
-	level = tonumber(info.level) or level
-	xp = tonumber(info.xp) or xp
-	nextXp = tonumber(info.nextXp) or nextXp
-
-	local currencies = payload.currencies or {}
-	coins = tonumber(currencies.Silver or currencies.Coins) or coins
-	souls = tonumber(currencies.Souls) or souls
-	weaponPoints = tonumber(currencies.WeaponPoints) or weaponPoints
-	tickets = tonumber(currencies.Tickets) or tickets
-
-	local resources = payload.resources or {}
-	inventoryResources.mineResources = resources.mineResources or {}
-	inventoryResources.mobMaterials = resources.mobMaterials or {}
-	inventoryResources.upgradeMaterials = resources.upgradeMaterials or {}
-
-	equippedWeaponId = payload.equippedId
-
-	inventoryItems = {}
-	for _, entry in ipairs(payload.weapons or {}) do
-		local instanceId = entry.InstanceId or entry.instanceId or entry.id
-		local weaponId = entry.WeaponId or entry.weaponId or entry.weapon
-		if typeof(instanceId) == "string" and instanceId ~= "" and typeof(weaponId) == "string" and weaponId ~= "" then
-			local def = WeaponConfigs.Get and WeaponConfigs.Get(weaponId) or nil
-			local rarity = entry.Rarity or (def and def.rarity) or "Common"
-			local prefix = entry.Prefix or "Standard"
-			local baseName = (def and def.name) or weaponId
-			local displayName = prefix ~= "Standard" and (prefix .. " " .. baseName) or baseName
-			table.insert(inventoryItems, {
-				id = instanceId,
-				weaponId = weaponId,
-				displayName = displayName,
-				def = def,
-				rarity = rarity,
-				level = tonumber(entry.Level) or 1,
-				maxLevel = tonumber(entry.MaxLevel) or (def and def.maxLevel) or nil,
-				stats = entry.Stats or {},
-				favorite = entry.Favorite == true,
-			})
-		end
-	end
-
-	spellSnapshot = payload.spells or spellSnapshot
-	spellSnapshot.entries = spellSnapshot.entries or {}
-	spellSnapshot.loadout = spellSnapshot.loadout or {}
-	spellSnapshot.damageSummary = spellSnapshot.damageSummary or {}
-	spellSnapshot.combinations = spellSnapshot.combinations or {}
-	spellEntries = buildSpellEntries(spellSnapshot.entries)
-
-	codexSnapshot = payload.codex or codexSnapshot
-	codexSnapshot.entries = codexSnapshot.entries or {}
-	codexSnapshot.counts = codexSnapshot.counts or {}
-	codexEntries = buildCodexEntries(codexSnapshot.entries)
-
-	updatePlayerInfo()
-	rebuildSlots()
 end
 
 local function fireInventoryAction(actionType, payload)
 	if not InventoryAction then
-		warn("[InventoryController] InventoryAction remote missing")
-		return
+		showToast("Inventory service is unavailable.", THEME.red)
+		return false
 	end
 	local message = payload or {}
 	message.type = actionType
 	InventoryAction:FireServer(message)
+	return true
 end
 
-local function getSelectedEntryForCurrentTab()
-	local selectedId = selectedEntryIdByTab[currentTab]
-	if not selectedId then
-		return nil
+local function getWeaponDef(id)
+	return WeaponConfigs.Get and WeaponConfigs.Get(id) or (WeaponConfigs.Defs and WeaponConfigs.Defs[id])
+end
+
+local function buildWeaponEntries(raw)
+	local out = {}
+	for _, entry in ipairs(raw or {}) do
+		local instanceId = entry.InstanceId or entry.instanceId or entry.id
+		local weaponId = entry.WeaponId or entry.weaponId or entry.weapon
+		if typeof(instanceId) == "string" and instanceId ~= "" and typeof(weaponId) == "string" and weaponId ~= "" then
+			local def = getWeaponDef(weaponId)
+			local prefix = tostring(entry.Prefix or entry.prefix or "Standard")
+			local baseName = (def and (def.name or def.displayName)) or weaponId
+			local displayName = prefix ~= "Standard" and (prefix .. " " .. baseName) or baseName
+			table.insert(out, {
+				id = instanceId,
+				weaponId = weaponId,
+				displayName = displayName,
+				prefix = prefix,
+				def = def,
+				rarity = entry.Rarity or entry.rarity or (def and def.rarity) or "Common",
+				level = tonumber(entry.Level or entry.level) or 1,
+				maxLevel = tonumber(entry.MaxLevel or entry.maxLevel) or (def and def.maxLevel) or 1,
+				stats = entry.Stats or entry.stats or {},
+				favorite = entry.Favorite == true or entry.favorite == true,
+				sellValue = tonumber(entry.SellValue or entry.sellValue) or (def and tonumber(def.sellValue)) or 0,
+				weaponType = entry.WeaponType or entry.weaponType or (def and def.weaponType) or "Weapon",
+				element = entry.Element or entry.element or (def and def.element) or "Physical",
+				description = entry.Description or (def and def.description) or "",
+			})
+		end
 	end
-	for _, entry in ipairs(currentEntries or {}) do
-		if entry.id == selectedId then
+	return out
+end
+
+local function buildSpellEntries(raw)
+	local byFamily = {}
+	local loadoutFamilyOrder = {}
+	for index, productId in ipairs((snapshot.spells and snapshot.spells.loadout) or {}) do
+		local product = SpellDefs.GetProduct and SpellDefs.GetProduct(productId)
+		local familyId = product and product.familyId or (SpellDefs.ProductToSpellId and SpellDefs.ProductToSpellId(productId)) or productId
+		loadoutFamilyOrder[familyId] = index
+	end
+
+	for _, entry in ipairs(raw or {}) do
+		local familyId = entry.familyId or (SpellDefs.ProductToSpellId and SpellDefs.ProductToSpellId(entry.productId or entry.id)) or entry.id
+		if typeof(familyId) == "string" and familyId ~= "" then
+			local def = SpellDefs.GetSpell and SpellDefs.GetSpell(familyId) or nil
+			local candidate = {
+				id = familyId,
+				familyId = familyId,
+				productId = entry.productId or entry.id,
+				displayName = (def and def.name) or entry.name or entry.displayName or familyId,
+				name = (def and def.name) or entry.name or familyId,
+				element = entry.element or (def and def.element) or "Physical",
+				attackType = entry.attackType or (def and def.attackType) or "Spell",
+				spellType = entry.spellType or (def and def.spellType) or "Magic",
+				rarity = entry.rarity or "Common",
+				unlocked = entry.unlocked == true,
+				equipped = loadoutFamilyOrder[familyId] ~= nil or entry.equipped == true,
+				loadoutIndex = loadoutFamilyOrder[familyId],
+				description = entry.gameplayDescription or entry.description or (def and def.gameplayDescription) or "",
+				loreDescription = entry.loreDescription or (def and def.loreDescription) or "",
+				gameplayDescription = entry.gameplayDescription or (def and def.gameplayDescription) or entry.description or "",
+				visualDirection = entry.visualDirection or (def and def.visualDirection) or "",
+				iconGlyph = entry.iconGlyph or (def and def.iconGlyph) or string.upper(string.sub(familyId, 1, 2)),
+				statLines = entry.statLines or {},
+				upgradeLevels = entry.upgradeLevels or {},
+				combinations = entry.combinations or {},
+				def = def,
+			}
+			local current = byFamily[familyId]
+			if not current
+				or (candidate.equipped and not current.equipped)
+				or (candidate.unlocked and not current.unlocked)
+			then
+				byFamily[familyId] = candidate
+			end
+		end
+	end
+
+	local out = {}
+	for _, entry in pairs(byFamily) do
+		table.insert(out, entry)
+	end
+	return out
+end
+
+local function getMaterialDefinition(id)
+	if MaterialDefinitions and MaterialDefinitions.Get then
+		local ok, def = pcall(MaterialDefinitions.Get, id)
+		if ok and def then return def end
+	end
+	if CraftingConfig.GetMaterialDefinition then
+		local ok, def = pcall(CraftingConfig.GetMaterialDefinition, id)
+		if ok and def then return def end
+	end
+	return (CraftingConfig.MaterialDefsById and CraftingConfig.MaterialDefsById[id])
+		or (CraftingConfig.MineResourcesById and CraftingConfig.MineResourcesById[id])
+		or (CraftingConfig.MobMaterialsById and CraftingConfig.MobMaterialsById[id])
+end
+
+local function addMaterialEntries(out, raw, bucket, sourceLabel)
+	for _, entry in ipairs(raw or {}) do
+		local id = entry.id
+		if typeof(id) == "string" and id ~= "" then
+			local def = getMaterialDefinition(id) or {}
+			table.insert(out, {
+				id = id,
+				displayName = def.displayName or def.name or id,
+				amount = math.max(0, math.floor(tonumber(entry.amount) or 0)),
+				rarity = def.rarity or entry.rarity or "Common",
+				bucket = bucket,
+				sourceLabel = sourceLabel,
+				description = def.description or def.tone or "A crafting material gathered during progression.",
+				source = def.source or sourceLabel,
+				iconName = def.iconName,
+				usedFor = materialUses[id] or {},
+			})
+		end
+	end
+end
+
+local function buildMaterialEntries(resources)
+	local out = {}
+	addMaterialEntries(out, resources.mineResources, "Mine", "Mining")
+	addMaterialEntries(out, resources.mobMaterials, "Monster", "Monster drops")
+	addMaterialEntries(out, resources.upgradeMaterials, "Forge", "Forge progression")
+	return out
+end
+
+local function buildCodexEntries(raw)
+	local out = {}
+	for _, entry in ipairs(raw or {}) do
+		local clean = {}
+		for key, value in pairs(entry) do clean[key] = value end
+		clean.id = clean.stableId or ((clean.category or "Codex") .. ":" .. tostring(clean.id or clean.displayName))
+		clean.entryId = entry.id
+		clean.displayName = clean.displayName or clean.name or tostring(entry.id or "Unknown")
+		clean.rarity = clean.rarity or "Codex"
+		clean.discovered = clean.discovered == true
+		clean.iconGlyph = clean.iconText or clean.iconGlyph or string.upper(string.sub(clean.displayName, 1, 1))
+		table.insert(out, clean)
+	end
+	return out
+end
+
+local function getEquippedWeapon()
+	for _, entry in ipairs(weaponEntries) do
+		if entry.id == equippedWeaponId then
 			return entry
 		end
 	end
 	return nil
 end
 
-local function closeInventory()
-	inventoryGui.Enabled = false
-	hideContextMenu()
-	infoOverlay.Visible = false
+local function computePlayerStats()
+	local raceName = tostring(player:GetAttribute("Race") or "")
+	local raceDef = Races.Defs and Races.Defs[raceName]
+	local raceStats = (raceDef and raceDef.stats) or {}
+	local weapon = getEquippedWeapon()
+	local ws = weapon and weapon.stats or {}
+	local function r(key) return tonumber(raceStats[key]) or 0 end
+	local function w(key) return tonumber(ws[key]) or 0 end
+	return {
+		HP = r("HP") + w("HP"),
+		ATK = w("ATK") + r("PhysicalPower") + r("MagicPower") + r("STR"),
+		DEF = r("Armor") + w("DEF"),
+		LIFESTEAL = r("LifeSteal") + w("LIFESTEAL"),
+		CRIT_RATE = r("CritChance") + w("CRIT_RATE"),
+		CRIT_DMG = r("CritDmg") + w("CRIT_DMG"),
+		SPD = r("MoveSpeed") + w("SPD"),
+	}
 end
 
-local function openInventory()
-	inventoryGui.Enabled = true
-	loadSnapshot()
+local function refreshPlayerPanel()
+	local raceName = tostring(player:GetAttribute("Race") or "-")
+	playerTitle.Text = string.format("%s  •  Lv. %d", player.DisplayName, level)
+	playerMeta.Text = string.format("@%s  •  Race: %s", player.Name, raceName)
+	expText.Text = string.format("EXP %s / %s", formatNumber(xp), formatNumber(math.max(1, nextXp)))
+	local ratio = math.clamp(xp / math.max(1, nextXp), 0, 1)
+	TweenService:Create(expFill, TweenInfo.new(0.18, Enum.EasingStyle.Quad), {
+		Size = UDim2.new(ratio, 0, 1, 0),
+	}):Play()
+	local stats = computePlayerStats()
+	for key, label in pairs(statLabels) do
+		local suffix = (key == "CRIT_RATE" or key == "CRIT_DMG" or key == "LIFESTEAL" or key == "SPD") and "%" or ""
+		label.Text = formatNumber(stats[key] or 0) .. suffix
+	end
+	currencyText.Text = string.format(
+		"Silver  %s    Souls  %s\nWP  %s    Tickets  %s",
+		formatNumber(currencies.Silver),
+		formatNumber(currencies.Souls),
+		formatNumber(currencies.WeaponPoints),
+		formatNumber(currencies.Tickets)
+	)
 end
 
-local function toggleInventory()
-	if inventoryGui.Enabled then
-		closeInventory()
+local function refreshCharacterPreview()
+	if previewModel then
+		previewModel:Destroy()
+		previewModel = nil
+	end
+	for _, child in ipairs(viewportWorld:GetChildren()) do
+		child:Destroy()
+	end
+	local character = player.Character
+	if not character then
+		return
+	end
+	local oldArchivable = character.Archivable
+	character.Archivable = true
+	local ok, clone = pcall(function() return character:Clone() end)
+	character.Archivable = oldArchivable
+	if not ok or not clone then
+		return
+	end
+	clone.Name = "PreviewCharacter"
+	for _, object in ipairs(clone:GetDescendants()) do
+		if object:IsA("BaseScript") then
+			object:Destroy()
+		elseif object:IsA("BasePart") then
+			object.Anchored = true
+			object.CanCollide = false
+			object.CanTouch = false
+			object.CanQuery = false
+		elseif object:IsA("ParticleEmitter") or object:IsA("Trail") or object:IsA("Beam") then
+			object.Enabled = false
+		elseif object:IsA("Humanoid") then
+			object.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+			object.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+		end
+	end
+	clone.Parent = viewportWorld
+	previewModel = clone
+	local boxCFrame, size = clone:GetBoundingBox()
+	previewSize = size
+	previewPivotOffset = boxCFrame:ToObjectSpace(clone:GetPivot())
+	clone:PivotTo(CFrame.Angles(0, previewYaw, 0) * previewPivotOffset)
+	local focus = Vector3.new(0, 0, 0)
+	local distance = math.max(size.Y * 1.15, size.X * 1.8, 7)
+	viewportCamera.CFrame = CFrame.new(Vector3.new(0, size.Y * 0.02, -distance), focus)
+end
+
+local function rotatePreview(deltaX)
+	if not previewModel then return end
+	previewYaw += deltaX * 0.012
+	previewModel:PivotTo(CFrame.Angles(0, previewYaw, 0) * previewPivotOffset)
+end
+
+viewportFrame.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		previewDragging = true
+		previewLastX = input.Position.X
+	end
+end)
+viewportFrame.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		previewDragging = false
+	end
+end)
+UserInputService.InputChanged:Connect(function(input)
+	if not previewDragging then return end
+	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+		local delta = input.Position.X - previewLastX
+		previewLastX = input.Position.X
+		rotatePreview(delta)
+	end
+end)
+
+local detailOrderCounter = 0
+local function nextDetailOrder()
+	detailOrderCounter += 1
+	return detailOrderCounter
+end
+
+local function makeActionButton(label, color, order)
+	local button = create("TextButton", {
+		LayoutOrder = order or 1,
+		Size = UDim2.fromOffset(92, 40),
+		BackgroundColor3 = color,
+		BorderSizePixel = 0,
+		Font = Enum.Font.GothamBold,
+		Text = label,
+		TextColor3 = Color3.new(1, 1, 1),
+		TextSize = 10,
+		AutoButtonColor = false,
+	}, actionBar)
+	addCorner(button, 9)
+	hoverColor(button, color, blend(color, Color3.new(1, 1, 1), 0.12))
+	return button
+end
+
+local function addDetailLabel(text, options)
+	options = options or {}
+	local label = create("TextLabel", {
+		LayoutOrder = options.order or nextDetailOrder(),
+		Size = UDim2.new(1, -4, 0, options.height or 18),
+		AutomaticSize = options.auto and Enum.AutomaticSize.Y or Enum.AutomaticSize.None,
+		BackgroundTransparency = 1,
+		Font = options.bold and Enum.Font.GothamBold or Enum.Font.Gotham,
+		Text = tostring(text or ""),
+		TextColor3 = options.color or THEME.muted,
+		TextSize = options.size or 10,
+		TextWrapped = options.wrap ~= false,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = options.y or Enum.TextYAlignment.Top,
+	}, detailScroll)
+	return label
+end
+
+local function addSectionTitle(text, color)
+	return addDetailLabel(string.upper(text), {
+		bold = true,
+		color = color or THEME.text,
+		size = 10,
+		height = 18,
+	})
+end
+
+local function addDivider()
+	return create("Frame", {
+		LayoutOrder = nextDetailOrder(),
+		Size = UDim2.new(1, -4, 0, 1),
+		BackgroundColor3 = THEME.strokeSoft,
+		BorderSizePixel = 0,
+	}, detailScroll)
+end
+
+local function addPillRow(values)
+	local row = create("Frame", {
+		LayoutOrder = nextDetailOrder(),
+		Size = UDim2.new(1, -4, 0, 28),
+		BackgroundTransparency = 1,
+	}, detailScroll)
+	local layout = create("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		Padding = UDim.new(0, 5),
+	}, row)
+	for _, item in ipairs(values or {}) do
+		local pill = create("TextLabel", {
+			AutomaticSize = Enum.AutomaticSize.X,
+			Size = UDim2.fromOffset(0, 24),
+			BackgroundColor3 = blend(THEME.panelSoft, item.color or THEME.accent, 0.18),
+			BorderSizePixel = 0,
+			Font = Enum.Font.GothamMedium,
+			Text = "  " .. tostring(item.text) .. "  ",
+			TextColor3 = item.color or THEME.text,
+			TextSize = 9,
+		}, row)
+		addCorner(pill, 7)
+	end
+	return row
+end
+
+local function setDetailIcon(imageRef, glyph, color)
+	local accent = color or THEME.accent
+	detailIcon.BackgroundColor3 = blend(THEME.panelSoft, accent, 0.18)
+	detailIconStroke.Color = blend(THEME.stroke, accent, 0.6)
+	if typeof(imageRef) == "string" and imageRef ~= "" then
+		detailIconImage.Image = imageRef
+		detailIconImage.Visible = true
+		detailIconGlyph.Visible = false
 	else
-		openInventory()
+		detailIconImage.Visible = false
+		detailIconGlyph.Visible = true
+		detailIconGlyph.Text = tostring(glyph or "?")
+		detailIconGlyph.TextColor3 = accent
 	end
 end
 
-local lastScreenButtonsNonce = nil
+local function resetDetails()
+	detailOrderCounter = 0
+	clearChildren(detailScroll, { UIListLayout = true })
+	clearChildren(actionBar, { UIListLayout = true })
+	detailName.Text = "Select an item"
+	detailName.TextColor3 = THEME.text
+	detailMeta.Text = "Choose a card to inspect details and available actions."
+	setDetailIcon(nil, "?", THEME.muted)
+	detailsAccent.BackgroundColor3 = THEME.accent
+	rightStroke.Color = THEME.strokeSoft
+	selectedEntry = nil
+end
 
-local function handleScreenButtonsRequest()
+local STAT_ORDER = {
+	{ key = "ATK", label = "ATK", percent = false },
+	{ key = "HP", label = "HP", percent = false },
+	{ key = "DEF", label = "DEF", percent = false },
+	{ key = "CRIT_RATE", label = "Crit Rate", percent = true },
+	{ key = "CRIT_DMG", label = "Crit DMG", percent = true },
+	{ key = "LIFESTEAL", label = "Lifesteal", percent = true },
+	{ key = "SPD", label = "Speed", percent = true },
+}
+
+local function addWeaponStatRow(spec, selectedStats, equippedStats, comparing)
+	local row = create("Frame", {
+		LayoutOrder = nextDetailOrder(),
+		Size = UDim2.new(1, -4, 0, 24),
+		BackgroundColor3 = Color3.fromRGB(18, 22, 31),
+		BorderSizePixel = 0,
+	}, detailScroll)
+	addCorner(row, 6)
+	create("TextLabel", {
+		Position = UDim2.fromOffset(8, 0),
+		Size = UDim2.new(0.45, -8, 1, 0),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.Gotham,
+		Text = spec.label,
+		TextColor3 = THEME.muted,
+		TextSize = 9,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, row)
+	local selectedValue = tonumber(selectedStats[spec.key]) or 0
+	local equippedValue = tonumber(equippedStats[spec.key]) or 0
+	local suffix = spec.percent and "%" or ""
+	local text
+	local color = THEME.text
+	if comparing then
+		local delta = selectedValue - equippedValue
+		local sign = delta > 0 and "+" or ""
+		text = string.format("%s → %s  (%s%s%s)", formatNumber(equippedValue), formatNumber(selectedValue), sign, formatNumber(delta), suffix)
+		if delta > 0 then color = THEME.green elseif delta < 0 then color = THEME.red end
+	else
+		text = formatNumber(selectedValue) .. suffix
+	end
+	create("TextLabel", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(1, 0),
+		Size = UDim2.new(0.55, -8, 1, 0),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		Text = text,
+		TextColor3 = color,
+		TextSize = 9,
+		TextXAlignment = Enum.TextXAlignment.Right,
+	}, row)
+end
+
+local loadSnapshot
+
+local function renderWeaponDetails(entry)
+	resetDetails()
+	if not entry then return end
+	selectedEntry = entry
+	local color = getRarityColor(entry.rarity)
+	detailsAccent.BackgroundColor3 = color
+	rightStroke.Color = blend(THEME.strokeSoft, color, 0.45)
+	detailName.Text = entry.displayName
+	detailName.TextColor3 = color
+	detailMeta.Text = string.format("%s • %s • Lv. %d/%d", entry.weaponType, entry.rarity, entry.level, entry.maxLevel)
+	setDetailIcon(weaponImage(entry), string.upper(string.sub(entry.weaponType or "W", 1, 1)), color)
+
+	addPillRow({
+		{ text = entry.element or "Physical", color = getElementColor(entry.element) },
+		{ text = entry.weaponType or "Weapon", color = color },
+		{ text = entry.id == equippedWeaponId and "Equipped" or "Owned", color = entry.id == equippedWeaponId and THEME.green or THEME.muted },
+	})
+	if entry.description ~= "" then
+		addDetailLabel(entry.description, { auto = true, size = 10, color = Color3.fromRGB(198, 207, 222) })
+	end
+	addDivider()
+	local equipped = getEquippedWeapon()
+	local comparing = equipped ~= nil and equipped.id ~= entry.id
+	addSectionTitle(comparing and "Compare with equipped" or "Stats", color)
+	for _, spec in ipairs(STAT_ORDER) do
+		addWeaponStatRow(spec, entry.stats or {}, (equipped and equipped.stats) or {}, comparing)
+	end
+
+	local def = entry.def or {}
+	if tostring(def.passiveName or "") ~= "" or tostring(def.passiveDescription or "") ~= "" then
+		addDivider()
+		addSectionTitle(def.passiveName ~= "" and def.passiveName or "Passive", THEME.gold)
+		addDetailLabel(def.passiveDescription or "", { auto = true, size = 10, color = Color3.fromRGB(197, 205, 218) })
+	end
+	if tostring(def.abilityName or "") ~= "" or tostring(def.abilityDescription or "") ~= "" then
+		addDivider()
+		addSectionTitle(def.abilityName ~= "" and def.abilityName or "Ability", THEME.purple)
+		addDetailLabel(def.abilityDescription or "", { auto = true, size = 10, color = Color3.fromRGB(197, 205, 218) })
+	end
+
+	local equip = makeActionButton(entry.id == equippedWeaponId and "Equipped" or "Equip", entry.id == equippedWeaponId and Color3.fromRGB(60, 78, 70) or THEME.accent, 1)
+	equip.Active = entry.id ~= equippedWeaponId
+	equip.TextTransparency = entry.id == equippedWeaponId and 0.35 or 0
+	equip.MouseButton1Click:Connect(function()
+		if entry.id == equippedWeaponId then return end
+		fireInventoryAction("equip", { id = entry.id })
+		equippedWeaponId = entry.id
+		showToast("Equipped " .. entry.displayName, THEME.green)
+		refreshPlayerPanel()
+		refreshCharacterPreview()
+		task.delay(0.2, function()
+			if inventoryGui.Enabled and loadSnapshot then loadSnapshot(true) end
+		end)
+	end)
+
+	local favorite = makeActionButton(entry.favorite and "★ Saved" or "☆ Favorite", Color3.fromRGB(123, 93, 43), 2)
+	favorite.MouseButton1Click:Connect(function()
+		entry.favorite = not entry.favorite
+		fireInventoryAction("favorite", { id = entry.id, value = entry.favorite })
+		showToast(entry.favorite and "Added to favorites" or "Removed from favorites", THEME.gold)
+		favorite.Text = entry.favorite and "★ Saved" or "☆ Favorite"
+	end)
+
+	local sell = makeActionButton("Sell", Color3.fromRGB(138, 55, 59), 3)
+	sell.MouseButton1Click:Connect(function()
+		pendingConfirm = entry
+		confirmTitle.Text = "Sell " .. entry.displayName .. "?"
+		local valueText = entry.sellValue > 0 and ("\nEstimated value: " .. formatNumber(entry.sellValue) .. " Silver") or ""
+		confirmBody.Text = "This permanently removes this weapon instance. Favorites do not protect a weapon from manual selling." .. valueText
+		confirmOverlay.Visible = true
+	end)
+end
+
+local function getSpellDamage(entry)
+	for _, line in ipairs(entry.statLines or {}) do
+		local value = string.match(tostring(line), "Damage%s+([%d%.]+)")
+		if value then return tonumber(value) or 0 end
+	end
+	return 0
+end
+
+local function spellCombinationNames(entry)
+	local names = {}
+	for _, combo in ipairs(entry.combinations or {}) do
+		local resultId = combo.resultId or combo.ResultId
+		local result = resultId and SpellDefs.GetSpell and SpellDefs.GetSpell(resultId)
+		table.insert(names, result and result.name or tostring(resultId or combo.id or "Combination"))
+	end
+	return names
+end
+
+local function renderSpellDetails(entry)
+	resetDetails()
+	if not entry then return end
+	selectedEntry = entry
+	local color = getElementColor(entry.element)
+	detailsAccent.BackgroundColor3 = color
+	rightStroke.Color = blend(THEME.strokeSoft, color, 0.48)
+	detailName.Text = entry.displayName
+	detailName.TextColor3 = color
+	detailMeta.Text = string.format("%s • %s • %s", entry.element or "Spell", entry.spellType or "Magic", entry.attackType or "Attack")
+	setDetailIcon(spellImage(entry), entry.iconGlyph, color)
+
+	addPillRow({
+		{ text = entry.equipped and ("Slot " .. tostring(entry.loadoutIndex or "?")) or (entry.unlocked and "Unlocked" or "Locked"), color = entry.equipped and THEME.green or (entry.unlocked and THEME.accent or THEME.muted) },
+		{ text = entry.element or "Spell", color = color },
+	})
+	local lore = tostring(entry.loreDescription or "")
+	if lore ~= "" then
+		addDetailLabel(lore, { auto = true, size = 10, color = Color3.fromRGB(214, 219, 230) })
+	end
+	local gameplay = tostring(entry.gameplayDescription or entry.description or "")
+	if gameplay ~= "" then
+		addSectionTitle("Gameplay", color)
+		addDetailLabel(gameplay, { auto = true, size = 10, color = THEME.muted })
+	end
+	if #(entry.statLines or {}) > 0 then
+		addDivider()
+		addSectionTitle("Stats", color)
+		for _, line in ipairs(entry.statLines) do
+			addDetailLabel("• " .. tostring(line), { height = 16, size = 9, color = Color3.fromRGB(196, 205, 220) })
+		end
+	end
+	local comboNames = spellCombinationNames(entry)
+	if #comboNames > 0 then
+		addDivider()
+		addSectionTitle("Possible combinations", THEME.gold)
+		for _, name in ipairs(comboNames) do
+			addDetailLabel("◇ " .. name, { height = 17, size = 9, color = Color3.fromRGB(239, 205, 132) })
+		end
+	end
+	if tostring(entry.visualDirection or "") ~= "" then
+		addDivider()
+		addSectionTitle("Visual identity", THEME.purple)
+		addDetailLabel(entry.visualDirection, { auto = true, size = 9, color = THEME.muted })
+	end
+
+	local maxSlots = tonumber(snapshot.spells and snapshot.spells.maxSlots) or 6
+	local loadoutCount = #((snapshot.spells and snapshot.spells.loadout) or {})
+	local actionText = entry.equipped and "Unequip" or "Equip"
+	local actionColor = entry.equipped and Color3.fromRGB(132, 70, 86) or THEME.purple
+	local equip = makeActionButton(actionText, actionColor, 1)
+	equip.Active = entry.unlocked and (entry.equipped or loadoutCount < maxSlots)
+	equip.TextTransparency = equip.Active and 0 or 0.45
+	equip.MouseButton1Click:Connect(function()
+		if not entry.unlocked then
+			showToast("This spell is locked.", THEME.red)
+			return
+		end
+		if not entry.equipped and loadoutCount >= maxSlots then
+			showToast("Spell loadout is full.", THEME.red)
+			return
+		end
+		fireInventoryAction(entry.equipped and "spellLoadoutUnequip" or "spellLoadoutEquip", {
+			productId = entry.productId,
+		})
+		showToast(entry.equipped and "Spell removed from loadout" or "Spell added to loadout", color)
+		task.delay(0.2, function()
+			if inventoryGui.Enabled and loadSnapshot then loadSnapshot(true) end
+		end)
+	end)
+	if entry.equipped then
+		local up = makeActionButton("Move Up", THEME.panelSoft, 2)
+		up.MouseButton1Click:Connect(function()
+			fireInventoryAction("spellLoadoutMove", { productId = entry.productId, direction = -1 })
+			showToast("Loadout order updated", color)
+			task.delay(0.18, function() if inventoryGui.Enabled and loadSnapshot then loadSnapshot(true) end end)
+		end)
+		local down = makeActionButton("Move Down", THEME.panelSoft, 3)
+		down.MouseButton1Click:Connect(function()
+			fireInventoryAction("spellLoadoutMove", { productId = entry.productId, direction = 1 })
+			showToast("Loadout order updated", color)
+			task.delay(0.18, function() if inventoryGui.Enabled and loadSnapshot then loadSnapshot(true) end end)
+		end)
+	end
+end
+
+local function renderMaterialDetails(entry)
+	resetDetails()
+	if not entry then return end
+	selectedEntry = entry
+	local color = getRarityColor(entry.rarity)
+	detailsAccent.BackgroundColor3 = color
+	rightStroke.Color = blend(THEME.strokeSoft, color, 0.42)
+	detailName.Text = entry.displayName
+	detailName.TextColor3 = color
+	detailMeta.Text = string.format("%s • %s • Stored %s", entry.bucket, entry.rarity, formatNumber(entry.amount))
+	setDetailIcon(materialImage(entry), string.upper(string.sub(entry.displayName, 1, 1)), color)
+	addPillRow({
+		{ text = entry.rarity, color = color },
+		{ text = entry.sourceLabel, color = THEME.green },
+	})
+	addDetailLabel(entry.description, { auto = true, size = 10, color = Color3.fromRGB(200, 208, 221) })
+	addDivider()
+	addSectionTitle("Source", THEME.green)
+	addDetailLabel(entry.source or entry.sourceLabel, { auto = true, size = 10 })
+	addDivider()
+	addSectionTitle("Used for", THEME.gold)
+	if #(entry.usedFor or {}) == 0 then
+		addDetailLabel("No current recipe uses this material.", { auto = true, size = 10 })
+	else
+		for _, use in ipairs(entry.usedFor) do
+			addDetailLabel("• " .. tostring(use), { height = 17, size = 9, color = Color3.fromRGB(226, 208, 167) })
+		end
+	end
+end
+
+local function renderCodexDetails(entry)
+	resetDetails()
+	if not entry then return end
+	selectedEntry = entry
+	local color = entry.element and getElementColor(entry.element) or getRarityColor(entry.rarity)
+	detailsAccent.BackgroundColor3 = color
+	rightStroke.Color = blend(THEME.strokeSoft, color, 0.42)
+	detailName.Text = entry.displayName
+	detailName.TextColor3 = entry.discovered and color or THEME.muted
+	detailMeta.Text = string.format("%s • %s", entry.category or "Codex", entry.discovered and "Discovered" or "Undiscovered")
+	setDetailIcon(codexImage(entry), entry.iconGlyph, color)
+	addPillRow({
+		{ text = entry.category or "Codex", color = color },
+		{ text = entry.discovered and "Discovered" or "Undiscovered", color = entry.discovered and THEME.green or THEME.muted },
+	})
+	if not entry.discovered and entry.displayName == "???" then
+		addDetailLabel("This entry is hidden until it is discovered during gameplay.", { auto = true, size = 10 })
+		return
+	end
+	local lore = entry.loreDescription or entry.description
+	if tostring(lore or "") ~= "" then
+		addSectionTitle("Lore", THEME.gold)
+		addDetailLabel(lore, { auto = true, size = 10, color = Color3.fromRGB(211, 215, 224) })
+	end
+	if tostring(entry.gameplayDescription or "") ~= "" then
+		addDivider()
+		addSectionTitle("Gameplay", color)
+		addDetailLabel(entry.gameplayDescription, { auto = true, size = 10 })
+	end
+	if entry.ingredients and #entry.ingredients > 0 then
+		addDivider()
+		addSectionTitle("Ingredients", THEME.purple)
+		for _, ingredient in ipairs(entry.ingredients) do
+			local def = SpellDefs.GetSpell and SpellDefs.GetSpell(ingredient)
+			addDetailLabel("• " .. ((def and def.name) or tostring(ingredient)), { height = 17, size = 9 })
+		end
+	end
+	if tostring(entry.visualDirection or "") ~= "" then
+		addDivider()
+		addSectionTitle("Visual direction", THEME.purple)
+		addDetailLabel(entry.visualDirection, { auto = true, size = 9 })
+	end
+end
+
+local function renderDetails(entry)
+	if currentTab == "Weapons" then
+		renderWeaponDetails(entry)
+	elseif currentTab == "Spells" then
+		renderSpellDetails(entry)
+	elseif currentTab == "Materials" then
+		renderMaterialDetails(entry)
+	elseif currentTab == "Codex" then
+		renderCodexDetails(entry)
+	end
+end
+
+local function currentTabAccent()
+	for _, tab in ipairs(TAB_DEFS) do
+		if tab.id == currentTab then return tab.accent end
+	end
+	return THEME.accent
+end
+
+local function tabSourceEntries()
+	if currentTab == "Weapons" then return weaponEntries end
+	if currentTab == "Spells" then return spellEntries end
+	if currentTab == "Materials" then return materialEntries end
+	return codexEntries
+end
+
+local function currentSort()
+	local options = SORT_OPTIONS[currentTab]
+	local index = math.clamp(sortIndices[currentTab] or 1, 1, #options)
+	return options[index]
+end
+
+local function passesFilters(entry)
+	local query = searchBox.Text
+	local searchText = table.concat({
+		entry.displayName or "",
+		entry.weaponId or "",
+		entry.weaponType or "",
+		entry.element or "",
+		entry.rarity or "",
+		entry.category or "",
+		entry.description or "",
+	}, " ")
+	if not textContains(searchText, query) then return false end
+	local f = filters[currentTab]
+	if currentTab == "Weapons" then
+		if f.a ~= "All" and entry.weaponType ~= f.a then return false end
+		if f.b ~= "All" and entry.rarity ~= f.b then return false end
+	elseif currentTab == "Spells" then
+		if f.a ~= "All" and entry.element ~= f.a then return false end
+		if f.b == "Equipped" and not entry.equipped then return false end
+		if f.b == "Unlocked" and (not entry.unlocked or entry.equipped) then return false end
+		if f.b == "Locked" and entry.unlocked then return false end
+	elseif currentTab == "Materials" then
+		if f.a ~= "All" and entry.bucket ~= f.a then return false end
+		if f.b ~= "All" and entry.rarity ~= f.b then return false end
+	elseif currentTab == "Codex" then
+		if f.a ~= "All" and entry.category ~= f.a then return false end
+		if f.b == "Discovered" and not entry.discovered then return false end
+		if f.b == "Undiscovered" and entry.discovered then return false end
+	end
+	return true
+end
+
+local function sortEntries(entries)
+	local mode = currentSort()
+	table.sort(entries, function(a, b)
+		if currentTab == "Weapons" then
+			if mode == "Equipped" then
+				local ae, be = a.id == equippedWeaponId, b.id == equippedWeaponId
+				if ae ~= be then return ae end
+				if a.favorite ~= b.favorite then return a.favorite end
+			elseif mode == "Rarity" then
+				local ar, br = RARITY_ORDER[a.rarity] or 0, RARITY_ORDER[b.rarity] or 0
+				if ar ~= br then return ar > br end
+			elseif mode == "Level" and a.level ~= b.level then
+				return a.level > b.level
+			elseif mode == "ATK" then
+				local aa, ba = tonumber(a.stats and a.stats.ATK) or 0, tonumber(b.stats and b.stats.ATK) or 0
+				if aa ~= ba then return aa > ba end
+			end
+		elseif currentTab == "Spells" then
+			if mode == "Equipped" and a.equipped ~= b.equipped then return a.equipped end
+			if mode == "Element" and a.element ~= b.element then return tostring(a.element) < tostring(b.element) end
+			if mode == "Damage" then
+				local ad, bd = getSpellDamage(a), getSpellDamage(b)
+				if ad ~= bd then return ad > bd end
+			end
+		elseif currentTab == "Materials" then
+			if mode == "Amount" and a.amount ~= b.amount then return a.amount > b.amount end
+			if mode == "Rarity" then
+				local ar, br = RARITY_ORDER[a.rarity] or 0, RARITY_ORDER[b.rarity] or 0
+				if ar ~= br then return ar > br end
+			end
+		elseif currentTab == "Codex" then
+			if mode == "Discovered" and a.discovered ~= b.discovered then return a.discovered end
+			if mode == "Category" and a.category ~= b.category then return tostring(a.category) < tostring(b.category) end
+		end
+		return tostring(a.displayName) < tostring(b.displayName)
+	end)
+end
+
+local function getFilteredEntries()
+	local out = {}
+	for _, entry in ipairs(tabSourceEntries()) do
+		if passesFilters(entry) then table.insert(out, entry) end
+	end
+	sortEntries(out)
+	return out
+end
+
+local function cardAccent(entry)
+	if currentTab == "Weapons" or currentTab == "Materials" then
+		return getRarityColor(entry.rarity)
+	elseif currentTab == "Spells" then
+		return getElementColor(entry.element)
+	elseif entry.element then
+		return getElementColor(entry.element)
+	end
+	return getRarityColor(entry.rarity)
+end
+
+local function cardImage(entry)
+	if currentTab == "Weapons" then return weaponImage(entry) end
+	if currentTab == "Spells" then return spellImage(entry) end
+	if currentTab == "Materials" then return materialImage(entry) end
+	return codexImage(entry)
+end
+
+local function cardGlyph(entry)
+	if currentTab == "Weapons" then
+		return string.upper(string.sub(entry.weaponType or "W", 1, 1))
+	elseif currentTab == "Spells" then
+		return entry.iconGlyph or string.upper(string.sub(entry.displayName, 1, 2))
+	elseif currentTab == "Materials" then
+		return string.upper(string.sub(entry.displayName, 1, 1))
+	end
+	return entry.iconGlyph or "?"
+end
+
+local function cardFooter(entry)
+	if currentTab == "Weapons" then
+		return string.format("Lv. %d   •   ATK %s", entry.level, formatNumber(entry.stats and entry.stats.ATK))
+	elseif currentTab == "Spells" then
+		if entry.equipped then return "Equipped • Slot " .. tostring(entry.loadoutIndex or "?") end
+		return entry.unlocked and ((entry.statLines and entry.statLines[1]) or entry.attackType) or "Locked"
+	elseif currentTab == "Materials" then
+		return string.format("Stored %s", formatNumber(entry.amount))
+	end
+	return entry.discovered and "Discovered" or "Undiscovered"
+end
+
+local function createCard(entry, index)
+	local accent = cardAccent(entry)
+	local selected = selectedIds[currentTab] == entry.id
+	local card = create("TextButton", {
+		LayoutOrder = index,
+		BackgroundColor3 = selected and blend(THEME.card, accent, 0.18) or THEME.card,
+		BorderSizePixel = 0,
+		Text = "",
+		AutoButtonColor = false,
+		ClipsDescendants = true,
+	}, gridScroll)
+	addCorner(card, 10)
+	local cardStroke = addStroke(card, selected and accent or blend(THEME.strokeSoft, accent, 0.18), selected and 2 or 1)
+	local topAccent = create("Frame", {
+		Size = UDim2.new(1, 0, 0, 3),
+		BackgroundColor3 = accent,
+		BorderSizePixel = 0,
+	}, card)
+
+	local iconWrap = create("Frame", {
+		Position = UDim2.fromOffset(10, 12),
+		Size = UDim2.new(1, -20, 0, 86),
+		BackgroundColor3 = blend(Color3.fromRGB(20, 24, 34), accent, 0.14),
+		BorderSizePixel = 0,
+	}, card)
+	addCorner(iconWrap, 8)
+	local imageRef = cardImage(entry)
+	if imageRef then
+		create("ImageLabel", {
+			Position = UDim2.fromOffset(8, 7),
+			Size = UDim2.new(1, -16, 1, -14),
+			BackgroundTransparency = 1,
+			Image = imageRef,
+			ScaleType = Enum.ScaleType.Fit,
+		}, iconWrap)
+	else
+		create("TextLabel", {
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Text = cardGlyph(entry),
+			TextColor3 = accent,
+			TextSize = 24,
+		}, iconWrap)
+	end
+
+	if currentTab == "Weapons" and entry.favorite then
+		local star = create("TextLabel", {
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, -5, 0, 5),
+			Size = UDim2.fromOffset(22, 22),
+			BackgroundColor3 = Color3.fromRGB(69, 53, 25),
+			BorderSizePixel = 0,
+			Font = Enum.Font.GothamBold,
+			Text = "★",
+			TextColor3 = THEME.gold,
+			TextSize = 12,
+		}, card)
+		addCorner(star, 7)
+	end
+
+	local equipped = (currentTab == "Weapons" and entry.id == equippedWeaponId) or (currentTab == "Spells" and entry.equipped)
+	if equipped then
+		local badge = create("TextLabel", {
+			Position = UDim2.fromOffset(6, 6),
+			Size = UDim2.fromOffset(62, 18),
+			BackgroundColor3 = blend(Color3.fromRGB(19, 24, 31), accent, 0.35),
+			BorderSizePixel = 0,
+			Font = Enum.Font.GothamBold,
+			Text = currentTab == "Spells" and ("SLOT " .. tostring(entry.loadoutIndex or "?")) or "EQUIPPED",
+			TextColor3 = Color3.new(1, 1, 1),
+			TextSize = 8,
+		}, card)
+		addCorner(badge, 6)
+	end
+
+	create("TextLabel", {
+		Position = UDim2.fromOffset(10, 105),
+		Size = UDim2.new(1, -20, 0, 36),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		Text = entry.displayName,
+		TextColor3 = currentTab == "Codex" and not entry.discovered and THEME.muted or accent,
+		TextSize = 10,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+	}, card)
+
+	local metaText
+	if currentTab == "Weapons" then
+		metaText = string.format("%s • %s", entry.rarity, entry.weaponType)
+	elseif currentTab == "Spells" then
+		metaText = string.format("%s • %s", entry.element, entry.attackType)
+	elseif currentTab == "Materials" then
+		metaText = string.format("%s • %s", entry.rarity, entry.bucket)
+	else
+		metaText = entry.category or "Codex"
+	end
+	create("TextLabel", {
+		Position = UDim2.fromOffset(10, 142),
+		Size = UDim2.new(1, -20, 0, 13),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.Gotham,
+		Text = metaText,
+		TextColor3 = THEME.muted,
+		TextSize = 8,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, card)
+	create("TextLabel", {
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 10, 1, -8),
+		Size = UDim2.new(1, -20, 0, 13),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamMedium,
+		Text = cardFooter(entry),
+		TextColor3 = Color3.fromRGB(188, 198, 215),
+		TextSize = 8,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, card)
+
+	hoverColor(card, card.BackgroundColor3, blend(THEME.cardHover, accent, 0.12))
+	card.MouseButton1Click:Connect(function()
+		selectedIds[currentTab] = entry.id
+		selectedEntry = entry
+		renderDetails(entry)
+		local now = os.clock()
+		local last = lastClickById[entry.id] or 0
+		lastClickById[entry.id] = now
+		if now - last <= 0.32 then
+			if currentTab == "Weapons" and entry.id ~= equippedWeaponId then
+				fireInventoryAction("equip", { id = entry.id })
+				equippedWeaponId = entry.id
+				showToast("Equipped " .. entry.displayName, THEME.green)
+				task.delay(0.18, function() if inventoryGui.Enabled and loadSnapshot then loadSnapshot(true) end end)
+			elseif currentTab == "Spells" and entry.unlocked then
+				fireInventoryAction(entry.equipped and "spellLoadoutUnequip" or "spellLoadoutEquip", { productId = entry.productId })
+				showToast(entry.equipped and "Spell removed" or "Spell equipped", accent)
+				task.delay(0.18, function() if inventoryGui.Enabled and loadSnapshot then loadSnapshot(true) end end)
+			end
+		end
+		-- refresh selection stroke without rebuilding everything later than one frame
+		for _, other in ipairs(gridScroll:GetChildren()) do
+			if other:IsA("TextButton") and other ~= card then
+				local stroke = other:FindFirstChildOfClass("UIStroke")
+				if stroke then stroke.Thickness = 1 end
+			end
+		end
+		cardStroke.Color = accent
+		cardStroke.Thickness = 2
+	end)
+	return card
+end
+
+local function loadoutFamilySet()
+	local set = {}
+	for _, productId in ipairs((snapshot.spells and snapshot.spells.loadout) or {}) do
+		local product = SpellDefs.GetProduct and SpellDefs.GetProduct(productId)
+		local familyId = product and product.familyId or (SpellDefs.ProductToSpellId and SpellDefs.ProductToSpellId(productId)) or productId
+		set[familyId] = true
+	end
+	return set
+end
+
+local function renderAuxiliaryPanel()
+	clearChildren(auxiliaryPanel, { UICorner = true, UIStroke = true })
+	if currentTab == "Spells" then
+		auxiliaryPanel.Visible = true
+		auxiliaryPanel.Size = UDim2.new(1, 0, 0, 126)
+		contentCard.Size = UDim2.new(1, 0, 1, -235)
+		addPadding(auxiliaryPanel, 10, 10, 9, 9)
+		create("TextLabel", {
+			Size = UDim2.new(1, 0, 0, 16),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Text = "EQUIPPED LOADOUT",
+			TextColor3 = THEME.text,
+			TextSize = 9,
+			TextXAlignment = Enum.TextXAlignment.Left,
+		}, auxiliaryPanel)
+		local slots = create("Frame", {
+			Position = UDim2.fromOffset(0, 22),
+			Size = UDim2.new(1, 0, 0, 56),
+			BackgroundTransparency = 1,
+		}, auxiliaryPanel)
+		local slotLayout = create("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			Padding = UDim.new(0, 6),
+		}, slots)
+		local maxSlots = tonumber(snapshot.spells and snapshot.spells.maxSlots) or 6
+		local byFamily = {}
+		for _, entry in ipairs(spellEntries) do byFamily[entry.familyId] = entry end
+		for slotIndex = 1, maxSlots do
+			local productId = snapshot.spells and snapshot.spells.loadout and snapshot.spells.loadout[slotIndex]
+			local product = productId and SpellDefs.GetProduct and SpellDefs.GetProduct(productId)
+			local familyId = product and product.familyId or (productId and SpellDefs.ProductToSpellId and SpellDefs.ProductToSpellId(productId))
+			local entry = familyId and byFamily[familyId] or nil
+			local color = entry and getElementColor(entry.element) or THEME.stroke
+			local button = create("TextButton", {
+				Size = UDim2.new(1 / maxSlots, -5, 1, 0),
+				BackgroundColor3 = entry and blend(THEME.panelSoft, color, 0.16) or Color3.fromRGB(17, 21, 29),
+				BorderSizePixel = 0,
+				Text = "",
+				AutoButtonColor = false,
+			}, slots)
+			addCorner(button, 8)
+			addStroke(button, entry and blend(THEME.stroke, color, 0.5) or THEME.strokeSoft, 1)
+			local imageRef = entry and spellImage(entry)
+			if imageRef then
+				create("ImageLabel", {
+					Position = UDim2.fromOffset(6, 5),
+					Size = UDim2.fromOffset(32, 32),
+					BackgroundTransparency = 1,
+					Image = imageRef,
+					ScaleType = Enum.ScaleType.Fit,
+				}, button)
+			else
+				create("TextLabel", {
+					Position = UDim2.fromOffset(6, 5),
+					Size = UDim2.fromOffset(32, 32),
+					BackgroundTransparency = 1,
+					Font = Enum.Font.GothamBold,
+					Text = entry and entry.iconGlyph or tostring(slotIndex),
+					TextColor3 = entry and color or THEME.mutedDark,
+					TextSize = 12,
+				}, button)
+			end
+			create("TextLabel", {
+				AnchorPoint = Vector2.new(0.5, 1),
+				Position = UDim2.new(0.5, 0, 1, -4),
+				Size = UDim2.new(1, -6, 0, 12),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Text = entry and entry.displayName or ("Slot " .. slotIndex),
+				TextColor3 = entry and THEME.text or THEME.mutedDark,
+				TextSize = 7,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+			}, button)
+			if entry then
+				button.MouseButton1Click:Connect(function()
+					selectedIds.Spells = entry.id
+					renderSpellDetails(entry)
+				end)
+			end
+		end
+
+		local summary = create("Frame", {
+			Position = UDim2.fromOffset(0, 85),
+			Size = UDim2.new(1, 0, 0, 29),
+			BackgroundTransparency = 1,
+		}, auxiliaryPanel)
+		local summaryLayout = create("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			Padding = UDim.new(0, 6),
+		}, summary)
+		local damageSummary = (snapshot.spells and snapshot.spells.damageSummary) or {}
+		for _, bucket in ipairs(damageSummary) do
+			local color = safeColor(bucket.color, getElementColor(bucket.element))
+			local pill = create("TextLabel", {
+				AutomaticSize = Enum.AutomaticSize.X,
+				Size = UDim2.fromOffset(0, 24),
+				BackgroundColor3 = blend(THEME.panelSoft, color, 0.18),
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamMedium,
+				Text = string.format("  %s %s DMG  ", bucket.element, formatNumber(bucket.damage)),
+				TextColor3 = color,
+				TextSize = 8,
+			}, summary)
+			addCorner(pill, 7)
+		end
+		local familySet = loadoutFamilySet()
+		local possibleCombos = 0
+		for _, combo in ipairs((snapshot.spells and snapshot.spells.combinations) or {}) do
+			local allPresent = true
+			for _, ingredient in ipairs(combo.ingredients or {}) do
+				if not familySet[ingredient] then allPresent = false break end
+			end
+			if allPresent then possibleCombos += 1 end
+		end
+		local comboPill = create("TextLabel", {
+			AutomaticSize = Enum.AutomaticSize.X,
+			Size = UDim2.fromOffset(0, 24),
+			BackgroundColor3 = blend(THEME.panelSoft, THEME.gold, 0.18),
+			BorderSizePixel = 0,
+			Font = Enum.Font.GothamMedium,
+			Text = string.format("  %d possible combos  ", possibleCombos),
+			TextColor3 = THEME.gold,
+			TextSize = 8,
+		}, summary)
+		addCorner(comboPill, 7)
+	elseif currentTab == "Codex" then
+		auxiliaryPanel.Visible = true
+		auxiliaryPanel.Size = UDim2.new(1, 0, 0, 54)
+		contentCard.Size = UDim2.new(1, 0, 1, -163)
+		addPadding(auxiliaryPanel, 12, 12, 9, 9)
+		local discovered, total = 0, 0
+		for _, entry in ipairs(codexEntries) do
+			total += 1
+			if entry.discovered then discovered += 1 end
+		end
+		create("TextLabel", {
+			Size = UDim2.new(1, 0, 0, 16),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Text = string.format("CODEX PROGRESS   %d / %d", discovered, total),
+			TextColor3 = THEME.text,
+			TextSize = 9,
+			TextXAlignment = Enum.TextXAlignment.Left,
+		}, auxiliaryPanel)
+		local back = create("Frame", {
+			Position = UDim2.fromOffset(0, 25),
+			Size = UDim2.new(1, 0, 0, 8),
+			BackgroundColor3 = Color3.fromRGB(40, 46, 58),
+			BorderSizePixel = 0,
+		}, auxiliaryPanel)
+		addCorner(back, 999)
+		local fill = create("Frame", {
+			Size = UDim2.new(total > 0 and discovered / total or 0, 0, 1, 0),
+			BackgroundColor3 = THEME.gold,
+			BorderSizePixel = 0,
+		}, back)
+		addCorner(fill, 999)
+	else
+		auxiliaryPanel.Visible = false
+		auxiliaryPanel.Size = UDim2.new(1, 0, 0, 0)
+		contentCard.Size = UDim2.new(1, 0, 1, -100)
+	end
+end
+
+local function updateToolbarLabels()
+	local options = FILTER_OPTIONS[currentTab]
+	local f = filters[currentTab]
+	filterButtonA.Text = string.format("%s: %s", options.aLabel, f.a)
+	filterButtonB.Text = string.format("%s: %s", options.bLabel, f.b)
+	sortButton.Text = "Sort: " .. currentSort()
+	filterButtonA.TextSize = #filterButtonA.Text > 14 and 8 or 9
+	filterButtonB.TextSize = #filterButtonB.Text > 14 and 8 or 9
+	sortButton.TextSize = #sortButton.Text > 14 and 8 or 9
+end
+
+local function updateTabButtons()
+	for _, tab in ipairs(TAB_DEFS) do
+		local button = tabButtons[tab.id]
+		local active = tab.id == currentTab
+		button.BackgroundColor3 = active and blend(THEME.panelAlt, tab.accent, 0.16) or THEME.panelAlt
+		button.TextColor3 = active and THEME.text or THEME.muted
+		local accent = button:FindFirstChild("Accent")
+		if accent then accent.Visible = active end
+	end
+end
+
+local function updateGridCellSize()
+	local width = gridScroll.AbsoluteSize.X
+	if width <= 10 then return end
+	local columns = width >= 710 and 4 or (width >= 510 and 3 or 2)
+	local gap = 9
+	local cellWidth = math.floor((width - gap * (columns - 1) - 2) / columns)
+	gridLayout.CellSize = UDim2.fromOffset(math.max(136, cellWidth), 176)
+end
+
+gridScroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateGridCellSize)
+
+local function rebuildGrid()
+	clearChildren(gridScroll, { UIGridLayout = true })
+	currentEntries = getFilteredEntries()
+	contentTitle.Text = currentTab == "Spells" and "Spell Collection" or currentTab
+	contentCount.Text = string.format("%d shown", #currentEntries)
+	emptyState.Visible = #currentEntries == 0
+	for index, entry in ipairs(currentEntries) do
+		createCard(entry, index)
+	end
+	updateGridCellSize()
+	renderAuxiliaryPanel()
+	updateToolbarLabels()
+	updateTabButtons()
+
+	local selectedId = selectedIds[currentTab]
+	local found = nil
+	for _, entry in ipairs(currentEntries) do
+		if entry.id == selectedId then found = entry break end
+	end
+	if not found then found = currentEntries[1] end
+	if found then
+		selectedIds[currentTab] = found.id
+		renderDetails(found)
+	else
+		resetDetails()
+	end
+end
+
+local function cycleFilter(which)
+	local config = FILTER_OPTIONS[currentTab]
+	local options = config[which]
+	local current = filters[currentTab][which]
+	local index = table.find(options, current) or 1
+	index = index % #options + 1
+	filters[currentTab][which] = options[index]
+	rebuildGrid()
+end
+
+local function setActiveTab(tabId)
+	if not FILTER_OPTIONS[tabId] then return end
+	currentTab = tabId
+	searchBox.Text = ""
+	rebuildGrid()
+end
+
+local function applySnapshot(payload)
+	snapshot = payload or {}
+	local info = snapshot.playerInfo or {}
+	level = tonumber(info.level) or level
+	xp = tonumber(info.xp) or xp
+	nextXp = tonumber(info.nextXp) or nextXp
+	local incomingCurrencies = snapshot.currencies or {}
+	currencies.Silver = tonumber(incomingCurrencies.Silver or incomingCurrencies.Coins) or currencies.Silver
+	currencies.Souls = tonumber(incomingCurrencies.Souls) or currencies.Souls
+	currencies.WeaponPoints = tonumber(incomingCurrencies.WeaponPoints) or currencies.WeaponPoints
+	currencies.Tickets = tonumber(incomingCurrencies.Tickets) or currencies.Tickets
+	equippedWeaponId = snapshot.equippedId
+	weaponEntries = buildWeaponEntries(snapshot.weapons or {})
+	spellEntries = buildSpellEntries((snapshot.spells and snapshot.spells.entries) or {})
+	materialEntries = buildMaterialEntries(snapshot.resources or {})
+	codexEntries = buildCodexEntries((snapshot.codex and snapshot.codex.entries) or {})
+	refreshPlayerPanel()
+	refreshCharacterPreview()
+	rebuildGrid()
+end
+
+loadSnapshot = function(silent)
+	if not GetInventorySnapshot then
+		if not silent then showToast("Inventory snapshot is unavailable.", THEME.red) end
+		return false
+	end
+	local ok, payload = pcall(function()
+		return GetInventorySnapshot:InvokeServer()
+	end)
+	if not ok or typeof(payload) ~= "table" then
+		if not silent then showToast("Could not load inventory.", THEME.red) end
+		return false
+	end
+	applySnapshot(payload)
+	return true
+end
+
+for _, tab in ipairs(TAB_DEFS) do
+	tabButtons[tab.id].MouseButton1Click:Connect(function()
+		setActiveTab(tab.id)
+	end)
+end
+
+filterButtonA.MouseButton1Click:Connect(function() cycleFilter("a") end)
+filterButtonB.MouseButton1Click:Connect(function() cycleFilter("b") end)
+sortButton.MouseButton1Click:Connect(function()
+	local options = SORT_OPTIONS[currentTab]
+	sortIndices[currentTab] = (sortIndices[currentTab] or 1) % #options + 1
+	rebuildGrid()
+end)
+
+filters.searchDebounce = 0
+searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+	filters.searchDebounce += 1
+	local token = filters.searchDebounce
+	task.delay(0.08, function()
+		if token == filters.searchDebounce then rebuildGrid() end
+	end)
+end)
+
+confirmCancel.MouseButton1Click:Connect(function()
+	pendingConfirm = nil
+	confirmOverlay.Visible = false
+end)
+confirmAccept.MouseButton1Click:Connect(function()
+	local entry = pendingConfirm
+	pendingConfirm = nil
+	confirmOverlay.Visible = false
+	if not entry then return end
+	fireInventoryAction("sell", { id = entry.id })
+	showToast("Sold " .. entry.displayName, THEME.orange)
+	task.delay(0.22, function()
+		if inventoryGui.Enabled then loadSnapshot(true) end
+	end)
+end)
+
+filters.closeInventory = function()
+	inventoryGui.Enabled = false
+	confirmOverlay.Visible = false
+	pendingConfirm = nil
+	previewDragging = false
+end
+
+filters.openInventory = function()
+	inventoryGui.Enabled = true
+	loadSnapshot(false)
+end
+
+filters.toggleInventory = function()
+	if inventoryGui.Enabled then
+		filters.closeInventory()
+	else
+		filters.openInventory()
+	end
+end
+
+closeButton.MouseButton1Click:Connect(filters.closeInventory)
+
+filters.lastScreenButtonsNonce = nil
+filters.handleScreenButtonsRequest = function()
 	local nonce = inventoryGui:GetAttribute("ScreenButtonsNonce")
-	if nonce == nil or nonce == lastScreenButtonsNonce then
+	if nonce == nil or nonce == filters.lastScreenButtonsNonce then return end
+	filters.lastScreenButtonsNonce = nonce
+	local action = inventoryGui:GetAttribute("ScreenButtonsAction")
+	if action == "open" then filters.openInventory()
+	elseif action == "close" then filters.closeInventory()
+	elseif action == "toggle" then filters.toggleInventory() end
+end
+inventoryGui:GetAttributeChangedSignal("ScreenButtonsNonce"):Connect(filters.handleScreenButtonsRequest)
+filters.handleScreenButtonsRequest()
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if input.KeyCode == Enum.KeyCode.Escape and confirmOverlay.Visible then
+		confirmOverlay.Visible = false
+		pendingConfirm = nil
 		return
 	end
 
-	lastScreenButtonsNonce = nonce
+	-- Nie przechwytuj klawiszy używanych przez chat, TextBox lub Roblox CoreGui.
+	if gameProcessed then return end
+	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 
-	local action = inventoryGui:GetAttribute("ScreenButtonsAction")
-	if action == "open" then
-		openInventory()
-	elseif action == "close" then
-		closeInventory()
-	elseif action == "toggle" then
-		toggleInventory()
+	if input.KeyCode == Enum.KeyCode.F and inventoryGui.Enabled then
+		searchBox:CaptureFocus()
 	end
+end)
+
+-- Bind I through ContextActionService instead of relying on gameProcessedEvent.
+-- This remains reliable even when Roblox CoreGui marks the key as processed.
+filters.contextActionService = game:GetService("ContextActionService")
+filters.inventoryToggleAction = "InventoryRemakeToggle"
+filters.contextActionService:UnbindAction(filters.inventoryToggleAction)
+filters.contextActionService:BindActionAtPriority(
+	filters.inventoryToggleAction,
+	function(_, inputState)
+		if inputState ~= Enum.UserInputState.Begin then
+			return Enum.ContextActionResult.Pass
+		end
+		if UserInputService:GetFocusedTextBox() then
+			return Enum.ContextActionResult.Pass
+		end
+		filters.toggleInventory()
+		return Enum.ContextActionResult.Sink
+	end,
+	false,
+	3000,
+	Enum.KeyCode.I
+)
+
+if InventorySync then
+	InventorySync.OnClientEvent:Connect(function()
+		if inventoryGui.Enabled then
+			task.delay(0.05, function() loadSnapshot(true) end)
+		end
+	end)
 end
-
-inventoryGui:GetAttributeChangedSignal("ScreenButtonsNonce"):Connect(handleScreenButtonsRequest)
-handleScreenButtonsRequest()
-
-equipBtn.MouseButton1Click:Connect(function()
-	local item = contextIndex and inventoryItems[contextIndex]
-	if not item then return end
-	fireInventoryAction("equip", { id = item.id })
-	equippedWeaponId = item.id
-	updatePlayerInfo()
-	rebuildSlots()
-	hideContextMenu()
-	task.delay(0.2, loadSnapshot)
-end)
-
-sellBtn.MouseButton1Click:Connect(function()
-	local item = contextIndex and inventoryItems[contextIndex]
-	if not item then return end
-	fireInventoryAction("sell", { id = item.id })
-	hideContextMenu()
-	task.delay(0.2, loadSnapshot)
-end)
-
-upgradeBtn.MouseButton1Click:Connect(function()
-	hideContextMenu()
-	warn("[InventoryController] Upgrade not implemented yet.")
-end)
-
-favoriteBtn.MouseButton1Click:Connect(function()
-	local item = contextIndex and inventoryItems[contextIndex]
-	if not item then return end
-	local nextValue = not item.favorite
-	fireInventoryAction("favorite", { id = item.id, value = nextValue })
-	item.favorite = nextValue
-	favoriteBtn.Text = nextValue and "Unfavorite" or "Favorite"
-	hideContextMenu()
-	task.delay(0.2, loadSnapshot)
-end)
-
-infoBtn.MouseButton1Click:Connect(function()
-	local item = contextIndex and inventoryItems[contextIndex]
-	if not item then return end
-	showInfoPopup(item.def)
-	hideContextMenu()
-end)
-
-spellEquipBtn.MouseButton1Click:Connect(function()
-	if currentTab ~= "SpellLoadout" then return end
-	local entry = getSelectedEntryForCurrentTab()
-	if not entry or not entry.unlocked then return end
-	if entry.equipped then
-		fireInventoryAction("spellLoadoutUnequip", { productId = entry.productId or entry.id })
-	else
-		fireInventoryAction("spellLoadoutEquip", { productId = entry.productId or entry.id })
-	end
-	task.delay(0.2, loadSnapshot)
-end)
-
-spellMoveUpBtn.MouseButton1Click:Connect(function()
-	if currentTab ~= "SpellLoadout" then return end
-	local entry = getSelectedEntryForCurrentTab()
-	if not entry or not entry.equipped then return end
-	fireInventoryAction("spellLoadoutMove", { productId = entry.productId or entry.id, direction = -1 })
-	task.delay(0.2, loadSnapshot)
-end)
-
-spellMoveDownBtn.MouseButton1Click:Connect(function()
-	if currentTab ~= "SpellLoadout" then return end
-	local entry = getSelectedEntryForCurrentTab()
-	if not entry or not entry.equipped then return end
-	fireInventoryAction("spellLoadoutMove", { productId = entry.productId or entry.id, direction = 1 })
-	task.delay(0.2, loadSnapshot)
-end)
-
-closeBtn.MouseButton1Click:Connect(function()
-	closeInventory()
-end)
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed and input.KeyCode ~= Enum.KeyCode.Tab then return end
-	if contextMenu.Visible and input.UserInputType == Enum.UserInputType.MouseButton1 then
-		hideContextMenu()
-	end
-	if input.KeyCode == Enum.KeyCode.Tab then
-		toggleInventory()
-	end
-end)
 
 if PlayerProgressEvent then
 	PlayerProgressEvent.OnClientEvent:Connect(function(payload)
@@ -2198,19 +2545,21 @@ if PlayerProgressEvent then
 		level = tonumber(payload.level) or level
 		xp = tonumber(payload.xp) or xp
 		nextXp = tonumber(payload.nextXp) or nextXp
-		coins = tonumber(payload.coins) or coins
-		if inventoryGui.Enabled then
-			updatePlayerInfo()
-		end
+		currencies.Silver = tonumber(payload.coins) or currencies.Silver
+		if inventoryGui.Enabled then refreshPlayerPanel() end
 	end)
-else
-	warn("[InventoryController] PlayerProgressEvent missing")
 end
 
-plr:GetAttributeChangedSignal("Race"):Connect(function()
+player:GetAttributeChangedSignal("Race"):Connect(function()
+	if inventoryGui.Enabled then refreshPlayerPanel() end
+end)
+player.CharacterAdded:Connect(function()
 	if inventoryGui.Enabled then
-		updatePlayerInfo()
+		task.delay(0.5, refreshCharacterPreview)
 	end
 end)
 
-print("[InventoryController] Ready")
+updateToolbarLabels()
+updateTabButtons()
+resetDetails()
+print("[InventoryController] Remake ready")

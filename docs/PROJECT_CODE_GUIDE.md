@@ -990,69 +990,72 @@ _G.
 
 Zmiany w pause/modal mogą wpłynąć na combat, chest rewards i sterowanie.
 
-### 14.9 Foldery/zmiany nieśledzone
+### 14.9 Stan worktree jest zmienny
 
-W aktualnym stanie worktree są już istniejące zmiany i foldery nieśledzone, m.in. `Guild/`, `Level/ReplicatedStorage/ModuleScripts/ModalUiState.lua`, `backend/roblox-error-bridge/node_modules/`. Ten dokument ich nie modyfikuje.
+Lista lokalnych zmian z dnia analizy nie jest trwałą dokumentacją projektu. Przed każdą pracą należy wykonać `git status`, nie nadpisywać niezwiązanych zmian użytkownika i nie zakładać, że pliki nieśledzone z poprzedniego audytu nadal istnieją w tym samym stanie.
 
 ## 15. Zalecana kolejność czytania kodu
 
 Jeśli chcesz zrozumieć projekt od zera, najlepsza kolejność to:
 
-1. `PROJECT_MAP.md`  
-   Ogólna mapa repo i ustalenia operacyjne.
+1. `AGENTS.md`  
+   Aktualne zasady pracy, planowania, architektury i walidacji.
 
-2. `ROBLOX_REPO_SYNC.md` oraz `STUDIO_REPO_PARITY_PLAN.md`  
-   Kontekst driftu Studio-repo i dlaczego nie wolno swobodnie przenosić skryptów.
+2. `docs/ROBLOX_REPO_SYNC.md`  
+   Aktualne zasady sprawdzania i synchronizacji Studio-repo. Historyczne plany parity znajdują się w `docs/archive/`.
 
-3. `Four Peaks/ServerScriptService/Script/Modules/PlayerData.lua`  
+3. `docs/ARCHITECTURE_PERFORMANCE.md`  
+   Zasady odpowiedzialności systemów, pętli runtime i wydajności.
+
+4. `Four Peaks/ServerScriptService/Script/Modules/PlayerData.lua`  
    Persistent progres konta.
 
-4. `Four Peaks/ServerScriptService/Script/Modules/PlayerStateStore.lua`  
+5. `Four Peaks/ServerScriptService/Script/Modules/PlayerStateStore.lua`  
    Szczegółowy stan lobby, weapon instances, tutorial, missions.
 
-5. `Four Peaks/ServerScriptService/Script/Modules/ProfilesManager.lua`  
+6. `Four Peaks/ServerScriptService/Script/Modules/ProfilesManager.lua`  
    Tworzenie profilu/rasy.
 
-6. `Four Peaks/ServerScriptService/Script/CharacterCreation.lua` oraz `CharacterCreationUI.lua`  
+7. `Four Peaks/ServerScriptService/Script/CharacterCreation.lua` oraz `CharacterCreationUI.lua`  
    Pierwszy flow gracza.
 
-7. `Four Peaks/ServerScriptService/Script/TutorialService.lua`  
+8. `Four Peaks/ServerScriptService/Script/TutorialService.lua`  
    Tutorial i odblokowania podstawowe.
 
-8. `Four Peaks/ServerScriptService/Script/InventoryService.lua`, `BlacksmithService.lua`, `Modules/CraftingService.lua`, `Modules/WeaponCatalog.lua`  
+9. `Four Peaks/ServerScriptService/Script/InventoryService.lua`, `BlacksmithService.lua`, `Modules/CraftingService.lua`, `Modules/WeaponCatalog.lua`  
    Broń, crafting, equip, inventory.
 
-9. `Four Peaks/ReplicatedStorage/ModuleScripts/WeaponConfigs.lua`, `CraftingConfig.lua`, `SpellDefinitions.lua`, `Levels.lua`  
+10. `Four Peaks/ReplicatedStorage/ModuleScripts/WeaponConfigs.lua`, `CraftingConfig.lua`, `SpellDefinitions.lua`, `Levels.lua`  
    Content/config lobby.
 
-10. `Four Peaks/ServerScriptService/Script/PortalToDungeon.lua`  
+11. `Four Peaks/ServerScriptService/Script/PortalToDungeon.lua`  
    Najważniejszy most z lobby do runu.
 
-11. `Level/ServerScriptService/Script/ReceiveTeleportLoadout.lua`  
+12. `Level/ServerScriptService/Script/ReceiveTeleportLoadout.lua`  
    Wejście danych teleportu po stronie dungeonu.
 
-12. `Level/ServerScriptService/Script/RunReadyGate.server.lua`  
+13. `Level/ServerScriptService/Script/RunReadyGate.server.lua`  
    Bramka loadingu/startu runu.
 
-13. `Level/ServerScriptService/Script/ProgressService.lua`  
+14. `Level/ServerScriptService/Script/ProgressService.lua`  
    Run state, XP, upgrade offers, summary i `_G` funkcje.
 
-14. `Level/ServerScriptService/Script/Model/WaveController.lua`  
+15. `Level/ServerScriptService/Script/Model/WaveController.lua`  
    Spawn przeciwników, elity, boss, portal/end condition.
 
-15. `Level/ServerScriptService/Script/Modules/NpcService.lua`  
+16. `Level/ServerScriptService/Script/Modules/NpcService.lua`  
    Serwerowa symulacja NPC i damage.
 
-16. `Level/ServerScriptService/Script/WeaponCombat.server.lua` oraz `SpellService.lua`  
+17. `Level/ServerScriptService/Script/WeaponCombat.server.lua` oraz `SpellService.lua`  
    Automatyczna walka i spelle.
 
-17. `Level/ServerScriptService/Script/DropService.lua`, `ChestService.server.lua`, `Modules/ChestItemService.lua`, `Modules/RunStatsService.lua`  
+18. `Level/ServerScriptService/Script/DropService.lua`, `ChestService.server.lua`, `Modules/ChestItemService.lua`, `Modules/RunStatsService.lua`  
    Rewardy runowe.
 
-18. `Level/ServerScriptService/Script/Modules/MissionProgress.lua`, `MissionState.lua`, `DailyMissionService.lua`, `EventProgress.lua`  
+19. `Level/ServerScriptService/Script/Modules/MissionProgress.lua`, `MissionState.lua`, `DailyMissionService.lua`, `EventProgress.lua`  
    Misje i eventy w runie.
 
-19. `Level/ServerScriptService/Script/ReturnToLobby.lua`  
+20. `Level/ServerScriptService/Script/ReturnToLobby.lua`  
    Powrót do lobby i zamknięcie runu.
 
 20. UI klienta:

@@ -1,28 +1,54 @@
 -- SCRIPT: InventorySnapshot.server.lua
+
 -- GDZIE: ServerScriptService/InventorySnapshot.server.lua
+
 -- CO: RemoteFunction zwraca snapshot ekwipunku (PlayerData + Currencies + WeaponInstances)
 
+
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 local ServerScriptService = game:GetService("ServerScriptService")
 
+
+
 local moduleFolder = ServerScriptService:FindFirstChild("ModuleScript")
+
 	or ServerScriptService:FindFirstChild("ModuleScripts")
 
+
+
 local function requireModule(name: string)
+
 	local mod = ServerScriptService:FindFirstChild(name)
+
 	if not mod and moduleFolder then
+
 		mod = moduleFolder:FindFirstChild(name)
+
 	end
+
 	if not mod or not mod:IsA("ModuleScript") then
+
 		warn(("[InventorySnapshot] Missing module: %s"):format(name))
+
 		return nil
+
 	end
+
 	return require(mod)
+
 end
 
+
+
 local PlayerData = requireModule("PlayerData")
+
 local CurrencyService = requireModule("CurrencyService")
+
 local PlayerStateStore = requireModule("PlayerStateStore")
+
+
 
 local replicatedModules = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:FindFirstChild("ModuleScript")
@@ -42,34 +68,58 @@ do
 	end
 end
 
+
 local function toPct(x: number): number
+
 	return math.floor((tonumber(x) or 0) * 100 + 0.5)
+
 end
+
+
 
 local function computeInstanceStats(def: any, inst: any)
 	local combat = def.combat or {}
 	local roll = (typeof(inst.rollStats) == "table") and inst.rollStats or {}
+
 	local lvl = math.max(1, math.floor(tonumber(inst.level) or 1))
 
+
+
 	local baseAtk = (combat.baseAtk or def.baseDamage or 0) + (roll.BaseATK or 0)
+
 	local atkPerLevel = (combat.atkPerLevel or 0) + (roll.ATKPerLevel or 0)
+
 	local atk = baseAtk + (lvl - 1) * atkPerLevel
 
+
+
 	local hp = (combat.bonusHP or 0) + (roll.BonusHP or 0)
+
 	local defv = (combat.bonusDefense or 0) + (roll.BonusDefense or 0)
+
 	local spd = (combat.bonusSpeed or 0) + (roll.BonusSpeed or 0)
+
 	local critRate = (combat.bonusCritRate or 0) + (roll.BonusCritRate or 0)
+
 	local critDmg = (combat.bonusCritDmg or 0) + (roll.BonusCritDmg or 0)
+
 	local lifesteal = (combat.bonusLifesteal or 0) + (roll.BonusLifesteal or 0)
+
+
 
 	return {
 		ATK = math.floor(atk + 0.5),
 		HP = math.floor(hp + 0.5),
 		DEF = math.floor(defv + 0.5),
+
 		SPD = toPct(spd),
+
 		CRIT_RATE = toPct(critRate),
+
 		CRIT_DMG = toPct(critDmg),
+
 		LIFESTEAL = toPct(lifesteal),
+
 	}
 end
 
@@ -147,44 +197,68 @@ end
 
 local function buildSpellEntries(unlockedMap, equippedSet)
 	local entries = {}
-	for _, productId in ipairs(SpellDefs.GetShopList()) do
+	local unlockedIds = {}
+	if typeof(unlockedMap) == "table" then
+		for id, value in pairs(unlockedMap) do
+			if value == true and typeof(id) == "string" then
+				table.insert(unlockedIds, id)
+			end
+		end
+	end
+	local strongestUnlocked = SpellDefs.ResolveUnlockedProducts(unlockedIds)
+	local equippedByFamily = {}
+	for productId in pairs(equippedSet or {}) do
 		local product = SpellDefs.GetProduct(productId)
-		local def = product and SpellDefs.GetSpell(product.familyId) or nil
-		if product and def then
-			local presentation = product.presentation or SpellDefs.GetPresentation(product)
-			table.insert(entries, {
-				id = product.id,
-				productId = product.id,
-				familyId = product.familyId,
-				displayName = product.displayName,
-				name = product.name,
-				element = product.element,
-				attackType = product.attackType,
-				spellType = product.spellType,
-				baseQuality = product.baseQuality,
-				rarity = product.cardQuality or product.baseQuality or "Common",
-				unlocked = unlockedMap[product.id] == true,
-				equipped = equippedSet[product.id] == true,
-				costSouls = product.costSouls or product.costCoins or 0,
-				description = SpellDefs.DescribeShopProduct(product),
-				iconGlyph = product.iconGlyph or def.iconGlyph,
-				artMotif = product.artMotif or def.artMotif,
-				loreDescription = product.loreDescription or def.loreDescription,
-				gameplayDescription = product.gameplayDescription or def.gameplayDescription,
-				visualDirection = product.visualDirection or def.visualDirection,
-				frameStyle = product.frameStyle or def.frameStyle,
-				codexCategory = product.codexCategory or def.codexCategory,
-				witchbookAccent = product.witchbookAccent or def.witchbookAccent,
-				presentation = presentation,
-				visualProfile = product.visualProfile or SpellDefs.GetVisualProfile(product),
-				statLines = SpellDefs.GetSpellStatLines(def, {
-					level = 1,
-					baseMultiplier = product.baseMultiplier,
-					basePower = product.basePower,
-				}),
-				upgradeLevels = SpellDefs.GetSpellUpgradeLevels(product.familyId),
-				combinations = SpellDefs.GetSynergiesFor(product.familyId),
-			})
+		if product then
+			equippedByFamily[product.familyId] = product
+		end
+	end
+
+	for _, familyId in ipairs(SpellDefs.GetSpellIds()) do
+		local def = SpellDefs.GetSpell(familyId)
+		if def and not def.isCombo and def.shopAvailable ~= false then
+			local product = equippedByFamily[familyId]
+				or strongestUnlocked[familyId]
+				or SpellDefs.GetProduct(("%s_Standard"):format(familyId))
+			if product then
+				local presentation = product.presentation or SpellDefs.GetPresentation(def)
+				local unlocked = strongestUnlocked[familyId] ~= nil
+					or (typeof(unlockedMap) == "table" and unlockedMap[familyId] == true)
+				local equipped = equippedByFamily[familyId] ~= nil
+				table.insert(entries, {
+					id = familyId,
+					productId = product.id,
+					familyId = familyId,
+					displayName = def.name,
+					name = def.name,
+					element = def.element,
+					attackType = def.attackType,
+					spellType = def.spellType,
+					baseQuality = "Standard",
+					rarity = product.cardQuality or "Common",
+					unlocked = unlocked,
+					equipped = equipped,
+					costSouls = product.costSouls or product.costCoins or 0,
+					description = def.gameplayDescription or def.description or "",
+					iconGlyph = def.iconGlyph,
+					artMotif = def.artMotif,
+					loreDescription = def.loreDescription,
+					gameplayDescription = def.gameplayDescription,
+					visualDirection = def.visualDirection,
+					frameStyle = def.frameStyle,
+					codexCategory = def.codexCategory,
+					witchbookAccent = def.witchbookAccent,
+					presentation = presentation,
+					visualProfile = product.visualProfile or SpellDefs.GetVisualProfile(def),
+					statLines = SpellDefs.GetSpellStatLines(def, {
+						level = 1,
+						baseMultiplier = product.baseMultiplier,
+						basePower = product.basePower,
+					}),
+					upgradeLevels = SpellDefs.GetSpellUpgradeLevels(familyId),
+					combinations = SpellDefs.GetSynergiesFor(familyId),
+				})
+			end
 		end
 	end
 	return entries
@@ -240,25 +314,46 @@ local function buildCodexPayload(player)
 	}
 end
 
+
 local remoteFunctions = ReplicatedStorage:FindFirstChild("RemoteFunctions")
+
 if not remoteFunctions then
+
 	remoteFunctions = Instance.new("Folder")
+
 	remoteFunctions.Name = "RemoteFunctions"
+
 	remoteFunctions.Parent = ReplicatedStorage
+
 end
+
+
 
 local function ensureRemoteFunction(name)
+
 	local fn = remoteFunctions:FindFirstChild(name)
+
 	if fn and fn:IsA("RemoteFunction") then
+
 		return fn
+
 	end
+
 	fn = Instance.new("RemoteFunction")
+
 	fn.Name = name
+
 	fn.Parent = remoteFunctions
+
 	return fn
+
 end
 
+
+
 local GetInventorySnapshot = ensureRemoteFunction("RF_GetInventorySnapshot")
+
+
 
 GetInventorySnapshot.OnServerInvoke = function(player)
 	if not PlayerData or not CurrencyService or not PlayerStateStore then
@@ -286,33 +381,61 @@ GetInventorySnapshot.OnServerInvoke = function(player)
 	local weapons = {}
 	local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)
 
+
 	local favoriteSet = {}
+
 	for _, name in ipairs(state.FavoriteWeapons or {}) do
+
 		if typeof(name) == "string" then
+
 			favoriteSet[name] = true
+
 		end
+
 	end
 
+
+
 	for _, inst in ipairs(state.WeaponInstances or {}) do
+
 		if typeof(inst) == "table" then
+
 			local weaponId = inst.weaponId
+
 			if typeof(weaponId) == "string" and weaponId ~= "" then
+
 				local def = WeaponConfigs.Get(weaponId)
+
 				if def then
+					local rarity = (inst.rarity ~= "" and inst.rarity) or def.rarity or "Common"
+					local rarityMultiplier = ({
+						Common = 1, Uncommon = 1.2, Rare = 1.4, Epic = 1.8,
+						Legendary = 2.4, Mythic = 3, Mythical = 3,
+					})[rarity] or 1
 					table.insert(weapons, {
 						InstanceId = inst.instanceId,
 						WeaponId = weaponId,
 						Prefix = inst.prefix or "Standard",
 						Level = tonumber(inst.level) or 1,
 						MaxLevel = def.maxLevel or 1,
-						Rarity = (inst.rarity ~= "" and inst.rarity) or def.rarity or "Common",
+						Rarity = rarity,
 						Stats = computeInstanceStats(def, inst),
 						Favorite = favoriteSet[weaponId] == true,
+						WeaponType = def.weaponType,
+						Element = def.element,
+						Description = def.description,
+						SellValue = def.sellValue or math.max(1, math.floor((def.baseDamage or 0) * 3 * rarityMultiplier)),
 					})
+
 				end
+
 			end
+
 		end
+
 	end
+
+
 
 	return {
 		playerInfo = {
@@ -348,4 +471,6 @@ GetInventorySnapshot.OnServerInvoke = function(player)
 	}
 end
 
+
 print("[InventorySnapshot] Ready")
+

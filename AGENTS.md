@@ -1,36 +1,164 @@
-# Project Instructions
+# AGENTS.md — The Dungeon 2
 
-- When working in `E:\Github\The-Dungeon-2`, always attempt to connect to Roblox Studio through MCP before doing other project work.
-- Start each task by calling `mcp__roblox_mcp__list_roblox_studios`.
-- If a Studio instance is available, call `mcp__roblox_mcp__set_active_studio` for that instance and prefer Roblox MCP tools for inspection, editing, playtesting, and verification when relevant.
-- If no Studio instance is available or the MCP connection fails, state that briefly and continue with filesystem-based work.
+## Cel
 
-## Required Reading Before Work
+Pracuj jak developer utrzymujący długoterminowy projekt, a nie jak generator jednorazowych poprawek. Kod ma działać, być możliwy do rozwijania i mieć rozsądny koszt przy docelowej liczbie NPC, pocisków, dropów i graczy.
 
-- Read `PROJECT_MAP.md`, `AGENTS.md`, `ROBLOX_REPO_SYNC.md`, `STUDIO_REPO_PARITY_PLAN.md`, and `CHANGELOG_AI.md` before making changes.
-- Treat those files as the current operational baseline for this repo unless the user explicitly overrides them.
+## Start każdego zadania
 
-# Project Context
+1. Uruchom `mcp__roblox_mcp__list_roblox_studios`.
+2. Jeżeli właściwa instancja Studio jest dostępna, ustaw ją przez `mcp__roblox_mcp__set_active_studio`:
+   - `Poziom` dla `Level/`,
+   - `Cztery szczyty` dla `Four Peaks/`,
+   - `Gildia` dla `Guild/`.
+3. Jeżeli Studio lub MCP nie działa, napisz to krótko i kontynuuj na podstawie repo.
+4. Używaj MCP do konkretnych inspekcji, synchronizacji i testów. Nie skanuj całej gry bez potrzeby.
+5. Sprawdź `git status` i nie nadpisuj niezwiązanych zmian użytkownika.
 
-- This is a Roblox survivors game inspired by Vampire Survivors and Megabonk.
-- The lobby is a core part of the game and its meta progression.
-- Combat is auto-attack based. Weapons attack automatically.
-- Runs focus on exploration, loot, portal hunting, boss kills, and level progression.
+## Dokumenty do czytania
 
-## AI Working Rules
+Nie czytaj automatycznie całej dokumentacji i pełnego changelogu przed każdym drobnym zadaniem.
 
-- Do not move scripts in Roblox Studio until the repo covers Studio 1:1.
-- Fix Studio-vs-repo drift before attempting folder cleanup or system-based reorganization.
-- Treat Studio as the source of truth unless the user explicitly says otherwise.
-- Use MCP sparingly and only for a concrete verification step.
-- Do not scan the entire game through MCP unless the task truly requires it.
-- Do not rename `RemoteEvent`, `RemoteFunction`, `ModuleScript`, folder, `Attribute`, or `CollectionService` tag names without checking all known usages first.
-- Do not refactor unless the user explicitly asks for refactoring.
-- Prefer the smallest possible diff.
-- One task should solve one problem or one narrowly scoped feature.
-- After every repo change, update `CHANGELOG_AI.md`.
-- After each change, report changed files, test/verification, risks, and rollback notes.
+Zawsze:
+
+- przeczytaj ten `AGENTS.md`,
+- sprawdź ostatnie wpisy w `CHANGELOG_AI.md` oraz odpowiedni fragment bieżącego pliku w `docs/changelog/`.
+
+Czytaj zależnie od zadania:
+
+- `docs/PROJECT_CODE_GUIDE.md` — gdy system jest nieznany, zmiana obejmuje kilka systemów albo dotyczy danych/remotes/teleportu,
+- `docs/ROBLOX_REPO_SYNC.md` — gdy synchronizujesz Studio z repo, zmieniasz ścieżki lub trafiasz na duplikaty,
+- `docs/ARCHITECTURE_PERFORMANCE.md` — przy nowym systemie, refaktorze albo kodzie działającym często,
+- `docs/AUDYT_OPTYMALIZACJI_PROJEKTU.md` — przy pracy nad wydajnością lub dużymi skryptami,
+- `docs/ROBLOX_ERROR_REPORTING.md` — tylko przy reporterze błędów i backendzie,
+- `docs/REVIEW_CHECKLIST.md` — przed zakończeniem większego zadania.
+
+Dokumenty w `docs/archive/` są historyczne. Nie traktuj ich jako aktualnych instrukcji, chyba że zadanie dotyczy historii parity.
+
+## Zakres pracy
+
+- Jedno zadanie powinno rozwiązywać jeden problem albo jedną wąską funkcję.
+- Preferuj najmniejszy diff, który jest poprawny architektonicznie.
+- Nie wykonuj pobocznych refaktorów bez związku z zadaniem.
+- Nie zmieniaj balansu, nazw publicznych ani formatu danych, jeżeli zadanie tego nie wymaga.
+- Nie usuwaj kodu oznaczonego jako legacy tylko dlatego, że wygląda na nieużywany. Najpierw sprawdź wszystkie użycia oraz aktywną strukturę Studio.
+
+## Planowanie przed implementacją
+
+Najpierw przedstaw plan, jeżeli zachodzi co najmniej jeden warunek:
+
+- nowy system gameplayowy,
+- zmiana może przekroczyć około 300 linii,
+- zmiana obejmuje więcej niż dwa istniejące systemy,
+- zmiana dotyczy persistent data, teleportu, remotes albo wspólnego API,
+- powstaje nowa pętla `Heartbeat`, `Stepped`, `RenderStepped` lub cykliczny task,
+- system obsługuje masowo NPC, pociski, dropy, VFX lub graczy,
+- refaktoryzowany jest duży albo silnie sprzężony plik.
+
+Plan powinien wskazać:
+
+1. odpowiedzialności systemu,
+2. pliki tworzone i zmieniane,
+3. przepływ danych i właścicieli stanu,
+4. publiczne API, remotes i zależności,
+5. wszystkie pętle runtime i ich częstotliwość,
+6. koszt przy skali docelowej,
+7. testy, ryzyka i rollback.
+
+## Architektura
+
+- Każdy skrypt lub moduł powinien mieć jedną główną odpowiedzialność.
+- Nie dopisuj nowego niezależnego systemu do największego istniejącego pliku tylko dlatego, że jest wygodnym punktem wejścia.
+- Plik powyżej około 800 linii wymaga oceny architektury przed dalszym rozbudowywaniem.
+- Plik powyżej około 1200 linii nie powinien przyjmować kolejnej niezależnej odpowiedzialności bez wyraźnego uzasadnienia.
+- Limity linii są sygnałem do przeglądu, nie powodem do sztucznego dzielenia każdej funkcji na osobny moduł.
+- Unikaj zarówno God Scriptów, jak i nadmiernej liczby mikromodułów.
+- Dane contentowe i tuning trzymaj w konfiguracjach. Kontroler runtime ma wykonywać konfigurację, a nie przechowywać setki linii definicji.
+- Jeden system powinien mieć jednego właściciela, np. damage, NPC simulation, projectiles, drops, rewards, save state.
+- Nie dodawaj nowych zależności przez `_G`. Używaj jawnych `ModuleScript` i `require()`.
+- Nie nadpisuj globalnej funkcji, którą może definiować inny skrypt.
+- Nie zmieniaj nazw `RemoteEvent`, `RemoteFunction`, `ModuleScript`, folderów, modeli, `Attribute` ani tagów bez audytu wszystkich użyć.
+
+## Wydajność Roblox
+
+- Nie twórz osobnego `Heartbeat`, `Stepped` lub `RenderStepped` dla każdego NPC, pocisku, dropu albo efektu.
+- Używaj centralnego schedulera/service dla obiektów tego samego typu.
+- Nie wykonuj bez uzasadnienia co klatkę:
+  - `Players:GetPlayers()`,
+  - `GetChildren()` lub `GetDescendants()`,
+  - tworzenia `RaycastParams`, tablic filtrów i dużych tabel tymczasowych,
+  - sortowania wszystkich NPC,
+  - pełnego wyszukiwania najbliższego celu,
+  - formatowania logów/debug UI,
+  - zapisów DataStore,
+  - wysyłania pełnych snapshotów wszystkich obiektów.
+- Cache'uj dane, które nie muszą być odświeżane co klatkę.
+- Rozdziel częstotliwości pracy. Typowe wartości orientacyjne:
+  - krytyczna fizyka: `Heartbeat`, tylko gdy konieczne,
+  - AI i steering: około 5–15 Hz,
+  - wyszukiwanie celu: okresowo lub po zmianie stanu,
+  - HUD i niekrytyczna synchronizacja: około 4–10 Hz,
+  - persistent rewards/save: buforowane i wykonywane zbiorczo.
+- Projektuj pod co najmniej: 100–500 NPC, 100 pocisków, 300 dropów i kilku graczy, jeżeli system może osiągnąć taką skalę.
+- Przy wyszukiwaniu celów rozważ spatial partitioning, siatkę przestrzenną, query cache albo wspólny target service.
+- Nowa częsta pętla musi mieć jasno określoną częstotliwość, maksymalną liczbę obiektów i sposób zatrzymania/cleanup.
+
+## Połączenia i cleanup
+
+- Każde dynamiczne połączenie eventu musi mieć właściciela i ścieżkę rozłączenia.
+- Sprawdź respawn, usuwanie obiektu, koniec runu i ponowne otwarcie UI pod kątem duplikowania connections.
+- Nie twórz nieograniczonych `task.spawn()` lub `task.delay()` bez anulowania albo kontroli stanu.
+- Długowieczne tabele aktywnych obiektów muszą usuwać martwe rekordy.
+
+## Refaktory
+
+- Refaktor wykonuj tylko na wyraźne polecenie albo gdy jest niezbędny do bezpiecznej realizacji zadania.
+- Duży refaktor i zmiana zachowania powinny być osobnymi etapami.
+- Najpierw zachowaj działanie 1:1, potem optymalizuj lub zmieniaj gameplay.
+- Podczas wydzielania modułów zachowaj, o ile zadanie nie mówi inaczej:
+  - publiczne API,
+  - nazwy remotes,
+  - format `TeleportData`,
+  - format persistent data,
+  - kolejność istotnych eventów,
+  - zachowanie gameplayowe.
+- Nie przepisuj dużego systemu od zera, gdy można wydzielać odpowiedzialności etapami.
+- Przed refaktorem potwierdź aktywną ścieżkę w Studio i sprawdź repo pod kątem duplikatów.
+
+## Studio i repo
+
+- Przy rozbieżności Studio jest źródłem prawdy, chyba że użytkownik wyraźnie postanowi inaczej.
+- Ostatni znany snapshot ma script parity, ale full object parity pozostaje częściowe. Weryfikuj konkretną dotykaną ścieżkę zamiast zakładać pełną zgodność całego projektu.
+- Nie przenoś ani nie usuwaj obiektów w Studio bez osobnego planu.
+- Nie poprawiaj jednocześnie wszystkich historycznych kopii. Najpierw ustal, która ścieżka jest aktywna, a które są mirrorami lub stale snapshotami.
+- Po zmianie kodu zsynchronizuj właściwy aktywny obiekt Studio, jeżeli MCP jest dostępne i zadanie tego wymaga.
+
+## Server authority i dane
+
+- Klient nie może być źródłem prawdy dla walut, damage, rewardów, ekwipunku ani progresu.
+- Waliduj typ, zakres, ownership, cooldown i stan gracza dla danych z klienta.
+- Nie zmieniaj DataStore name, kluczy ani kształtu zapisanych danych bez migracji i rollbacku.
+- Nowe pola danych muszą mieć bezpieczne wartości domyślne dla starych profili.
+
+## Walidacja przed zakończeniem
+
+1. Przejrzyj cały diff.
+2. Sprawdź, czy nie powstał nowy God Script albo nowa ukryta odpowiedzialność w dużym pliku.
+3. Wypisz wszystkie dodane lub zmienione pętle runtime i ich częstotliwości.
+4. Sprawdź brak per-object Heartbeat oraz nowych zależności `_G`.
+5. Sprawdź cleanup eventów i tabel runtime.
+6. Uruchom dostępne compile checks i odpowiedni test w Roblox Studio.
+7. Przy zmianie wydajnościowej porównaj zachowanie i koszt przed/po, gdy jest to możliwe.
+8. Zaktualizuj bieżący miesięczny changelog w `docs/changelog/CHANGELOG_AI_YYYY-MM.md`.
+9. Na końcu podaj:
+   - zmienione pliki,
+   - wykonane testy,
+   - czego nie udało się zweryfikować,
+   - ryzyka,
+   - rollback.
+
+Kod nie jest ukończony tylko dlatego, że się kompiluje. Musi mieć poprawnego właściciela, kontrolowany koszt runtime i możliwą ścieżkę utrzymania.
 
 ## Skills
 
-- `the-dungeon-2-workflow`: Workflow and environment guidance for this repo. Use for code, debugging, sync, playtesting, and Studio-vs-filesystem comparisons in `The-Dungeon-2`. File: `C:\Users\Sadocha\.codex\skills\the-dungeon-2-workflow\SKILL.md`
+- `the-dungeon-2-workflow`: workflow dla kodu, debugowania, synchronizacji i testów. Plik: `C:\Users\Sadocha\.codex\skills\the-dungeon-2-workflow\SKILL.md`
