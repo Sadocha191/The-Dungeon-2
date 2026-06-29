@@ -2,6 +2,46 @@
 
 Pełne wpisy zmian AI z miesiąca 2026-06. Kolejność zachowuje oryginalny plik.
 
+## 2026-06-29 - Poziom DebugStressTools Studio-only guard
+
+### Scope
+
+- Added an early `RunService:IsStudio()` return to `Level` `DebugStressTools` before it can create or modify `DebugSettings`, enable god mode, change spawn stress values, wrap `_G.ApplyDamageToPlayer`, connect player/character hooks, or attach its `Heartbeat`.
+- Kept the existing Studio stress-tool defaults and behavior unchanged.
+- Did not change wave balance, damage systems, spawn configuration, remotes, persistent data, or other gameplay systems.
+
+### Files updated
+
+- `Level/ServerScriptService/Script/DebugStressTools.lua`
+- `CHANGELOG_AI.md`
+- `docs/changelog/CHANGELOG_AI_2026-06.md`
+
+### Live Studio objects updated
+
+- `Level`: `game.ServerScriptService.Script.DebugStressTools`
+
+### Verification
+
+- Confirmed connected Studio instances and set active Studio to `Level`.
+- Confirmed the active Studio script path is `game.ServerScriptService.Script.DebugStressTools`.
+- Searched the repo for `DebugStressTools.lua`; only `Level/ServerScriptService/Script/DebugStressTools.lua` was found.
+- Synced the updated source into live Studio and read it back; the `RunService:IsStudio()` guard is before `Players`, `ReplicatedStorage`, `DebugSettings`, `_G.ApplyDamageToPlayer`, player hooks, and `Heartbeat`.
+- Verified the live Studio source compiles with `loadstring` in Edit mode.
+- Ran a short `Level` Play smoke test. The persistent Studio script object is currently `Enabled=false`, so ordinary Play did not execute it; the test did not change that persistent property.
+- Temporarily enabled the runtime server copy during Play and verified `ReplicatedStorage.DebugSettings` is created with the existing defaults for `GodModeEnabled`, `AutoMobSpawnsEnabled`, `SpawnStressMode`, `SpawnBurstSize`, `SpawnIntervalScale`, `MaxAliveScale`, and `PerfHudEnabled`.
+- In the short smoke test, `_G.ApplyDamageToPlayer` was `nil`, so the damage-wrapper branch was not exercised.
+- Local `luau` was not available in PATH; Studio `loadstring` was used for the syntax check instead.
+
+### Risks
+
+- Production servers will skip this debug script entirely, so any accidental reliance on `DebugSettings` in live production would remain absent instead of being created by debug tooling.
+- Already-running Studio sessions need the synced source or a fresh server execution to pick up the guard.
+
+### Rollback
+
+- Revert `Level/ServerScriptService/Script/DebugStressTools.lua` and this changelog entry.
+- In live `Level`, restore the previous source of `game.ServerScriptService.Script.DebugStressTools`.
+
 ## 2026-06-28 - Studio-to-repo chest, upgrade, inventory, and Slime sync
 
 ### Scope

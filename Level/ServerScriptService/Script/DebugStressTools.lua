@@ -1,6 +1,11 @@
+local RunService = game:GetService("RunService")
+
+if not RunService:IsStudio() then
+	return
+end
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 
 local debugFolder = ReplicatedStorage:FindFirstChild("DebugSettings")
 if not debugFolder then
