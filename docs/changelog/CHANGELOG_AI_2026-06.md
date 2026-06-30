@@ -2,6 +2,105 @@
 
 Pełne wpisy zmian AI z miesiąca 2026-06. Kolejność zachowuje oryginalny plik.
 
+## 2026-06-30 - Poziom NpcService DamageService contact damage migration
+
+### Scope
+
+- Migrated `NpcService` melee/contact player damage from the temporary `_G.ApplyDamageToPlayer` shim to direct `DamageService.Apply`.
+- Removed the local `Humanoid:TakeDamage` fallback from the NPC contact-damage path so NPC melee damage cannot bypass the central player damage pipeline.
+- Preserved melee range validation, vertical validation, attack cooldowns, damage values, NPC records, death callbacks, and the public `NpcService` API.
+- Passed the attacking NPC model as both `source` and `attacker` with `sourceType = "npc"` and `damageType = "contact"` so existing thorns handling receives the real attacker model.
+- Did not modify `DamageService`, `RunStatsService`, `WaveController`, `ShrineService`, `DebugStressTools`, remotes, NPC configuration, or balance.
+
+### Files updated
+
+- `Level/ServerScriptService/ModuleScript/NpcService.lua`
+- `CHANGELOG_AI.md`
+- `docs/changelog/CHANGELOG_AI_2026-06.md`
+
+### Live Studio objects updated
+
+- `Level`: `game.ServerScriptService.ModuleScript.NpcService`
+
+### Verification
+
+- Confirmed connected Studio instances and active Studio `Level`.
+- Synced `game.ServerScriptService.ModuleScript.NpcService` from the repo change.
+- Confirmed `NpcService.lua` no longer contains `_G.ApplyDamageToPlayer` or a local player-damage `Humanoid:TakeDamage` fallback.
+- Confirmed Studio grep finds `_G.ApplyDamageToPlayer` and fallback `hum:TakeDamage` in `WaveController`, not in `NpcService`; `WaveController` remained unchanged and still uses the compatibility shim.
+- Checked the require graph: `NpcService -> DamageService`, `RunStatsService -> NpcService`, `RunStatsService -> DamageService`, and `DamageService -> StatsConfig/RunDefenseState`; no `DamageService -> NpcService/RunStatsService` cycle was introduced.
+- Ran a Play server probe using clones of the real `ReplicatedStorage.Enemies.Normal.Slime` template through `NpcService.Register`, allowing the existing `NpcService` Heartbeat melee path to call `DamageService.Apply`.
+- Verified real Slime contact damage, armor reduction, shrine difficulty applied exactly once, shrine shield/temporary shield/persistent shield/overheal consumption, thorns damage to the attacking Slime model, invalid vertical contact rejection, and evasion.
+- Checked Studio Output after Play. No `NpcService` startup or damage migration errors appeared; expected `DamageService` evasion logs appeared during the evasion case, with existing unrelated Hybrid Terrain and error-reporter configuration messages still present.
+- Ran `git diff --check`; it reported no whitespace errors, only LF/CRLF conversion warnings on touched text files.
+- Confirmed no new runtime loops, `_G` writers, callbacks, or schedulers were added.
+
+### Risks
+
+- A missing `DamageService` module now fails `NpcService` startup explicitly instead of falling back to direct Humanoid damage.
+- `WaveController` still uses the temporary compatibility shim until its separate migration.
+
+### Rollback
+
+- Restore the previous `NpcService.lua` source in repo and Studio, then revert this changelog entry.
+
+## 2026-06-30 - Poziom DamageService player damage pipeline
+
+### Scope
+
+- Added `Level` `DamageService` as the single server-side owner of incoming player damage application.
+- Added `DamageService.server` as the only writer of `_G.ApplyDamageToPlayer`, keeping `NpcService` and `WaveController` on the temporary compatibility shim.
+- Moved the incoming damage pipeline out of `RunStatsService.ApplyDamageToPlayer` while keeping that public function available as a numeric-return delegator.
+- Removed competing `_G.ApplyDamageToPlayer` writers from `RunStatsService`, `ShrineService`, and `DebugStressTools`.
+- Kept `RunDefenseState` as the owner of defensive state from stage 1A; did not duplicate shield, overheal, or lethal-prevention state.
+- Kept `ShrineService` responsible for shrines, shrine attributes, shield regen, and HP regen.
+- Kept `DebugStressTools` Studio-only and moved god-mode damage blocking to `DamageService` reading `ReplicatedStorage.DebugSettings.GodModeEnabled`.
+- Did not modify `NpcService`, `WaveController`, `ChestItemService`, remotes, persistent data, attribute names, or source damage balance.
+
+### Files updated
+
+- `Level/ServerScriptService/ModuleScript/DamageService.lua`
+- `Level/ServerScriptService/Script/DamageService.server.lua`
+- `Level/ServerScriptService/ModuleScript/Stats/RunStatsService.lua`
+- `Level/ServerScriptService/Script/ShrineService.server.lua`
+- `Level/ServerScriptService/Script/DebugStressTools.lua`
+- `CHANGELOG_AI.md`
+- `docs/changelog/CHANGELOG_AI_2026-06.md`
+
+### Live Studio objects updated
+
+- `Level`: `game.ServerScriptService.ModuleScript.DamageService`
+- `Level`: `game.ServerScriptService.Script.DamageService`
+- `Level`: `game.ServerScriptService.ModuleScript.Stats.RunStatsService`
+- `Level`: `game.ServerScriptService.Script.ShrineService`
+- `Level`: `game.ServerScriptService.Script.DebugStressTools`
+
+### Verification
+
+- Confirmed connected Studio instances and set active Studio to `Level`.
+- Verified Studio `loadstring` compilation for `DamageService`, `DamageService.server`, `RunStatsService`, `ShrineService`, and `DebugStressTools`.
+- Verified repo and Studio source checksum parity for all five changed live sources.
+- Verified `rg "_G\\.ApplyDamageToPlayer\\s*="` and Studio `script_grep` both report only `DamageService.server`.
+- Verified `DamageService.lua` requires only `StatsConfig` and `RunDefenseState`.
+- Ran a Play startup-order probe from a normal server `Script`: `_G.ApplyDamageToPlayer` became `function` while `RunStarted=false` and active NPC model count was `0`; at `RunStarted=true`, the shim was still `function` and active NPC model count was still `0`.
+- Ran a Play server pipeline probe covering `_G` shim calls, `RunStatsService.ApplyDamageToPlayer`, `DamageService.CanDamage`, Studio god mode, armor, evasion, shrine difficulty exactly once, shrine shield before run shields, temporary shield before persistent shield, persistent shield before overheal, Angel's Debt lethal prevention, and thorns damage to an `NpcService`-registered attacker.
+- Checked Studio Output after Play. No damage-shim or fallback-related errors appeared; existing unrelated `Hybrid Terrain Hex Generator` and error-reporter configuration messages remained.
+- Confirmed no new runtime loop was added. Existing loops in `RunStatsService`, `ShrineService`, and `DebugStressTools` remain.
+- Ran `git diff --check`; it reported only LF/CRLF conversion warnings on touched text files.
+
+### Risks
+
+- `NpcService` and `WaveController` still depend on the temporary `_G.ApplyDamageToPlayer` shim until a later migration to `require(DamageService)`.
+- Thorns and Angel's Debt use temporary callbacks registered by `RunStatsService` to avoid a `DamageService -> RunStatsService/NpcService` require cycle.
+- The fallback branches in `NpcService` and `WaveController` do not log when used, so fallback non-use was verified by shim readiness before run start plus unchanged caller branches rather than by dedicated fallback counters.
+
+### Rollback
+
+- Delete `DamageService.lua` and `DamageService.server.lua`.
+- Restore the previous `RunStatsService.lua`, `ShrineService.server.lua`, and `DebugStressTools.lua` sources.
+- Revert this changelog entry.
+- In live `Level`, remove `game.ServerScriptService.ModuleScript.DamageService` and `game.ServerScriptService.Script.DamageService`, then restore the previous sources of the three changed existing scripts.
+
 ## 2026-06-29 - Poziom RunDefenseState defensive state extraction
 
 ### Scope

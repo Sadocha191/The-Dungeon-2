@@ -500,34 +500,6 @@ _G.PrepareRunShrines = function()
 	return #shrines
 end
 
-_G.ApplyDamageToPlayer = function(plr, amount)
-	if not plr or not plr.Parent then
-		return 0
-	end
-	local char = plr.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if not hum or hum.Health <= 0 then
-		return 0
-	end
-
-	ensurePlayerDefaults(plr)
-
-	local incoming = math.max(0, tonumber(amount) or 0)
-	incoming = incoming * (1 + getNumAttr(plr, "ShrineDifficultyPct", 0))
-
-	local shield = math.max(0, getNumAttr(plr, "ShrineShieldCurrent", 0))
-	if shield > 0 and incoming > 0 then
-		local absorbed = math.min(shield, incoming)
-		incoming -= absorbed
-		setNumAttr(plr, "ShrineShieldCurrent", shield - absorbed)
-	end
-
-	if incoming > 0 then
-		hum:TakeDamage(incoming)
-	end
-	return incoming
-end
-
 Players.PlayerAdded:Connect(function(plr)
 	ensurePlayerDefaults(plr)
 	plr.CharacterAdded:Connect(function()

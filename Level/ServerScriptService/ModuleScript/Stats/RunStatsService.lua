@@ -5,6 +5,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local sharedModules = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:WaitForChild("ModuleScripts")
 local StatsConfig = require(sharedModules:WaitForChild("Stats"):WaitForChild("StatsConfig"))
+local DamageService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("DamageService"))
 local NpcService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("NpcService"))
 local RunDefenseState = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("Stats"):WaitForChild("RunDefenseState"))
 
@@ -41,6 +42,19 @@ end
 local function getHumanoid(player)
 	local character = player and player.Character
 	return character and character:FindFirstChildOfClass("Humanoid") or nil
+end
+
+local function getSourceModel(source)
+	if typeof(source) == "Instance" then
+		return source
+	end
+	if typeof(source) == "table" then
+		local model = source.Model or source.model or source.SourceModel or source.sourceModel
+		if typeof(model) == "Instance" then
+			return model
+		end
+	end
+	return nil
 end
 
 local function getBaseWalkSpeed(player)
@@ -175,8 +189,7 @@ local function rebuildStats(player, options)
 	return nextStats, changedStats
 end
 
-local function consumeAngelDebt(player)
-	local sourceId, effectData = RunDefenseState.ConsumeLethalPrevention(player)
+local function handleLethalPrevention(player, sourceId, effectData)
 	if not sourceId or not effectData then
 		return false
 	end
@@ -358,61 +371,22 @@ function RunStatsService.HealPlayer(player, amount)
 end
 
 function RunStatsService.ApplyDamageToPlayer(player, amount, source)
-	if not player or not player.Parent then
-		return 0
-	end
+	return DamageService.Apply(player, amount, {
+		source = source,
+		sourceModel = getSourceModel(source),
+	})
+end
 
-	local humanoid = getHumanoid(player)
-	if not humanoid or humanoid.Health <= 0 then
-		return 0
-	end
-
-	local incoming = math.max(0, tonumber(amount) or 0)
-	if incoming <= 0 then
-		return 0
-	end
-
-	ensureState(player)
-	local evasionChance = math.max(0, RunStatsService.GetStat(player, "Evasion"))
-	if evasionChance > 0 and math.random() < evasionChance then
-		print(string.format("[RunStatsService] %s evaded incoming damage", player.Name))
-		return 0
-	end
-
-	local armor = math.clamp(RunStatsService.GetStat(player, "Armor"), 0, 0.80)
-	incoming *= (1 - armor)
-
-	local legacyShield = RunDefenseState.IsBlockShieldGain(player) == true and 0 or math.max(0, getLegacyNumberAttr(player, "ShrineShieldCurrent", 0))
-	if legacyShield > 0 and incoming > 0 then
-		local absorbed = math.min(legacyShield, incoming)
-		legacyShield -= absorbed
-		incoming -= absorbed
-		player:SetAttribute("ShrineShieldCurrent", legacyShield)
-	end
-
-	incoming = RunDefenseState.AbsorbRunDefense(player, incoming)
-
-	if incoming > 0 then
-		local lethal = incoming >= humanoid.Health
-		if lethal and consumeAngelDebt(player) then
-			syncDynamicAttributes(player)
-			return amount
-		end
-		humanoid:TakeDamage(incoming)
-	end
-
-	local thorns = math.max(0, RunStatsService.GetStat(player, "Thorns"))
-	local sourceModel = typeof(source) == "Instance" and source or (typeof(source) == "table" and source.Model)
-	if thorns > 0 and sourceModel and sourceModel:IsA("Model") and NpcService.IsAlive(sourceModel) then
+-- Temporary bridge until all damage callers migrate from the global shim to DamageService.
+DamageService.SetLethalPreventionCallback(handleLethalPrevention)
+DamageService.SetThornsCallback(function(player, thorns, sourceModel)
+	if sourceModel and sourceModel:IsA("Model") and NpcService.IsAlive(sourceModel) then
 		NpcService.ApplyDamage(sourceModel, thorns, {
 			player = player,
 			showFloating = false,
 		})
 	end
-
-	syncDynamicAttributes(player)
-	return incoming
-end
+end)
 
 local function refreshAllLivingPlayers()
 	for _, player in ipairs(Players:GetPlayers()) do
@@ -474,10 +448,6 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 end)
-
-_G.ApplyDamageToPlayer = function(player, amount, source)
-	return RunStatsService.ApplyDamageToPlayer(player, amount, source)
-end
 
 _G.GetRunStat = function(player, statName)
 	return RunStatsService.GetStat(player, statName)

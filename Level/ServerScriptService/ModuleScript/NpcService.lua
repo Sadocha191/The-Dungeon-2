@@ -9,6 +9,10 @@ local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:WaitForChild("ModuleScript")
 local NpcShared = require(moduleFolder:WaitForChild("NpcShared"))
 local serverModuleFolder = ServerScriptService:FindFirstChild("ModuleScript") or ServerScriptService:FindFirstChild("ModuleScripts")
+assert(serverModuleFolder, "[NpcService] Server ModuleScript folder is required")
+local damageServiceModule = serverModuleFolder:FindFirstChild("DamageService")
+assert(damageServiceModule and damageServiceModule:IsA("ModuleScript"), "[NpcService] DamageService ModuleScript is required for player damage")
+local DamageService = require(damageServiceModule)
 local MissionProgress = nil
 if serverModuleFolder then
 	pcall(function()
@@ -796,16 +800,12 @@ local function applyPlayerDamage(player: Player, amount: number, sourceModel: Mo
 		return
 	end
 
-	if _G.ApplyDamageToPlayer then
-		_G.ApplyDamageToPlayer(player, amount, sourceModel)
-		return
-	end
-
-	local char = player.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if hum and hum.Health > 0 then
-		hum:TakeDamage(amount)
-	end
+	DamageService.Apply(player, amount, {
+		source = sourceModel,
+		sourceType = "npc",
+		damageType = "contact",
+		attacker = sourceModel,
+	})
 end
 
 local function getNpcBooleanAttribute(model: Model, attributeName: string, fallback: boolean): boolean

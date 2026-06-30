@@ -15,6 +15,8 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-06-30** — Poziom NpcService DamageService contact damage migration
+- **2026-06-30** — Poziom DamageService player damage pipeline
 - **2026-06-29** — Poziom RunDefenseState defensive state extraction
 - **2026-06-29** — Poziom DebugStressTools Studio-only guard
 - **2026-06-28** — Studio-to-repo chest, upgrade, inventory, and Slime sync

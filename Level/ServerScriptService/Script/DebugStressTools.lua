@@ -37,27 +37,6 @@ ensureValue("NumberValue", "SpawnIntervalScale", 0.55)
 ensureValue("NumberValue", "MaxAliveScale", 2.6)
 ensureValue("BoolValue", "PerfHudEnabled", true)
 
-local wrappedDamage = false
-local originalApplyDamage = nil
-
-local function installDamageWrapper()
-	if wrappedDamage then
-		return
-	end
-	local base = _G.ApplyDamageToPlayer
-	if type(base) ~= "function" then
-		return
-	end
-	originalApplyDamage = base
-	_G.ApplyDamageToPlayer = function(plr, amount)
-		if godModeEnabled.Value == true then
-			return 0
-		end
-		return originalApplyDamage(plr, amount)
-	end
-	wrappedDamage = true
-end
-
 local function syncHumanoidState(humanoid: Humanoid)
 	pcall(function()
 		humanoid:SetStateEnabled(Enum.HumanoidStateType.Dead, godModeEnabled.Value ~= true)
@@ -89,7 +68,6 @@ for _, player in ipairs(Players:GetPlayers()) do
 end
 
 RunService.Heartbeat:Connect(function()
-	installDamageWrapper()
 	for _, player in ipairs(Players:GetPlayers()) do
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
