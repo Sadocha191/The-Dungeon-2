@@ -10,11 +10,13 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Archiwa
 
+- [`2026-07`](docs/changelog/CHANGELOG_AI_2026-07.md)
 - [`2026-06`](docs/changelog/CHANGELOG_AI_2026-06.md)
 - [`2026-05`](docs/changelog/CHANGELOG_AI_2026-05.md)
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-07-01** — Poziom DamageService global shim removal
 - **2026-06-30** — Poziom WaveController DamageService ability damage migration
 - **2026-06-30** — Poziom NpcService DamageService contact damage migration
 - **2026-06-30** — Poziom DamageService player damage pipeline
