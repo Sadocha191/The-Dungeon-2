@@ -61,6 +61,13 @@ end)
 
 local ServerScriptService = game:GetService("ServerScriptService")
 
+local DamageService = (function()
+	local moduleFolder = ServerScriptService:FindFirstChild("ModuleScript")
+	assert(moduleFolder and moduleFolder:IsA("Folder"), "[WaveController] ServerScriptService.ModuleScript folder is required")
+	local damageServiceModule = moduleFolder:FindFirstChild("DamageService")
+	assert(damageServiceModule and damageServiceModule:IsA("ModuleScript"), "[WaveController] DamageService ModuleScript is required for player damage")
+	return require(damageServiceModule)
+end)()
 local NpcService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("NpcService"))
 local PlayerData = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerData"))
 local PickupToastService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PickupToastService"))
@@ -1103,19 +1110,23 @@ local function pickNearestCombatPlayer(fromPos: Vector3)
 	return bestInfo, bestDist
 end
 
-local function applyAbilityDamageToPlayer(player: Player, amount: number)
+local function applyAbilityDamageToPlayer(player: Player, amount: number, context: {[string]: any}?)
 	amount = math.max(1, math.floor(tonumber(amount) or 0))
 	if amount <= 0 then
 		return
 	end
-	if _G.ApplyDamageToPlayer then
-		_G.ApplyDamageToPlayer(player, amount)
-		return
+
+	local damageContext = nil
+	if typeof(context) == "table" then
+		damageContext = {
+			sourceType = context.sourceType,
+		}
+		if context.abilityId ~= nil then
+			damageContext.abilityId = context.abilityId
+		end
 	end
-	local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-	if hum and hum.Health > 0 then
-		hum:TakeDamage(amount)
-	end
+
+	DamageService.Apply(player, amount, damageContext)
 end
 
 local function makeTelegraphPart(name: string, color: Color3, transparency: number)
@@ -1173,25 +1184,25 @@ local function burstMarker(pos: Vector3, color: Color3?, scale: number?, duratio
 	Debris:AddItem(burst, (duration or 0.35) + 0.1)
 end
 
-local function damagePlayersInRadius(center: Vector3, radius: number, damage: number)
+local function damagePlayersInRadius(center: Vector3, radius: number, damage: number, context: {[string]: any}?)
 	for _, info in ipairs(getAliveCombatPlayers()) do
 		if (info.hrp.Position - center).Magnitude <= radius then
-			applyAbilityDamageToPlayer(info.player, damage)
+			applyAbilityDamageToPlayer(info.player, damage, context)
 		end
 	end
 end
 
-local function damagePlayersAlongLine(startPos: Vector3, endPos: Vector3, width: number, damage: number)
+local function damagePlayersAlongLine(startPos: Vector3, endPos: Vector3, width: number, damage: number, context: {[string]: any}?)
 	for _, info in ipairs(getAliveCombatPlayers()) do
 		if (info.hrp.Position - startPos).Magnitude <= ((endPos - startPos).Magnitude + width + 2)
 			and distancePointToSegment(info.hrp.Position, startPos, endPos) <= width
 		then
-			applyAbilityDamageToPlayer(info.player, damage)
+			applyAbilityDamageToPlayer(info.player, damage, context)
 		end
 	end
 end
 
-local function damagePlayersInCone(origin: Vector3, forward: Vector3, range: number, halfAngleDeg: number, damage: number)
+local function damagePlayersInCone(origin: Vector3, forward: Vector3, range: number, halfAngleDeg: number, damage: number, context: {[string]: any}?)
 	local flatForward = flatVector(forward)
 	if flatForward.Magnitude <= 1e-4 then
 		return
@@ -1202,13 +1213,13 @@ local function damagePlayersInCone(origin: Vector3, forward: Vector3, range: num
 		local toPlayer = flatVector(info.hrp.Position - origin)
 		if toPlayer.Magnitude <= range and toPlayer.Magnitude > 1e-4 then
 			if flatForward:Dot(toPlayer.Unit) >= dotMin then
-				applyAbilityDamageToPlayer(info.player, damage)
+				applyAbilityDamageToPlayer(info.player, damage, context)
 			end
 		end
 	end
 end
 
-local function createHazardZone(center: Vector3, radius: number, duration: number, tickRate: number, damage: number, color: Color3?)
+local function createHazardZone(center: Vector3, radius: number, duration: number, tickRate: number, damage: number, color: Color3?, context: {[string]: any}?)
 	local zone = telegraphCircle(center, radius, duration, color)
 	zone.Transparency = 0.48
 	task.spawn(function()
@@ -1220,7 +1231,7 @@ local function createHazardZone(center: Vector3, radius: number, duration: numbe
 			if PauseState.Value then
 				task.wait(0.1)
 			else
-				damagePlayersInRadius(center, radius, damage)
+				damagePlayersInRadius(center, radius, damage, context)
 				local step = math.min(math.max(0.05, tonumber(tickRate) or 0.5), remaining)
 				task.wait(step)
 				remaining -= step
@@ -1273,7 +1284,7 @@ local function castTargetImpact(controller, targetInfo, now, cfg)
 	task.delay(cfg.telegraph, function()
 		if controller.model.Parent and NpcService.IsAlive(controller.model) then
 			burstMarker(targetPos, cfg.color, cfg.radius * 0.45, 0.4)
-			damagePlayersInRadius(targetPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier))
+			damagePlayersInRadius(targetPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier), { sourceType = "ability", abilityId = cfg.id })
 		end
 	end)
 	return true
@@ -1292,7 +1303,7 @@ local function castGroundSlam(controller, targetInfo, now, cfg)
 		if controller.model.Parent and NpcService.IsAlive(controller.model) then
 			local currentPos = NpcService.GetPosition(controller.model) or center
 			burstMarker(currentPos, cfg.color, cfg.radius * 0.55, 0.45)
-			damagePlayersInRadius(currentPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier))
+			damagePlayersInRadius(currentPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier), { sourceType = "ability", abilityId = cfg.id })
 		end
 	end)
 	return true
@@ -1319,7 +1330,7 @@ local function castDash(controller, targetInfo, now, cfg)
 		if controller.model.Parent and NpcService.IsAlive(controller.model) then
 			NpcService.SetPosition(controller.model, endPos, dir)
 			burstMarker(endPos, cfg.color, cfg.width * 0.8, 0.35)
-			damagePlayersAlongLine(startPos, endPos, cfg.width, math.floor(controller.baseDamage * cfg.damageMultiplier))
+			damagePlayersAlongLine(startPos, endPos, cfg.width, math.floor(controller.baseDamage * cfg.damageMultiplier), { sourceType = "ability", abilityId = cfg.id })
 		end
 	end)
 	return true
@@ -1343,7 +1354,7 @@ local function castLineStrike(controller, targetInfo, now, cfg)
 	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
 	task.delay(cfg.telegraph, function()
 		if controller.model.Parent and NpcService.IsAlive(controller.model) then
-			damagePlayersAlongLine(startPos, endPos, cfg.width, math.floor(controller.baseDamage * cfg.damageMultiplier))
+			damagePlayersAlongLine(startPos, endPos, cfg.width, math.floor(controller.baseDamage * cfg.damageMultiplier), { sourceType = "ability", abilityId = cfg.id })
 			burstMarker(endPos, cfg.color, cfg.width * 0.7, 0.35)
 		end
 	end)
@@ -1365,7 +1376,7 @@ local function castCone(controller, targetInfo, now, cfg)
 	setAbilityCooldown(controller, cfg.id, now, cfg.cooldown, cfg.globalCooldown)
 	task.delay(cfg.telegraph, function()
 		if controller.model.Parent and NpcService.IsAlive(controller.model) then
-			damagePlayersInCone(startPos, dir.Unit, cfg.range, cfg.angle, math.floor(controller.baseDamage * cfg.damageMultiplier))
+			damagePlayersInCone(startPos, dir.Unit, cfg.range, cfg.angle, math.floor(controller.baseDamage * cfg.damageMultiplier), { sourceType = "ability", abilityId = cfg.id })
 			burstMarker(startPos + (dir.Unit * math.min(cfg.range * 0.55, 7)), cfg.color, cfg.range * 0.20, 0.32)
 		end
 	end)
@@ -1387,7 +1398,7 @@ local function castTripleCombo(controller, targetInfo, now, cfg)
 	for _, hitDelay in ipairs(cfg.hitDelays) do
 			scheduleGameplayDelay(hitDelay, function()
 			if controller.model.Parent and NpcService.IsAlive(controller.model) then
-				damagePlayersInCone(startPos, dir.Unit, cfg.range, cfg.angle, math.floor(controller.baseDamage * cfg.damageMultiplier))
+				damagePlayersInCone(startPos, dir.Unit, cfg.range, cfg.angle, math.floor(controller.baseDamage * cfg.damageMultiplier), { sourceType = "ability", abilityId = cfg.id })
 				burstMarker(startPos + (dir.Unit * math.min(cfg.range * 0.5, 6)), cfg.color, cfg.range * 0.16, 0.20)
 			end
 		end)
@@ -1419,7 +1430,7 @@ local function castVolley(controller, targetInfo, now, cfg)
 		task.delay(cfg.telegraph, function()
 			if controller.model.Parent and NpcService.IsAlive(controller.model) then
 				burstMarker(impactPos, cfg.color, cfg.radius * 0.45, 0.35)
-				damagePlayersInRadius(impactPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier))
+				damagePlayersInRadius(impactPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier), { sourceType = "ability", abilityId = cfg.id })
 			end
 		end)
 	end
@@ -1443,7 +1454,7 @@ local function castTeleportStep(controller, targetInfo, now, cfg)
 		if controller.model.Parent and NpcService.IsAlive(controller.model) then
 			NpcService.SetPosition(controller.model, endPos, flatVector(targetPos - endPos))
 			burstMarker(endPos, cfg.color, cfg.radius * 0.55, 0.35)
-			damagePlayersInRadius(endPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier))
+			damagePlayersInRadius(endPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier), { sourceType = "ability", abilityId = cfg.id })
 		end
 	end)
 	return true
@@ -1465,7 +1476,8 @@ local function castHazard(controller, targetInfo, now, cfg)
 				cfg.duration,
 				cfg.tickRate,
 				math.floor(controller.baseDamage * cfg.damageMultiplier),
-				cfg.color
+				cfg.color,
+				{ sourceType = "hazard", abilityId = cfg.id }
 			)
 		end
 	end)
@@ -1506,7 +1518,7 @@ local function castShockwaveSequence(controller, targetInfo, now, cfg)
 			scheduleGameplayDelay(pulse.delay, function()
 			if controller.model.Parent and NpcService.IsAlive(controller.model) then
 				burstMarker(center, cfg.color, pulse.radius * 0.35, 0.35)
-				damagePlayersInRadius(center, pulse.radius, math.floor(controller.baseDamage * pulse.damageMultiplier))
+				damagePlayersInRadius(center, pulse.radius, math.floor(controller.baseDamage * pulse.damageMultiplier), { sourceType = "ability", abilityId = cfg.id })
 			end
 		end)
 	end
@@ -1526,7 +1538,7 @@ local function castMeteorRain(controller, now, cfg)
 		task.delay(cfg.telegraph, function()
 			if controller.model.Parent and NpcService.IsAlive(controller.model) then
 				burstMarker(impactPos, cfg.color, cfg.radius * 0.55, 0.45)
-				damagePlayersInRadius(impactPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier))
+				damagePlayersInRadius(impactPos, cfg.radius, math.floor(controller.baseDamage * cfg.damageMultiplier), { sourceType = "ability", abilityId = cfg.id })
 			end
 		end)
 	end
@@ -1545,7 +1557,7 @@ local function castArenaPressure(controller, now, cfg)
 		telegraphCircle(center, cfg.radius, cfg.telegraph, cfg.color)
 		task.delay(cfg.telegraph, function()
 			if controller.model.Parent and NpcService.IsAlive(controller.model) then
-				createHazardZone(center, cfg.radius, cfg.duration, cfg.tickRate, math.floor(controller.baseDamage * cfg.damageMultiplier), cfg.color)
+				createHazardZone(center, cfg.radius, cfg.duration, cfg.tickRate, math.floor(controller.baseDamage * cfg.damageMultiplier), cfg.color, { sourceType = "hazard", abilityId = cfg.id })
 			end
 		end)
 	end

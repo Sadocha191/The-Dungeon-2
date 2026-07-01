@@ -2,6 +2,52 @@
 
 Pełne wpisy zmian AI z miesiąca 2026-06. Kolejność zachowuje oryginalny plik.
 
+## 2026-06-30 - Poziom WaveController DamageService ability damage migration
+
+### Scope
+
+- Migrated active `WaveController` ability and hazard player damage from the temporary `_G.ApplyDamageToPlayer` shim to direct `DamageService.Apply`.
+- Removed the local `Humanoid:TakeDamage` fallback from the active ability/hazard player-damage helper.
+- Added an explicit `DamageService` require with readable asserts for the expected module path, avoiding an unbounded `WaitForChild()` chain as the only validation.
+- Preserved existing damage amounts, geometry checks, ability cooldowns, hazard tick rates, telegraph timing, boss/elite behavior, remotes, and public `WaveController` API.
+- Passed only existing context data: `sourceType = "ability"` or `sourceType = "hazard"` plus `abilityId = cfg.id` when present.
+- Did not pass `source`, `attacker`, or NPC models from `WaveController`, so ability/hazard damage does not newly trigger thorns against NPCs.
+- Did not modify the stale duplicate `Level/ServerScriptService/Script/Model.model/WaveController.lua` or the compatibility shim.
+
+### Files updated
+
+- `Level/ServerScriptService/Script/Model/WaveController.lua`
+- `CHANGELOG_AI.md`
+- `docs/changelog/CHANGELOG_AI_2026-06.md`
+
+### Live Studio objects updated
+
+- `Level`: `game.ServerScriptService.Script.Model.WaveController`
+
+### Verification
+
+- Confirmed connected Studio instance and active object `game.ServerScriptService.Script.Model.WaveController`.
+- Synced the active Studio object only; the stale duplicate `Level/ServerScriptService/Script/Model.model/WaveController.lua` was not changed.
+- Confirmed active Studio grep for `_G.ApplyDamageToPlayer` reports only `DamageService.server` and the public `RunStatsService.ApplyDamageToPlayer`, not active `WaveController`.
+- Confirmed active Studio grep for `TakeDamage` reports `DamageService` and unrelated weapon templates, not active `WaveController`.
+- Confirmed active Studio grep shows ability contexts on radius, line, cone, TripleCombo, volley, teleport, shockwave, and meteor call sites, plus hazard contexts for targeted hazards and `ArenaPressure`.
+- Confirmed repo `WaveController.lua` no longer contains `_G.ApplyDamageToPlayer` or player-damage `Humanoid:TakeDamage` fallback.
+- Confirmed `WaveController` requires `DamageService`, while `DamageService` still requires only `StatsConfig` and `RunDefenseState`; no `WaveController -> DamageService -> WaveController/NpcService/RunStatsService` cycle was introduced.
+- Attempted a Play probe for real ability/hazard damage, `TripleCombo` multi-hit, hazard ticks, armor, evasion, shrine difficulty, shield/overheal consumption, and thorns non-regression.
+- Play probe was blocked in the current Studio session because `_G.ApplyDamageToPlayer` and `WaveController` debug hooks were not set by normal startup even though the relevant scripts were enabled; existing Output showed no `DamageService` load error or fallback use. No fallback writer or direct `Humanoid:TakeDamage` workaround was added.
+- Ran `git diff --check`; it reported no whitespace errors, only LF/CRLF conversion warnings on touched text files.
+- Confirmed no new runtime loops, `_G` writers, callbacks, or schedulers were added.
+
+### Risks
+
+- The runtime ability/hazard behavior still needs a clean Studio Play pass once the current session starts `DamageService.server` and active `WaveController` normally.
+- A missing `DamageService` module now fails active `WaveController` startup explicitly instead of falling back to direct Humanoid damage.
+- The stale duplicate `Model.model/WaveController.lua` still contains the legacy shim/fallback path and remains intentionally untouched until its ownership is confirmed.
+
+### Rollback
+
+- Restore the previous `Level/ServerScriptService/Script/Model/WaveController.lua` source in repo and Studio, then revert this changelog entry.
+
 ## 2026-06-30 - Poziom NpcService DamageService contact damage migration
 
 ### Scope

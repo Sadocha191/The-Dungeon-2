@@ -15,6 +15,7 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-06-30** — Poziom WaveController DamageService ability damage migration
 - **2026-06-30** — Poziom NpcService DamageService contact damage migration
 - **2026-06-30** — Poziom DamageService player damage pipeline
 - **2026-06-29** — Poziom RunDefenseState defensive state extraction
