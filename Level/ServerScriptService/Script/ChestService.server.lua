@@ -7,6 +7,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlayerData = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerData"))
 local PickupToastService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PickupToastService"))
+local RunProgressApi = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunProgressApi"))
 local WorldBounds = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WorldBounds"))
 local ChestItemService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("Items"):WaitForChild("ChestItemService"))
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
@@ -763,11 +764,7 @@ handleOpen = function(chest, plr)
 	local openedForFree = chest.forceFree == true or (math.random() < freeChance)
 
 	if not openedForFree then
-		local canSpend = false
-		if type(_G.TrySpendRunCoins) == "function" then
-			local ok = _G.TrySpendRunCoins(plr, cost)
-			canSpend = (ok == true)
-		end
+		local canSpend = RunProgressApi.TrySpendRunCoins(plr, cost)
 		if not canSpend then
 			WaveStatusEvent:FireClient(plr, {
 				type = "chestFail",

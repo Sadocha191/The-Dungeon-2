@@ -4,6 +4,9 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local RunProgressApi = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunProgressApi"))
 
 local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 if not remotes then
@@ -260,17 +263,11 @@ local function awardDrop(plr: Player, meta)
 
 	meta.awarded = true
 	if meta.type == "xp" then
-		if _G.AwardPlayer then
-			_G.AwardPlayer(plr, meta.amount, 0)
-		end
+		RunProgressApi.AwardPlayer(plr, meta.amount, 0)
 	elseif meta.type == "coins" then
-		if _G.AwardPlayer then
-			_G.AwardPlayer(plr, 0, meta.amount)
-		end
+		RunProgressApi.AwardPlayer(plr, 0, meta.amount)
 	elseif meta.type == "souls" then
-		if _G.AwardSouls then
-			_G.AwardSouls(plr, meta.amount)
-		end
+		RunProgressApi.AwardSouls(plr, meta.amount)
 	end
 
 	firePickupIndicator(plr, tostring(meta.type), meta.amount)

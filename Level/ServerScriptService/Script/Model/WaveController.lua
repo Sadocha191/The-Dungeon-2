@@ -582,12 +582,8 @@ local function getSpawnStressConfig(): (number, number, number)
 end
 
 local function getAverageRunLevel(): number
-	if type(_G.GetAverageRunLevel) ~= "function" then
-		return 0
-	end
-
 	local ok, value = pcall(function()
-		return _G.GetAverageRunLevel()
+		return require(ServerScriptService.ModuleScript.RunProgressApi).GetAverageRunLevel()
 	end)
 	if not ok then
 		return 0
@@ -802,12 +798,12 @@ end
 local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, isBoss: boolean, _ctx)
 	local pos = (_ctx and _ctx.position) or NpcService.GetPosition(mob) or mob:GetPivot().Position
 	local killer = _ctx and _ctx.player
-	local runSeconds = (_G.GetRunSeconds and _G.GetRunSeconds()) or 0
+	local runSeconds = require(ServerScriptService.ModuleScript.RunProgressApi).GetRunSeconds()
 	local minutes, _, levelPressure = getRunPressure(runSeconds)
 
-	if _G.RegisterEnemyKill then
-        pcall(function() _G.RegisterEnemyKill(pos, killer) end)
-    end
+	pcall(function()
+		require(ServerScriptService.ModuleScript.RunProgressApi).RegisterEnemyKill(pos, killer)
+	end)
 
     if MissionProgress and MissionProgress.OnKill and killer and killer.Parent == Players and killer:GetAttribute("RunEnded") ~= true then
         pcall(function() MissionProgress.OnKill(killer, mob) end)
@@ -971,7 +967,7 @@ local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vecto
     mob.Parent = ENEMIES_FOLDER
     mob:PivotTo(cf)
 
-    local hpMult, dmgMult, speedMult, cooldownMult = timeScaleMult(_G.GetRunSeconds and _G.GetRunSeconds() or 0)
+    local hpMult, dmgMult, speedMult, cooldownMult = timeScaleMult(require(ServerScriptService.ModuleScript.RunProgressApi).GetRunSeconds())
     local hp = math.floor(cfg.hp * ENEMY_HP_MULTIPLIER * hpMult)
     local dmg = math.floor(cfg.dmg * dmgMult)
     local speed = cfg.speed * speedMult
@@ -1848,49 +1844,29 @@ elapsed = function()
     return now - runStart - pausedAccum
 end
 
--- Expose run seconds for other scripts if needed
-_G.GetRunSeconds = function()
+require(ServerScriptService.ModuleScript.RunProgressApi).SetRunSecondsProvider(function()
     return math.floor(elapsed())
-end
+end)
 
 
 -- Counters for InfoUI (must be defined before wrappers below)
 local runKills = 0
 local runCoins = 0
--- Track kills + coins for InfoUI.
--- Coins are counted when the player actually picks them up (AwardPlayer).
-if not _G.__InfoUI_Wrapped then
-	_G.__InfoUI_Wrapped = true
-
-	-- Kills: WaveController already calls _G.RegisterEnemyKill on enemy death.
-	local prevKill = _G.RegisterEnemyKill
-	_G.RegisterEnemyKill = function(pos, killer)
+require(ServerScriptService.ModuleScript.RunProgressApi).Wrap("RegisterEnemyKill", function(prevKill)
+	return function(pos, killer)
 		runKills += 1
-		if prevKill then
-			pcall(function()
-				prevKill(pos, killer)
-			end)
-		end
+		return prevKill(pos, killer)
 	end
+end)
 
-	-- Coins: wrap AwardPlayer *when it exists* (ProgressService defines it).
-	task.spawn(function()
-		local waited = 0
-		while type(_G.AwardPlayer) ~= "function" and waited < 10 do
-			waited += 0.1
-			task.wait(0.1)
-		end
-		if type(_G.AwardPlayer) ~= "function" then return end
-
-		local prevAward = _G.AwardPlayer
-		_G.AwardPlayer = function(plr: Player, xp: number, coins: number)
-			xp = math.max(0, math.floor(tonumber(xp) or 0))
-			coins = math.max(0, math.floor(tonumber(coins) or 0))
-			if coins > 0 then runCoins += coins end
-			return prevAward(plr, xp, coins)
-		end
-	end)
-end
+require(ServerScriptService.ModuleScript.RunProgressApi).Wrap("AwardPlayer", function(prevAward)
+	return function(plr: Player, xp: number, coins: number)
+		xp = math.max(0, math.floor(tonumber(xp) or 0))
+		coins = math.max(0, math.floor(tonumber(coins) or 0))
+		if coins > 0 then runCoins += coins end
+		return prevAward(plr, xp, coins)
+	end
+end)
 
 local SWARM_EVENT_TIMES = { 240, 720 } -- 4:00, 12:00
 local SWARM_DURATION = 60
@@ -2077,11 +2053,9 @@ local function endRun(reason: string)
 
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr.Parent and plr:GetAttribute("RunEnded") ~= true then
-			if _G.EndRunForPlayer then
-				pcall(function() _G.EndRunForPlayer(plr, reason) end)
-			elseif _G.EndRun then
-				pcall(function() _G.EndRun(reason) end)
-			end
+			pcall(function()
+				require(ServerScriptService.ModuleScript.RunProgressApi).EndRunForPlayer(plr, reason)
+			end)
 		end
 	end
 end
@@ -2241,11 +2215,9 @@ local function ensurePortal()
 		bossModel = registered
 		registerBossController(registered, bossStats.dmg)
 		nextBossReinforcementAt = math.huge
-		if type(_G.NotifyBossSpawn) == "function" then
-			pcall(function()
-				_G.NotifyBossSpawn()
-			end)
-		end
+		pcall(function()
+			require(ServerScriptService.ModuleScript.RunProgressApi).NotifyBossSpawn()
+		end)
 		broadcast({ type = "portalBossSpawn" })
 		return true
 	end

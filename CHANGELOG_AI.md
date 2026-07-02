@@ -16,6 +16,9 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-07-02** — Poziom ProgressService party XP declaration-order fix
+- **2026-07-01** — Poziom ProgressService RunProgressApi migration
+- **2026-07-01** — God Script refactor audit and migration plan
 - **2026-07-01** — Poziom DamageService global shim removal
 - **2026-06-30** — Poziom WaveController DamageService ability damage migration
 - **2026-06-30** — Poziom NpcService DamageService contact damage migration

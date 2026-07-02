@@ -45,8 +45,12 @@ end
 
 local PlayerData = safeRequire(findModule("PlayerData"))
 local MissionProgress = safeRequire(findModule("MissionProgress"))
+local RunProgressApi = safeRequire(findModule("RunProgressApi"))
 if not PlayerData then
 	error("[ProgressService] Missing PlayerData module")
+end
+if not RunProgressApi then
+	error("[ProgressService] Missing RunProgressApi module")
 end
 
 -- Spell defs
@@ -116,6 +120,10 @@ local function isMulti(plr: Player): boolean
 	v = string.lower(v)
 	return v == "multi"
 end
+
+local rollNextRunXp
+local getRun
+local syncHud
 
 local function getPartyState(partyId: string)
 	local p = party[partyId]
@@ -262,12 +270,12 @@ local function startPartyLevelUp(partyId: string)
 	end
 end
 
-local function rollNextRunXp(level: number): number
+rollNextRunXp = function(level: number): number
 	level = math.max(0, math.floor(tonumber(level) or 0))
 	return 90 + (level * 48) + math.floor((level * level) * 3)
 end
 
-local function getRun(plr: Player)
+getRun = function(plr: Player)
 	local uid = plr.UserId
 	local r = run[uid]
 	if not r then
@@ -463,7 +471,7 @@ runSeconds = function(plr: Player): number
 	return math.floor(runSecondsPrecise(plr))
 end
 
-local function syncHud(plr: Player)
+syncHud = function(plr: Player)
 	local r = getRun(plr)
 	local d = PlayerData.Get(plr)
 	PlayerProgressEvent:FireClient(plr, {
@@ -1210,8 +1218,7 @@ local function addRunCoins(plr: Player, amount: number)
 	missionSetMax(plr, "COINS_RUN_MAX", r.coinsEarned)
 end
 
--- Public API for orbs (DropService calls _G.AwardPlayer)
-function _G.AwardPlayer(plr: Player, xp: number, coins: number)
+local function awardPlayer(plr: Player, xp: number, coins: number)
 	if not plr or not plr.Parent then return end
 
 	xp = math.max(0, math.floor(tonumber(xp) or 0))
@@ -1287,13 +1294,13 @@ function _G.AwardPlayer(plr: Player, xp: number, coins: number)
 end
 
 
-function _G.GetRunCoins(plr: Player): number
+local function getRunCoins(plr: Player): number
 	if not plr or not plr.Parent then return 0 end
 	local r = getRun(plr)
 	return math.max(0, math.floor(tonumber(r.runSilver) or 0))
 end
 
-function _G.TrySpendRunCoins(plr: Player, coins: number): boolean
+local function trySpendRunCoins(plr: Player, coins: number): boolean
 	if not plr or not plr.Parent then return false end
 	coins = math.max(0, math.floor(tonumber(coins) or 0))
 	if coins <= 0 then return true end
@@ -1309,8 +1316,7 @@ function _G.TrySpendRunCoins(plr: Player, coins: number): boolean
 	syncHud(plr)
 	return true
 end
--- Public API for soul orbs (DropService calls _G.AwardSouls)
-function _G.AwardSouls(plr: Player, souls: number)
+local function awardSouls(plr: Player, souls: number)
 	if not plr or not plr.Parent then return end
 	souls = math.max(0, math.floor(tonumber(souls) or 0))
 	if souls <= 0 then return end
@@ -1323,7 +1329,7 @@ function _G.AwardSouls(plr: Player, souls: number)
 	syncHud(plr)
 end
 
-function _G.RegisterEnemyKill(_pos: Vector3?, killer: Player?)
+local function registerEnemyKill(_pos: Vector3?, killer: Player?)
 	if not killer or killer.Parent ~= Players or killer:GetAttribute("RunEnded") == true then
 		return
 	end
@@ -1374,10 +1380,10 @@ function _G.RegisterEnemyKill(_pos: Vector3?, killer: Player?)
 	syncHud(killer)
 end
 
-function _G.NotifyBossSpawn()
+local function notifyBossSpawn()
 	local spawnSeconds = nil
-	if type(_G.GetRunSeconds) == "function" then
-		spawnSeconds = tonumber(_G.GetRunSeconds())
+	if RunProgressApi.IsConfigured("GetRunSeconds") then
+		spawnSeconds = tonumber(RunProgressApi.GetRunSeconds())
 	end
 
 	for _, plr in ipairs(Players:GetPlayers()) do
@@ -1392,7 +1398,7 @@ function _G.NotifyBossSpawn()
 	end
 end
 
-function _G.GetAverageRunLevel(): number
+local function getAverageRunLevel(): number
 	local total = 0
 	local count = 0
 
@@ -1575,7 +1581,16 @@ local function endRunForPlayer(plr: Player, reason: string)
 	end
 end
 
-_G.EndRunForPlayer = endRunForPlayer
+RunProgressApi.Configure({
+	AwardPlayer = awardPlayer,
+	GetRunCoins = getRunCoins,
+	TrySpendRunCoins = trySpendRunCoins,
+	AwardSouls = awardSouls,
+	RegisterEnemyKill = registerEnemyKill,
+	NotifyBossSpawn = notifyBossSpawn,
+	GetAverageRunLevel = getAverageRunLevel,
+	EndRunForPlayer = endRunForPlayer,
+})
 
 Players.PlayerAdded:Connect(function(plr: Player)
 	run[plr.UserId] = nil

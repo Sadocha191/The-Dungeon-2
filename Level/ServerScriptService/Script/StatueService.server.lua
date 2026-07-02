@@ -5,6 +5,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local modules = ServerScriptService:WaitForChild("ModuleScript")
 local NpcService = require(modules:WaitForChild("NpcService"))
+local RunProgressApi = require(modules:WaitForChild("RunProgressApi"))
 local WorldBounds = require(modules:WaitForChild("WorldBounds"))
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:FindFirstChild("ModuleScript")
@@ -297,9 +298,7 @@ local function spawnChallengeBurst(monument, plr)
 	end
 
 	local runSeconds = 0
-	if type(_G.GetRunSeconds) == "function" then
-		runSeconds = _G.GetRunSeconds()
-	end
+	runSeconds = RunProgressApi.GetRunSeconds()
 
 	spawnEnemyBurst(EXTRA_SPAWN_COUNT, anchorPos, runSeconds, "HeroMonument")
 end
@@ -558,9 +557,7 @@ local function activateBattleStatue(statue, plr: Player)
 	end
 
 	local runSeconds = 0
-	if type(_G.GetRunSeconds) == "function" then
-		runSeconds = _G.GetRunSeconds()
-	end
+	runSeconds = RunProgressApi.GetRunSeconds()
 
 	local spawned = spawnEnemyBurst(BATTLE_SPAWN_COUNT, statue.core.Position, runSeconds, "BattleStatue")
 	statue.remaining = #spawned

@@ -5,6 +5,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local sharedModules = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:WaitForChild("ModuleScripts")
 local StatsConfig = require(sharedModules:WaitForChild("Stats"):WaitForChild("StatsConfig"))
 local ChestItemConfig = require(sharedModules:WaitForChild("Items"):WaitForChild("ChestItemConfig"))
+local RunProgressApi = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunProgressApi"))
 local RunStatsService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("Stats"):WaitForChild("RunStatsService"))
 local PlayerData = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerData"))
 
@@ -322,22 +323,18 @@ end
 
 local function awardFallback(player, rewardDefinition)
 	if rewardDefinition.Kind == "XP" then
-		if type(_G.AwardPlayer) == "function" then
-			_G.AwardPlayer(player, rewardDefinition.Amount, 0)
-		end
+		RunProgressApi.AwardPlayer(player, rewardDefinition.Amount, 0)
 	elseif rewardDefinition.Kind == "Gold" then
-		if type(_G.AwardPlayer) == "function" then
-			_G.AwardPlayer(player, 0, rewardDefinition.Amount)
-		end
+		RunProgressApi.AwardPlayer(player, 0, rewardDefinition.Amount)
 	elseif rewardDefinition.Kind == "Silver" then
-		if type(_G.AwardSouls) == "function" then
-			_G.AwardSouls(player, rewardDefinition.Amount)
-		else
-			local data = PlayerData.Get(player)
-			data.silver = (tonumber(data.silver) or 0) + rewardDefinition.Amount
-			if PlayerData.MarkDirty then
-				PlayerData.MarkDirty(player)
-			end
+		if RunProgressApi.IsConfigured("AwardSouls") then
+			RunProgressApi.AwardSouls(player, rewardDefinition.Amount)
+			return
+		end
+		local data = PlayerData.Get(player)
+		data.silver = (tonumber(data.silver) or 0) + rewardDefinition.Amount
+		if PlayerData.MarkDirty then
+			PlayerData.MarkDirty(player)
 		end
 	end
 end
@@ -356,20 +353,12 @@ end
 
 local function releasePause(pauseSource)
 	print(string.format("[ChestItemService] Resuming run (%s)", tostring(pauseSource)))
-	if type(_G.SetGlobalRunPause) == "function" then
-		_G.SetGlobalRunPause(pauseSource, false)
-	else
-		PauseState.Value = false
-	end
+	PauseState.Value = false
 end
 
 local function acquirePause(pauseSource)
 	print(string.format("[ChestItemService] Pausing run (%s)", tostring(pauseSource)))
-	if type(_G.SetGlobalRunPause) == "function" then
-		_G.SetGlobalRunPause(pauseSource, true)
-	else
-		PauseState.Value = true
-	end
+	PauseState.Value = true
 end
 
 local function clearPendingReward(player)

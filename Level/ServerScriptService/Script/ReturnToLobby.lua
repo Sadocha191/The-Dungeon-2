@@ -2,9 +2,11 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 local TeleportService = game:GetService("TeleportService")
 
 local LOBBY_PLACE_ID = 88516424167732
+local RunProgressApi = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunProgressApi"))
 
 local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 if not remotes then
@@ -54,9 +56,8 @@ remote.OnServerEvent:Connect(function(player)
 	end
 
 	if player:GetAttribute("RunEnded") ~= true then
-		local endRunForPlayer = _G.EndRunForPlayer
-		if type(endRunForPlayer) == "function" then
-			local ok, err = pcall(endRunForPlayer, player, "Surrendered")
+		if RunProgressApi.IsConfigured("EndRunForPlayer") then
+			local ok, err = pcall(RunProgressApi.EndRunForPlayer, player, "Surrendered")
 			if ok then
 				return
 			end

@@ -7,6 +7,10 @@
 --   - if all party members are down/dead during that window => end run for everyone
 
 local Players = game:GetService("Players")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local RunProgressApi = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunProgressApi"))
+
 Players.RespawnTime = 9999
 
 local REVIVE_DELAY = 30
@@ -52,11 +56,9 @@ local function endForAll(plr: Player, reason: string)
 	local group = partyPlayers(plr)
 	for _, p in ipairs(group) do
 		if p.Parent and p:GetAttribute("RunEnded") ~= true then
-			if _G.EndRunForPlayer then
-				pcall(function() _G.EndRunForPlayer(p, reason) end)
-			elseif _G.EndRun then
-				pcall(function() _G.EndRun(reason) end)
-			end
+			pcall(function()
+				RunProgressApi.EndRunForPlayer(p, reason)
+			end)
 		end
 	end
 end
@@ -77,11 +79,9 @@ Players.PlayerAdded:Connect(function(plr: Player)
 			local mode = plr:GetAttribute("RunMode")
 			if mode ~= "Multi" then
 				-- single = immediate game over
-				if _G.EndRunForPlayer then
-					pcall(function() _G.EndRunForPlayer(plr, "Defeated") end)
-				elseif _G.EndRun then
-					pcall(function() _G.EndRun("Defeated") end)
-				end
+				pcall(function()
+					RunProgressApi.EndRunForPlayer(plr, "Defeated")
+				end)
 				return
 			end
 

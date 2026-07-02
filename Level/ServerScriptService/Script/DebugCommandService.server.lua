@@ -1,10 +1,13 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 if not RunService:IsStudio() then
 	return
 end
+
+local RunProgressApi = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunProgressApi"))
 
 local DEBUG_PREFIXES = {
 	";debug",
@@ -371,14 +374,14 @@ local function handleCommand(player: Player, message: string)
 			log(player, ("Use: ;debug %s <amount>"):format(command))
 			return
 		end
-		if type(_G.AwardPlayer) ~= "function" then
+		if not RunProgressApi.IsConfigured("AwardPlayer") then
 			log(player, "Award hook is not ready yet.")
 			return
 		end
 		if command == "xp" then
-			_G.AwardPlayer(player, amount, 0)
+			RunProgressApi.AwardPlayer(player, amount, 0)
 		else
-			_G.AwardPlayer(player, 0, amount)
+			RunProgressApi.AwardPlayer(player, 0, amount)
 		end
 		log(player, ("Granted %d %s."):format(amount, command))
 		return
