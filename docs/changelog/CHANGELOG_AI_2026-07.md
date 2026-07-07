@@ -1,5 +1,175 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Poziom NpcService stage 3B registry lifecycle extraction and validation
+
+### Summary
+
+- Completed Stage 3B for active `game.ServerScriptService.ModuleScript.NpcService`.
+- Added `NpcRegistry` as a neutral ModuleScript that owns NPC ids, model/id lookup maps, tombstones, registration/removal helpers, and reset/count helpers.
+- Kept `NpcService` as the only public facade and central scheduler owner.
+- Preserved all public `NpcService` function names, arguments, and return behavior.
+- Did not move movement, targeting, melee, status effects, death callbacks, despawn side effects, damage, rewards, remotes, or balancing.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/NpcRegistry.lua`
+- Updated `Level/ServerScriptService/ModuleScript/NpcService.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Created live `game.ServerScriptService.ModuleScript.NpcRegistry`.
+- Synchronized active `game.ServerScriptService.ModuleScript.NpcService` to require `NpcRegistry` and use it for registry iteration, lookup, add/remove, and tombstones.
+- Studio grep after sync showed old `npcById`, `npcByModel`, and `tombstones` storage only inside `NpcRegistry`; active `NpcService` uses `NpcRegistry.Pairs`, `Resolve`, `GetByModel`, `Add`, `Remove`, and tombstone helpers.
+- A temporary Studio-only Stage 3B validation harness was created for Play validation and removed afterward; no test script or marker was left in Studio or repo.
+
+### Architecture
+
+- New graph: `NpcService -> NpcRegistry`, `NpcService -> WorldBounds`, `NpcService -> NpcShared`, `NpcService -> DamageService`, optional `NpcService -> MissionProgress`.
+- `NpcRegistry` has no `require()` calls, no Roblox service fetches, no remotes, no `_G`, no `Heartbeat`, and no event connections.
+- `NpcService` still owns the single `NpcSyncRequest.OnServerEvent` connection and single central `RunService.Heartbeat`.
+- Player damage still uses `DamageService.Apply(player, amount, { source = npcModel, sourceType = "npc", damageType = "contact", attacker = npcModel })`.
+
+### Validation
+
+- Play startup reached normal service-ready logs with no `NpcService` or `NpcRegistry` errors.
+- Natural runtime spawned real Slime models through the active wave/NPC flow; inspected `Workspace.Enemies.Slime` models had `NpcId`, `NpcType`, `MobType`, `Damage`, `AttackRange`, and normal `IsElite=false`/`IsBoss=false` attributes.
+- Character navigation to a real Slime completed, and subsequent Output showed no registry, movement, or damage-path errors.
+- Controlled Studio-only validation covered normal registration, duplicate registration, elite registration, boss-style registration using an existing elite template with boss config, manual `Destroy`, death callback once-only behavior, despawn without death callback, explicit registry reset, and 20 register/remove cycles.
+- Duplicate registration preserved the previous contract: the same model returned the existing id, did not allocate a second id, did not increase registry count, and did not invoke an extra death callback.
+- Death flow through public `NpcService.ApplyDamage` invoked the registered callback exactly once and removed the registry entry once.
+- Despawn flow removed the registry entry without invoking the death callback.
+- `NpcRegistry.Reset()` cleared maps and tombstones but did not reset `nextNpcId`, preserving the previous monotonic id behavior.
+- Studio grep found no Stage 3B probe markers.
+- Studio grep found no player-damage `Humanoid:TakeDamage` fallback in `NpcService`; existing matches are outside this substage and include `DamageService` and legacy weapon templates.
+- Studio grep showed no new `_G` in `NpcService` or `NpcRegistry`.
+- Repo grep confirmed `NpcRegistry` has no `require`, `RunService`, `Heartbeat`, `Connect`, `_G`, or `Humanoid:TakeDamage`.
+
+### Not verified
+
+- Exact native `RBXScriptConnection` counts were not measurable in Studio; callback counters, cleanup state, and static grep confirmed no growth symptoms, no per-NPC connection additions, one central `Heartbeat`, and one `NpcSyncRequest.OnServerEvent`.
+- Manual `Destroy` cleanup removed the registry entry, but the tombstone was not always observable after Heartbeat because the existing batch broadcast can clear tombstones in the same frame.
+- True multiplayer lifecycle under repeated spawn/despawn remains for later Stage 3 passes.
+
+### Risks
+
+- `NpcRegistry.Pairs()` preserves direct table iteration semantics from the previous `pairs(npcById)` loops. This intentionally avoids behavior changes, but Stage 3F may still need measured iteration/cleanup optimization.
+- `NpcRegistry.Reset()` is available for future lifecycle work but is not wired into `NpcService` public API in 3B to avoid adding behavior.
+- The repo diff still includes the Stage 3A parity sync because Stage 3A and 3B share the current uncommitted Stage 3 worktree.
+
+### Rollback
+
+- Revert `Level/ServerScriptService/ModuleScript/NpcService.lua` to inline `nextNpcId`, `npcById`, `npcByModel`, and `tombstones`.
+- Remove `Level/ServerScriptService/ModuleScript/NpcRegistry.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 3B notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
+## 2026-07-07 - Poziom NpcService stage 3A runtime audit and baseline
+
+### Summary
+
+- Completed Stage 3A audit and baseline for active `game.ServerScriptService.ModuleScript.NpcService`.
+- Confirmed Stage 2 checkpoint before starting Stage 3: clean worktree at `3780841 Refactor dungeon NPC and reward systems`.
+- Audited public `NpcService` API, local helpers, per-NPC state tables, runtime loops, remotes, raycasts, target scans, ground handling, obstacle steering, melee damage, status effects, death/despawn flow, and active callers.
+- Detected repo/Studio drift before Stage 3 edits: active Studio `NpcService` had live ground/visual repair logic not present in repo. Mirrored those live changes into `Level/ServerScriptService/ModuleScript/NpcService.lua` without changing Studio behavior.
+- Captured temporary Studio-only baseline metrics for 10, 25, and 50 controlled Slime NPCs, then removed all probes.
+
+### Files
+
+- Updated `Level/ServerScriptService/ModuleScript/NpcService.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Active module path confirmed: `game.ServerScriptService.ModuleScript.NpcService`.
+- Temporary probes were inserted only in Studio, used no new `_G` and no RemoteEvents, and were removed after measurement.
+- Studio `script_grep` found no `Stage3ABaseline` or `stage3Profile` markers after cleanup.
+- Clean Play startup after probe removal reached the normal service ready logs with no `NpcService` errors.
+
+### Audit
+
+- Active Studio `NpcService` line count: `1739`; repo mirror after parity sync: `1738` lines, equivalent content aside from final newline.
+- Repo public API count: `20` functions:
+  - `GetRoot`, `GetPosition`, `IsAlive`, `GetHealth`, `GetLivingModels`, `GetActiveCount`, `DespawnOldestFarNormal`, `GetNearestEnemy`, `GetEnemiesInRadius`, `GetTargetingMetrics`, `ApplySlow`, `ApplyFreeze`, `AddImpulse`, `BindDeath`, `ApplyDamage`, `Register`, `SetIncomingDamageModifier`, `LockForAbility`, `SetPosition`, `Despawn`.
+- Repo local helper count after sync: `65`.
+- Persistent state tables:
+  - `npcById`
+  - `npcByModel`
+  - `tombstones`
+  - per-record `deathCallbacks`
+- Runtime connections:
+  - `NpcSyncRequest.OnServerEvent`
+  - one central `RunService.Heartbeat`
+- Runtime loop:
+  - one central `Heartbeat` updates alive players, engagement slots, all active NPCs, and 10 Hz batch replication through `NpcShared.BatchRate = 0.1`.
+- No per-NPC `Heartbeat`, no per-NPC RBXScriptConnection, and no gameplay `_G` in `NpcService`.
+- Player damage path remains `DamageService.Apply(player, amount, { source = npcModel, sourceType = "npc", damageType = "contact", attacker = npcModel })`.
+
+### Callers
+
+- Active/repo callers requiring `NpcService`:
+  - `WaveController`
+  - `WeaponCombat`
+  - `SpellService`
+  - `StatueService`
+  - `RunStatsService`
+  - `AbilityExecutor`
+- Main public API usage:
+  - `WaveController`: register, active counts, boss/elite health/position, death callbacks, despawn.
+  - `WeaponCombat`: nearest/radius queries, position/alive checks, `ApplyDamage`, impulse.
+  - `SpellService`: target queries, position/alive/root checks, damage, slow/freeze/impulse.
+  - `RunStatsService`: thorns calls `IsAlive` and `ApplyDamage`.
+  - `AbilityExecutor`: ability locks, position, alive/health, incoming damage modifier.
+  - `StatueService`: death callback for spawned mobs.
+
+### Baseline
+
+Controlled baseline used cloned Slime templates registered through public `NpcService.Register`, with auto mob spawning disabled during the probe. Measurements are from Studio Play and should be treated as local baseline, not production profiler data.
+
+| NPCs | Avg update ms | Max update ms | Ground raycasts/s | Obstacle raycasts/s | Target scans/s | Formation scans/s | Formation comparisons/s |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 10 | 0.081 | 0.686 | 80.0 | 95.0 | 0.0 | 1625.0 | 1625.0 |
+| 25 | 0.135 | 0.444 | 212.5 | 25.0 | 0.0 | 6000.0 | 6000.0 |
+| 50 | 0.260 | 1.459 | 425.0 | 100.0 | 0.0 | 12025.0 | 12025.0 |
+
+Notes:
+
+- Target scans were near zero during the measured windows because targets were already cached during warmup; engagement slot formation scans ran every frame.
+- Active counts during each measured sample matched requested count for 10, 25, and 50 NPCs.
+- Cleanup removed probe NPCs, but one non-probe active entry/extra enemy-folder children reappeared in Play even with auto mob spawns disabled; this is recorded as residual runtime noise, not a proven NpcService leak.
+- Memory readings from `collectgarbage("count")` varied enough to be useful only as a rough local signal.
+
+### Validation
+
+- Studio probe removed after baseline.
+- Studio grep found no probe markers.
+- Repo grep found no probe markers.
+- Clean Play startup after cleanup showed no `NpcService` errors.
+- Existing unrelated Output remained from `Hybrid Terrain Hex Generator`, error reporter config, and missing TeleportData in Play Solo.
+- No new gameplay `_G`, remotes, runtime loops, or fallback `Humanoid:TakeDamage` path was added.
+
+### Not verified
+
+- No true multiplayer target switching baseline; MCP Play used one local player.
+- No natural long-run 100+ NPC baseline in this pass.
+- Status/death/drop/thorns gameplay matrices are scheduled for later Stage 3 substeps and were not revalidated by 3A.
+
+### Risks
+
+- Stage 3B must preserve the live ground/visual repair behavior now mirrored into repo.
+- Formation slot building currently scans every active NPC every frame and sorts each target group; this is a likely Stage 3F optimization candidate, but it should not be changed before lifecycle/movement/combat behavior is preserved.
+- Baseline probes affected Play-only runtime state while measuring; all probe code was removed afterward.
+
+### Rollback
+
+- Revert the `NpcService.lua` repo parity sync if it must return to the previous stale repo copy, but note that doing so would diverge from active Studio and risk losing live ground/visual repair behavior.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 3A notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Poziom WaveController stage 2E portal and debug API extraction
 
 ### Summary

@@ -10,7 +10,7 @@ Zakres: etapowy refaktor największych God Scriptów i gameplayowych zależnośc
 | 0. Audyt i mapa zależności | Ukończony dla repo i aktywnych place `Level`/`Four Peaks`; `Guild` Studio nie było otwarte | Metryki plików, `_G`, `require`, pętle runtime, aktywne ścieżki Studio, plan migracji | Diff dokumentacji i changelog przechodzą walidację |
 | 1. `ProgressService` i gameplayowe `_G` | Ukończony w zatwierdzonym zakresie Stage 1; etap 2 nie rozpoczęty | `RunProgressApi` zastąpił `_G` dla XP/coins/souls/kills/run time/average level/boss/end run; party XP declaration-order bug naprawiony; martwy `SetGlobalRunPause` fallback usunięty z chest itemów | Przed etapem 2 pozostaje tylko osobna akceptacja dalszego zakresu i pełniejszy runtime test, jeżeli dostępny będzie multiplayer |
 | 2. `WaveController` | 2A-2E ukończone | `AbilityGeometry` wydziela czystą geometrię ability; `AbilityHazards` wydziela hazard zones/ticki/cleanup; `AbilityExecutor` wydziela wykonanie ability elit i bossów; `EncounterScheduler` wydziela planowanie spawn/encounter; `RunPortalController` wydziela portal/prompt state; `WaveDebugApi` wydziela Studio-only debug hook registration | Brak zmian damage/tick/cooldown/spawn rate; po każdym podetapie Play test |
-| 3. `NpcService` | Zaplanowany | Registry/lifecycle, targeting/steering/combat/replication tylko po potwierdzeniu granic | Jeden centralny update, brak per-NPC Heartbeat |
+| 3. `NpcService` | 3A-3B ukończone; 3C następny | Registry/lifecycle wydzielone; movement/steering/ground następne | Jeden centralny update, brak per-NPC Heartbeat |
 | 4. `SpellService` i projectiles | Zaplanowany | Centralny projectile service, targeting/effects/VFX dispatch | Jedno połączenie runtime dla pocisków |
 | 5. `RunStatsService` i `ShrineService` | Zaplanowany | Tylko pozostałe realnie mieszane odpowiedzialności | DamageService i RunDefenseState bez zmiany ownership |
 | 6. Guild | Zablokowany do czasu otwarcia `Guild` Studio | Persistence, membership, treasury, upgrades, teleport | Potwierdzony aktywny place `Gildia` |
@@ -37,6 +37,8 @@ Uwagi o parity:
 - 2026-07-02: Stage 2C verified `WaveController`, `AbilityExecutor`, `AbilityGeometry`, and `AbilityHazards` repo/Studio parity after extracting ability execution. Temporary Play probes were removed from Studio.
 - 2026-07-07: Stage 2D verified `WaveController` and `EncounterScheduler` after extracting encounter scheduling. Temporary Play probes were removed from Studio.
 - 2026-07-07: Stage 2E verified `WaveController`, `RunPortalController`, and `WaveDebugApi` after extracting portal/prompt state and Studio-only debug hook registration. Temporary Play probes were removed from Studio.
+- 2026-07-07: Stage 3A verified active `NpcService`, captured baseline metrics, and mirrored live Studio ground/visual repair behavior into the repo before any Stage 3 split. Temporary Play probes were removed from Studio.
+- 2026-07-07: Stage 3B added `NpcRegistry` and moved NPC id/model maps plus tombstones behind a neutral registry module. `NpcService` remains the public facade and single central scheduler owner.
 
 ## Metryki największych plików
 
@@ -245,9 +247,49 @@ Status 2026-07-02:
 
 Etap 3, NPC:
 
-- `NpcService` zostaje właścicielem symulacji NPC do czasu wydzielenia jasnych modułów.
-- Kandydaci: registry/lifecycle, targeting, steering/grounding, melee combat, status effects, replication.
+- 3A ukończony.
+- 3B ukończony.
+- Aktywna ścieżka Studio: `game.ServerScriptService.ModuleScript.NpcService`.
+- Plik repo: `Level/ServerScriptService/ModuleScript/NpcService.lua`.
+- Checkpoint przed etapem 3: `3780841 Refactor dungeon NPC and reward systems`; worktree był czysty przed 3A.
+- Wykryto drift Studio/repo: aktywne Studio miało nowszy ground/visual repair (`DETACHED_VISUAL_REPAIR_MIN_FLAT_DISTANCE`, `repairDetachedVisualParts`, `modelYExtents`, `moveNpcModelToRoot`) niż repo. Repo zostało zsynchronizowane do aktywnej wersji bez zmiany zachowania Studio.
+- Publiczne API do zachowania: `GetRoot`, `GetPosition`, `IsAlive`, `GetHealth`, `GetLivingModels`, `GetActiveCount`, `DespawnOldestFarNormal`, `GetNearestEnemy`, `GetEnemiesInRadius`, `GetTargetingMetrics`, `ApplySlow`, `ApplyFreeze`, `AddImpulse`, `BindDeath`, `ApplyDamage`, `Register`, `SetIncomingDamageModifier`, `LockForAbility`, `SetPosition`, `Despawn`.
+- Aktywni callerzy: `WaveController`, `WeaponCombat`, `SpellService`, `StatueService`, `RunStatsService`, `AbilityExecutor`.
+- Obecny graf po 3B: `NpcService -> NpcRegistry`, `NpcService -> WorldBounds`, `NpcService -> NpcShared`, `NpcService -> DamageService`, opcjonalnie `NpcService -> MissionProgress`; `NpcRegistry` nie wymaga żadnego modułu i nie tworzy cyklu.
+- Stan runtime po 3B: `NpcRegistry` przechowuje `nextNpcId`, `npcById`, `npcByModel` i `tombstones`; per-entry `deathCallbacks` pozostają w rekordzie NPC tworzonym przez `NpcService`.
+- Połączenia runtime: `NpcSyncRequest.OnServerEvent` i jeden centralny `RunService.Heartbeat`.
+- Pętla runtime: jeden `Heartbeat` wykonuje `getAlivePlayers`, `buildEngagementSlots`, `updateNpc` dla każdego wpisu i batch replication co `NpcShared.BatchRate = 0.1`.
+- Koszt hot loopu:
+  - `getAlivePlayers` skanuje `Players:GetPlayers()` co frame.
+  - `buildEngagementSlots` skanuje aktywne NPC co frame, dla każdego porównuje graczy i sortuje grupy.
+  - `updateNpc` robi target cache/full scan co `0.35s`, movement, obstacle steering, ground correction, melee gating i batch state.
+  - ground raycast odpala po `0.12s` albo przesunięciu XZ `>=4`.
+  - obstacle steering buduje ignore list i tworzy `RaycastParams` przy próbie omijania przeszkód.
+- Damage gracza pozostaje przez `DamageService.Apply(player, amount, { source = npcModel, sourceType = "npc", damageType = "contact", attacker = npcModel })`.
+- Baseline Studio Play, kontrolowane Slime NPC, auto mob spawn wyłączony na czas probe'a:
+
+| NPCs | Avg update ms | Max update ms | Ground raycasts/s | Obstacle raycasts/s | Target scans/s | Formation scans/s | Formation comparisons/s |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 10 | 0.081 | 0.686 | 80.0 | 95.0 | 0.0 | 1625.0 | 1625.0 |
+| 25 | 0.135 | 0.444 | 212.5 | 25.0 | 0.0 | 6000.0 | 6000.0 |
+| 50 | 0.260 | 1.459 | 425.0 | 100.0 | 0.0 | 12025.0 | 12025.0 |
+
+- Uwagi 3A: target scans były bliskie `0` w oknach pomiaru, bo target został zcache'owany w warmupie; formation scans są wykonywane co frame. Po cleanupie probe'ów w Play pojawiał się 1 nie-probe aktywny wpis/extra enemy-folder children mimo wyłączonego auto spawnu, więc traktować to jako szum środowiska do późniejszego sprawdzenia, nie dowód wycieku `NpcService`.
+- Nieweryfikowane w 3A: prawdziwy multiplayer target switching, naturalny long-run 100+ NPC, pełna macierz status/death/drop/thorns.
+- 3B dodał `Level/ServerScriptService/ModuleScript/NpcRegistry.lua`.
+- `NpcRegistry` odpowiada tylko za `NextId`, `GetByModel`, `Resolve`, `Contains`, `Add`, `Remove`, `Pairs`, `QueueTombstone`, `Tombstones`, `ClearTombstones`, `Reset` i `Count`.
+- `NpcRegistry` nie ma `require()`, `_G`, remotes, `Heartbeat`, event connections ani zależności do `DamageService`, `WaveController`, `NpcService`, `RunStatsService` lub `ShrineService`.
+- `NpcService` po 3B nadal zachowuje publiczne API: `GetRoot`, `GetPosition`, `IsAlive`, `GetHealth`, `GetLivingModels`, `GetActiveCount`, `DespawnOldestFarNormal`, `GetNearestEnemy`, `GetEnemiesInRadius`, `GetTargetingMetrics`, `ApplySlow`, `ApplyFreeze`, `AddImpulse`, `BindDeath`, `ApplyDamage`, `Register`, `SetIncomingDamageModifier`, `LockForAbility`, `SetPosition`, `Despawn`.
+- `NpcService` po 3B ma nadal jeden `NpcSyncRequest.OnServerEvent` i jeden centralny `RunService.Heartbeat`; nie dodano per-NPC connection ani nowej pętli.
+- Walidacja 3B: live Studio `NpcRegistry` utworzony, live `NpcService` zsynchronizowany; Play startup doszedł do normalnych logów ready bez błędów `NpcService`/`NpcRegistry`; naturalny run spawnował realne `Slime` z `NpcId`; character navigation do realnego Slime nie dodał błędów Output.
+- Kontrolowany Studio-only harness 3B potwierdził: zwykłą rejestrację, duplicate register zwracający ten sam id bez wzrostu registry, rejestrację elity i bossa, manual `Destroy` cleanup, death callback dokładnie raz, despawn bez death callbacku, reset registry oraz 20 cykli register/remove bez narastania callbacków.
+- Zachowanie `nextNpcId` po 3B pozostaje monotoniczne: `NpcRegistry.Reset()` czyści mapy/tombstones, ale nie resetuje licznika id, zgodnie z brakiem resetu `nextNpcId` w poprzednim inline stanie.
+- Ograniczenia testu 3B: dokładna liczba natywnych `RBXScriptConnection` nie była mierzona; potwierdzono brak dodatkowych wywołań callbacków, brak nowych pętli oraz statycznie jeden `RunService.Heartbeat` i jedno `NpcSyncRequest.OnServerEvent`. Tombstone po manualnym `Destroy` mógł zostać skonsumowany przez batch broadcast w tej samej klatce, więc obserwacja tombstone dla tej ścieżki pozostaje pośrednia.
+- `NpcService` zostaje właścicielem publicznego API i centralnego schedulera.
+- Kandydaci 3C-3F: movement/grounding, targeting/melee, status/death/despawn, central update optimization.
 - Główny `Heartbeat` pozostaje centralny; żadnych per-NPC połączeń.
+- Rollback 3A: cofnąć parity sync `NpcService.lua` tylko jeśli świadomie wracamy do stale repo copy, oraz cofnąć wpisy planu/changeloga.
+- Rollback 3B: przywrócić inline `nextNpcId`, `npcById`, `npcByModel` i `tombstones` w `NpcService.lua`, usunąć `NpcRegistry.lua` z repo i live Studio oraz cofnąć wpisy planu/changeloga.
 
 Etap 4, Spell/projectiles:
 

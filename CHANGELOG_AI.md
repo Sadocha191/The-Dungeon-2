@@ -16,6 +16,8 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-07-07** — Poziom NpcService stage 3B registry lifecycle extraction and validation
+- **2026-07-07** — Poziom NpcService stage 3A runtime audit and baseline
 - **2026-07-07** — Poziom WaveController stage 2E portal and debug API extraction
 - **2026-07-07** — Poziom WaveController stage 2D encounter scheduler extraction
 - **2026-07-07** — Lobby and level UI ScreenGui toggles and mobile camera fallback

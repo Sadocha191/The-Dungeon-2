@@ -10,6 +10,9 @@ local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 local NpcShared = require(moduleFolder:WaitForChild("NpcShared"))
 local serverModuleFolder = ServerScriptService:FindFirstChild("ModuleScript") or ServerScriptService:FindFirstChild("ModuleScripts")
 assert(serverModuleFolder, "[NpcService] Server ModuleScript folder is required")
+local npcRegistryModule = serverModuleFolder:FindFirstChild("NpcRegistry")
+assert(npcRegistryModule and npcRegistryModule:IsA("ModuleScript"), "[NpcService] NpcRegistry ModuleScript is required")
+local NpcRegistry = require(npcRegistryModule)
 local damageServiceModule = serverModuleFolder:FindFirstChild("DamageService")
 assert(damageServiceModule and damageServiceModule:IsA("ModuleScript"), "[NpcService] DamageService ModuleScript is required for player damage")
 local DamageService = require(damageServiceModule)
@@ -109,7 +112,6 @@ type NpcRecord = {
 	state: string,
 	dead: boolean,
 	spawnTime: number,
-	rootToPivot: CFrame?,
 	attackUntil: number,
 	nextAttackAt: number,
 	targetPlayer: Player?,
@@ -142,10 +144,6 @@ type NpcRecord = {
 
 local NpcService = {}
 
-local nextNpcId = 0
-local npcById: {[string]: NpcRecord} = {}
-local npcByModel: {[Model]: NpcRecord} = {}
-local tombstones = {}
 local NPC_FORMATION_LANE_ORDER = { 0, -1, 1, -2, 2, -3, 3 }
 local NPC_FORMATION_LANE_COUNT = #NPC_FORMATION_LANE_ORDER
 local NPC_FORMATION_LANE_SPACING = 1.85
@@ -165,6 +163,7 @@ local SPAWN_EMERGE_RISE_DURATION = 0.85
 local SPAWN_EMERGE_MIN_DEPTH = 5.75
 local SPAWN_EMERGE_MAX_DEPTH = 16
 local SPAWN_EMERGE_EXTRA_DEPTH = 2.75
+local DETACHED_VISUAL_REPAIR_MIN_FLAT_DISTANCE = 64
 local RUNTIME_ATTRIBUTE_NAMES = {
 	ATTR.State,
 	ATTR.LegacyState,
@@ -306,30 +305,98 @@ local function sampleGroundY(model: Model, pos: Vector3): number?
 	return nil
 end
 
-local function computeGroundOffset(model: Model, root: BasePart): number
-	local lowestY = math.huge
-	for _, descendant in ipairs(model:GetDescendants()) do
-		if descendant:IsA("BasePart") then
-			local partBottom = descendant.Position.Y - (descendant.Size.Y * 0.5)
-			if partBottom < lowestY then
-				lowestY = partBottom
+local function partYExtents(part: BasePart): (number, number)
+	local half = part.Size * 0.5
+	local minY = math.huge
+	local maxY = -math.huge
+	for _, x in ipairs({ -half.X, half.X }) do
+		for _, y in ipairs({ -half.Y, half.Y }) do
+			for _, z in ipairs({ -half.Z, half.Z }) do
+				local world = part.CFrame:PointToWorldSpace(Vector3.new(x, y, z))
+				minY = math.min(minY, world.Y)
+				maxY = math.max(maxY, world.Y)
 			end
+		end
+	end
+	return minY, maxY
+end
+
+local function isVisualGroundingPart(part: BasePart): boolean
+	return part.Transparency < 0.95
+end
+
+local function modelYExtents(model: Model, visualOnly: boolean): (number?, number?)
+	local lowestY = math.huge
+	local highestY = -math.huge
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") and (not visualOnly or isVisualGroundingPart(descendant)) then
+			local partMinY, partMaxY = partYExtents(descendant)
+			lowestY = math.min(lowestY, partMinY)
+			highestY = math.max(highestY, partMaxY)
 		end
 	end
 
 	if lowestY == math.huge then
-		return math.max(0, root.Size.Y * 0.5)
+		return nil, nil
 	end
 
+	return lowestY, highestY
+end
+
+local function visualPartCenter(model: Model): (Vector3?, number)
+	local sum = Vector3.zero
+	local count = 0
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") and isVisualGroundingPart(descendant) then
+			sum += descendant.Position
+			count += 1
+		end
+	end
+	if count <= 0 then
+		return nil, 0
+	end
+	return sum / count, count
+end
+
+local function repairDetachedVisualParts(model: Model, root: BasePart)
+	local center, count = visualPartCenter(model)
+	if not center or count <= 0 then
+		return
+	end
+
+	local flatDelta = Vector3.new(root.Position.X - center.X, 0, root.Position.Z - center.Z)
+	if flatDelta.Magnitude < DETACHED_VISUAL_REPAIR_MIN_FLAT_DISTANCE then
+		return
+	end
+
+	local delta = root.Position - center
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") and descendant ~= root then
+			descendant.CFrame += delta
+		end
+	end
+end
+
+local function computeGroundOffset(model: Model, root: BasePart): number
+	local explicitOffset = model:GetAttribute("NpcGroundOffset")
+	if typeof(explicitOffset) == "number" then
+		return explicitOffset
+	end
+
+	local lowestY = modelYExtents(model, true) or modelYExtents(model, false)
+	if not lowestY then
+		return math.max(0, root.Size.Y * 0.5)
+	end
 	return root.Position.Y - lowestY
 end
 
 local function computeModelHeight(model: Model, root: BasePart): number
-	local ok, _boundsCFrame, boundsSize = pcall(function()
-		return model:GetBoundingBox()
-	end)
-	if ok and typeof(boundsSize) == "Vector3" and boundsSize.Y > 0 then
-		return boundsSize.Y
+	local lowestY, highestY = modelYExtents(model, true)
+	if not lowestY or not highestY then
+		lowestY, highestY = modelYExtents(model, false)
+	end
+	if lowestY and highestY and highestY > lowestY then
+		return highestY - lowestY
 	end
 	return math.max(1, root.Size.Y)
 end
@@ -361,10 +428,13 @@ local function beginSpawnEmergence(model: Model, root: BasePart, groundOffset: n
 	local depth = resolveSpawnEmergeDepth(model, root, groundOffset)
 	local surfacePosition = root.Position
 	local undergroundPosition = surfacePosition - Vector3.new(0, depth, 0)
+	local emergeDelta = undergroundPosition - surfacePosition
 
-	pcall(function()
-		model:PivotTo(model:GetPivot() + Vector3.new(0, -depth, 0))
-	end)
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.CFrame += emergeDelta
+		end
+	end
 
 	return undergroundPosition, surfacePosition, now + holdDuration, now + holdDuration + riseDuration, depth
 end
@@ -497,7 +567,7 @@ local function buildEngagementSlots(alivePlayers: {AlivePlayerInfo}): {[string]:
 	end
 
 	local groups = {}
-	for _, npc in pairs(npcById) do
+	for _, npc in NpcRegistry.Pairs() do
 		if not npc.dead and npc.model.Parent then
 			local bestInfo = nil
 			local bestDist = math.huge
@@ -577,15 +647,19 @@ local function setState(npc: NpcRecord, newState: string)
 	writeStateAttributes(npc)
 end
 
-local function pivotNpcModelToRoot(npc: NpcRecord)
-	local rootFrame = CFrame.lookAt(npc.position, npc.position + npc.look)
-	local pivotFrame = rootFrame
-	if npc.rootToPivot then
-		pivotFrame = rootFrame * npc.rootToPivot
+local function translateModel(model: Model, delta: Vector3)
+	if delta.Magnitude <= 1e-5 then
+		return
 	end
-	pcall(function()
-		npc.model:PivotTo(pivotFrame)
-	end)
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.CFrame += delta
+		end
+	end
+end
+
+local function moveNpcModelToRoot(npc: NpcRecord)
+	translateModel(npc.model, npc.position - npc.root.Position)
 end
 
 local function updateSpawnEmergence(npc: NpcRecord, now: number, dt: number): boolean
@@ -625,26 +699,13 @@ local function updateSpawnEmergence(npc: NpcRecord, now: number, dt: number): bo
 	npc.attackUntil = 0
 	npc.nextAttackAt = math.max(npc.nextAttackAt, now + 0.15)
 
-	pivotNpcModelToRoot(npc)
+	moveNpcModelToRoot(npc)
 	writeStateAttributes(npc)
 	return true
 end
 
 local function resolveNpc(target: any): NpcRecord?
-	if typeof(target) ~= "Instance" then
-		return nil
-	end
-
-	if target:IsA("Model") then
-		return npcByModel[target]
-	end
-
-	local model = target:FindFirstAncestorOfClass("Model")
-	if model then
-		return npcByModel[model]
-	end
-
-	return nil
+	return NpcRegistry.Resolve(target)
 end
 
 local function matchesActiveCountFilter(npc: NpcRecord, filter: ActiveCountFilter?): boolean
@@ -711,7 +772,7 @@ local function fireDamageIndicator(sourcePlayer: Player?, npc: NpcRecord, amount
 end
 
 local function queueTombstone(npc: NpcRecord, despawned: boolean)
-	table.insert(tombstones, {
+	NpcRegistry.QueueTombstone({
 		id = npc.id,
 		model = npc.model,
 		type = npc.mobType,
@@ -728,12 +789,11 @@ local function queueTombstone(npc: NpcRecord, despawned: boolean)
 end
 
 local function unregisterNpc(npc: NpcRecord, despawned: boolean?)
-	if npcById[npc.id] ~= npc then
+	if not NpcRegistry.Contains(npc) then
 		return
 	end
 
-	npcById[npc.id] = nil
-	npcByModel[npc.model] = nil
+	NpcRegistry.Remove(npc)
 	queueTombstone(npc, despawned == true)
 end
 
@@ -835,7 +895,7 @@ local function debugMeleeSkip(npc: NpcRecord, targetInfo: AlivePlayerInfo, reaso
 		targetInfo.player.Name,
 		reason,
 		detail
-	))
+		))
 end
 
 local function canApplyMeleeDamage(npc: NpcRecord, targetInfo: AlivePlayerInfo): boolean
@@ -1194,11 +1254,11 @@ end
 
 local function collectBatchItems(includeTombstones: boolean?)
 	local items = {}
-	for _, npc in pairs(npcById) do
+	for _, npc in NpcRegistry.Pairs() do
 		table.insert(items, buildSnapshot(npc))
 	end
 	if includeTombstones == true then
-		for _, tombstone in ipairs(tombstones) do
+		for _, tombstone in NpcRegistry.Tombstones() do
 			table.insert(items, tombstone)
 		end
 	end
@@ -1221,7 +1281,7 @@ end
 
 local function broadcastBatch()
 	local items = collectBatchItems(true)
-	table.clear(tombstones)
+	NpcRegistry.ClearTombstones()
 
 	if #items == 0 then
 		return
@@ -1258,7 +1318,7 @@ end
 
 function NpcService.GetLivingModels(): {Model}
 	local result = {}
-	for _, npc in pairs(npcById) do
+	for _, npc in NpcRegistry.Pairs() do
 		if isNpcTargetable(npc) then
 			table.insert(result, npc.model)
 		end
@@ -1268,7 +1328,7 @@ end
 
 function NpcService.GetActiveCount(filter: ActiveCountFilter?): number
 	local count = 0
-	for _, npc in pairs(npcById) do
+	for _, npc in NpcRegistry.Pairs() do
 		if not npc.dead and npc.model.Parent and matchesActiveCountFilter(npc, filter) then
 			count += 1
 		end
@@ -1284,7 +1344,7 @@ function NpcService.DespawnOldestFarNormal(minDistance: number): Model?
 	end
 
 	local bestNpc = nil
-	for _, npc in pairs(npcById) do
+	for _, npc in NpcRegistry.Pairs() do
 		if not npc.dead and npc.model.Parent and not npc.isElite and npc.model:GetAttribute("IsBoss") ~= true then
 			local nearestDist = math.huge
 			for _, info in ipairs(alivePlayers) do
@@ -1313,7 +1373,7 @@ function NpcService.GetNearestEnemy(fromPos: Vector3, maxRange: number): (Model?
 	local bestDist = searchRange
 	local bestEffectiveDist = math.huge
 	local bestPriority = -math.huge
-	for _, npc in pairs(npcById) do
+	for _, npc in NpcRegistry.Pairs() do
 		if isNpcTargetable(npc) then
 			local dist = (npc.position - fromPos).Magnitude
 			if dist <= searchRange then
@@ -1335,7 +1395,7 @@ end
 
 function NpcService.GetEnemiesInRadius(fromPos: Vector3, radius: number): {Model}
 	local hits = {}
-	for _, npc in pairs(npcById) do
+	for _, npc in NpcRegistry.Pairs() do
 		if isNpcTargetable(npc) then
 			local dist = (npc.position - fromPos).Magnitude
 			if dist <= radius then
@@ -1469,8 +1529,9 @@ function NpcService.ApplyDamage(target: any, amount: number, meta: {[string]: an
 end
 
 function NpcService.Register(model: Model, config: NpcConfig?): string?
-	if npcByModel[model] then
-		return npcByModel[model].id
+	local existingNpc = NpcRegistry.GetByModel(model)
+	if existingNpc then
+		return existingNpc.id
 	end
 
 	local root = resolveRoot(model)
@@ -1509,16 +1570,13 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		end
 	end
 
-	nextNpcId += 1
-	local npcId = tostring(nextNpcId)
+	repairDetachedVisualParts(model, root)
+
+	local npcId = NpcRegistry.NextId()
 	local mobType = tostring((config and config.mobType) or model.Name)
 	local maxHealth = math.max(1, math.floor(tonumber(config and config.maxHealth) or 1))
 	local speed = math.max(0, tonumber(config and config.speed) or 0)
 	local groundOffset = computeGroundOffset(model, root)
-	local rootToPivot: CFrame? = nil
-	pcall(function()
-		rootToPivot = root.CFrame:ToObjectSpace(model:GetPivot())
-	end)
 	local now = os.clock()
 	local initialPosition, spawnSurfacePosition, spawnHoldUntil, spawnEmergeEnd, spawnEmergeDepth =
 		beginSpawnEmergence(model, root, groundOffset, now)
@@ -1542,7 +1600,6 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		state = STATE.Spawn,
 		dead = false,
 		spawnTime = now,
-		rootToPivot = rootToPivot,
 		attackUntil = 0,
 		nextAttackAt = 0,
 		targetPlayer = nil,
@@ -1577,8 +1634,7 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		table.insert(npc.deathCallbacks, config.onDeath)
 	end
 
-	npcById[npcId] = npc
-	npcByModel[model] = npc
+	NpcRegistry.Add(npc)
 
 	setAttributeIfChanged(model, ATTR.Id, npc.id)
 	setAttributeIfChanged(model, ATTR.Type, mobType)
@@ -1628,7 +1684,7 @@ function NpcService.SetPosition(target: any, pos: Vector3, lookDir: Vector3?)
 		npc.look = lookDir.Unit
 	end
 	npc.velocity = Vector3.zero
-	pivotNpcModelToRoot(npc)
+	moveNpcModelToRoot(npc)
 	writeStateAttributes(npc)
 end
 
@@ -1652,7 +1708,7 @@ RunService.Heartbeat:Connect(function(dt)
 	local alivePlayers = getAlivePlayers()
 	local engagementSlots = buildEngagementSlots(alivePlayers)
 
-	for _, npc in pairs(npcById) do
+	for _, npc in NpcRegistry.Pairs() do
 		updateNpc(npc, dt, alivePlayers, now, engagementSlots)
 	end
 
