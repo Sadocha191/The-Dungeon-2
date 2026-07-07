@@ -1,5 +1,39 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-08 - God Script refactor final audit
+
+### Summary
+
+- Completed the final audit for the God Script refactor plan after closing stages 3C-3F, 4, 5, 6, and 7.
+- Confirmed the plan status table now marks stages 0-7 complete in their approved scopes.
+- Kept all gameplay balance, remotes, persistent data, teleport data, and public APIs unchanged during the final audit.
+
+### Files
+
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Validation
+
+- `git status --short` was clean before final-audit documentation edits.
+- Repo grep found no `_G.ApplyDamageToPlayer`, `_G["ApplyDamageToPlayer"]`, or `rawget(_G, "ApplyDamageToPlayer")` in runtime code.
+- Repo grep found no final test markers `Stage7`, `Stage4F`, `VirtualInputManager`, `MouseButton1Click:Fire`, `SendMouse`, or `unlikely-filter` in runtime code.
+- Studio marker grep in open `Level`, `Four Peaks`, and `Guild` places returned no matches for final test markers.
+- `git diff --check` passed during the final audit workflow.
+
+### Remaining Explicit Risks
+
+- Existing non-goal `_G` contracts remain, including drop/chest/shrine/run-ready/debug/error-reporter/spellbook hooks.
+- Legacy weapon templates in `ServerStorage` still contain old frame-loop patterns and were not part of this God Script service/controller refactor.
+- `InventoryController` remains large as the active owner of inventory layout, card/detail rendering, remotes, and actions; a future renderer/action split should be planned separately.
+- Full external teleport/reconnect, true two-client multiplayer party XP, and exhaustive manual UI matrices remain outside MCP validation coverage.
+
+### Rollback
+
+- Roll back by checkpoint commits in reverse order, using the rollback notes recorded under each stage in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+- For Studio rollbacks, remove the ModuleScripts added by the reverted checkpoint and resync the active script object from repo.
+
 ## 2026-07-08 - Four Peaks UI stage 7 completion audit
 
 ### Summary

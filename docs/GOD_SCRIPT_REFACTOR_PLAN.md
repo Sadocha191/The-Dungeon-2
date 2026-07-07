@@ -8,11 +8,11 @@ Zakres: etapowy refaktor największych God Scriptów i gameplayowych zależnośc
 | Etap | Status | Zakres | Warunek przejścia |
 |---|---|---|---|
 | 0. Audyt i mapa zależności | Ukończony dla repo i aktywnych place `Level`/`Four Peaks`; `Guild` Studio nie było otwarte | Metryki plików, `_G`, `require`, pętle runtime, aktywne ścieżki Studio, plan migracji | Diff dokumentacji i changelog przechodzą walidację |
-| 1. `ProgressService` i gameplayowe `_G` | Ukończony w zatwierdzonym zakresie Stage 1; etap 2 nie rozpoczęty | `RunProgressApi` zastąpił `_G` dla XP/coins/souls/kills/run time/average level/boss/end run; party XP declaration-order bug naprawiony; martwy `SetGlobalRunPause` fallback usunięty z chest itemów | Przed etapem 2 pozostaje tylko osobna akceptacja dalszego zakresu i pełniejszy runtime test, jeżeli dostępny będzie multiplayer |
+| 1. `ProgressService` i gameplayowe `_G` | Ukończony | `RunProgressApi` zastąpił `_G` dla XP/coins/souls/kills/run time/average level/boss/end run; party XP declaration-order bug naprawiony; martwy `SetGlobalRunPause` fallback usunięty z chest itemów | Multiplayer two-client pozostaje nieweryfikowany poza ograniczeniami MCP |
 | 2. `WaveController` | 2A-2E ukończone | `AbilityGeometry` wydziela czystą geometrię ability; `AbilityHazards` wydziela hazard zones/ticki/cleanup; `AbilityExecutor` wydziela wykonanie ability elit i bossów; `EncounterScheduler` wydziela planowanie spawn/encounter; `RunPortalController` wydziela portal/prompt state; `WaveDebugApi` wydziela Studio-only debug hook registration | Brak zmian damage/tick/cooldown/spawn rate; po każdym podetapie Play test |
 | 3. `NpcService` | 3A-3F ukończone | Registry, movement/steering/ground, targeting/melee, lifecycle/status/death/despawn oraz batch replication wydzielone | Jeden centralny update, brak per-NPC Heartbeat |
 | 4. `SpellService` i projectiles | 4A-4F ukończone | `SpellProjectiles` wydziela projectile simulation i hit detection; `SpellTargeting` wydziela enemy query/target picking/beam segment distance; `SpellEffects` wydziela status/effect application; `SpellVisuals` wydziela server VFX dispatch/payload/orbit sync; `SpellSustained` wydziela zone/beam tick loopi; martwe server-side konstruktory VFX usunięte | Pociski mają jeden leniwy scheduler; targeting/effects/VFX dispatch oraz zone/beam tick loopi delegowane bez zmian balansu |
-| 5. `RunStatsService` i `ShrineService` | 5A ukończone | Usunięto nieużywane globalne shimy `RunStatsService`; `ShrineService` `_G.PrepareRunShrines` pozostaje aktywnym kontraktem `RunReadyGate` | DamageService i RunDefenseState bez zmiany ownership |
+| 5. `RunStatsService` i `ShrineService` | Ukończony (5A) | Usunięto nieużywane globalne shimy `RunStatsService`; `ShrineService` `_G.PrepareRunShrines` pozostaje aktywnym kontraktem `RunReadyGate` | DamageService i RunDefenseState bez zmiany ownership |
 | 6. Guild | Ukończony (6A-6E) | `GuildPlaceRemotes` wydziela remote factory aktywnego `Gildia`; `GuildPlaceLocations` wydziela config/status lokalizacji oraz budowę modeli/promptów; `GuildRecordState` wydziela sanitizację/state rekordów gildii w `Four Peaks`; `GuildUpdateBroadcaster` wydziela istniejący broadcast `GuildUpdated`; persistence, membership, treasury, upgrades i teleport bez zmian | Potwierdzony aktywny place `Gildia`/`Four Peaks`; oba aktywne serwisy Guild poniżej 1200 linii; Play smoke wykonane po checkpointach |
 | 7. Duże kontrolery UI | Ukończony (7A-7G) | `InventoryIconResolver` wydziela resolver ikon aktywnego `InventoryController`; `InventoryEntryBuilder` wydziela transformację snapshotu inventory; `InventoryFilterSorter` wydziela filtrowanie i sortowanie inventory; `InventoryCharacterPreview` wydziela viewport preview; `BlacksmithIconResolver`, `BlacksmithEntryBuilder` i `BlacksmithSceneController` wydzielają odpowiedzialności aktywnego `BlacksmithUI` | Brak zmian wyglądu/remotes/bindów |
 
@@ -95,6 +95,18 @@ Repo-wide scan:
 - `_G.` occurrences: present in Level gameplay, Four Peaks spellbook hooks, and error reporter debug hooks.
 - `_G[...]`: only dynamic reads in `RunReadyGate.server.lua` and `StatueService.server.lua`.
 - `rawget(_G`, `rawset(_G`, `shared.`, `getfenv`, `setfenv`: no current source matches.
+
+## Końcowy audyt 2026-07-08
+
+- Etapy 0-7 są zamknięte w zakresie planu: Progress/RunProgressApi, WaveController, NpcService, SpellService, RunStats/Shrine scoped cleanup, Guild oraz duże kontrolery UI.
+- Ostatni clean `git status --short` przed audytem był pusty; każdy główny checkpoint ma osobny commit lub dokumentacyjny commit checkpointu.
+- Końcowy repo grep nie znalazł `_G.ApplyDamageToPlayer`, `_G["ApplyDamageToPlayer"]` ani `rawget(_G, "ApplyDamageToPlayer")` w kodzie runtime.
+- Końcowy repo grep markerów testowych `Stage7`, `Stage4F`, `VirtualInputManager`, `MouseButton1Click:Fire`, `SendMouse`, `unlikely-filter` nie znalazł wyników w kodzie runtime.
+- Końcowy Studio marker grep w otwartych place `Level`, `Four Peaks` i `Guild` nie znalazł markerów testowych z finalnego audytu.
+- Pozostałe `_G` w repo są istniejącymi kontraktami poza tym celem albo historycznymi/debugowymi hookami: m.in. `SpawnDropsAt`, `PrepareRunChests`, `PrepareRunShrines`, debug API, error reporter debug i spellbook lobby hooks. Nie były rozszerzane w etapach 3C-7.
+- Pozostałe pętle `Heartbeat`/`RenderStepped`/`Stepped` obejmują istniejące systemy runtime, UI lub template legacy; etapy refaktoru nie dodały per-object Heartbeat. Nowe moduły Stage 7 przenoszą istniejące eventy/BindToRenderStep bez zmiany częstotliwości.
+- Nieweryfikowane końcowo pozostają: pełny zewnętrzny teleport/reconnect, prawdziwy two-client multiplayer party XP, pełna ręczna macierz UI inventory/blacksmith oraz legacy weapon templates w `ServerStorage`, które nie były celem refaktoru.
+- Rollback końcowy: cofać commity etapami w odwrotnej kolejności, korzystając z rollbacków opisanych przy każdym checkpointcie 1-7; przy rollbackach Studio usunąć odpowiadające ModuleScripty dodane w danym etapie i przywrócić aktywny obiekt do repo parity.
 
 ## Gameplayowe `_G`
 
