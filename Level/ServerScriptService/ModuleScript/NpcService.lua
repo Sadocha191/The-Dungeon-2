@@ -15,6 +15,9 @@ local NpcRegistry = require(npcRegistryModule)
 local npcLifecycleModule = serverModuleFolder:FindFirstChild("NpcLifecycle")
 assert(npcLifecycleModule and npcLifecycleModule:IsA("ModuleScript"), "[NpcService] NpcLifecycle ModuleScript is required")
 local NpcLifecycle = require(npcLifecycleModule)
+local npcReplicationModule = serverModuleFolder:FindFirstChild("NpcReplication")
+assert(npcReplicationModule and npcReplicationModule:IsA("ModuleScript"), "[NpcService] NpcReplication ModuleScript is required")
+local NpcReplication = require(npcReplicationModule)
 local npcMovementModule = serverModuleFolder:FindFirstChild("NpcMovement")
 assert(npcMovementModule and npcMovementModule:IsA("ModuleScript"), "[NpcService] NpcMovement ModuleScript is required")
 local NpcMovement = require(npcMovementModule)
@@ -442,67 +445,12 @@ local function updateNpc(
 	writeStateAttributes(npc)
 end
 
-local function buildSnapshot(npc: NpcRecord)
-	local snapshot = {
-		id = npc.id,
-		model = npc.model,
-		type = npc.mobType,
-		pos = npc.position,
-		dir = npc.look,
-		vel = npc.velocity,
-		speed = npc.baseSpeed,
-		state = npc.state,
-		hp = npc.health,
-		maxHp = npc.maxHealth,
-		dead = npc.dead,
-		despawned = false,
-	}
-	if typeof(npc.spawnSurfacePosition) == "Vector3" then
-		snapshot.spawnSurfacePos = npc.spawnSurfacePosition
-		snapshot.spawnEmergeDepth = npc.spawnEmergeDepth
-	end
-	return snapshot
-end
-
-local function collectBatchItems(includeTombstones: boolean?)
-	local items = {}
-	for _, npc in NpcRegistry.Pairs() do
-		table.insert(items, buildSnapshot(npc))
-	end
-	if includeTombstones == true then
-		for _, tombstone in NpcRegistry.Tombstones() do
-			table.insert(items, tombstone)
-		end
-	end
-	return items
-end
-
 local function sendBatchToPlayer(player: Player, fullSnapshot: boolean?, requestId: number?)
-	if not player or player.Parent ~= Players then
-		return
-	end
-
-	local items = collectBatchItems(false)
-	batchEvent:FireClient(player, {
-		serverTime = workspace:GetServerTimeNow(),
-		full = fullSnapshot == true,
-		requestId = requestId,
-		items = items,
-	})
+	NpcReplication.SendBatchToPlayer(batchEvent, player, fullSnapshot, requestId, NpcRegistry.Pairs)
 end
 
 local function broadcastBatch()
-	local items = collectBatchItems(true)
-	NpcRegistry.ClearTombstones()
-
-	if #items == 0 then
-		return
-	end
-
-	batchEvent:FireAllClients({
-		serverTime = workspace:GetServerTimeNow(),
-		items = items,
-	})
+	NpcReplication.BroadcastBatch(batchEvent, NpcRegistry.Pairs, NpcRegistry.Tombstones, NpcRegistry.ClearTombstones)
 end
 
 function NpcService.GetRoot(target: any): BasePart?

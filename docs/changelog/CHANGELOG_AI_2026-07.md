@@ -1,5 +1,66 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Poziom NpcService stage 3F replication update cleanup
+
+### Summary
+
+- Completed Stage 3F for active `game.ServerScriptService.ModuleScript.NpcService`.
+- Added `NpcReplication` for NPC snapshot payloads, full sync responses, broadcast batch payloads, and tombstone inclusion/clear order.
+- Kept `NpcService` as the public API facade, remote creation owner, damage indicator dispatcher, MissionProgress damage notifier, and only central scheduler owner.
+- Preserved `NpcShared.BatchRate`, `NpcBatchEvent`, `NpcSyncRequest`, public `NpcService` API, targeting cadence, movement tick, and gameplay balance.
+- Did not add throttling or spatial partitioning in this checkpoint because that would require a separate measured behavior/performance change.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/NpcReplication.lua`
+- Updated `Level/ServerScriptService/ModuleScript/NpcService.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Created live `game.ServerScriptService.ModuleScript.NpcReplication`.
+- Synchronized active `game.ServerScriptService.ModuleScript.NpcService` to require `NpcReplication` and delegate batch payload responsibilities.
+- Repo/Studio parity for `NpcService`, `NpcRegistry`, `NpcMovement`, `NpcTargeting`, `NpcMelee`, `NpcLifecycle`, and `NpcReplication` was confirmed by normalized length/checksum/line-count metrics.
+- Temporary Server/Client harnesses were executed during Play and removed automatically with no script markers left in Studio or repo.
+
+### Architecture
+
+- New graph: `NpcService -> NpcRegistry`, `NpcService -> NpcLifecycle`, `NpcService -> NpcReplication`, `NpcService -> NpcMovement`, `NpcService -> NpcTargeting`, `NpcService -> NpcMelee`, `NpcService -> NpcShared`, optional `NpcService -> MissionProgress`; `NpcReplication` requires no modules.
+- `NpcReplication` has no `_G`, `Heartbeat`, event connections, `task.spawn`, `task.delay`, or remotes of its own. It only fires the existing remote passed by `NpcService`.
+- `NpcService` still owns the single `NpcSyncRequest.OnServerEvent` connection and single central `RunService.Heartbeat`.
+
+### Validation
+
+- Play startup reached normal service-ready logs with no `NpcService` or `NpcReplication` errors.
+- Public `NpcService.Register` created a controlled elite `Slime` for replication validation.
+- Client received `NpcBatchEvent` broadcasts through the normal batch path: `broadcastCount=10`.
+- Client sent existing `NpcSyncRequest` and received full snapshot responses: `fullCount=2`.
+- Broadcast and full snapshot payloads both contained the test `NpcId=2`.
+- Full snapshot preserved `requestId=7321`.
+- Cleanup removed the test NPC and returned `NpcService.GetActiveCount()` to `0`.
+- Repo `rg` and Studio `script_grep` found no temporary harness markers after cleanup.
+- `git diff --check` passed.
+
+### Not Verified
+
+- Full natural long-run with 100+ NPC was not repeated in 3F; the 3A 10/25/50 baseline remains the comparison point for a future measured optimization pass.
+- True multiplayer target switching remains unverified in current MCP Play.
+- Real throttling of formation scans, spatial partitioning, or target cache tuning was intentionally not implemented in 3F.
+
+### Risks
+
+- `NpcReplication` now owns payload construction. Client broadcast/full sync validation covered the active remote path, but large-NPC payload cost still needs a dedicated performance pass before changing cadence or payload shape.
+- Stage 3F is a responsibility cleanup, not a gameplay performance tuning change.
+
+### Rollback
+
+- Restore the previous inline snapshot, batch collection, full sync, broadcast, and tombstone batch helpers in `NpcService.lua`.
+- Remove `Level/ServerScriptService/ModuleScript/NpcReplication.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 3F notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Poziom NpcService stage 3E lifecycle and status extraction
 
 ### Summary
