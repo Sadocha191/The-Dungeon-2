@@ -70,6 +70,9 @@ local InventoryEntryBuilder = require(inventoryEntryBuilderModule)
 local inventoryFilterSorterModule = script.Parent:FindFirstChild("InventoryFilterSorter")
 assert(inventoryFilterSorterModule and inventoryFilterSorterModule:IsA("ModuleScript"), "[InventoryController] InventoryFilterSorter ModuleScript is required")
 local InventoryFilterSorter = require(inventoryFilterSorterModule)
+local inventoryCharacterPreviewModule = script.Parent:FindFirstChild("InventoryCharacterPreview")
+assert(inventoryCharacterPreviewModule and inventoryCharacterPreviewModule:IsA("ModuleScript"), "[InventoryController] InventoryCharacterPreview ModuleScript is required")
+local InventoryCharacterPreview = require(inventoryCharacterPreviewModule)
 
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents", 10)
 local remoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions", 10)
@@ -448,12 +451,13 @@ local viewportHint = create("TextLabel", {
 local viewportWorld = create("WorldModel", { Name = "PreviewWorld" }, viewportFrame)
 local viewportCamera = create("Camera", { FieldOfView = 34 }, viewportFrame)
 viewportFrame.CurrentCamera = viewportCamera
-local previewModel = nil
-local previewPivotOffset = CFrame.new()
-local previewSize = Vector3.new(4, 6, 2)
-local previewYaw = math.rad(18)
-local previewDragging = false
-local previewLastX = 0
+local characterPreview = InventoryCharacterPreview.new({
+	Player = player,
+	ViewportFrame = viewportFrame,
+	ViewportWorld = viewportWorld,
+	ViewportCamera = viewportCamera,
+	UserInputService = UserInputService,
+})
 
 local statsCard = create("Frame", {
 	LayoutOrder = 5,
@@ -1077,76 +1081,8 @@ local function refreshPlayerPanel()
 end
 
 local function refreshCharacterPreview()
-	if previewModel then
-		previewModel:Destroy()
-		previewModel = nil
-	end
-	for _, child in ipairs(viewportWorld:GetChildren()) do
-		child:Destroy()
-	end
-	local character = player.Character
-	if not character then
-		return
-	end
-	local oldArchivable = character.Archivable
-	character.Archivable = true
-	local ok, clone = pcall(function() return character:Clone() end)
-	character.Archivable = oldArchivable
-	if not ok or not clone then
-		return
-	end
-	clone.Name = "PreviewCharacter"
-	for _, object in ipairs(clone:GetDescendants()) do
-		if object:IsA("BaseScript") then
-			object:Destroy()
-		elseif object:IsA("BasePart") then
-			object.Anchored = true
-			object.CanCollide = false
-			object.CanTouch = false
-			object.CanQuery = false
-		elseif object:IsA("ParticleEmitter") or object:IsA("Trail") or object:IsA("Beam") then
-			object.Enabled = false
-		elseif object:IsA("Humanoid") then
-			object.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
-			object.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
-		end
-	end
-	clone.Parent = viewportWorld
-	previewModel = clone
-	local boxCFrame, size = clone:GetBoundingBox()
-	previewSize = size
-	previewPivotOffset = boxCFrame:ToObjectSpace(clone:GetPivot())
-	clone:PivotTo(CFrame.Angles(0, previewYaw, 0) * previewPivotOffset)
-	local focus = Vector3.new(0, 0, 0)
-	local distance = math.max(size.Y * 1.15, size.X * 1.8, 7)
-	viewportCamera.CFrame = CFrame.new(Vector3.new(0, size.Y * 0.02, -distance), focus)
+	characterPreview.Refresh()
 end
-
-local function rotatePreview(deltaX)
-	if not previewModel then return end
-	previewYaw += deltaX * 0.012
-	previewModel:PivotTo(CFrame.Angles(0, previewYaw, 0) * previewPivotOffset)
-end
-
-viewportFrame.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		previewDragging = true
-		previewLastX = input.Position.X
-	end
-end)
-viewportFrame.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		previewDragging = false
-	end
-end)
-UserInputService.InputChanged:Connect(function(input)
-	if not previewDragging then return end
-	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-		local delta = input.Position.X - previewLastX
-		previewLastX = input.Position.X
-		rotatePreview(delta)
-	end
-end)
 
 local detailOrderCounter = 0
 local function nextDetailOrder()
@@ -2148,7 +2084,7 @@ filters.closeInventory = function()
 	inventoryGui.Enabled = false
 	confirmOverlay.Visible = false
 	pendingConfirm = nil
-	previewDragging = false
+	characterPreview.CancelDrag()
 end
 
 filters.openInventory = function()

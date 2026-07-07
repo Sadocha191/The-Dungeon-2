@@ -1,5 +1,64 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-08 - Four Peaks InventoryController stage 7G character preview extraction
+
+### Summary
+
+- Completed Stage 7G for active `game.StarterPlayer.StarterPlayerScripts.InventoryController` in the `Four Peaks` Studio place.
+- Added `InventoryCharacterPreview` to own existing character clone preview, preview camera placement, drag/touch rotation state, and preview drag cancellation.
+- Kept `InventoryController` as the owner of UI layout, details rendering, inventory actions, snapshot loading, remotes, input bindings, and calls that refresh the preview.
+- Preserved remote names, screen button attributes, inventory action payloads, viewport layout, preview camera values, preview clone cleanup, and visual behavior.
+
+### Files
+
+- Added `Four Peaks/StarterPlayer/StarterPlayerScripts/InventoryCharacterPreview.lua`
+- Updated `Four Peaks/StarterPlayer/StarterPlayerScripts/InventoryController.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Four Peaks`.
+- Created live `game.StarterPlayer.StarterPlayerScripts.InventoryCharacterPreview`.
+- Synchronized active `game.StarterPlayer.StarterPlayerScripts.InventoryController`.
+- Repo/Studio parity after sync and Play, measured as UTF-8 byte length plus rolling hash:
+  - `InventoryController`: length `72317`, hash `710125476`.
+  - `InventoryCharacterPreview`: length `3205`, hash `997130305`.
+
+### Architecture
+
+- Moved `refreshCharacterPreview`, preview model state, preview rotation, and viewport/touch input handlers into `InventoryCharacterPreview`.
+- `InventoryCharacterPreview` has no ModuleScript dependencies, no remote, no `_G`, and no fallback path.
+- Existing preview runtime work moved with ownership: three input connections for the viewport drag/touch behavior.
+- No UI hierarchy, remote, action payload, card rendering, filtering/sorting, or inventory balance data was changed.
+
+### Validation
+
+- Studio Play in `Four Peaks` started successfully with normal lobby ready logs and no `InventoryController`/`InventoryCharacterPreview` errors.
+- Opened inventory through the existing `InventoryGui` attribute contract: `ScreenButtonsAction = "open"` and a new `ScreenButtonsNonce`.
+- Runtime inspection confirmed `InventoryCharacterPreview` cloned into `PlayerScripts` as a `ModuleScript` and `require` returned a valid table API.
+- Preview inspection found `PreviewWorld.PreviewCharacter` with `16` BasePart descendants and a configured `ViewportFrame.CurrentCamera`.
+- Render inspection counted `10` image objects with non-empty images, plus `22` buttons, `81` text labels, and `1` search TextBox.
+- Closed inventory through the existing `ScreenButtonsAction = "toggle"` path; `InventoryGui.Enabled=false`.
+- Clean Play session Output had no `InventoryController`/`InventoryCharacterPreview` errors.
+
+### Not Verified
+
+- Physical drag/touch rotation of the viewport preview was not executed because the MCP Client execution thread cannot synthesize that input.
+- Equip, favorite, spell loadout, sell, and every tab/filter/sort combination were not repeated because Stage 7G changed only character preview ownership.
+
+### Risks
+
+- Missing `InventoryCharacterPreview` now fails `InventoryController` startup with a clear assert instead of silently using inline preview helpers.
+- Future changes to viewport preview clone/camera/rotation behavior should update `InventoryCharacterPreview`; inventory UI state and actions should remain in `InventoryController` or dedicated UI modules.
+
+### Rollback
+
+- Restore inline preview model state, `refreshCharacterPreview`, `rotatePreview`, and the three viewport input connections in `InventoryController.lua`.
+- Remove `InventoryCharacterPreview.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 7G notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-08 - Four Peaks BlacksmithUI stage 7F scene controller extraction
 
 ### Summary
