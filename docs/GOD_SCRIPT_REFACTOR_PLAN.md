@@ -11,7 +11,7 @@ Zakres: etapowy refaktor największych God Scriptów i gameplayowych zależnośc
 | 1. `ProgressService` i gameplayowe `_G` | Ukończony w zatwierdzonym zakresie Stage 1; etap 2 nie rozpoczęty | `RunProgressApi` zastąpił `_G` dla XP/coins/souls/kills/run time/average level/boss/end run; party XP declaration-order bug naprawiony; martwy `SetGlobalRunPause` fallback usunięty z chest itemów | Przed etapem 2 pozostaje tylko osobna akceptacja dalszego zakresu i pełniejszy runtime test, jeżeli dostępny będzie multiplayer |
 | 2. `WaveController` | 2A-2E ukończone | `AbilityGeometry` wydziela czystą geometrię ability; `AbilityHazards` wydziela hazard zones/ticki/cleanup; `AbilityExecutor` wydziela wykonanie ability elit i bossów; `EncounterScheduler` wydziela planowanie spawn/encounter; `RunPortalController` wydziela portal/prompt state; `WaveDebugApi` wydziela Studio-only debug hook registration | Brak zmian damage/tick/cooldown/spawn rate; po każdym podetapie Play test |
 | 3. `NpcService` | 3A-3F ukończone | Registry, movement/steering/ground, targeting/melee, lifecycle/status/death/despawn oraz batch replication wydzielone | Jeden centralny update, brak per-NPC Heartbeat |
-| 4. `SpellService` i projectiles | 4A-4E ukończone | `SpellProjectiles` wydziela projectile simulation i hit detection; `SpellTargeting` wydziela enemy query/target picking/beam segment distance; `SpellEffects` wydziela status/effect application; `SpellVisuals` wydziela server VFX dispatch/payload/orbit sync; martwe server-side konstruktory VFX usunięte | Pociski mają jeden leniwy scheduler; targeting/effects/VFX dispatch delegowane bez zmian balansu |
+| 4. `SpellService` i projectiles | 4A-4F ukończone | `SpellProjectiles` wydziela projectile simulation i hit detection; `SpellTargeting` wydziela enemy query/target picking/beam segment distance; `SpellEffects` wydziela status/effect application; `SpellVisuals` wydziela server VFX dispatch/payload/orbit sync; `SpellSustained` wydziela zone/beam tick loopi; martwe server-side konstruktory VFX usunięte | Pociski mają jeden leniwy scheduler; targeting/effects/VFX dispatch oraz zone/beam tick loopi delegowane bez zmian balansu |
 | 5. `RunStatsService` i `ShrineService` | Zaplanowany | Tylko pozostałe realnie mieszane odpowiedzialności | DamageService i RunDefenseState bez zmiany ownership |
 | 6. Guild | Zablokowany do czasu otwarcia `Guild` Studio | Persistence, membership, treasury, upgrades, teleport | Potwierdzony aktywny place `Gildia` |
 | 7. Duże kontrolery UI | Zaplanowany | Inventory/blacksmith/crafting UI po stabilizacji serwera | Brak zmian wyglądu/remotes/bindów |
@@ -48,6 +48,7 @@ Uwagi o parity:
 - 2026-07-07: Stage 4C added `SpellEffects` for target damage multipliers, vulnerability multiplier, DOT, slow, stun, vulnerability, knockback, pull, and pullStrength application. `SpellService` still owns spell archetype flow, VFX dispatch, and the main damage call.
 - 2026-07-07: Stage 4D added `SpellVisuals` for transient spell VFX payload extraction/broadcast and orbit VFX `FireClient` state sync. `SpellService` still owns spell archetype flow, cooldowns, and main damage call.
 - 2026-07-07: Stage 4E removed unused server-side spell visual constructors from `SpellService` after audit confirmed the active call sites live in `SpellVFXClient` and server dispatch runs through `SpellVisuals`.
+- 2026-07-07: Stage 4F added `SpellSustained` for existing zone and beam sustained tick loops. `SpellService` still owns cooldowns, spell archetype selection, player state, and the single global spell `Heartbeat`.
 
 ## Metryki największych plików
 
@@ -68,7 +69,8 @@ Liczby są statycznym skanem repo. `Remote names` to unikalne publiczne remotes 
 | `Four Peaks/ServerScriptService/ModuleScript/GuildService.lua` | 1503 | 52 / 23 | 3 | `GuildUpdated`, `TeleportStatus` | no frame loop; 1 player removing connection | 0 / 0 |
 | `Guild/ServerScriptService/Script/GuildPlace.server.lua` | 1422 | 63 / 4 | 1 | `GetGuildCastleState`, `GetTreasury`, `DepositToTreasury`, `SpendFromTreasury`, `GuildLocationOpened`, `GuildTreasuryUpdated`, `LobbyReturnStatus`, `RequestLobbyReturn` | no frame loop; prompt/player/remote connections | 0 / 0 |
 | `Four Peaks/ServerScriptService/ModuleScript/CraftingService.lua` | 1287 | 41 / 16 | 6 | none | no runtime loop | 0 / 0 |
-| `Level/ServerScriptService/Script/SpellService.lua` | 644 | 44 / 0 | 8 | `SpellVFXEvent` | 1 global spell `Heartbeat`; beam/zone task loops; projectile simulation delegated to `SpellProjectiles`; targeting delegated to `SpellTargeting`; effects delegated to `SpellEffects`; VFX dispatch delegated to `SpellVisuals` | 0 / 0 |
+| `Level/ServerScriptService/Script/SpellService.lua` | 594 | 44 / 0 | 9 | `SpellVFXEvent` | 1 global spell `Heartbeat`; projectile simulation delegated to `SpellProjectiles`; targeting delegated to `SpellTargeting`; effects delegated to `SpellEffects`; VFX dispatch delegated to `SpellVisuals`; zone/beam sustained loops delegated to `SpellSustained` | 0 / 0 |
+| `Level/ServerScriptService/ModuleScript/SpellSustained.lua` | 138 | 2 / 3 | 0 | none | existing zone and beam `task.spawn` tick loops moved from `SpellService`; no connection | 0 / 0 |
 | `Level/ServerScriptService/ModuleScript/SpellVisuals.lua` | 94 | 1 / 5 | 0 | none | no runtime loop or connection | 0 / 0 |
 | `Level/ServerScriptService/ModuleScript/SpellEffects.lua` | 137 | 4 / 5 | 0 | none | existing DOT `task.spawn` loop moved from `SpellService`; no connection | 0 / 0 |
 | `Level/ServerScriptService/ModuleScript/SpellProjectiles.lua` | 125 | 6 / 3 | 0 | none | 1 lazy `Heartbeat` only while active projectiles exist | 0 / 0 |
@@ -352,6 +354,7 @@ Etap 4, Spell/projectiles:
 - 4C ukończony.
 - 4D ukończony.
 - 4E ukończony.
+- 4F ukończony.
 - 4A dodał `Level/ServerScriptService/ModuleScript/SpellProjectiles.lua`.
 - `SpellProjectiles` odpowiada za aktywną listę pocisków, ruch po `dt`, dystans/range, pierce/hit-once tracking i hit detection przez callbacki z `SpellService`.
 - 4B dodał `Level/ServerScriptService/ModuleScript/SpellTargeting.lua`.
@@ -361,15 +364,19 @@ Etap 4, Spell/projectiles:
 - 4D dodał `Level/ServerScriptService/ModuleScript/SpellVisuals.lua`.
 - `SpellVisuals` odpowiada za `SpellVFXEvent` transient payload broadcast, visual stats extraction, `serverTime`, orbit VFX enable/disable sync i deduplikację orbit params.
 - 4E usunął nieużywane server-side konstruktory VFX z `SpellService` (`spawn*Visual`, `createProjectileVisual`, `destroyProjectileVisual` oraz ich prywatne helpery). Aktywne konstruktory pozostają w `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SpellVFXClient.lua`.
+- 4F dodał `Level/ServerScriptService/ModuleScript/SpellSustained.lua`.
+- `SpellSustained` odpowiada za istniejące zone i beam sustained tick loopi, ich broadcast ring/beam payloadów przez callbacki oraz wywołania `hitEnemy` dla ticków.
 - `SpellService` po 4A nadal odpowiada za cooldowny, wybór targetu, `SpellVFXEvent`, VFX payload shape, damage/effect formulas, orbit/nova/zone/beam flow, `PlayerData`/weapon multipliers i jeden globalny spell `Heartbeat`.
 - `SpellService` po 4B nadal odpowiada za cooldowny, `SpellVFXEvent`, VFX payload shape, damage/effect formulas, status/effect application, orbit/nova/zone/beam archetype flow, `PlayerData`/weapon multipliers i jeden globalny spell `Heartbeat`.
 - `SpellService` po 4C nadal odpowiada za cooldowny, `SpellVFXEvent`, VFX payload shape, impact/ring/beam/projectile visual construction, main damage call, orbit/nova/zone/beam archetype flow, `PlayerData`/weapon multipliers i jeden globalny spell `Heartbeat`.
 - `SpellService` po 4E nadal odpowiada za cooldowny, main damage call, orbit/nova/zone/beam archetype flow, `PlayerData`/weapon multipliers i jeden globalny spell `Heartbeat`.
-- Graf po 4D: `SpellService -> SpellEffects`, `SpellService -> SpellProjectiles`, `SpellService -> SpellTargeting`, `SpellService -> SpellVisuals`, `SpellService -> NpcService`, `SpellService -> PlayerData`, `SpellService -> SpellDefinitions`, `SpellService -> WeaponConfigs`; `SpellTargeting -> NpcService`; `SpellEffects`, `SpellProjectiles` i `SpellVisuals` nie wymagają modułów. Nie powstał cykl require.
+- `SpellService` po 4F nadal odpowiada za cooldowny, main damage call, orbit/nova archetype flow, `PlayerData`/weapon multipliers i jeden globalny spell `Heartbeat`; zone/beam sustained loopi są delegowane do `SpellSustained`.
+- Graf po 4F: `SpellService -> SpellEffects`, `SpellService -> SpellProjectiles`, `SpellService -> SpellTargeting`, `SpellService -> SpellVisuals`, `SpellService -> SpellSustained`, `SpellService -> NpcService`, `SpellService -> PlayerData`, `SpellService -> SpellDefinitions`, `SpellService -> WeaponConfigs`; `SpellTargeting -> NpcService`; `SpellEffects`, `SpellProjectiles`, `SpellVisuals` i `SpellSustained` nie wymagają modułów. Nie powstał cykl require.
 - Runtime po 4A: per-projectile `Heartbeat` został usunięty z `SpellService`; `SpellProjectiles` tworzy co najwyżej jedno leniwe połączenie `RunService.Heartbeat`, tylko gdy istnieje aktywny pocisk, i rozłącza je po opróżnieniu listy.
 - Runtime po 4C: istniejący DOT `task.spawn` co `0.5s` został przeniesiony do `SpellEffects` bez zmiany częstotliwości; `SpellService` zachowuje dotychczasowe beam/zone task loopi.
 - Runtime po 4D: `SpellVisuals` nie dodaje żadnej pętli ani connection; przejął tylko istniejące `FireAllClients`/`FireClient` dispatch.
 - Runtime po 4E: nie dodano pętli ani connection; usunięty kod nie miał call site’ów w aktywnym server flow.
+- Runtime po 4F: istniejące zone i beam `task.spawn` tick loopi przeniesiono z `SpellService` do `SpellSustained` bez zmiany `tickRate`, `duration`, damage math ani warunku `isPlayerRunActive`; `SpellService` nie zawiera już `task.spawn`.
 - Nie zmieniono prędkości, range, damage, cooldown, pierce, target selection, VFX payload shape, nazw remotes, persistent data ani atrybutów.
 - Walidacja 4A: live Studio `SpellProjectiles` utworzony, live `SpellService` zsynchronizowany; repo/Studio parity potwierdzona przez znormalizowane length/hash: `SpellService` `46747/771417623`, `SpellProjectiles` `3187/229091311`.
 - Play test 4A: tymczasowy Studio-only `Stage4ASpellProjectileHarness` uruchomiony jako zwykły server `Script` w tym samym VM co `SpellService`; realny `VoltNeedle` przeszedł przez `SpellService -> fireProjectile -> SpellProjectiles.Fire -> NpcService.ApplyDamage`, utworzył `1` pocisk (`before=0`, `after=1`), trafił target `Stage4A_VoltNeedle_Target`, zadał `18` damage i zmienił HP `200 -> 182`; po trafieniu aktywne pociski wróciły do `0`.
@@ -381,18 +388,22 @@ Etap 4, Spell/projectiles:
 - Play test 4D: tymczasowy Studio-only `Stage4DSpellVisualsHarness` uruchomiony jako zwykły server `Script` w tym samym VM co `SpellService`; realny `VoltNeedle` wysłał `projectile` i `impact` payload przez `SpellVisuals.Broadcast`, `FlameBurst` wysłał `nova`, `ScorchField` wysłał `ring`, `ThunderRay` wysłał `beam`, a `EmberOrbit` przeszedł przez `SpellVisuals.SyncOrbit` enable/disable. Payloady miały `serverTime`; wynik harnessu `ok=true`, `damageCount=58`, `damageDealt=716`.
 - Walidacja 4E: repo/Studio parity potwierdzona dla aktywnego `SpellService` po usunięciu martwych server-side visual constructors: `SpellService` `19498/431803948`; pozostałe spell moduły bez zmian względem 4D.
 - Play test 4E: tymczasowy Studio-only `Stage4ESpellSmokeHarness` uruchomiony jako zwykły server `Script` w tym samym VM co `SpellService`; realny `VoltNeedle` nadal wysłał `projectile` i `impact`, `ScorchField` wysłał `ring`, a `ThunderRay` wysłał `beam`; wynik `ok=true`, `damageCount=25`, `damageDealt=86`.
+- Walidacja 4F: live Studio `SpellSustained` utworzony, live `SpellService` zsynchronizowany; repo/Studio parity potwierdzona przez length/hash: `SpellService` `17984/776218815`, `SpellSustained` `4093/41753248`, `SpellVisuals` `2543/314798517`, `SpellEffects` `4120/920148350`, `SpellProjectiles` `3187/229091311`, `SpellTargeting` `2333/375152092`.
+- Play test 4F: tymczasowy Studio-only `Stage4FSpellSustainedHarness` uruchomiony jako zwykły server `Script` w tym samym VM co `SpellService`; po odblokowaniu i późniejszym przywróceniu `PauseState` realny `ScorchField` przeszedł przez `SpellService -> SpellSustained.RunZone -> NpcService.ApplyDamage` (`zoneInvoked=1`, `zoneDirectHits=8`, `tickRate=0.45`, `duration=3.672`), a realny `ThunderRay` przeszedł przez `SpellService -> SpellSustained.RunBeam -> NpcService.ApplyDamage` (`beamInvoked=1`, `beamDirectHits=13`, `tickRate=0.16`, `duration=1.537`, `range=54`, `width=4.32`); ring i beam payloady przeszły przez `SpellVisuals.Broadcast`.
 - Cleanup 4A: tymczasowy harness usunięty ze Studio; `script_grep` i repo grep nie znajdują markerów `Stage4A`.
 - Cleanup 4B: tymczasowy harness usunięty ze Studio; `script_grep` i repo grep nie znajdują markerów `Stage4B`.
 - Cleanup 4C: tymczasowy harness usunięty ze Studio; `script_grep` i repo grep nie znajdują markerów `Stage4C`.
 - Cleanup 4D: tymczasowy harness i `ServerStorage.Stage4DResult` usunięte ze Studio; `script_grep` i repo grep nie znajdują markerów `Stage4D`.
 - Cleanup 4E: tymczasowy harness i `ServerStorage.Stage4EResult` usunięte ze Studio; `script_grep` i repo grep nie znajdują markerów `Stage4E`.
-- Nieweryfikowane w 4E: pełny naturalny run z losowymi spellami, multiplayer, oraz klientowa wizualna inspekcja renderowanych VFX. Server dispatch dla projectile/impact/ring/beam został sprawdzony realnym `SpellService` flow.
-- Pozostałe prace etapu 4: ewentualne uporządkowanie beam/zone task loopów bez zmiany balansu.
+- Cleanup 4F: tymczasowy harness, heartbeat probe, `ServerStorage.Stage4FResult` i target folder usunięte ze Studio; `script_grep` i repo grep nie znajdują markerów `Stage4F`.
+- Nieweryfikowane w 4F: pełny naturalny run z losowymi spellami, multiplayer, oraz klientowa wizualna inspekcja renderowanych VFX. Server flow dla zone/beam ticków został sprawdzony realnym `SpellService` flow.
+- Pozostałe prace etapu 4: brak w zatwierdzonym zakresie.
 - Rollback 4A: przywrócić poprzedni inline `fireProjectile` z per-projectile `RunService.Heartbeat` w `SpellService.lua`, usunąć `SpellProjectiles.lua` z repo i live Studio oraz cofnąć wpisy planu/changeloga.
 - Rollback 4B: przywrócić enemy query/target picking/distance segment helpery inline w `SpellService.lua`, usunąć `SpellTargeting.lua` z repo i live Studio oraz cofnąć wpisy planu/changeloga.
 - Rollback 4C: przywrócić target damage multiplier, vulnerability multiplier, DOT/effects helpery inline w `SpellService.lua`, usunąć `SpellEffects.lua` z repo i live Studio oraz cofnąć wpisy planu/changeloga.
 - Rollback 4D: przywrócić `extractVisualStats`, `broadcastSpellVisual`, `syncOrbitVFX` i orbit stop helpery inline w `SpellService.lua`, usunąć `SpellVisuals.lua` z repo i live Studio oraz cofnąć wpisy planu/changeloga.
 - Rollback 4E: przywrócić usunięte server-side visual constructors i helpery z commita poprzedzającego 4E oraz cofnąć wpisy planu/changeloga.
+- Rollback 4F: przywrócić inline `runZone` i `runBeam` task loopi w `SpellService.lua`, usunąć `SpellSustained.lua` z repo i live Studio oraz cofnąć wpisy planu/changeloga.
 
 Etapy 5-7:
 

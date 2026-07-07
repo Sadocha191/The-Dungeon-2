@@ -1,5 +1,71 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Poziom SpellService stage 4F sustained spell loop extraction
+
+### Summary
+
+- Completed Stage 4F for active `game.ServerScriptService.Script.SpellService`.
+- Added `SpellSustained` as the owner of existing zone and beam sustained tick loops.
+- Kept `SpellService` as the owner of spell cooldowns, archetype selection, player state, main damage call, `PlayerData`/weapon multipliers, and the single global spell `Heartbeat`.
+- Preserved spell damage, cooldowns, tick rates, durations, target selection, VFX payload shape, remotes, persistent data, attributes, and balance.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/SpellSustained.lua`
+- Updated `Level/ServerScriptService/Script/SpellService.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Created live `game.ServerScriptService.ModuleScript.SpellSustained`.
+- Synchronized active `game.ServerScriptService.Script.SpellService`.
+- Repo/Studio parity after sync:
+  - `SpellService`: length `17984`, hash `776218815`.
+  - `SpellSustained`: length `4093`, hash `41753248`.
+  - `SpellVisuals`: length `2543`, hash `314798517`.
+  - `SpellEffects`: length `4120`, hash `920148350`.
+  - `SpellProjectiles`: length `3187`, hash `229091311`.
+  - `SpellTargeting`: length `2333`, hash `375152092`.
+- Temporary `Stage4FSpellSustainedHarness`, heartbeat probe, `ServerStorage.Stage4FResult`, and target folder were removed; Studio grep and repo grep found no `Stage4F` markers.
+
+### Architecture
+
+- Moved the existing `ScorchField`/zone-style `task.spawn` tick loop out of `SpellService` into `SpellSustained.RunZone`.
+- Moved the existing `ThunderRay`/beam-style `task.spawn` tick loop out of `SpellService` into `SpellSustained.RunBeam`.
+- `SpellSustained` uses callbacks only and has no module `require()`.
+- `SpellService` now has no `task.spawn`; it still owns exactly one global `RunService.Heartbeat`.
+- No new `_G`, remotes, fallback path, bootstrap, require cycle, scheduler, per-object heartbeat, or connection was added.
+
+### Validation
+
+- Static audit showed `SpellService` now has `0` `task.spawn` calls and still has one global spell `Heartbeat`.
+- `SpellSustained` contains the two moved `task.spawn` tick loops with the same `tickRate`, `duration`, damage math, and `isPlayerRunActive` stop condition as before.
+- Studio Play startup reached normal `SpellService` ready logs with no `SpellSustained` loading errors.
+- A temporary Studio-only server Script harness ran in the same server VM as live `SpellService`.
+- Real `ScorchField` called `SpellSustained.RunZone`, emitted a `ring` payload, and dealt zone direct hits through `NpcService.ApplyDamage`: `zoneInvoked=1`, `zoneDirectHits=8`, `tickRate=0.45`, `duration=3.672`.
+- Real `ThunderRay` called `SpellSustained.RunBeam`, emitted a `beam` payload, and dealt beam direct hits through `NpcService.ApplyDamage`: `beamInvoked=1`, `beamDirectHits=13`, `tickRate=0.16`, `duration=1.537`, `range=54`, `width=4.32`.
+- `git diff --check` passed with only existing CRLF warnings.
+
+### Not Verified
+
+- Full natural run with random spell acquisition was not repeated in this checkpoint.
+- Multiplayer spell behavior was not available through current MCP Play.
+- Client visual rendering was not inspected visually; this checkpoint validated server spell flow and VFX dispatch for real zone/beam call sites.
+
+### Risks
+
+- The moved loops still create one task per active zone or beam cast, matching pre-refactor behavior. This checkpoint does not centralize sustained spell ticking.
+- The temporary harness had to set `PauseState=false` during the test because the Play session started paused; it restored the previous value during cleanup.
+
+### Rollback
+
+- Restore inline `runZone` and `runBeam` task loops in `SpellService.lua` from the commit before Stage 4F.
+- Remove `SpellSustained.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 4F notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Poziom SpellService stage 4E server visual dead code cleanup
 
 ### Summary

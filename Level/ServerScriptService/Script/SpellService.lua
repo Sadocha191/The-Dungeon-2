@@ -46,6 +46,7 @@ local SpellEffects = require(findServerModule("SpellEffects") or error("[SpellSe
 local SpellProjectiles = require(findServerModule("SpellProjectiles") or error("[SpellService] Missing SpellProjectiles"))
 local SpellTargeting = require(findServerModule("SpellTargeting") or error("[SpellService] Missing SpellTargeting"))
 local SpellVisuals = require(findServerModule("SpellVisuals") or error("[SpellService] Missing SpellVisuals"))
+local SpellSustained = require(findServerModule("SpellSustained") or error("[SpellService] Missing SpellSustained"))
 local WeaponConfigs = modFolder and require(modFolder:WaitForChild("WeaponConfigs"))
 
 local vfxRoot = workspace:FindFirstChild("SpellVFX")
@@ -287,6 +288,25 @@ SpellProjectiles.Configure({
 	isPlayerRunActive = isPlayerRunActive,
 })
 
+SpellSustained.Configure({
+	broadcastBeam = function(payload)
+		SpellVisuals.Broadcast("beam", payload)
+	end,
+	broadcastRing = function(payload)
+		SpellVisuals.Broadcast("ring", payload)
+	end,
+	distancePointToSegment = distancePointToSegment,
+	extractVisualStats = SpellVisuals.ExtractStats,
+	getAllEnemies = getAllEnemies,
+	getDurationMult = getDurationMult,
+	getEnemiesInRadius = getEnemiesInRadius,
+	getEnemyPosition = getEnemyPosition,
+	hitEnemy = hitEnemy,
+	isPlayerRunActive = isPlayerRunActive,
+	pickPriorityEnemy = pickPriorityEnemy,
+	spellClock = spellClock,
+})
+
 local function getCastOrigin(hrp)
 	return hrp.Position + Vector3.new(0, 1.2, 0)
 end
@@ -481,39 +501,11 @@ local function runZone(plr, spellId, stats, hrp)
 	end
 	s.cds[spellId] = now + ((stats.cooldown or 4) * getCooldownMult(plr))
 
-	local origin = hrp.Position
-	local center = origin
-	if stats.spawnAtEnemy then
-		local target = pickPriorityEnemy(origin, math.max(70, stats.range or 0))
-		local targetPos = target and getEnemyPosition(target)
-		if targetPos then
-			center = targetPos
-		end
-	end
-
-	local radius = stats.radius or 6
-	local duration = (stats.duration or 3) * getDurationMult(plr)
-	local tickRate = stats.tickRate or 0.45
-	local tickDamage = stats.damage * math.max(0.3, tickRate)
-	SpellVisuals.Broadcast("ring", {
-		pos = center,
-		radius = radius,
-		duration = duration,
-		stats = SpellVisuals.ExtractStats(stats),
+	SpellSustained.RunZone({
+		player = plr,
+		stats = stats,
+		origin = hrp.Position,
 	})
-
-	local endAt = spellClock() + duration
-	task.spawn(function()
-		while spellClock() < endAt do
-			if not isPlayerRunActive(plr) then
-				break
-			end
-			for _, enemy in ipairs(getEnemiesInRadius(center, radius)) do
-				hitEnemy(plr, enemy, tickDamage, stats, center, getEnemyPosition(enemy))
-			end
-			task.wait(tickRate)
-		end
-	end)
 end
 
 local function runBeam(plr, spellId, stats, hrp)
@@ -525,55 +517,13 @@ local function runBeam(plr, spellId, stats, hrp)
 	s.cds[spellId] = now + ((stats.cooldown or 5) * getCooldownMult(plr))
 
 	local origin = getCastOrigin(hrp)
-	local target = pickPriorityEnemy(hrp.Position, stats.range or 60)
-	local targetPos = target and getEnemyPosition(target)
-	local direction = targetPos and (targetPos - origin) or hrp.CFrame.LookVector
-	if direction.Magnitude <= 0.01 then
-		return
-	end
-	direction = direction.Unit
-
-	local range = stats.range or 50
-	local width = stats.width or 4
-	local duration = stats.duration or 1.5
-	local tickRate = stats.tickRate or 0.18
-	local beamDamage = stats.damage * math.max(0.6, tickRate * 4)
-	SpellVisuals.Broadcast("beam", {
+	SpellSustained.RunBeam({
+		player = plr,
+		stats = stats,
 		origin = origin,
-		dir = direction,
-		range = range,
-		width = width,
-		duration = duration,
-		stats = SpellVisuals.ExtractStats(stats),
+		targetSearchPosition = hrp.Position,
+		fallbackDirection = hrp.CFrame.LookVector,
 	})
-
-	local endAt = spellClock() + duration
-	task.spawn(function()
-		while spellClock() < endAt do
-			if not isPlayerRunActive(plr) then
-				break
-			end
-			local hitThisTick = {}
-			local beamEnd = origin + (direction * range)
-			for _, enemy in ipairs(getAllEnemies()) do
-				local enemyPos = getEnemyPosition(enemy)
-				if enemyPos and not hitThisTick[enemy] and distancePointToSegment(enemyPos, origin, beamEnd) <= (width * 0.5) then
-					hitThisTick[enemy] = true
-					local impactPos = enemyPos
-					if enemyPos then
-						local ab = beamEnd - origin
-						local denom = ab:Dot(ab)
-						if denom > 1e-4 then
-							local t = math.clamp(((enemyPos - origin):Dot(ab)) / denom, 0, 1)
-							impactPos = origin + (ab * t)
-						end
-					end
-					hitEnemy(plr, enemy, beamDamage, stats, origin, impactPos)
-				end
-			end
-			task.wait(tickRate)
-		end
-	end)
 end
 
 local function stopOrbitIfNeeded(plr, spellId)
