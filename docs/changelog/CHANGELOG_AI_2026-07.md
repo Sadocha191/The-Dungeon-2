@@ -1,5 +1,64 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-08 - Four Peaks BlacksmithUI stage 7F scene controller extraction
+
+### Summary
+
+- Completed Stage 7F for active `game.StarterPlayer.StarterPlayerScripts.BlacksmithUI` in the `Four Peaks` Studio place.
+- Added `BlacksmithSceneController` to own existing blacksmith scene lifecycle: lobby UI hiding, blacksmith camera, local character hiding, movement state snapshot/restore, and blacksmith prompt hiding.
+- Kept `BlacksmithUI` as the owner of UI layout, tooltips, category/entry rendering, crafting requests, remotes, input bindings, and the existing open/close order.
+- Preserved remote names, crafting action payloads, prompt behavior, camera FOV/offset, movement restore values, character visibility restore, and visual behavior.
+
+### Files
+
+- Added `Four Peaks/StarterPlayer/StarterPlayerScripts/BlacksmithSceneController.lua`
+- Updated `Four Peaks/StarterPlayer/StarterPlayerScripts/BlacksmithUI.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Four Peaks`.
+- Created live `game.StarterPlayer.StarterPlayerScripts.BlacksmithSceneController`.
+- Synchronized active `game.StarterPlayer.StarterPlayerScripts.BlacksmithUI`.
+- Repo/Studio parity after sync and Play, measured as UTF-8 byte length plus rolling hash:
+  - `BlacksmithUI`: length `35187`, hash `419464323`.
+  - `BlacksmithSceneController`: length `8781`, hash `892045071`.
+
+### Architecture
+
+- Moved lobby GUI state, camera bind/restore, local character visibility state, movement state snapshot/restore, blacksmith prompt hide/restore, and prompt ancestry checks into `BlacksmithSceneController`.
+- `BlacksmithSceneController` has no ModuleScript dependencies, no remote, no `_G`, and no fallback path.
+- Existing scene runtime work moved with ownership: one camera `BindToRenderStep` while the UI is open plus the same character/prompt connections as before.
+- No UI hierarchy, remote, action payload, card rendering, tooltip behavior, crafting request, or balance data was changed.
+
+### Validation
+
+- Studio Play in `Four Peaks` started successfully with normal lobby ready logs and no `BlacksmithUI`/`BlacksmithSceneController` errors.
+- Opened blacksmith through the existing server remote path with `OpenBlacksmithUI:FireClient(player)`.
+- Runtime inspection confirmed `BlacksmithSceneController` cloned into `PlayerScripts` as a `ModuleScript` and `require` returned a valid table API.
+- Render inspection counted `44` image objects, all with non-empty images, plus `13` buttons (`12` visible) and `46` text labels.
+- During open, the blacksmith prompt was hidden (`1/1` disabled), `16` local character parts were hidden, camera FOV was `45`, and the UI was enabled.
+- Closed via the existing `BlacksmithCloseRequested` BindableEvent; after close the UI was disabled, prompt disabled count returned to `0/1`, hidden local character parts returned to `0`, `ScreenGuiButtons.Enabled=true`, and camera FOV restored to `70`.
+- Clean Play session Output had no `BlacksmithUI`/`BlacksmithSceneController` errors.
+
+### Not Verified
+
+- Physical BackButton click and physical ProximityPrompt traversal were not repeated; the test used the existing remote open path and existing `BlacksmithCloseRequested` close path.
+- Craft/upgrade request and full material tooltip matrix were not repeated because Stage 7F changed only scene lifecycle ownership.
+
+### Risks
+
+- Missing `BlacksmithSceneController` now fails `BlacksmithUI` startup with a clear assert instead of silently using inline lifecycle helpers.
+- Future scene lifecycle changes should update `BlacksmithSceneController`; rendering, tooltips, crafting requests, and remotes should remain in `BlacksmithUI` or dedicated UI modules.
+
+### Rollback
+
+- Restore inline scene lifecycle helpers in `BlacksmithUI.lua`: lobby UI hiding/restoring, blacksmith camera start/stop, local character hide/restore, movement snapshot/restore, prompt hide/restore, and prompt ancestry checks.
+- Remove `BlacksmithSceneController.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 7F notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-08 - Four Peaks BlacksmithUI stage 7E entry builder extraction
 
 ### Summary

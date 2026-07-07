@@ -14,7 +14,7 @@ Zakres: etapowy refaktor największych God Scriptów i gameplayowych zależnośc
 | 4. `SpellService` i projectiles | 4A-4F ukończone | `SpellProjectiles` wydziela projectile simulation i hit detection; `SpellTargeting` wydziela enemy query/target picking/beam segment distance; `SpellEffects` wydziela status/effect application; `SpellVisuals` wydziela server VFX dispatch/payload/orbit sync; `SpellSustained` wydziela zone/beam tick loopi; martwe server-side konstruktory VFX usunięte | Pociski mają jeden leniwy scheduler; targeting/effects/VFX dispatch oraz zone/beam tick loopi delegowane bez zmian balansu |
 | 5. `RunStatsService` i `ShrineService` | 5A ukończone | Usunięto nieużywane globalne shimy `RunStatsService`; `ShrineService` `_G.PrepareRunShrines` pozostaje aktywnym kontraktem `RunReadyGate` | DamageService i RunDefenseState bez zmiany ownership |
 | 6. Guild | Ukończony (6A-6E) | `GuildPlaceRemotes` wydziela remote factory aktywnego `Gildia`; `GuildPlaceLocations` wydziela config/status lokalizacji oraz budowę modeli/promptów; `GuildRecordState` wydziela sanitizację/state rekordów gildii w `Four Peaks`; `GuildUpdateBroadcaster` wydziela istniejący broadcast `GuildUpdated`; persistence, membership, treasury, upgrades i teleport bez zmian | Potwierdzony aktywny place `Gildia`/`Four Peaks`; oba aktywne serwisy Guild poniżej 1200 linii; Play smoke wykonane po checkpointach |
-| 7. Duże kontrolery UI | 7A-7E ukończone | `InventoryIconResolver` wydziela resolver ikon aktywnego `InventoryController`; `InventoryEntryBuilder` wydziela transformację snapshotu inventory; `InventoryFilterSorter` wydziela filtrowanie i sortowanie inventory; `BlacksmithIconResolver` wydziela resolver ikon aktywnego `BlacksmithUI`; `BlacksmithEntryBuilder` wydziela listę i opisy craftingu; Crafting UI jeszcze bez zmian strukturalnych | Brak zmian wyglądu/remotes/bindów |
+| 7. Duże kontrolery UI | 7A-7F ukończone | `InventoryIconResolver` wydziela resolver ikon aktywnego `InventoryController`; `InventoryEntryBuilder` wydziela transformację snapshotu inventory; `InventoryFilterSorter` wydziela filtrowanie i sortowanie inventory; `BlacksmithIconResolver` wydziela resolver ikon aktywnego `BlacksmithUI`; `BlacksmithEntryBuilder` wydziela listę i opisy craftingu; `BlacksmithSceneController` wydziela lifecycle sceny kowala | Brak zmian wyglądu/remotes/bindów |
 
 ## Aktywne ścieżki Studio
 
@@ -23,7 +23,7 @@ Potwierdzone przez MCP 2026-07-01:
 | Place | Studio | Aktywne ścieżki |
 |---|---|---|
 | Level | `Level` | `ServerScriptService.Script.ProgressService`, `ServerScriptService.Script.Model.WaveController`, `ServerScriptService.ModuleScript.NpcService`, `ServerScriptService.ModuleScript.Stats.RunStatsService`, `ServerScriptService.Script.SpellService`, `ServerScriptService.Script.ShrineService`, `ServerScriptService.Script.DropService`, `ServerScriptService.ModuleScript.DamageService` |
-| Four Peaks | `Four Peaks` | `ServerScriptService.ModuleScript.GuildService`, `ServerScriptService.ModuleScript.GuildRecordState`, `ServerScriptService.ModuleScript.GuildUpdateBroadcaster`, `ServerScriptService.ModuleScript.CraftingService`, `ServerScriptService.Script.BlacksmithService`, `StarterPlayer.StarterPlayerScripts.InventoryController`, `StarterPlayer.StarterPlayerScripts.InventoryIconResolver`, `StarterPlayer.StarterPlayerScripts.InventoryEntryBuilder`, `StarterPlayer.StarterPlayerScripts.InventoryFilterSorter`, `StarterPlayer.StarterPlayerScripts.BlacksmithUI`, `StarterPlayer.StarterPlayerScripts.BlacksmithIconResolver`, `StarterPlayer.StarterPlayerScripts.BlacksmithEntryBuilder`, `StarterPlayer.StarterPlayerScripts.GuildClient` |
+| Four Peaks | `Four Peaks` | `ServerScriptService.ModuleScript.GuildService`, `ServerScriptService.ModuleScript.GuildRecordState`, `ServerScriptService.ModuleScript.GuildUpdateBroadcaster`, `ServerScriptService.ModuleScript.CraftingService`, `ServerScriptService.Script.BlacksmithService`, `StarterPlayer.StarterPlayerScripts.InventoryController`, `StarterPlayer.StarterPlayerScripts.InventoryIconResolver`, `StarterPlayer.StarterPlayerScripts.InventoryEntryBuilder`, `StarterPlayer.StarterPlayerScripts.InventoryFilterSorter`, `StarterPlayer.StarterPlayerScripts.BlacksmithUI`, `StarterPlayer.StarterPlayerScripts.BlacksmithIconResolver`, `StarterPlayer.StarterPlayerScripts.BlacksmithEntryBuilder`, `StarterPlayer.StarterPlayerScripts.BlacksmithSceneController`, `StarterPlayer.StarterPlayerScripts.GuildClient` |
 | Guild | `Guild` | `ServerScriptService.Script.GuildPlace`, `ServerScriptService.ModuleScript.GuildPlaceRemotes`, `ServerScriptService.ModuleScript.GuildPlaceLocations`, `StarterPlayer.StarterPlayerScripts.GuildCastleClient` |
 
 Uwagi o parity:
@@ -68,9 +68,10 @@ Liczby są statycznym skanem repo. `Remote names` to unikalne publiczne remotes 
 | `Level/ServerScriptService/ModuleScript/NpcTargeting.lua` | 191 | 0 / 9 | 1 | none | no runtime loop or connection | 0 / 0 |
 | `Level/ServerScriptService/ModuleScript/NpcMelee.lua` | 105 | 3 / 2 | 1 | none | no runtime loop or connection | 0 / 0 |
 | `Level/ServerScriptService/Script/ProgressService.lua` | 1645 | 56 / 7 | 0 | `PlayerProgressEvent`, `MissionSummaryEvent`, `SpellEvent`, `PauseMenuEvent` | character health watch task co 0.25 s; remote/player connections | 4 / 8 |
-| `Four Peaks/StarterPlayer/StarterPlayerScripts/BlacksmithUI.lua` | 1419 | 58 / 0 | 5 | `OpenBlacksmithUI`, `BlacksmithSync`, `BlacksmithAction` | event-driven UI, 18 connections | 0 / 0 |
+| `Four Peaks/StarterPlayer/StarterPlayerScripts/BlacksmithUI.lua` | 1121 | 38 / 0 | 6 | `OpenBlacksmithUI`, `BlacksmithSync`, `BlacksmithAction` | event-driven UI, 15 connections; scene lifecycle delegated | 0 / 0 |
 | `Four Peaks/StarterPlayer/StarterPlayerScripts/BlacksmithIconResolver.lua` | 173 | 0 / 2 | 0 | none | no runtime loop or connection | 0 / 0 |
 | `Four Peaks/StarterPlayer/StarterPlayerScripts/BlacksmithEntryBuilder.lua` | 124 | 1 / 7 | 0 | none | no runtime loop or connection | 0 / 0 |
+| `Four Peaks/StarterPlayer/StarterPlayerScripts/BlacksmithSceneController.lua` | 338 | 9 / 13 | 0 | none | existing scene `BindToRenderStep` plus 3 connections moved from `BlacksmithUI` | 0 / 0 |
 | `Four Peaks/ServerScriptService/ModuleScript/GuildService.lua` | 1159 | 29 / 23 | 5 | `GuildUpdated`, `TeleportStatus` | no frame loop; 1 player removing connection | 0 / 0 |
 | `Four Peaks/ServerScriptService/ModuleScript/GuildRecordState.lua` | 314 | 0 / 20 | 1 | none | no runtime loop or connection | 0 / 0 |
 | `Four Peaks/ServerScriptService/ModuleScript/GuildUpdateBroadcaster.lua` | 75 | 2 / 1 | 0 | `GuildUpdated` | no runtime loop or connection | 0 / 0 |
@@ -487,6 +488,7 @@ Etap 7, duże kontrolery UI:
 - 7C ukończony.
 - 7D ukończony.
 - 7E ukończony.
+- 7F ukończony.
 - 7A potwierdził aktywne Studio `Four Peaks` i ścieżkę `game.StarterPlayer.StarterPlayerScripts.InventoryController`; stale duplicate `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/BlacksmithUI.lua` nie istnieje jako aktywny obiekt Studio i nie był edytowany.
 - 7A dodał `Four Peaks/StarterPlayer/StarterPlayerScripts/InventoryIconResolver.lua`.
 - `InventoryIconResolver` odpowiada za dotychczasowe odczyty folderów ikon, cache indeksów i wybór assetów dla weapon/material/spell/codex cards.
@@ -535,6 +537,15 @@ Etap 7, duże kontrolery UI:
 - Play test 7E w aktywnym `Four Peaks`: `OpenBlacksmithUI:FireClient(player)` otworzył istniejące UI; `BlacksmithEntryBuilder` był obecny w `PlayerScripts` jako `ModuleScript`, `require` zwrócił table, render zawierał `44` obrazy z assetami, `13` przycisków (`12` widocznych) i `46` labeli; syntetyczny smoke potwierdził category grouping `Sword=1`, `Bow=1`, fallback selected category `Sword`, selected recipe `r1` i stat line `ATK 12`; Output bez błędów `BlacksmithUI`/`BlacksmithEntryBuilder`.
 - Nieweryfikowane w 7E: craft/upgrade request, material tooltip matrix, ręczne kliknięcie każdej kategorii i pełne zamknięcie z kamerą nie były wykonywane, ponieważ checkpoint zmieniał tylko helpery danych listy craftingu.
 - Rollback 7E: przywrócić inline `buildEntriesByCategory`, `getSelectedCategoryEntries`, `getSelectedEntry`, `getWeaponDisplayName`, `getWeaponTypeLabel` i `buildStatLines` w `BlacksmithUI.lua`, usunąć `BlacksmithEntryBuilder.lua` z repo i live Studio oraz cofnąć wpisy planu/changeloga.
+- 7F dodał `Four Peaks/StarterPlayer/StarterPlayerScripts/BlacksmithSceneController.lua`.
+- `BlacksmithSceneController` odpowiada za dotychczasowe ukrywanie/przywracanie lobby UI, kamery kowala, lokalnej postaci, stanu movementu oraz promptów kowala.
+- `BlacksmithUI` po 7F nadal odpowiada za UI layout, tooltipy, render kart/detali, crafting request, remotes, input bindings i kolejność open/close flow.
+- Graf 7F: `BlacksmithUI -> BlacksmithSceneController`; `BlacksmithSceneController` nie wymaga modułów i używa jawnie przekazanych zależności `Player`, `PlayerGui`, `Gui`, `CameraPoint`, `Workspace`, `RunService` oraz stałych kamery/lobby.
+- Runtime 7F: nie dodano nowych pętli, remotes, `_G`, fallbacków ani schedulerów; istniejący `BindToRenderStep` kamery i 3 scenowe connection zostały przeniesione z `BlacksmithUI` do modułu.
+- Walidacja 7F: repo/Studio parity aktywnego `Four Peaks` potwierdzona bajtowym length/hash: `BlacksmithUI` `35187/419464323`, `BlacksmithSceneController` `8781/892045071`.
+- Play test 7F w aktywnym `Four Peaks`: `OpenBlacksmithUI:FireClient(player)` otworzył istniejące UI; `BlacksmithSceneController` był obecny w `PlayerScripts` jako `ModuleScript`, `require` zwrócił table, render zawierał `44` obrazy z assetami, `13` przycisków (`12` widocznych) i `46` labeli. Podczas open prompt kowala był ukryty `1/1`, `16` części lokalnej postaci miało `LocalTransparencyModifier >= 1`, FOV kamery wynosił `45`; po zamknięciu przez istniejący `BlacksmithCloseRequested` GUI było disabled, prompt wrócił `0/1` disabled, ukryte części postaci spadły do `0`, `ScreenGuiButtons.Enabled=true`, FOV wrócił do `70`; Output bez błędów `BlacksmithUI`/`BlacksmithSceneController`.
+- Nieweryfikowane w 7F: ręczne kliknięcie BackButton i fizyczne przejście przez ProximityPrompt nie były wykonywane, ponieważ test użył istniejącego remote oraz istniejącego `BlacksmithCloseRequested`; craft/upgrade request i tooltip matrix pozostają poza zakresem scene extraction.
+- Rollback 7F: przywrócić inline funkcje lifecycle sceny w `BlacksmithUI.lua` (`hideLobbyUi`, kamera, character visibility, movement snapshot/restore, prompt hide/restore, `isPromptInsideBlacksmith`), usunąć `BlacksmithSceneController.lua` z repo i live Studio oraz cofnąć wpisy planu/changeloga.
 
 ## Plan migracji `_G`
 

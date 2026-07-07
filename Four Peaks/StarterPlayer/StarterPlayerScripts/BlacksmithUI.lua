@@ -61,6 +61,9 @@ local BlacksmithIconResolver = require(blacksmithIconResolverModule)
 local blacksmithEntryBuilderModule = script.Parent:FindFirstChild("BlacksmithEntryBuilder")
 assert(blacksmithEntryBuilderModule and blacksmithEntryBuilderModule:IsA("ModuleScript"), "[BlacksmithUI] BlacksmithEntryBuilder ModuleScript is required")
 local BlacksmithEntryBuilder = require(blacksmithEntryBuilderModule)
+local blacksmithSceneControllerModule = script.Parent:FindFirstChild("BlacksmithSceneController")
+assert(blacksmithSceneControllerModule and blacksmithSceneControllerModule:IsA("ModuleScript"), "[BlacksmithUI] BlacksmithSceneController ModuleScript is required")
+local BlacksmithSceneController = require(blacksmithSceneControllerModule)
 
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local OpenBlacksmithUI = remoteEvents:WaitForChild("OpenBlacksmithUI")
@@ -352,19 +355,9 @@ local popupConfig = nil
 local snapshot = nil
 local selectedCategory = nil
 local selectedRecipeId = nil
-local hiddenLobbyGuiStates = nil
-local savedCameraState = nil
-local cameraActive = false
 local entryTemplate = nil
 local runtimeEntryButtons = {}
 local hoveredMaterialId = nil
-local characterAddedConnection = nil
-local characterDescendantAddedConnection = nil
-local hiddenCharacterParts = {}
-local hiddenCharacterEffects = {}
-local hiddenBlacksmithPromptStates = {}
-local blacksmithPromptWatcher = nil
-local savedMovementState = nil
 local iconResolver = BlacksmithIconResolver.new({
 	ReplicatedStorage = ReplicatedStorage,
 })
@@ -375,6 +368,18 @@ local resolveElementIconAsset = iconResolver.ResolveElementIconAsset
 local entryBuilder = BlacksmithEntryBuilder.new({
 	WeaponConfigs = WeaponConfigs,
 	ClampInt = clampInt,
+})
+local sceneController = BlacksmithSceneController.new({
+	Player = player,
+	PlayerGui = playerGui,
+	Gui = gui,
+	CameraPoint = cameraPoint,
+	Workspace = Workspace,
+	RunService = RunService,
+	HiddenLobbyGuiNames = HiddenLobbyGuiNames,
+	CameraOffset = CameraOffset,
+	CameraFieldOfView = CameraFieldOfView,
+	CameraRenderStepName = CameraRenderStepName,
 })
 local refresh
 
@@ -427,95 +432,6 @@ popupSecondaryButton.MouseButton1Click:Connect(function()
 	end
 end)
 
-local function hideLobbyUi()
-	if hiddenLobbyGuiStates then
-		return
-	end
-
-	hiddenLobbyGuiStates = {}
-	for _, guiName in ipairs(HiddenLobbyGuiNames) do
-		local lobbyGui = playerGui:FindFirstChild(guiName)
-		if lobbyGui and lobbyGui:IsA("ScreenGui") then
-			hiddenLobbyGuiStates[guiName] = lobbyGui.Enabled
-			lobbyGui.Enabled = false
-		end
-	end
-end
-
-local function restoreLobbyUi()
-	if not hiddenLobbyGuiStates then
-		return
-	end
-
-	for guiName, wasEnabled in pairs(hiddenLobbyGuiStates) do
-		local lobbyGui = playerGui:FindFirstChild(guiName)
-		if lobbyGui and lobbyGui:IsA("ScreenGui") then
-			lobbyGui.Enabled = wasEnabled
-		end
-	end
-
-	hiddenLobbyGuiStates = nil
-end
-
-local function computeBlacksmithCameraCFrame()
-	local targetPosition = cameraPoint.WorldPosition
-	local cameraPosition = targetPosition + CameraOffset
-	return CFrame.lookAt(cameraPosition, targetPosition)
-end
-
-local function applyBlacksmithCamera()
-	local camera = Workspace.CurrentCamera
-	if not camera then
-		return
-	end
-
-	camera.CameraType = Enum.CameraType.Scriptable
-	camera.FieldOfView = CameraFieldOfView
-	camera.CFrame = computeBlacksmithCameraCFrame()
-end
-
-local function startBlacksmithCamera()
-	if cameraActive then
-		return
-	end
-
-	local camera = Workspace.CurrentCamera
-	if not camera then
-		return
-	end
-
-	savedCameraState = {
-		CameraType = camera.CameraType,
-		CFrame = camera.CFrame,
-		CameraSubject = camera.CameraSubject,
-		FieldOfView = camera.FieldOfView,
-	}
-
-	cameraActive = true
-	RunService:UnbindFromRenderStep(CameraRenderStepName)
-	RunService:BindToRenderStep(CameraRenderStepName, Enum.RenderPriority.Camera.Value + 2, applyBlacksmithCamera)
-	applyBlacksmithCamera()
-end
-
-local function stopBlacksmithCamera()
-	if not cameraActive then
-		return
-	end
-
-	cameraActive = false
-	RunService:UnbindFromRenderStep(CameraRenderStepName)
-
-	local camera = Workspace.CurrentCamera
-	if camera and savedCameraState then
-		camera.CameraType = savedCameraState.CameraType
-		camera.CFrame = savedCameraState.CFrame
-		camera.CameraSubject = savedCameraState.CameraSubject
-		camera.FieldOfView = savedCameraState.FieldOfView
-	end
-
-	savedCameraState = nil
-end
-
 local function getTooltipViewportSize()
 	local camera = Workspace.CurrentCamera
 	return camera and camera.ViewportSize or Vector2.new(1920, 1080)
@@ -566,199 +482,6 @@ UserInputService.InputChanged:Connect(function(input)
 		positionTooltip()
 	end
 end)
-
-local function disconnectCharacterVisibilityConnections()
-	if characterDescendantAddedConnection then
-		characterDescendantAddedConnection:Disconnect()
-		characterDescendantAddedConnection = nil
-	end
-	if characterAddedConnection then
-		characterAddedConnection:Disconnect()
-		characterAddedConnection = nil
-	end
-end
-
-local function trackHiddenCharacterPart(part)
-	if hiddenCharacterParts[part] == nil then
-		hiddenCharacterParts[part] = part.LocalTransparencyModifier
-	end
-	part.LocalTransparencyModifier = 1
-end
-
-local function trackHiddenCharacterEffect(effect)
-	local enabled = nil
-	if effect:IsA("ParticleEmitter") or effect:IsA("Trail") or effect:IsA("Beam") or effect:IsA("Highlight") then
-		enabled = effect.Enabled
-	elseif effect:IsA("BillboardGui") or effect:IsA("SurfaceGui") then
-		enabled = effect.Enabled
-	end
-
-	if enabled == nil then
-		return
-	end
-
-	if hiddenCharacterEffects[effect] == nil then
-		hiddenCharacterEffects[effect] = enabled
-	end
-	effect.Enabled = false
-end
-
-local function hideCharacterDescendant(descendant)
-	if descendant:IsA("BasePart") then
-		trackHiddenCharacterPart(descendant)
-	elseif descendant:IsA("ParticleEmitter")
-		or descendant:IsA("Trail")
-		or descendant:IsA("Beam")
-		or descendant:IsA("Highlight")
-		or descendant:IsA("BillboardGui")
-		or descendant:IsA("SurfaceGui")
-	then
-		trackHiddenCharacterEffect(descendant)
-	end
-end
-
-local function applyLocalCharacterHidden(character)
-	if not character then
-		return
-	end
-
-	for _, descendant in ipairs(character:GetDescendants()) do
-		hideCharacterDescendant(descendant)
-	end
-
-	if characterDescendantAddedConnection then
-		characterDescendantAddedConnection:Disconnect()
-	end
-	characterDescendantAddedConnection = character.DescendantAdded:Connect(function(descendant)
-		if gui.Enabled then
-			hideCharacterDescendant(descendant)
-		end
-	end)
-end
-
-local function hideLocalCharacter()
-	if characterAddedConnection then
-		return
-	end
-
-	applyLocalCharacterHidden(player.Character)
-	characterAddedConnection = player.CharacterAdded:Connect(function(character)
-		if not gui.Enabled then
-			return
-		end
-		task.defer(function()
-			if gui.Enabled then
-				applyLocalCharacterHidden(character)
-			end
-		end)
-	end)
-end
-
-local function restoreLocalCharacter()
-	disconnectCharacterVisibilityConnections()
-
-	for part, originalTransparency in pairs(hiddenCharacterParts) do
-		if part and part.Parent then
-			part.LocalTransparencyModifier = originalTransparency
-		end
-	end
-	table.clear(hiddenCharacterParts)
-
-	for effect, originalEnabled in pairs(hiddenCharacterEffects) do
-		if effect and effect.Parent and effect.Enabled ~= originalEnabled then
-			effect.Enabled = originalEnabled
-		end
-	end
-	table.clear(hiddenCharacterEffects)
-end
-
-local function snapshotMovementState()
-	if savedMovementState then
-		return
-	end
-
-	local character = player.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if not humanoid then
-		return
-	end
-
-	savedMovementState = {
-		humanoid = humanoid,
-		walkSpeed = humanoid.WalkSpeed,
-		jumpPower = humanoid.JumpPower,
-		autoRotate = humanoid.AutoRotate,
-		platformStand = humanoid.PlatformStand,
-	}
-end
-
-local function restoreMovementState()
-	if not savedMovementState then
-		return
-	end
-
-	local humanoid = savedMovementState.humanoid
-	if humanoid and humanoid.Parent then
-		humanoid.WalkSpeed = savedMovementState.walkSpeed
-		humanoid.JumpPower = savedMovementState.jumpPower
-		humanoid.AutoRotate = savedMovementState.autoRotate
-		humanoid.PlatformStand = savedMovementState.platformStand
-	end
-
-	savedMovementState = nil
-end
-
-local function getBlacksmithModel()
-	local npcs = Workspace:FindFirstChild("NPCs")
-	return npcs and (npcs:FindFirstChild("Blacksmith") or npcs:FindFirstChild("BlacksmithNPC")) or nil
-end
-
-local function setPromptHidden(prompt)
-	if not prompt or not prompt:IsA("ProximityPrompt") then
-		return
-	end
-	if hiddenBlacksmithPromptStates[prompt] == nil then
-		hiddenBlacksmithPromptStates[prompt] = prompt.Enabled
-	end
-	prompt.Enabled = false
-end
-
-local function hideBlacksmithPrompts()
-	if blacksmithPromptWatcher then
-		return
-	end
-
-	local smith = getBlacksmithModel()
-	if not smith then
-		return
-	end
-
-	for _, descendant in ipairs(smith:GetDescendants()) do
-		if descendant:IsA("ProximityPrompt") then
-			setPromptHidden(descendant)
-		end
-	end
-
-	blacksmithPromptWatcher = smith.DescendantAdded:Connect(function(descendant)
-		if gui.Enabled and descendant:IsA("ProximityPrompt") then
-			setPromptHidden(descendant)
-		end
-	end)
-end
-
-local function restoreBlacksmithPrompts()
-	if blacksmithPromptWatcher then
-		blacksmithPromptWatcher:Disconnect()
-		blacksmithPromptWatcher = nil
-	end
-
-	for prompt, wasEnabled in pairs(hiddenBlacksmithPromptStates) do
-		if prompt and prompt.Parent then
-			prompt.Enabled = wasEnabled
-		end
-	end
-	table.clear(hiddenBlacksmithPromptStates)
-end
 
 local function getCraftEntries()
 	return snapshot and snapshot.craftEntries or {}
@@ -1246,11 +969,11 @@ local function closeUI()
 	hideMaterialTooltip()
 	closePopup()
 	refresh()
-	stopBlacksmithCamera()
-	restoreMovementState()
-	restoreLobbyUi()
-	restoreLocalCharacter()
-	restoreBlacksmithPrompts()
+	sceneController.StopCamera()
+	sceneController.RestoreMovementState()
+	sceneController.RestoreLobbyUi()
+	sceneController.RestoreLocalCharacter()
+	sceneController.RestoreBlacksmithPrompts()
 	gui.Enabled = false
 end
 
@@ -1268,12 +991,12 @@ local function openUI()
 	selectedRecipeId = nil
 	selectedCategory = nil
 	hideMaterialTooltip()
-	snapshotMovementState()
+	sceneController.SnapshotMovementState()
 	gui.Enabled = true
-	hideBlacksmithPrompts()
-	hideLobbyUi()
-	hideLocalCharacter()
-	startBlacksmithCamera()
+	sceneController.HideBlacksmithPrompts()
+	sceneController.HideLobbyUi()
+	sceneController.HideLocalCharacter()
+	sceneController.StartCamera()
 	BlacksmithAction:FireServer({ type = "request" })
 	refresh()
 end
@@ -1342,23 +1065,6 @@ for index, button in ipairs(categoryButtons) do
 	end)
 end
 
-local function isPromptInsideBlacksmith(prompt)
-	local smith = getBlacksmithModel()
-	if not smith then
-		return false
-	end
-
-	local current = prompt and prompt.Parent
-	while current do
-		if current == smith then
-			return true
-		end
-		current = current.Parent
-	end
-
-	return false
-end
-
 UserInputService.InputBegan:Connect(function(input, processed)
 	if processed then
 		return
@@ -1380,7 +1086,7 @@ ProximityPromptService.PromptTriggered:Connect(function(prompt, localPlayer)
 	if localPlayer ~= player or gui.Enabled then
 		return
 	end
-	if isPromptInsideBlacksmith(prompt) then
+	if sceneController.IsPromptInsideBlacksmith(prompt) then
 		openUI()
 	end
 end)
@@ -1411,9 +1117,5 @@ end)
 script.Destroying:Connect(function()
 	hideMaterialTooltip()
 	closePopup()
-	stopBlacksmithCamera()
-	restoreMovementState()
-	restoreLobbyUi()
-	restoreLocalCharacter()
-	restoreBlacksmithPrompts()
+	sceneController.Cleanup()
 end)
