@@ -1,5 +1,64 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-08 - Four Peaks InventoryController stage 7D filter sorter extraction
+
+### Summary
+
+- Completed Stage 7D for active `game.StarterPlayer.StarterPlayerScripts.InventoryController` in the `Four Peaks` Studio place.
+- Added `InventoryFilterSorter` to own existing inventory search/filter checks and tab-specific sorting for weapons, spells, materials, and codex rows.
+- Kept `InventoryController` as the owner of UI state, layout, details rendering, inventory actions, snapshot loading, remotes, input bindings, and the existing rebuild flow.
+- Preserved remote names, screen button attributes, inventory action payloads, entry fields, UI hierarchy, current filter labels, sort modes, and visual behavior.
+
+### Files
+
+- Added `Four Peaks/StarterPlayer/StarterPlayerScripts/InventoryFilterSorter.lua`
+- Updated `Four Peaks/StarterPlayer/StarterPlayerScripts/InventoryController.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Four Peaks`.
+- Created live `game.StarterPlayer.StarterPlayerScripts.InventoryFilterSorter`.
+- Synchronized active `game.StarterPlayer.StarterPlayerScripts.InventoryController`.
+- Repo/Studio parity after sync and Play, measured as UTF-8 byte length plus rolling hash:
+  - `InventoryController`: length `74327`, hash `316184324`.
+  - `InventoryFilterSorter`: length `3760`, hash `478229585`.
+
+### Architecture
+
+- Moved `passesFilters` and `sortEntries` behavior into `InventoryFilterSorter`.
+- `InventoryFilterSorter` has no ModuleScript dependencies, no runtime loop, no connection, no remote, no `_G`, and no fallback path.
+- `InventoryController` passes explicit dependencies into the sorter: rarity order, text match helper, and spell damage helper.
+- No UI hierarchy, remote, action payload, snapshot loading, input binding, or balance data was changed.
+
+### Validation
+
+- Studio Play in `Four Peaks` started successfully with normal lobby ready logs and no UI/filter sorter errors.
+- Opened inventory through the existing `InventoryGui` attribute contract: `ScreenButtonsAction = "open"` and a new `ScreenButtonsNonce`.
+- Runtime inspection confirmed `InventoryFilterSorter` cloned into `PlayerScripts` as a `ModuleScript` and `require` returned a valid table API.
+- Real snapshot render counted `10` image objects with non-empty images, plus `22` buttons, `81` text labels, and `1` search TextBox.
+- Search TextBox filtering through the real `Text` changed event reduced the rendered view to `1` image with asset, `10` buttons, and `32` labels; clearing search restored `10`/`22`/`81`.
+- Synthetic sorter smoke confirmed weapon filtering/sort (`syntheticWeapons=1`) and spell damage sort (`syntheticSpells=2`).
+- Clean Play session Output had no `InventoryController`/`InventoryFilterSorter` errors.
+
+### Not Verified
+
+- Physical click on the sort button was not executed because the MCP Client execution thread lacks `VirtualInputManager` capability.
+- Equip, favorite, spell loadout, sell, and every tab/filter/sort combination were not repeated because Stage 7D changed only list filtering and sorting ownership.
+
+### Risks
+
+- Missing `InventoryFilterSorter` now fails `InventoryController` startup with a clear assert instead of silently using inline helpers.
+- Future changes to inventory search/filter/sort semantics should update `InventoryFilterSorter`; UI state, rendering, and action handling should stay in `InventoryController` or a later dedicated UI module.
+
+### Rollback
+
+- Restore inline `passesFilters`, `sortEntries`, and the previous `getFilteredEntries` loop in `InventoryController.lua`.
+- Remove `InventoryFilterSorter.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 7D notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-08 - Four Peaks InventoryController stage 7C entry builder extraction
 
 ### Summary

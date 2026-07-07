@@ -67,6 +67,9 @@ local InventoryIconResolver = require(inventoryIconResolverModule)
 local inventoryEntryBuilderModule = script.Parent:FindFirstChild("InventoryEntryBuilder")
 assert(inventoryEntryBuilderModule and inventoryEntryBuilderModule:IsA("ModuleScript"), "[InventoryController] InventoryEntryBuilder ModuleScript is required")
 local InventoryEntryBuilder = require(inventoryEntryBuilderModule)
+local inventoryFilterSorterModule = script.Parent:FindFirstChild("InventoryFilterSorter")
+assert(inventoryFilterSorterModule and inventoryFilterSorterModule:IsA("ModuleScript"), "[InventoryController] InventoryFilterSorter ModuleScript is required")
+local InventoryFilterSorter = require(inventoryFilterSorterModule)
 
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents", 10)
 local remoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions", 10)
@@ -1396,6 +1399,14 @@ local function getSpellDamage(entry)
 	return 0
 end
 
+local inventoryFilterSorter = InventoryFilterSorter.new({
+	RarityOrder = RARITY_ORDER,
+	TextContains = textContains,
+	GetSpellDamage = function(entry)
+		return getSpellDamage(entry)
+	end,
+})
+
 local function spellCombinationNames(entry)
 	local names = {}
 	for _, combo in ipairs(entry.combinations or {}) do
@@ -1598,83 +1609,15 @@ local function currentSort()
 	return options[index]
 end
 
-local function passesFilters(entry)
-	local query = searchBox.Text
-	local searchText = table.concat({
-		entry.displayName or "",
-		entry.weaponId or "",
-		entry.weaponType or "",
-		entry.element or "",
-		entry.rarity or "",
-		entry.category or "",
-		entry.description or "",
-	}, " ")
-	if not textContains(searchText, query) then return false end
-	local f = filters[currentTab]
-	if currentTab == "Weapons" then
-		if f.a ~= "All" and entry.weaponType ~= f.a then return false end
-		if f.b ~= "All" and entry.rarity ~= f.b then return false end
-	elseif currentTab == "Spells" then
-		if f.a ~= "All" and entry.element ~= f.a then return false end
-		if f.b == "Equipped" and not entry.equipped then return false end
-		if f.b == "Unlocked" and (not entry.unlocked or entry.equipped) then return false end
-		if f.b == "Locked" and entry.unlocked then return false end
-	elseif currentTab == "Materials" then
-		if f.a ~= "All" and entry.bucket ~= f.a then return false end
-		if f.b ~= "All" and entry.rarity ~= f.b then return false end
-	elseif currentTab == "Codex" then
-		if f.a ~= "All" and entry.category ~= f.a then return false end
-		if f.b == "Discovered" and not entry.discovered then return false end
-		if f.b == "Undiscovered" and entry.discovered then return false end
-	end
-	return true
-end
-
-local function sortEntries(entries)
-	local mode = currentSort()
-	table.sort(entries, function(a, b)
-		if currentTab == "Weapons" then
-			if mode == "Equipped" then
-				local ae, be = a.id == equippedWeaponId, b.id == equippedWeaponId
-				if ae ~= be then return ae end
-				if a.favorite ~= b.favorite then return a.favorite end
-			elseif mode == "Rarity" then
-				local ar, br = RARITY_ORDER[a.rarity] or 0, RARITY_ORDER[b.rarity] or 0
-				if ar ~= br then return ar > br end
-			elseif mode == "Level" and a.level ~= b.level then
-				return a.level > b.level
-			elseif mode == "ATK" then
-				local aa, ba = tonumber(a.stats and a.stats.ATK) or 0, tonumber(b.stats and b.stats.ATK) or 0
-				if aa ~= ba then return aa > ba end
-			end
-		elseif currentTab == "Spells" then
-			if mode == "Equipped" and a.equipped ~= b.equipped then return a.equipped end
-			if mode == "Element" and a.element ~= b.element then return tostring(a.element) < tostring(b.element) end
-			if mode == "Damage" then
-				local ad, bd = getSpellDamage(a), getSpellDamage(b)
-				if ad ~= bd then return ad > bd end
-			end
-		elseif currentTab == "Materials" then
-			if mode == "Amount" and a.amount ~= b.amount then return a.amount > b.amount end
-			if mode == "Rarity" then
-				local ar, br = RARITY_ORDER[a.rarity] or 0, RARITY_ORDER[b.rarity] or 0
-				if ar ~= br then return ar > br end
-			end
-		elseif currentTab == "Codex" then
-			if mode == "Discovered" and a.discovered ~= b.discovered then return a.discovered end
-			if mode == "Category" and a.category ~= b.category then return tostring(a.category) < tostring(b.category) end
-		end
-		return tostring(a.displayName) < tostring(b.displayName)
-	end)
-end
-
 local function getFilteredEntries()
-	local out = {}
-	for _, entry in ipairs(tabSourceEntries()) do
-		if passesFilters(entry) then table.insert(out, entry) end
-	end
-	sortEntries(out)
-	return out
+	return inventoryFilterSorter.GetFilteredEntries(
+		tabSourceEntries(),
+		currentTab,
+		searchBox.Text,
+		filters[currentTab],
+		currentSort(),
+		equippedWeaponId
+	)
 end
 
 local function cardAccent(entry)
