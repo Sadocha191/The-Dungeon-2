@@ -12,6 +12,9 @@ assert(serverModuleFolder, "[NpcService] Server ModuleScript folder is required"
 local npcRegistryModule = serverModuleFolder:FindFirstChild("NpcRegistry")
 assert(npcRegistryModule and npcRegistryModule:IsA("ModuleScript"), "[NpcService] NpcRegistry ModuleScript is required")
 local NpcRegistry = require(npcRegistryModule)
+local npcLifecycleModule = serverModuleFolder:FindFirstChild("NpcLifecycle")
+assert(npcLifecycleModule and npcLifecycleModule:IsA("ModuleScript"), "[NpcService] NpcLifecycle ModuleScript is required")
+local NpcLifecycle = require(npcLifecycleModule)
 local npcMovementModule = serverModuleFolder:FindFirstChild("NpcMovement")
 assert(npcMovementModule and npcMovementModule:IsA("ModuleScript"), "[NpcService] NpcMovement ModuleScript is required")
 local NpcMovement = require(npcMovementModule)
@@ -160,42 +163,19 @@ local beginSpawnEmergence = NpcMovement.BeginSpawnEmergence
 local moveNpcModelToRoot = NpcMovement.MoveModelToRoot
 local applyPlayerDamage = NpcMelee.ApplyPlayerDamage
 local canApplyMeleeDamage = NpcMelee.CanApplyDamage
-local RUNTIME_ATTRIBUTE_NAMES = {
-	ATTR.State,
-	ATTR.LegacyState,
-	ATTR.AiState,
-	ATTR.Dead,
-	ATTR.LegacyDead,
-	ATTR.LegacyAttacking,
-	ATTR.Alive,
-	ATTR.Direction,
-	ATTR.Velocity,
-	ATTR.Health,
-	ATTR.LegacyHealth,
-	ATTR.MaxHealth,
-	ATTR.LegacyMaxHealth,
-}
+local clearRuntimeAttributes = NpcLifecycle.ClearRuntimeAttributes
+local writeStateAttributes = NpcLifecycle.WriteStateAttributes
+local writeHealthAttributes = NpcLifecycle.WriteHealthAttributes
+local setState = NpcLifecycle.SetState
+local unregisterNpc = NpcLifecycle.Unregister
+local killNpc = NpcLifecycle.Kill
+local despawnNpcRecord = NpcLifecycle.Despawn
+local getCurrentSpeed = NpcLifecycle.GetCurrentSpeed
 
 local function setAttributeIfChanged(inst: Instance, name: string, value: any)
 	if inst:GetAttribute(name) ~= value then
 		inst:SetAttribute(name, value)
 	end
-end
-
-local function clearRuntimeAttributes(model: Model)
-	for _, name in ipairs(RUNTIME_ATTRIBUTE_NAMES) do
-		if model:GetAttribute(name) ~= nil then
-			model:SetAttribute(name, nil)
-		end
-	end
-end
-
-local function ensureRuntimeAttributesCleared(npc: NpcRecord)
-	if npc.runtimeAttrsCleared then
-		return
-	end
-	clearRuntimeAttributes(npc.model)
-	npc.runtimeAttrsCleared = true
 end
 
 local function resolveRoot(model: Model): BasePart?
@@ -243,23 +223,6 @@ local function stripLegacyNpcScripts(model: Model)
 			descendant:Destroy()
 		end
 	end
-end
-
-local function writeStateAttributes(npc: NpcRecord)
-	ensureRuntimeAttributesCleared(npc)
-end
-
-local function writeHealthAttributes(npc: NpcRecord)
-	ensureRuntimeAttributesCleared(npc)
-end
-
-local function setState(npc: NpcRecord, newState: string)
-	if npc.state == newState then
-		return
-	end
-
-	npc.state = newState
-	writeStateAttributes(npc)
 end
 
 local function updateSpawnEmergence(npc: NpcRecord, now: number, dt: number): boolean
@@ -341,124 +304,8 @@ local function fireDamageIndicator(sourcePlayer: Player?, npc: NpcRecord, amount
 	})
 end
 
-local function queueTombstone(npc: NpcRecord, despawned: boolean)
-	NpcRegistry.QueueTombstone({
-		id = npc.id,
-		model = npc.model,
-		type = npc.mobType,
-		pos = npc.position,
-		dir = npc.look,
-		vel = npc.velocity,
-		speed = 0,
-		state = despawned and STATE.Despawned or npc.state,
-		hp = npc.health,
-		maxHp = npc.maxHealth,
-		dead = npc.dead,
-		despawned = despawned,
-	})
-end
-
-local function unregisterNpc(npc: NpcRecord, despawned: boolean?)
-	if not NpcRegistry.Contains(npc) then
-		return
-	end
-
-	NpcRegistry.Remove(npc)
-	queueTombstone(npc, despawned == true)
-end
-
-local function destroyNpcNow(npc: NpcRecord, despawned: boolean)
-	unregisterNpc(npc, despawned)
-	if npc.model.Parent then
-		npc.model:Destroy()
-	end
-end
-
-local function killNpc(npc: NpcRecord, context: {[string]: any}?)
-	if npc.dead then
-		return
-	end
-
-	local deathContext = {}
-	if context then
-		for key, value in pairs(context) do
-			deathContext[key] = value
-		end
-	end
-
-	npc.dead = true
-	npc.health = 0
-	npc.velocity = Vector3.zero
-	npc.impulse = Vector3.zero
-	npc.attackUntil = 0
-	setState(npc, STATE.Dead)
-	writeHealthAttributes(npc)
-	deathContext.position = npc.position
-	deathContext.model = npc.model
-	deathContext.npcId = npc.id
-
-	for _, callback in ipairs(npc.deathCallbacks) do
-		pcall(callback, npc, deathContext)
-	end
-
-	destroyNpcNow(npc, true)
-end
-
-local function despawnNpcRecord(npc: NpcRecord)
-	if not npc.dead then
-		npc.dead = true
-		npc.health = 0
-		npc.velocity = Vector3.zero
-		npc.impulse = Vector3.zero
-		npc.attackUntil = 0
-		setState(npc, STATE.Despawned)
-		writeHealthAttributes(npc)
-	end
-
-	destroyNpcNow(npc, true)
-end
-
 local function shouldDistanceDespawn(npc: NpcRecord, alivePlayers: {AlivePlayerInfo}): boolean
 	return NpcTargeting.ShouldDistanceDespawn(npc, alivePlayers, NORMAL_DESPAWN_DISTANCE)
-end
-
-local function getCurrentSpeed(npc: NpcRecord, now: number): number
-	if npc.freezeEnd > now then
-		return 0
-	end
-	if npc.slowEnd > now and npc.slowPct > 0 then
-		return math.max(0, npc.baseSpeed * (1 - npc.slowPct))
-	end
-	if npc.slowEnd ~= 0 then
-		npc.slowEnd = 0
-		npc.slowPct = 0
-	end
-	return npc.baseSpeed
-end
-
-local function getControlResistance(npc: NpcRecord)
-	if npc.isBoss then
-		return {
-			slowPct = 0.55,
-			slowDuration = 0.45,
-			freezeDuration = 0.22,
-			impulse = 0.20,
-		}
-	end
-	if npc.isElite then
-		return {
-			slowPct = 0.78,
-			slowDuration = 0.72,
-			freezeDuration = 0.45,
-			impulse = 0.48,
-		}
-	end
-	return {
-		slowPct = 1,
-		slowDuration = 1,
-		freezeDuration = 1,
-		impulse = 1,
-	}
 end
 
 local function updateNpc(
@@ -814,10 +661,7 @@ function NpcService.ApplySlow(target: any, slowPct: number, duration: number)
 		return
 	end
 
-	local resist = getControlResistance(npc)
-	local now = os.clock()
-	npc.slowPct = math.max(npc.slowPct, math.clamp((tonumber(slowPct) or 0) * resist.slowPct, 0, 0.95))
-	npc.slowEnd = math.max(npc.slowEnd, now + math.max(0.05, (tonumber(duration) or 0) * resist.slowDuration))
+	NpcLifecycle.ApplySlow(npc, slowPct, duration)
 end
 
 function NpcService.ApplyFreeze(target: any, duration: number)
@@ -826,9 +670,7 @@ function NpcService.ApplyFreeze(target: any, duration: number)
 		return
 	end
 
-	local resist = getControlResistance(npc)
-	local now = os.clock()
-	npc.freezeEnd = math.max(npc.freezeEnd, now + math.max(0.08, (tonumber(duration) or 0) * resist.freezeDuration))
+	NpcLifecycle.ApplyFreeze(npc, duration)
 end
 
 function NpcService.AddImpulse(target: any, impulse: Vector3)
@@ -837,13 +679,7 @@ function NpcService.AddImpulse(target: any, impulse: Vector3)
 		return
 	end
 
-	local flatImpulse = flat(impulse)
-	if flatImpulse.Magnitude <= 1e-4 then
-		return
-	end
-
-	local resist = getControlResistance(npc)
-	npc.impulse = clampMagnitude(npc.impulse + (flatImpulse * resist.impulse), 90)
+	NpcLifecycle.AddImpulse(npc, impulse)
 end
 
 function NpcService.BindDeath(target: any, callback: (any, {[string]: any}) -> ())
@@ -1024,8 +860,7 @@ function NpcService.SetIncomingDamageModifier(target: any, multiplier: number, d
 		return
 	end
 
-	npc.damageTakenMult = math.clamp(tonumber(multiplier) or 1, 0.10, 3)
-	npc.damageTakenEnd = os.clock() + math.max(0.1, tonumber(duration) or 0)
+	NpcLifecycle.SetIncomingDamageModifier(npc, multiplier, duration)
 end
 
 function NpcService.LockForAbility(target: any, duration: number, faceTarget: Vector3?)
@@ -1034,8 +869,7 @@ function NpcService.LockForAbility(target: any, duration: number, faceTarget: Ve
 		return
 	end
 
-	npc.aiLockUntil = math.max(npc.aiLockUntil, os.clock() + math.max(0.05, tonumber(duration) or 0))
-	npc.aiLookTarget = typeof(faceTarget) == "Vector3" and faceTarget or npc.aiLookTarget
+	NpcLifecycle.LockForAbility(npc, duration, faceTarget)
 end
 
 function NpcService.SetPosition(target: any, pos: Vector3, lookDir: Vector3?)

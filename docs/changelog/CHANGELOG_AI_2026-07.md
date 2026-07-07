@@ -1,5 +1,69 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Poziom NpcService stage 3E lifecycle and status extraction
+
+### Summary
+
+- Completed Stage 3E for active `game.ServerScriptService.ModuleScript.NpcService`.
+- Added `NpcLifecycle` for runtime attribute cleanup, state/health writers, tombstones, unregister/destroy, kill/despawn, death callback context, status/control effects, incoming damage modifiers, impulse, and ability lock.
+- Kept `NpcService` as the public API facade, model registration owner, damage indicator dispatcher, MissionProgress damage notifier, and only central scheduler owner.
+- Preserved all public `NpcService` function names, arguments, and return behavior.
+- Did not move reward/drop ownership, remotes, persistent data, attributes, balancing, model setup, or the central `Heartbeat`.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/NpcLifecycle.lua`
+- Updated `Level/ServerScriptService/ModuleScript/NpcService.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Created live `game.ServerScriptService.ModuleScript.NpcLifecycle`.
+- Synchronized active `game.ServerScriptService.ModuleScript.NpcService` to require `NpcLifecycle` and delegate lifecycle/status responsibilities.
+- Repo/Studio parity for `NpcService`, `NpcRegistry`, `NpcMovement`, `NpcTargeting`, `NpcMelee`, and `NpcLifecycle` was confirmed by normalized length/checksum/line-count metrics.
+- Temporary Server harnesses were executed during Play and removed automatically with no script markers left in Studio or repo.
+
+### Architecture
+
+- New graph: `NpcService -> NpcRegistry`, `NpcService -> NpcLifecycle`, `NpcService -> NpcMovement`, `NpcService -> NpcTargeting`, `NpcService -> NpcMelee`, `NpcService -> NpcShared`, optional `NpcService -> MissionProgress`; `NpcLifecycle -> NpcRegistry`, `NpcLifecycle -> NpcMovement`, `NpcLifecycle -> NpcShared`; `NpcTargeting -> NpcMovement`; `NpcMelee -> DamageService`; `NpcMovement -> WorldBounds`.
+- `NpcLifecycle` does not require `NpcService`, `DamageService`, `WaveController`, `RunStatsService`, or `ShrineService`.
+- `NpcLifecycle` has no remotes, `_G`, `Heartbeat`, event connections, `task.spawn`, or `task.delay`.
+- `NpcService` still owns the single `NpcSyncRequest.OnServerEvent` connection and single central `RunService.Heartbeat`.
+
+### Validation
+
+- Play startup reached normal service-ready logs with no `NpcService` or `NpcLifecycle` errors.
+- `SetIncomingDamageModifier` through public `NpcService` changed damage `10 -> 20` and left NPC HP at `80`.
+- Config `onDeath` and `BindDeath` each fired exactly once on lethal `ApplyDamage`, with preserved death context.
+- Public `Despawn` destroyed the model and did not fire death callbacks.
+- Manual `Model:Destroy()` was cleaned up by the central update and reduced active count.
+- `ApplyFreeze` and `LockForAbility` held movement at `0` studs during the measured windows.
+- `AddImpulse` moved the NPC `3.586` studs through the normal update loop.
+- Cleanup through public `NpcService.Despawn` returned `NpcService.GetActiveCount()` to `0`.
+- Repo `rg` and Studio `script_grep` found no temporary harness markers after cleanup.
+- `git diff --check` passed.
+
+### Not Verified
+
+- Full natural long-run movement/targeting/status behavior with 100+ NPC was not repeated in 3E; the 3A 10/25/50 baseline remains the comparison point until 3F optimization.
+- True multiplayer target switching remains unverified in current MCP Play.
+- Drop/reward integration from a real `WaveController` kill remains for the next runtime pass.
+- Long status stacking matrices beyond the focused slow/freeze/impulse/lock paths remain for final audit.
+
+### Risks
+
+- `NpcLifecycle` now owns death/despawn side effects and status timers. Public facade behavior was validated, but Stage 3F should still monitor active count and tombstone churn under larger NPC counts.
+- `NpcService.ApplyDamage` still owns damage indicator and MissionProgress side effects; this is intentional to avoid moving reward/progress ownership in 3E.
+
+### Rollback
+
+- Restore the previous inline runtime attribute cleanup, state/health writers, tombstone/unregister/destroy, kill/despawn, death callback, speed/status/control, incoming damage modifier, impulse, and ability lock helpers in `NpcService.lua`.
+- Remove `Level/ServerScriptService/ModuleScript/NpcLifecycle.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 3E notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Poziom NpcService stage 3D targeting and melee extraction
 
 ### Summary
