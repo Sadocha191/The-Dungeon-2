@@ -1,5 +1,62 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Gildia GuildPlace stage 6B location config extraction
+
+### Summary
+
+- Completed Stage 6B for active `game.ServerScriptService.Script.GuildPlace` in the `Guild` Studio place.
+- Added `GuildPlaceLocations` to own guild location definitions, id lookup, status calculation, and castle-state location list construction.
+- Kept `GuildPlace` as the owner of guild authorization, DataStore profile/guild access, treasury deposit/spend, physical location model/prompt construction, return teleport, and remote callback handlers.
+- Preserved location ids, positions, sizes, colors, names, descriptions, hints, statuses, prompt attributes, remote names, persistent data, and teleport data.
+
+### Files
+
+- Added `Guild/ServerScriptService/ModuleScript/GuildPlaceLocations.lua`
+- Updated `Guild/ServerScriptService/Script/GuildPlace.server.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Guild`.
+- Created live `game.ServerScriptService.ModuleScript.GuildPlaceLocations`.
+- Synchronized active `game.ServerScriptService.Script.GuildPlace`.
+- Repo/Studio parity after sync, measured as UTF-8 byte length plus rolling hash:
+  - `GuildPlace`: length `38838`, hash `189744719`.
+  - `GuildPlaceRemotes`: length `1923`, hash `248263159`.
+  - `GuildPlaceLocations`: length `5273`, hash `950361888`.
+
+### Architecture
+
+- Moved static guild location definitions and status/list helpers from `GuildPlace` into `GuildPlaceLocations`.
+- `GuildPlaceLocations` has no `require()` dependencies, no runtime loop, no connection, and no `_G`.
+- `GuildPlace` still owns physical model construction and prompt binding for this checkpoint.
+- No remote names, DataStore keys, teleport data fields, runtime loops, schedulers, connections, or require cycles were added.
+
+### Validation
+
+- Studio inspection confirmed `GuildPlaceLocations` returns `7` definitions, `Treasury` status `Open`, `Dojo` status `Coming soon`, and preserved label text `Łowiska`.
+- Studio Play in `Guild` started successfully and logged `[GuildPlace] Ready`.
+- Runtime inspection in Play confirmed `7` models under `Workspace.GuildLocations`, each with `GuildLocationPrompt`, preserved `GuildLocationId`, expected status attributes, and billboard labels including `Skarbiec`, `Łowiska`, and `Sala chwały`.
+- `git diff --check` passed with only existing CRLF warnings.
+
+### Not Verified
+
+- Guild create/join/invite/leave/kick flows were not repeated in this checkpoint.
+- Treasury deposit/spend, upgrades, task progress, and return teleport were not executed because Stage 6B changed only location config ownership.
+
+### Risks
+
+- `GuildPlace` still owns physical location model creation and prompt binding; this checkpoint intentionally did not move connection ownership.
+- `GuildPlaceLocations.GetDefinitions()` returns the shared static definition table, matching the previous inline behavior but not protecting callers from mutation.
+
+### Rollback
+
+- Restore inline `LOCATION_STATUS`, `GUILD_LOCATION_DEFINITIONS`, `GUILD_LOCATION_BY_ID`, `getLocationStatus`, and `buildGuildLocationState` in `GuildPlace.server.lua`.
+- Remove `GuildPlaceLocations.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 6B notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Gildia GuildPlace stage 6A remote factory extraction
 
 ### Summary
