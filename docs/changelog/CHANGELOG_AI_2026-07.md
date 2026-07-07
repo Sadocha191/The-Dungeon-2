@@ -1,5 +1,63 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Four Peaks InventoryController stage 7A icon resolver extraction
+
+### Summary
+
+- Completed Stage 7A for active `game.StarterPlayer.StarterPlayerScripts.InventoryController` in the `Four Peaks` Studio place.
+- Added `InventoryIconResolver` to own existing icon folder indexing and asset resolution for weapon, material, spell, and codex inventory cards.
+- Kept `InventoryController` as the owner of UI layout, filters, sorting, details rendering, inventory actions, snapshot loading, remotes, and input bindings.
+- Preserved remote names, screen button attributes, inventory action payloads, UI hierarchy, filters, sorting, cards, and visual behavior.
+
+### Files
+
+- Added `Four Peaks/StarterPlayer/StarterPlayerScripts/InventoryIconResolver.lua`
+- Updated `Four Peaks/StarterPlayer/StarterPlayerScripts/InventoryController.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Four Peaks`.
+- Confirmed active `game.StarterPlayer.StarterPlayerScripts.InventoryController` is a `LocalScript`.
+- Confirmed stale repo duplicate `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/BlacksmithUI.lua` has no corresponding active Studio object and was not edited.
+- Created live `game.StarterPlayer.StarterPlayerScripts.InventoryIconResolver`.
+- Repo/Studio parity after sync, measured as UTF-8 byte length plus rolling hash:
+  - `InventoryController`: length `83064`, hash `452095484`.
+  - `InventoryIconResolver`: length `3898`, hash `377823037`.
+
+### Architecture
+
+- Moved `readImageReference`, image-index cache construction, `resolveImage`, and item-specific image lookup into `InventoryIconResolver`.
+- `InventoryIconResolver` has no ModuleScript dependencies, no runtime loop, no connection, no remote, no `_G`, and no fallback path.
+- `InventoryController` requires the sibling module with an asserted active path and keeps local `weaponImage`, `materialImage`, `spellImage`, and `codexImage` aliases for existing call sites.
+- No UI hierarchy, remote, action payload, sorting/filtering logic, or input binding was changed.
+
+### Validation
+
+- Studio Play in `Four Peaks` started successfully with normal lobby ready logs and no `InventoryController`/`InventoryIconResolver` errors.
+- Opened inventory through the existing `InventoryGui` attribute contract: `ScreenButtonsAction = "open"` and a new `ScreenButtonsNonce`.
+- Runtime inspection confirmed `InventoryGui.Enabled=true`, `Modal=true`, `InventoryIconResolver` cloned into `PlayerScripts` as a `ModuleScript`, and `require` returned a table.
+- Render inspection counted `10` image objects, all with non-empty images, plus `22` buttons and `81` text labels after real snapshot load.
+- `git diff --check` passed with only existing CRLF warnings.
+
+### Not Verified
+
+- Manual clicks across every tab/filter/sort combination were not repeated in this checkpoint.
+- Equip, favorite, spell loadout, and sell actions were not executed because Stage 7A changed only icon resolver ownership.
+
+### Risks
+
+- Missing `InventoryIconResolver` now fails `InventoryController` startup with a clear assert instead of silently using inline helpers.
+- Future icon lookup changes should update `InventoryIconResolver` while keeping `InventoryController` focused on UI state and interaction.
+
+### Rollback
+
+- Restore the moved icon helper functions inline in `InventoryController.lua`.
+- Remove `InventoryIconResolver.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 7A notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Guild refactor stage 6 completion audit
 
 ### Summary

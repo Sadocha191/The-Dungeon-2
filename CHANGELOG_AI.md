@@ -16,6 +16,7 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-07-07** — Four Peaks InventoryController stage 7A icon resolver extraction
 - **2026-07-07** — Guild refactor stage 6 completion audit
 - **2026-07-07** — Four Peaks GuildService stage 6E update broadcast extraction
 - **2026-07-07** — Four Peaks GuildService stage 6D record state extraction
