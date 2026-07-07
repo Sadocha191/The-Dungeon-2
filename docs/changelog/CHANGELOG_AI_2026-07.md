@@ -1,5 +1,62 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Four Peaks GuildService stage 6D record state extraction
+
+### Summary
+
+- Completed Stage 6D for active `game.ServerScriptService.ModuleScript.GuildService` in the `Four Peaks` Studio place.
+- Added `GuildRecordState` to own the existing guild record normalization/sanitization helpers, treasury state helpers, task/upgrades defaults, role rebuild, and treasury history helpers.
+- Kept `GuildService` as the owner of DataStore load/save, directory updates, PlayerData membership sync, join/invite/leave/kick/disband flows, treasury donation and upgrade behavior, task progress, teleport, remotes, and public API.
+- Preserved public API, remote names, DataStore names/keys, teleport data, guild treasury math, role rules, task progress rules, and player data shape.
+
+### Files
+
+- Added `Four Peaks/ServerScriptService/ModuleScript/GuildRecordState.lua`
+- Updated `Four Peaks/ServerScriptService/ModuleScript/GuildService.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Four Peaks`.
+- Created live `game.ServerScriptService.ModuleScript.GuildRecordState`.
+- Synchronized active `game.ServerScriptService.ModuleScript.GuildService`.
+- Repo/Studio parity after sync, measured as UTF-8 byte length plus rolling hash:
+  - `GuildService`: length `37970`, hash `716157583`.
+  - `GuildRecordState`: length `9763`, hash `53470018`.
+
+### Architecture
+
+- Moved `clampInt`, `copyMap`, name/privacy/member-key helpers, treasury sanitization/history helpers, task/upgrades default builders, member/request sanitization, role rebuild, and guild record sanitization into `GuildRecordState`.
+- `GuildRecordState` depends only on `ReplicatedStorage.ModuleScripts.GuildConfig`; it has no runtime loop, no connection, no remotes, no `_G`, and no fallback path.
+- `GuildService` keeps local aliases for the moved helpers so internal call sites and return values remain unchanged.
+- No new remotes, DataStore keys, teleport data fields, runtime loops, schedulers, gameplay globals, or require cycles were added.
+
+### Validation
+
+- Studio Play in `Four Peaks` started successfully with normal lobby ready logs and no `GuildService`/`GuildRecordState` errors.
+- Runtime smoke required `GuildService` and `GuildRecordState`; `GuildService.GetState` returned `Success=true` with `Config` and `PlayerResources`.
+- Public API smoke confirmed `CreateGuild`, `Donate`, and `TeleportToCastle` remain functions.
+- Synthetic `GuildRecordState.SanitizeGuildRecord` preserved normalized name `Test Guild`, privacy `Private`, `1` member, owner role `Owner`, level `1`, and treasury Silver `5`.
+- `git diff --check` passed with only existing CRLF warnings.
+
+### Not Verified
+
+- Guild create/join/invite/leave/kick/disband flows were not repeated in this checkpoint.
+- Treasury deposit/spend, upgrades, task progress, and teleport to guild castle were not executed because Stage 6D changed only helper ownership and avoided DataStore write flows in smoke.
+
+### Risks
+
+- `GuildRecordState` now owns record-shape defaults; future changes to persistent guild record shape should update this module and keep `GuildService` call sites read-only.
+- `GuildService` remains above 1200 lines and still owns persistence, membership, treasury, upgrades, tasks, teleport, and remotes; further staged extraction is still required.
+
+### Rollback
+
+- Restore the moved record/state helper functions inline in `GuildService.lua`.
+- Remove `GuildRecordState.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 6D notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Gildia GuildPlace stage 6C location builder extraction
 
 ### Summary

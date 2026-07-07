@@ -16,6 +16,7 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-07-07** — Four Peaks GuildService stage 6D record state extraction
 - **2026-07-07** — Gildia GuildPlace stage 6C location builder extraction
 - **2026-07-07** — Gildia GuildPlace stage 6B location config extraction
 - **2026-07-07** — Gildia GuildPlace stage 6A remote factory extraction

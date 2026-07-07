@@ -10,6 +10,7 @@ local replicatedModules = ReplicatedStorage:WaitForChild("ModuleScripts")
 
 local PlayerData = require(moduleFolder:WaitForChild("PlayerData"))
 local CurrencyService = require(moduleFolder:WaitForChild("CurrencyService"))
+local GuildRecordState = require(moduleFolder:WaitForChild("GuildRecordState"))
 local GuildConfig = require(replicatedModules:WaitForChild("GuildConfig"))
 
 local GuildService = {}
@@ -25,308 +26,28 @@ local directory = {
 	guilds = {},
 }
 
-local roleRank = {
-	Owner = 3,
-	Officer = 2,
-	Member = 1,
-}
-
-local PRIVACY_PUBLIC = "Public"
-local PRIVACY_PRIVATE = "Private"
+local roleRank = GuildRecordState.RoleRank
+local PRIVACY_PUBLIC = GuildRecordState.PRIVACY_PUBLIC
+local PRIVACY_PRIVATE = GuildRecordState.PRIVACY_PRIVATE
+local clampInt = GuildRecordState.ClampInt
+local copyMap = GuildRecordState.CopyMap
+local normalizeName = GuildRecordState.NormalizeName
+local directoryNameKey = GuildRecordState.DirectoryNameKey
+local validateName = GuildRecordState.ValidateName
+local sanitizeDescription = GuildRecordState.SanitizeDescription
+local sanitizePrivacy = GuildRecordState.SanitizePrivacy
+local memberKey = GuildRecordState.MemberKey
+local countMembers = GuildRecordState.CountMembers
+local sanitizeCountMap = GuildRecordState.SanitizeCountMap
+local ensureTreasury = GuildRecordState.EnsureTreasury
+local addTreasuryResource = GuildRecordState.AddTreasuryResource
+local addTreasuryHistory = GuildRecordState.AddTreasuryHistory
+local ensureUpgrades = GuildRecordState.EnsureUpgrades
+local ensureTasks = GuildRecordState.EnsureTasks
+local rebuildRoles = GuildRecordState.RebuildRoles
+local sanitizeGuildRecord = GuildRecordState.SanitizeGuildRecord
 
 local guildUpdatedRemote = nil
-
-local function clampInt(value, minValue)
-	local n = math.floor(tonumber(value) or 0)
-	if minValue ~= nil and n < minValue then
-		return minValue
-	end
-	if n < 0 then
-		return 0
-	end
-	return n
-end
-
-local function copyMap(raw)
-	local out = {}
-	if typeof(raw) ~= "table" then
-		return out
-	end
-	for key, value in pairs(raw) do
-		if typeof(key) == "string" then
-			if typeof(value) == "table" then
-				out[key] = copyMap(value)
-			else
-				out[key] = value
-			end
-		end
-	end
-	return out
-end
-
-local function normalizeName(name)
-	local text = tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", "")
-	text = text:gsub("%s+", " ")
-	return text
-end
-
-local function directoryNameKey(name)
-	return string.lower(normalizeName(name)):gsub("%s+", "")
-end
-
-local function validateName(name)
-	local text = normalizeName(name)
-	if #text < GuildConfig.MIN_NAME_LENGTH then
-		return nil, "Guild name is too short."
-	end
-	if #text > GuildConfig.MAX_NAME_LENGTH then
-		return nil, "Guild name is too long."
-	end
-	if not text:match("^[%w%s%-_'%.]+$") then
-		return nil, "Use letters, numbers, spaces, dash, underscore, apostrophe, or dot."
-	end
-	return text, nil
-end
-
-local function sanitizeDescription(description)
-	local text = tostring(description or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
-	if #text > GuildConfig.MAX_DESCRIPTION_LENGTH then
-		text = text:sub(1, GuildConfig.MAX_DESCRIPTION_LENGTH)
-	end
-	return text
-end
-
-local function sanitizePrivacy(value)
-	return tostring(value or PRIVACY_PUBLIC) == PRIVACY_PRIVATE and PRIVACY_PRIVATE or PRIVACY_PUBLIC
-end
-
-local function memberKey(userId)
-	return tostring(math.floor(tonumber(userId) or 0))
-end
-
-local function countMembers(guild)
-	local count = 0
-	for _, member in pairs(guild.members or {}) do
-		if typeof(member) == "table" then
-			count += 1
-		end
-	end
-	return count
-end
-
-local function sanitizeCountMap(raw)
-	local out = {}
-	if typeof(raw) ~= "table" then
-		return out
-	end
-	for key, value in pairs(raw) do
-		if typeof(key) == "string" and key ~= "" then
-			local amount = clampInt(value)
-			if amount > 0 then
-				out[key] = amount
-			end
-		end
-	end
-	return out
-end
-
-local function sanitizeTreasuryHistory(raw)
-	local history = {}
-	if typeof(raw) ~= "table" then
-		return history
-	end
-	local startIndex = math.max(1, #raw - 24)
-	for index = startIndex, #raw do
-		local entry = raw[index]
-		if typeof(entry) == "table" then
-			table.insert(history, {
-				userId = clampInt(entry.userId or entry.UserId),
-				username = tostring(entry.username or entry.Username or "Player"),
-				resourceId = tostring(entry.resourceId or entry.ResourceId or ""),
-				amount = clampInt(entry.amount or entry.Amount),
-				createdAt = clampInt(entry.createdAt or entry.CreatedAt),
-				action = tostring(entry.action or entry.Action or "Deposit"),
-				reason = tostring(entry.reason or entry.Reason or ""),
-			})
-		end
-	end
-	return history
-end
-
-local function ensureTreasury(raw)
-	local treasury = {}
-	if typeof(raw) == "table" then
-		for _, key in ipairs(GuildConfig.TREASURY_KEYS) do
-			treasury[key] = clampInt(raw[key])
-		end
-		treasury.resources = sanitizeCountMap(raw.resources or raw.Resources)
-	end
-	for _, key in ipairs(GuildConfig.TREASURY_KEYS) do
-		treasury[key] = clampInt(treasury[key])
-	end
-	treasury.resources = sanitizeCountMap(treasury.resources)
-	return treasury
-end
-
-local function addTreasuryResource(guild, resourceId, amount)
-	if typeof(guild.treasury) ~= "table" then
-		guild.treasury = ensureTreasury(nil)
-	end
-	guild.treasury.resources = sanitizeCountMap(guild.treasury.resources)
-	local id = tostring(resourceId or "")
-	if id == "" then
-		return
-	end
-	guild.treasury.resources[id] = clampInt(guild.treasury.resources[id]) + clampInt(amount)
-end
-
-local function addTreasuryHistory(guild, player, resourceId, amount, action, reason)
-	guild.treasuryHistory = sanitizeTreasuryHistory(guild.treasuryHistory)
-	table.insert(guild.treasuryHistory, {
-		userId = player.UserId,
-		username = player.Name,
-		resourceId = tostring(resourceId or ""),
-		amount = clampInt(amount),
-		createdAt = os.time(),
-		action = tostring(action or "Deposit"),
-		reason = tostring(reason or ""),
-	})
-	while #guild.treasuryHistory > 25 do
-		table.remove(guild.treasuryHistory, 1)
-	end
-end
-
-local function ensureUpgrades(raw)
-	local upgrades = {}
-	for upgradeId in pairs(GuildConfig.UPGRADES) do
-		upgrades[upgradeId] = clampInt(typeof(raw) == "table" and raw[upgradeId] or 0)
-	end
-	return upgrades
-end
-
-local function ensureTasks(raw)
-	local tasks = {}
-	for _, def in ipairs(GuildConfig.TASKS) do
-		local existing = typeof(raw) == "table" and raw[def.id] or nil
-		tasks[def.id] = {
-			progress = clampInt(typeof(existing) == "table" and existing.progress or 0),
-			completed = typeof(existing) == "table" and existing.completed == true or false,
-		}
-		if tasks[def.id].progress >= def.target then
-			tasks[def.id].progress = def.target
-			tasks[def.id].completed = true
-		end
-	end
-	return tasks
-end
-
-local function sanitizeUserRecords(raw, includeInviter)
-	local records = {}
-	if typeof(raw) ~= "table" then
-		return records
-	end
-	for key, value in pairs(raw) do
-		if typeof(value) == "table" then
-			local userId = math.floor(tonumber(value.userId or value.UserId or key) or 0)
-			if userId > 0 then
-				local record = {
-					userId = userId,
-					username = tostring(value.username or value.Username or value.name or value.Name or ("Player " .. tostring(userId))),
-					createdAt = clampInt(value.createdAt or value.CreatedAt),
-				}
-				if includeInviter then
-					record.invitedByUserId = clampInt(value.invitedByUserId or value.InvitedByUserId)
-				end
-				records[memberKey(userId)] = record
-			end
-		end
-	end
-	return records
-end
-
-local function sanitizeMembers(raw)
-	local members = {}
-	if typeof(raw) ~= "table" then
-		return members
-	end
-	for key, value in pairs(raw) do
-		if typeof(value) == "table" then
-			local userId = math.floor(tonumber(value.userId or key) or 0)
-			if userId > 0 then
-				local role = tostring(value.role or value.Role or "Member")
-				if not roleRank[role] then
-					role = "Member"
-				end
-				members[memberKey(userId)] = {
-					userId = userId,
-					name = tostring(value.name or value.Name or ("Player " .. tostring(userId))),
-					role = role,
-					joinedAt = clampInt(value.joinedAt or value.JoinedAt),
-					contribution = clampInt(value.contribution or value.Contribution),
-				}
-			end
-		end
-	end
-	return members
-end
-
-local function rebuildRoles(guild)
-	guild.roles = {}
-	for key, member in pairs(guild.members or {}) do
-		if typeof(member) == "table" then
-			guild.roles[key] = member.role
-		end
-	end
-end
-
-local function sanitizeGuildRecord(raw)
-	if typeof(raw) ~= "table" then
-		return nil
-	end
-	local guildId = raw.guildId or raw.GuildId
-	if typeof(guildId) ~= "string" or guildId == "" then
-		return nil
-	end
-
-	local guild = {
-		guildId = guildId,
-		name = normalizeName(raw.name or raw.Name or "Guild"),
-		description = sanitizeDescription(raw.description or raw.Description or ""),
-		privacy = sanitizePrivacy(raw.privacy or raw.Privacy),
-		ownerUserId = math.floor(tonumber(raw.ownerUserId or raw.OwnerUserId) or 0),
-		members = sanitizeMembers(raw.members or raw.Members),
-		joinRequests = sanitizeUserRecords(raw.joinRequests or raw.JoinRequests, false),
-		invites = sanitizeUserRecords(raw.invites or raw.Invites, true),
-		roles = {},
-		createdAt = clampInt(raw.createdAt or raw.CreatedAt),
-		level = math.max(1, clampInt(raw.level or raw.Level, 1)),
-		xp = clampInt(raw.xp or raw.Xp or raw.XP),
-		treasury = ensureTreasury(raw.treasury or raw.Treasury),
-		memberContributions = sanitizeCountMap(raw.memberContributions or raw.MemberContributions),
-		totalContribution = clampInt(raw.totalContribution or raw.TotalContribution),
-		treasuryHistory = sanitizeTreasuryHistory(raw.treasuryHistory or raw.TreasuryHistory),
-		upgrades = ensureUpgrades(raw.upgrades or raw.Upgrades),
-		tasks = ensureTasks(raw.tasks or raw.Tasks),
-		disbanded = raw.disbanded == true,
-	}
-
-	local owner = guild.members[memberKey(guild.ownerUserId)]
-	if owner then
-		owner.role = "Owner"
-	else
-		for _, member in pairs(guild.members) do
-			if member.role == "Owner" then
-				guild.ownerUserId = member.userId
-				owner = member
-				break
-			end
-		end
-	end
-
-	guild.level = GuildConfig.GetLevelFromXp(guild.xp)
-	rebuildRoles(guild)
-	return guild
-end
 
 local function loadDirectory()
 	if directoryLoaded then
