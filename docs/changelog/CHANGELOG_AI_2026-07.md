@@ -1,5 +1,64 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-08 - Four Peaks InventoryController stage 7C entry builder extraction
+
+### Summary
+
+- Completed Stage 7C for active `game.StarterPlayer.StarterPlayerScripts.InventoryController` in the `Four Peaks` Studio place.
+- Added `InventoryEntryBuilder` to own existing inventory snapshot-to-entry transformations for weapons, spells, materials, and codex rows.
+- Kept `InventoryController` as the owner of UI state, layout, filters, sorting, details rendering, inventory actions, snapshot loading, remotes, and input bindings.
+- Preserved remote names, screen button attributes, inventory action payloads, entry fields, material usage text, spell loadout interpretation, UI hierarchy, filters, sorting, cards, and visual behavior.
+
+### Files
+
+- Added `Four Peaks/StarterPlayer/StarterPlayerScripts/InventoryEntryBuilder.lua`
+- Updated `Four Peaks/StarterPlayer/StarterPlayerScripts/InventoryController.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Four Peaks`.
+- Created live `game.StarterPlayer.StarterPlayerScripts.InventoryEntryBuilder`.
+- Synchronized active `game.StarterPlayer.StarterPlayerScripts.InventoryController`.
+- Repo/Studio parity after sync, measured as UTF-8 byte length plus rolling hash:
+  - `InventoryController`: length `76784`, hash `270817220`.
+  - `InventoryIconResolver`: length `3898`, hash `377823037`.
+  - `InventoryEntryBuilder`: length `7480`, hash `197435266`.
+
+### Architecture
+
+- Moved `materialUses`, `getWeaponDef`, weapon entry build, spell entry build, material definition lookup, material entry build, and codex entry build into `InventoryEntryBuilder`.
+- `InventoryEntryBuilder` has no ModuleScript dependencies, no runtime loop, no connection, no remote, no `_G`, and no fallback path.
+- `InventoryController` passes explicit config dependencies into the builder and still owns `snapshot`, current tab state, filtering, sorting, rendering, and actions.
+- No UI hierarchy, remote, action payload, sorting/filtering logic, or input binding was changed.
+
+### Validation
+
+- Studio Play in `Four Peaks` started successfully with normal lobby ready logs and no `InventoryController`/`InventoryEntryBuilder` errors.
+- Opened inventory through the existing `InventoryGui` attribute contract: `ScreenButtonsAction = "open"` and a new `ScreenButtonsNonce`.
+- Runtime inspection confirmed `InventoryGui.Enabled=true`, `Modal=true`, `InventoryEntryBuilder` cloned into `PlayerScripts` as a `ModuleScript`, and `require` returned a table.
+- Render inspection counted `10` image objects with non-empty images, plus `22` buttons and `81` text labels after real snapshot load.
+- Synthetic builder smoke returned counts `weapons=1`, `spells=0`, `materials=0`, `codex=1`.
+- `git diff --check` passed with only existing CRLF warnings.
+
+### Not Verified
+
+- Manual clicks across every tab/filter/sort combination were not repeated in this checkpoint.
+- Equip, favorite, spell loadout, and sell actions were not executed because Stage 7C changed only entry-building ownership.
+
+### Risks
+
+- Missing `InventoryEntryBuilder` now fails `InventoryController` startup with a clear assert instead of silently using inline helpers.
+- Future inventory entry-shape changes should update `InventoryEntryBuilder`; UI state/rendering changes should stay in `InventoryController` or later UI modules.
+
+### Rollback
+
+- Restore the moved entry-builder helper functions inline in `InventoryController.lua`.
+- Remove `InventoryEntryBuilder.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 7C notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Four Peaks BlacksmithUI stage 7B icon resolver extraction
 
 ### Summary
