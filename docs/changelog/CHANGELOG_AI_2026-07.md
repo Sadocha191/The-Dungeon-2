@@ -1,5 +1,62 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Four Peaks GuildService stage 6E update broadcast extraction
+
+### Summary
+
+- Completed Stage 6E for active `game.ServerScriptService.ModuleScript.GuildService` in the `Four Peaks` Studio place.
+- Added `GuildUpdateBroadcaster` to own the existing `GuildUpdated` RemoteEvent lookup/creation and guild update fanout.
+- Kept `GuildService` as the owner of DataStore load/save, directory updates, PlayerData membership sync, join/invite/leave/kick/disband flows, treasury donation and upgrade behavior, task progress, teleport, and public API.
+- Preserved public API, remote name `GuildUpdated`, broadcast payload fields, DataStore names/keys, teleport data, guild treasury math, role rules, task progress rules, and player data shape.
+
+### Files
+
+- Added `Four Peaks/ServerScriptService/ModuleScript/GuildUpdateBroadcaster.lua`
+- Updated `Four Peaks/ServerScriptService/ModuleScript/GuildService.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Four Peaks`.
+- Created live `game.ServerScriptService.ModuleScript.GuildUpdateBroadcaster`.
+- Synchronized active `game.ServerScriptService.ModuleScript.GuildService`.
+- Repo/Studio parity after sync, measured as UTF-8 byte length plus rolling hash:
+  - `GuildService`: length `36581`, hash `45412315`.
+  - `GuildRecordState`: length `9763`, hash `53470018`.
+  - `GuildUpdateBroadcaster`: length `1721`, hash `304481289`.
+
+### Architecture
+
+- Moved `getGuildUpdatedRemote`, `fireGuildUpdated`, and `broadcastGuildUpdated` into `GuildUpdateBroadcaster`.
+- `GuildUpdateBroadcaster` has no ModuleScript dependencies, no runtime loop, no connection, no `_G`, and no fallback path.
+- `GuildService` keeps a local `broadcastGuildUpdated` alias for existing call sites.
+- No new remotes, DataStore keys, teleport data fields, runtime loops, schedulers, gameplay globals, or require cycles were added.
+
+### Validation
+
+- Studio Play in `Four Peaks` started successfully with normal lobby ready logs and no `GuildService`/`GuildUpdateBroadcaster` errors.
+- Runtime smoke required `GuildService` and `GuildUpdateBroadcaster`; `GuildService.GetState` returned `Success=true` with `Config` and `PlayerResources`.
+- Synthetic `GuildUpdateBroadcaster.Broadcast` confirmed `ReplicatedStorage.RemoteEvents.GuildUpdated` remains a `RemoteEvent`.
+- `git diff --check` passed with only existing CRLF warnings.
+
+### Not Verified
+
+- Guild create/join/invite/leave/kick/disband flows were not repeated in this checkpoint.
+- Treasury deposit/spend, upgrades, task progress, and teleport to guild castle were not executed because Stage 6E changed only broadcast ownership and avoided DataStore write flows in smoke.
+
+### Risks
+
+- Future changes to guild update payload or fanout should update `GuildUpdateBroadcaster` instead of `GuildService`.
+- The smoke test verified the broadcaster directly with a synthetic guild record; real mutation call sites still need broader guild-flow tests in a later validation checkpoint.
+
+### Rollback
+
+- Restore `getGuildUpdatedRemote`, `fireGuildUpdated`, and `broadcastGuildUpdated` inline in `GuildService.lua`.
+- Remove `GuildUpdateBroadcaster.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 6E notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Four Peaks GuildService stage 6D record state extraction
 
 ### Summary
