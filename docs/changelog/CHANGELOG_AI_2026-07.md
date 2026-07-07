@@ -1,5 +1,65 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Poziom SpellService stage 4B targeting extraction
+
+### Summary
+
+- Completed Stage 4B for active `game.ServerScriptService.Script.SpellService`.
+- Added `SpellTargeting` for enemy root/position/alive queries, nearest/radius/all enemy queries, priority target picking/listing, and beam segment distance math.
+- Kept the existing local helper names in `SpellService` as thin delegates so spell archetype call sites, cooldowns, damage formulas, VFX payloads, and public behavior remained unchanged.
+- Preserved projectile/beam damage, speed, range, cooldown, tick rate, pierce, remotes, persistent data, attributes, and balance.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/SpellTargeting.lua`
+- Updated `Level/ServerScriptService/Script/SpellService.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Created live `game.ServerScriptService.ModuleScript.SpellTargeting`.
+- Synchronized active `game.ServerScriptService.Script.SpellService` to require `SpellTargeting` and delegate target helpers.
+- Repo/Studio parity after cleanup:
+  - `SpellService`: normalized length `46264`, hash `18656830`.
+  - `SpellProjectiles`: normalized length `3187`, hash `229091311`.
+  - `SpellTargeting`: normalized length `2333`, hash `375152092`.
+- Temporary `Stage4BSpellTargetingHarness` was removed; Studio grep and repo grep found no `Stage4B` markers.
+
+### Architecture
+
+- New graph: `SpellService -> SpellProjectiles`, `SpellService -> SpellTargeting`, `SpellService -> NpcService`, `SpellService -> PlayerData`, `SpellService -> SpellDefinitions`, `SpellService -> WeaponConfigs`; `SpellTargeting -> NpcService`.
+- `SpellTargeting` has no `_G`, remotes, runtime loop, event connection, `task.spawn`, or `task.delay`.
+- No require cycle was introduced.
+
+### Validation
+
+- Studio Play startup reached normal `SpellService` ready logs with no `SpellTargeting` or missing-module errors.
+- A temporary Studio-only server Script harness ran in the same server VM as live `SpellService` and wrapped `SpellTargeting` methods during real spell flow.
+- Real `VoltNeedle` projectile used `PickPriorityEnemyList`, `GetNearestEnemy`, `GetEnemiesInRadius`, and `GetEnemyPosition`; it dealt `18` damage and changed target health `500 -> 482`.
+- Real `ThunderRay` beam used `PickPriorityEnemy`, `GetAllEnemies`, `GetEnemyPosition`, and `DistancePointToSegment`; it dealt `2` ticks of `7` damage and changed target health `344 -> 330`.
+- Output showed no `SpellService`, `SpellTargeting`, `SpellProjectiles`, or `NpcService` errors. Existing unrelated Studio output remained from `Hybrid Terrain Hex Generator`, `ErrorReporter`, and missing TeleportData in Play Solo.
+- Repo grep and Studio grep found no temporary harness/probe markers after cleanup.
+
+### Not Verified
+
+- Full natural run with random spell acquisition was not repeated in this checkpoint.
+- Multiplayer spell targeting was not available through current MCP Play.
+- Complete orbit/nova/zone/beam matrix remains for later Stage 4/final audit; 4B specifically validated projectile targeting and beam/line distance targeting.
+
+### Risks
+
+- `SpellTargeting` depends on `NpcService`; isolated `execute_luau` requires in Edit can report the existing `NpcService` module-load limitation, while real Play startup loads the graph correctly.
+- Other spell responsibilities, including effect application, impact/ring/beam VFX construction, and zone/beam/dot task loops, still live in `SpellService` for later checkpoints.
+
+### Rollback
+
+- Restore the previous inline enemy query, priority target picking, and `distancePointToSegment` helpers in `SpellService.lua`.
+- Remove `Level/ServerScriptService/ModuleScript/SpellTargeting.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 4B notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Poziom SpellService stage 4A central projectile simulation
 
 ### Summary

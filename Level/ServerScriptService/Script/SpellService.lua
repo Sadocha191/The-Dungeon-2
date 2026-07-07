@@ -45,6 +45,7 @@ local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions
 local NpcService = require(findServerModule("NpcService") or error("[SpellService] Missing NpcService"))
 local PlayerData = require(findServerModule("PlayerData") or error("[SpellService] Missing PlayerData"))
 local SpellProjectiles = require(findServerModule("SpellProjectiles") or error("[SpellService] Missing SpellProjectiles"))
+local SpellTargeting = require(findServerModule("SpellTargeting") or error("[SpellService] Missing SpellTargeting"))
 local WeaponConfigs = modFolder and require(modFolder:WaitForChild("WeaponConfigs"))
 
 local vfxRoot = workspace:FindFirstChild("SpellVFX")
@@ -98,11 +99,11 @@ local function isPlayerRunActive(plr: Player): boolean
 end
 
 local function getEnemyRoot(model)
-	return NpcService.GetRoot(model)
+	return SpellTargeting.GetEnemyRoot(model)
 end
 
 local function enemyAlive(model)
-	return NpcService.IsAlive(model)
+	return SpellTargeting.IsEnemyAlive(model)
 end
 
 local function safeDamage(enemyModel, dmg, meta)
@@ -120,53 +121,31 @@ local function safeDamage(enemyModel, dmg, meta)
 end
 
 local function getEnemyPosition(model)
-	local pos = NpcService.GetPosition(model)
-	if pos then
-		return pos
-	end
-	local root = getEnemyRoot(model)
-	return root and root.Position or nil
+	return SpellTargeting.GetEnemyPosition(model)
 end
 
 local function getNearestEnemy(pos, range)
-	return NpcService.GetNearestEnemy(pos, range or 9999)
+	return SpellTargeting.GetNearestEnemy(pos, range)
 end
 
 local function getEnemiesInRadius(pos, radius)
-	return NpcService.GetEnemiesInRadius(pos, radius or 10)
+	return SpellTargeting.GetEnemiesInRadius(pos, radius)
 end
 
 local function getAllEnemies()
-	return NpcService.GetLivingModels()
+	return SpellTargeting.GetAllEnemies()
 end
 
 local function getPrioritizedEnemiesInRange(pos, range)
-	return getEnemiesInRadius(pos, range or 10)
+	return SpellTargeting.GetPrioritizedEnemiesInRange(pos, range)
 end
 
 local function pickPriorityEnemy(pos, range)
-	local candidates = getPrioritizedEnemiesInRange(pos, range)
-	return candidates[1]
+	return SpellTargeting.PickPriorityEnemy(pos, range)
 end
 
 local function pickPriorityEnemyList(pos, range, count)
-	local desiredCount = math.max(1, math.floor(tonumber(count) or 1))
-	local candidates = getPrioritizedEnemiesInRange(pos, range)
-	if #candidates <= 0 then
-		return {}
-	end
-
-	local out = {}
-	local candidateCount = #candidates
-	local index = 1
-	while #out < desiredCount do
-		table.insert(out, candidates[index])
-		index += 1
-		if index > candidateCount then
-			index = 1
-		end
-	end
-	return out
+	return SpellTargeting.PickPriorityEnemyList(pos, range, count)
 end
 
 local function applySlow(model, slowPct, duration)
@@ -479,14 +458,7 @@ local function getEffectResistance(enemy)
 end
 
 local function distancePointToSegment(point, a, b)
-	local ab = b - a
-	local denom = ab:Dot(ab)
-	if denom <= 1e-4 then
-		return (point - a).Magnitude
-	end
-	local t = math.clamp(((point - a):Dot(ab)) / denom, 0, 1)
-	local projection = a + (ab * t)
-	return (point - projection).Magnitude
+	return SpellTargeting.DistancePointToSegment(point, a, b)
 end
 
 local function applyTimedDot(plr, enemy, dps, duration)
