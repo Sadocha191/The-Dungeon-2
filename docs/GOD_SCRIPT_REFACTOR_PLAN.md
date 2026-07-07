@@ -12,7 +12,7 @@ Zakres: etapowy refaktor największych God Scriptów i gameplayowych zależnośc
 | 2. `WaveController` | 2A-2E ukończone | `AbilityGeometry` wydziela czystą geometrię ability; `AbilityHazards` wydziela hazard zones/ticki/cleanup; `AbilityExecutor` wydziela wykonanie ability elit i bossów; `EncounterScheduler` wydziela planowanie spawn/encounter; `RunPortalController` wydziela portal/prompt state; `WaveDebugApi` wydziela Studio-only debug hook registration | Brak zmian damage/tick/cooldown/spawn rate; po każdym podetapie Play test |
 | 3. `NpcService` | 3A-3F ukończone | Registry, movement/steering/ground, targeting/melee, lifecycle/status/death/despawn oraz batch replication wydzielone | Jeden centralny update, brak per-NPC Heartbeat |
 | 4. `SpellService` i projectiles | 4A-4F ukończone | `SpellProjectiles` wydziela projectile simulation i hit detection; `SpellTargeting` wydziela enemy query/target picking/beam segment distance; `SpellEffects` wydziela status/effect application; `SpellVisuals` wydziela server VFX dispatch/payload/orbit sync; `SpellSustained` wydziela zone/beam tick loopi; martwe server-side konstruktory VFX usunięte | Pociski mają jeden leniwy scheduler; targeting/effects/VFX dispatch oraz zone/beam tick loopi delegowane bez zmian balansu |
-| 5. `RunStatsService` i `ShrineService` | Zaplanowany | Tylko pozostałe realnie mieszane odpowiedzialności | DamageService i RunDefenseState bez zmiany ownership |
+| 5. `RunStatsService` i `ShrineService` | 5A ukończone | Usunięto nieużywane globalne shimy `RunStatsService`; `ShrineService` `_G.PrepareRunShrines` pozostaje aktywnym kontraktem `RunReadyGate` | DamageService i RunDefenseState bez zmiany ownership |
 | 6. Guild | Zablokowany do czasu otwarcia `Guild` Studio | Persistence, membership, treasury, upgrades, teleport | Potwierdzony aktywny place `Gildia` |
 | 7. Duże kontrolery UI | Zaplanowany | Inventory/blacksmith/crafting UI po stabilizacji serwera | Brak zmian wyglądu/remotes/bindów |
 
@@ -76,7 +76,7 @@ Liczby są statycznym skanem repo. `Remote names` to unikalne publiczne remotes 
 | `Level/ServerScriptService/ModuleScript/SpellProjectiles.lua` | 125 | 6 / 3 | 0 | none | 1 lazy `Heartbeat` only while active projectiles exist | 0 / 0 |
 | `Level/ServerScriptService/ModuleScript/SpellTargeting.lua` | 80 | 0 / 10 | 1 | none | no runtime loop or connection | 0 / 0 |
 | `Level/ServerScriptService/Script/ShrineService.server.lua` | 651 | 19 / 1 | 1 | `WaveStatusEvent` | 1 `Heartbeat`, player/run connections | 0 / 1 |
-| `Level/ServerScriptService/ModuleScript/Stats/RunStatsService.lua` | 462 | 14 / 16 | 4 | none | 1 `Heartbeat`, player/run connections | 0 / 2 |
+| `Level/ServerScriptService/ModuleScript/Stats/RunStatsService.lua` | 454 | 14 / 14 | 4 | none | 1 `Heartbeat`, player/run connections | 0 / 0 |
 | `Four Peaks/ServerScriptService/Script/BlacksmithService.lua` | 312 | 12 / 0 | 3 | `OpenBlacksmithUI`, `BlacksmithSync`, `BlacksmithAction` | prompt/workspace/player/remote connections | 0 / 0 |
 
 Repo-wide scan:
@@ -107,7 +107,7 @@ Repo-wide scan:
 | `_G.PrepareRunChests` | `ChestService` | `RunReadyGate` dynamic `_G[name]` | Prepare chest objects before run | `RunWorldPreparation.PrepareChests()` |
 | `_G.PrepareRunShrines` | `ShrineService` | `RunReadyGate` dynamic `_G[name]` | Prepare shrine objects before run | `RunWorldPreparation.PrepareShrines()` |
 | `_G.PrepareRunStructures` | `StatueService` | `RunReadyGate` dynamic `_G[name]` | Prepare statue/structure objects before run | `RunWorldPreparation.PrepareStructures()` |
-| `_G.GetRunStat`, `_G.HealRunPlayer` | `RunStatsService` | no repo caller | Stat query and heal helper | Remove after Studio grep, or replace with `RunStatsService` direct calls |
+| `_G.GetRunStat`, `_G.HealRunPlayer` | removed in 5A | no active caller found before removal | Legacy stat query and heal helper | Public `RunStatsService.GetStat` and `RunStatsService.HealPlayer` remain |
 | `_G.Debug*` WaveController hooks | `WaveController` | `DebugCommandService` | Studio/debug spawn toggles | Keep as Studio/debug-only until a debug command module owns them |
 | `_G.Spells_*` | Four Peaks `SpellService` | `WitchNPC` and no-call helpers | Spellbook unlock/reset/open choice hooks | Later lobby spell API module; not part of Level etap 1 |
 | `_G.ErrorReporterTest`, `_G.ErrorWebhookTest` | ErrorBootstrap | debug commands | Error reporter diagnostics | Out of scope for gameplay refactor |
@@ -411,6 +411,20 @@ Etapy 5-7:
 - Guild dopiero po otwarciu Studio `Gildia`.
 - UI na końcu, bez zmian wyglądu ani nazw obiektów.
 
+Etap 5, RunStatsService/ShrineService:
+
+- 5A ukończony.
+- 5A usunął nieużywane globalne writer-y `_G.GetRunStat` i `_G.HealRunPlayer` z aktywnego `RunStatsService`; publiczne `RunStatsService.GetStat` i `RunStatsService.HealPlayer` pozostały bez zmian.
+- Audyt 5A: repo grep i Studio grep przed zmianą nie znalazły aktywnych callerów `_G.GetRunStat` ani `_G.HealRunPlayer`; Studio grep po zmianie nie znajduje tych globali.
+- Audyt 5A: `_G.PrepareRunShrines` w `ShrineService` pozostaje aktywnym kontraktem `RunReadyGate`, więc nie był usuwany ani modernizowany w tym checkpointcie.
+- Graf 5A bez zmian ownership: `RunStatsService -> DamageService`, `RunStatsService -> NpcService`, `RunStatsService -> RunDefenseState`, `RunStatsService -> StatsConfig`; `ShrineService -> WorldBounds`. Nie dodano cyklu require.
+- Runtime 5A: nie dodano pętli, connection, schedulerów, remotes, `_G` ani fallbacków; `RunStatsService` zachowuje istniejący jeden `Heartbeat`.
+- Walidacja 5A: repo/Studio parity aktywnego `RunStatsService` potwierdzona przez length/hash `14191/403943297`.
+- Play test 5A: bez używania globali wymagano `RunStatsService`, `DamageService` i `NpcService`; `_G.GetRunStat=false`, `_G.HealRunPlayer=false`, publiczne `GetStat`/`HealPlayer` dostępne; `HealPlayer` przywrócił `5` HP (`57 -> 62`), `DamageService.Apply` z registered attacker zadał `6` HP graczowi (`62 -> 56`) i thorns callback odbił `4` HP w NPC (`1000 -> 996`).
+- Cleanup 5A: tymczasowy target folder usunięty; repo grep i Studio grep nie znajdują markerów `Stage5A`.
+- Nieweryfikowane w 5A: pełny naturalny long-run z chest item modifiers i shrine completion nie był powtarzany; test dotyczył usunięcia nieużywanych globali oraz publicznego direct API.
+- Rollback 5A: przywrócić dwa końcowe przypisania `_G.GetRunStat` i `_G.HealRunPlayer` w `RunStatsService.lua` oraz cofnąć wpisy planu/changeloga.
+
 ## Plan migracji `_G`
 
 ### Aktualizacja 2026-07-01 po etapie 1
@@ -439,7 +453,7 @@ Pozostałe gameplayowe `_G` w `Level` po tym kroku:
 - `ShrineService`: `_G.PrepareRunShrines`,
 - `StatueService`: `_G.PrepareRunStructures`, dynamiczne `_G[name]` call site’y i odczyty spawn/chest hooków,
 - `WaveController`: `_G.SpawnEnemyBurst`, debug-only `_G.Debug*`,
-- `RunStatsService`: `_G.GetRunStat`, `_G.HealRunPlayer` bez repo/live callerów poza writerami.
+- `RunStatsService`: `_G.GetRunStat`, `_G.HealRunPlayer` usunięte w 5A po potwierdzeniu braku repo/live callerów.
 
 Walidacja etapu 1:
 
@@ -447,7 +461,7 @@ Walidacja etapu 1:
 - Play startup smoke w `Level` przeszedł po poprawce limitu lokalnych rejestrów `WaveController`.
 - Nie wykonano pełnych testów kill/XP/drop/chest/end-run, więc etap 2 nie powinien startować przed ich wykonaniem.
 
-1. Najpierw usunąć read-only fallbacki bez writera (`EndRun`, `SetGlobalRunPause`, nieużywane `GetRunCoins`/`GetRunStat`/`HealRunPlayer`) tylko po Studio grep i Play test.
+1. Read-only fallbacki bez aktywnych callerów zostały usunięte dla `GetRunStat`/`HealRunPlayer` w 5A po Studio grep i Play test.
 2. Wydzielić najmniejszy moduł dla run rewards/wallet/kill query, który nie wymaga zależności zwrotnej do `WaveController`, `NpcService`, `DamageService` ani `ChestItemService`.
 3. Zmigrować callerów w kolejności najmniejszego ryzyka:
    - `ChestService` spend coins,

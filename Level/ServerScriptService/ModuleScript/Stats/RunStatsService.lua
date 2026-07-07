@@ -449,14 +449,6 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 end)
 
-_G.GetRunStat = function(player, statName)
-	return RunStatsService.GetStat(player, statName)
-end
-
-_G.HealRunPlayer = function(player, amount)
-	return RunStatsService.HealPlayer(player, amount)
-end
-
 refreshAllLivingPlayers()
 
 return RunStatsService

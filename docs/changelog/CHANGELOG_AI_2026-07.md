@@ -1,5 +1,62 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Poziom RunStatsService stage 5A unused global shim removal
+
+### Summary
+
+- Completed Stage 5A for active `game.ServerScriptService.ModuleScript.Stats.RunStatsService`.
+- Removed unused global writers `_G.GetRunStat` and `_G.HealRunPlayer`.
+- Kept public module API `RunStatsService.GetStat` and `RunStatsService.HealPlayer` unchanged.
+- Audited `ShrineService` and left `_G.PrepareRunShrines` untouched because it remains an active `RunReadyGate` contract.
+
+### Files
+
+- Updated `Level/ServerScriptService/ModuleScript/Stats/RunStatsService.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Synchronized active `game.ServerScriptService.ModuleScript.Stats.RunStatsService`.
+- Repo/Studio parity after sync:
+  - `RunStatsService`: length `14191`, hash `403943297`.
+- Studio grep found no `_G.GetRunStat`, `_G.HealRunPlayer`, or `Stage5A` markers after cleanup.
+
+### Architecture
+
+- Removed two unused gameplay global shims from `RunStatsService`.
+- Did not change `DamageService`, `RunDefenseState`, damage order, HP regen, shield/overheal math, thorns callback registration, public module functions, remotes, persistent data, attributes, or balance.
+- Did not change `ShrineService`; `_G.PrepareRunShrines` is still required by `RunReadyGate`.
+- No new `_G`, fallback, runtime loop, scheduler, connection, remote, bootstrap, or require cycle was added.
+
+### Validation
+
+- Repo grep and Studio grep before removal found no active caller of `_G.GetRunStat` or `_G.HealRunPlayer`.
+- Studio Play startup loaded `RunStatsService`, `DamageService`, and `NpcService` without missing-global errors.
+- Runtime smoke required `RunStatsService` directly and confirmed `_G.GetRunStat=false`, `_G.HealRunPlayer=false`, public `GetStat`/`HealPlayer` available.
+- `RunStatsService.HealPlayer` healed `5` HP (`57 -> 62`).
+- `DamageService.Apply` with a registered NPC attacker dealt `6` HP to the player (`62 -> 56`) and thorns callback damaged the NPC (`1000 -> 996`).
+- `git diff --check` passed with only existing CRLF warnings.
+
+### Not Verified
+
+- Full natural long-run with chest item modifiers and shrine completion was not repeated in this checkpoint.
+- Multiplayer stat propagation was not available through current MCP Play.
+
+### Risks
+
+- Unknown out-of-repo tools that called `_G.GetRunStat` or `_G.HealRunPlayer` would now need to use `RunStatsService` directly, but repo and active Studio grep found no runtime callers.
+- `ShrineService` still exposes `_G.PrepareRunShrines`; this remains intentional until the world-preparation globals are migrated together.
+
+### Rollback
+
+- Restore the two final global assignments in `RunStatsService.lua`:
+  - `_G.GetRunStat = function(player, statName) return RunStatsService.GetStat(player, statName) end`
+  - `_G.HealRunPlayer = function(player, amount) return RunStatsService.HealPlayer(player, amount) end`
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 5A notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Poziom SpellService stage 4F sustained spell loop extraction
 
 ### Summary
