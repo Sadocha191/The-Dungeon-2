@@ -35,8 +35,7 @@ end
 
 function ModalUiState.IsBlockingUiOpen(playerGui: PlayerGui): boolean
 	local upgradesGui = playerGui:FindFirstChild("UpgradesGUI")
-	local upgradesMain = upgradesGui and upgradesGui:FindFirstChild("Main")
-	if upgradesGui and upgradesGui:IsA("ScreenGui") and upgradesGui.Enabled and upgradesMain and upgradesMain:IsA("GuiObject") and upgradesMain.Visible then
+	if upgradesGui and upgradesGui:IsA("ScreenGui") and upgradesGui.Enabled then
 		return true
 	end
 

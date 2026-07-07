@@ -114,9 +114,11 @@ end
 local gui = script.Parent
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
+gui.Enabled = false
 gui:SetAttribute("Modal", true) -- used by camera/mouse lock script
 
 local main = gui:WaitForChild("Main") -- ImageLabel
+main.Visible = true
 local bottom = main:WaitForChild("BottomButtons")
 local btnSkip = bottom:WaitForChild("Skip")
 local btnReroll = bottom:WaitForChild("Reroll")
@@ -271,7 +273,8 @@ local function setBanishButtonState(on: boolean)
 end
 
 local function hideMenu()
-	main.Visible = false
+	gui.Enabled = false
+	main.Visible = true
 	lockMovement(false)
 	currentToken = nil
 	banishMode = false
@@ -281,6 +284,7 @@ end
 
 local function showMenu()
 	main.Visible = true
+	gui.Enabled = true
 	lockMovement(true)
 	choiceLockedUntil = os.clock()
 end
@@ -686,12 +690,13 @@ btnBanish.MouseButton1Click:Connect(function()
 	setBanishButtonState(banishMode)
 end)
 
-main.Visible = false
+gui.Enabled = false
+main.Visible = true
 updateRerollButtonState()
 
 -- If the player respawns while the menu is open, keep them locked.
 plr.CharacterAdded:Connect(function()
-	if main.Visible then
+	if gui.Enabled then
 		lockMovement(true)
 	else
 		lockMovement(false)
@@ -712,7 +717,7 @@ end)
 
 -- auto-close waiting when pause ends
 PauseState:GetPropertyChangedSignal("Value"):Connect(function()
-	if PauseState.Value == false and main.Visible == true then
+	if PauseState.Value == false and gui.Enabled == true then
 		for _, s in ipairs(slots) do s.Visible = true end
 		btnSkip.Active = true; btnReroll.Active = true; btnBanish.Active = true
 		hideMenu()

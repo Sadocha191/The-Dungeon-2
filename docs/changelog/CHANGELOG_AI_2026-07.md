@@ -1,5 +1,373 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Poziom WaveController stage 2E portal and debug API extraction
+
+### Summary
+
+- Completed Stage 2E for active `game.ServerScriptService.Script.Model.WaveController`.
+- Added `RunPortalController` as a server ModuleScript for run portal model creation, prompt state, activation state, boss-defeated state, and portal trigger callbacks.
+- Added `WaveDebugApi` as a Studio-only debug hook registrar so active `WaveController` no longer writes debug `_G.Debug*` functions directly.
+- Kept boss spawning execution, boss combat registration, rewards, `RunProgressApi` calls, remotes, spawn values, damage, cooldowns, and the single `Heartbeat` owner unchanged.
+- Did not touch `DamageService`, `NpcService`, `RunStatsService`, ability configs, hazard timing, remotes, persistent data, or the already-removed stale duplicate `Model.model/WaveController.lua`.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/RunPortalController.lua`
+- Added `Level/ServerScriptService/ModuleScript/WaveDebugApi.lua`
+- Updated `Level/ServerScriptService/Script/Model/WaveController.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Active script path remained `game.ServerScriptService.Script.Model.WaveController`.
+- Created live `game.ServerScriptService.ModuleScript.RunPortalController`.
+- Created live `game.ServerScriptService.ModuleScript.WaveDebugApi`.
+- Synchronized active `WaveController`, `RunPortalController`, and `WaveDebugApi` with repo.
+- Removed temporary Stage 2E probe code after validation; Studio `script_grep` and repo grep found no Stage 2E probe markers.
+
+### Validation
+
+- Dependency graph for 2E: `WaveController -> RunPortalController`; `WaveController -> WaveDebugApi` only inside `RunService:IsStudio()`. Neither new module requires `WaveController`.
+- Play startup without probes reached `[HordeController] Ready (time-based)` with no `WaveController`, `RunPortalController`, or `WaveDebugApi` errors.
+- Temporary Studio-only probe validated real portal/debug paths through the active `WaveController` and was removed afterward:
+  - Portal exists under `workspace` with prompt action `Awaken Boss` and enabled initial prompt state.
+  - Studio debug hook registration was present (`DebugForceBossSpawn` function registered through `WaveDebugApi`).
+  - Debug boss spawn returned `Boss_Golem`, active boss count became `1`, portal prompt changed to disabled `Boss Active`.
+  - Setting boss defeated changed prompt to enabled `Enter Portal`.
+  - Debug cleanup removed the spawned boss and active boss count returned to `0`.
+- Studio grep after sync showed no direct `_G.Debug*` writer in active `WaveController`; debug writers are centralized in `WaveDebugApi`, and `WaveDebugApi.Register` asserts `RunService:IsStudio()`.
+- Existing gameplay `_G.SpawnEnemyBurst` in `WaveController` and other unrelated project globals were not changed in this substage.
+- No new remotes, fallback damage path, Heartbeat, scheduler loop, gameplay `_G`, or bootstrap was added.
+- Output showed no missing-module or portal/debug errors. Existing unrelated Studio output remained from `Hybrid Terrain Hex Generator`, error reporter configuration, and missing TeleportData in Play Solo.
+
+### Not verified
+
+- Full manual ProximityPrompt click by a player and full victory end-run through entering the portal after a real boss kill were not manually completed in this pass; prompt states and callbacks were validated through the active controller path.
+- Non-Studio published-server absence of debug hooks was verified statically by the `RunService:IsStudio()` registration gate and `WaveDebugApi.Register` assertion, not by a published server run.
+
+### Risks
+
+- `RunPortalController` owns portal prompt state but still delegates actual boss spawn and victory end-run to `WaveController`; later stages must not move reward/end-run ownership casually.
+- `WaveDebugApi` still writes debug `_G.Debug*` hooks in Studio for `DebugCommandService` compatibility. It is intentionally Studio-only and should be removed or replaced only in a dedicated debug API migration.
+
+### Rollback
+
+- Restore the previous portal creation/state block and direct debug hook registration in `WaveController.lua`.
+- Delete `Level/ServerScriptService/ModuleScript/RunPortalController.lua` and live `game.ServerScriptService.ModuleScript.RunPortalController`.
+- Delete `Level/ServerScriptService/ModuleScript/WaveDebugApi.lua` and live `game.ServerScriptService.ModuleScript.WaveDebugApi`.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 2E notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
+## 2026-07-07 - Poziom WaveController stage 2D encounter scheduler extraction
+
+### Summary
+
+- Completed Stage 2D for active `game.ServerScriptService.Script.Model.WaveController`.
+- Added `EncounterScheduler` as a server ModuleScript that owns encounter timing state and spawn-planning calculations for normal spawns, elite cadence, swarm windows, catch-up debt, max-alive caps, spawn pools, spawn interval math, and important-encounter normal-trim decisions.
+- Kept actual mob cloning, spawn positioning, `NpcService.Register`, reward/drop handling, boss portal spawn execution, ability controllers, portal/end state, debug hooks, remotes, and the single `Heartbeat` owner in `WaveController`.
+- Kept spawn formulas, constants, pools, elite interval, swarm event times, swarm duration, catch-up behavior, caps, damage, ability values, remotes, and persistent data unchanged.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/EncounterScheduler.lua`
+- Updated `Level/ServerScriptService/Script/Model/WaveController.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Active script path remained `game.ServerScriptService.Script.Model.WaveController`.
+- Created live `game.ServerScriptService.ModuleScript.EncounterScheduler`.
+- Synchronized active `WaveController` and `EncounterScheduler` with repo.
+- Removed temporary Stage 2D probe code after validation; Studio `script_grep` and repo grep found no Stage 2D probe markers.
+
+### Validation
+
+- Dependency graph for 2D: `WaveController -> EncounterScheduler`; `EncounterScheduler` has no `require()` dependencies and no dependency back to `WaveController`.
+- Play startup without probes reached `[HordeController] Ready (time-based)` with no `WaveController` or `EncounterScheduler` errors.
+- Temporary Studio-only probe validated real scheduler-driven paths through the active `WaveController` and was removed afterward:
+  - Normal spawn startup under existing debug stress: `normalAfterStartup=24`, `activeAfterStartup=24`, `maxAlive=24`, `cap=100`, `normalWithinCap=true`.
+  - Elite scheduler trigger: `eliteAfterTrigger=1`, `eliteAfterSecondWindow=1`, `eliteIndexAfterTrigger=2`, `eliteNoDouble=true`.
+  - Boss spawn path through the existing debug hook: `bossSpawned=true`.
+  - Swarm scheduler: `swarmActive=true`, `swarmSourceCount=120`, `swarmActiveCount=120`, `swarmCap=120`, `swarmWithinCap=true`.
+  - Cleanup after disabling auto-spawn/run: `cleared=120`, `afterClearActive=0`.
+- Values preserved before/after refactor:
+  - `ELITE_INTERVAL_SECONDS = 300`.
+  - `SWARM_EVENT_TIMES = {240, 720}` and `SWARM_DURATION = 60`.
+  - Initial spawn cap observed as `100`; initial desired normal alive observed as `24`.
+  - Active swarm cap observed as `120`.
+  - Existing spawn pool thresholds, interval formula, burst formula, overtime formula, catch-up debt formula, and important-encounter trim formula were moved without balance edits.
+- Output showed no missing-module, fallback, or scheduler errors. Existing unrelated Studio output remained from `Hybrid Terrain Hex Generator`, `RunStatsHud` reentrancy in one probe run, error reporter configuration, and missing TeleportData in Play Solo.
+- No new `_G`, remotes, fallback damage path, Heartbeat, scheduler loop, or bootstrap was added.
+
+### Not verified
+
+- Natural wall-clock wait to the 4:00 swarm, 5:00 elite, and 12:00 swarm timings was not performed; the probe advanced scheduler state through existing debug/test-only controls to keep validation short.
+- Long-run random encounter progression over the full 15-minute run remains unverified in this pass.
+
+### Risks
+
+- `EncounterScheduler` now owns mutable scheduling state. Future Stage 2E or later work must keep mob spawning execution and portal/end ownership in `WaveController` or a dedicated spawn owner, not grow scheduler into a God Module.
+- Existing gameplay `_G` debug hooks in `WaveController` remain for Stage 2E; they were not expanded in 2D.
+
+### Rollback
+
+- Restore the previous `WaveController.lua` scheduling/state helpers and Heartbeat spawn block.
+- Delete `Level/ServerScriptService/ModuleScript/EncounterScheduler.lua` and live `game.ServerScriptService.ModuleScript.EncounterScheduler`.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 2D notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
+## 2026-07-07 - Lobby and level UI ScreenGui toggles and mobile camera fallback
+
+### Summary
+
+- Changed `Four Peaks` portal UI state so `PortalUI` opens and closes through `ScreenGui.Enabled`; the `UI` and `Background` frames remain visible containers instead of being the open/closed state.
+- Changed active `Level` `UpgradesGUI` state so upgrade offers open and close through `ScreenGui.Enabled`; `Main` remains a visible container.
+- Updated level modal checks in `ModalUiState` and `PauseClient` to treat enabled `UpgradesGUI` as the blocking state.
+- Updated lobby and level camera controllers to keep Roblox's default `CameraType.Custom` camera on touch-only devices, avoiding the custom lagged `Scriptable` orbit camera on phones.
+
+### Files
+
+- Updated `Four Peaks/StarterGui/PortalUI/PortalUIClient.lua`
+- Updated `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/CameraMouseLock.lua`
+- Updated `Level/StarterGUI/UpgradesGUI/UpgradesClient.lua`
+- Updated `Level/StarterGUI/Pause/PauseClient.lua`
+- Updated `Level/ReplicatedStorage/ModuleScripts/ModalUiState.lua`
+- Updated `Level/StarterPlayer/StarterPlayerScripts/LocalScript/CameraMouseLock.lua`
+
+### Studio
+
+- Active `Four Peaks` scripts synchronized:
+  - `game.StarterGui.PortalUI.PortalUIClient`
+  - `game.StarterPlayer.StarterPlayerScripts.CameraMouseLock`
+- Active `Level` scripts synchronized:
+  - `game.StarterGui.UpgradesGUI.UpgradesClient`
+  - `game.StarterGui.Pause.PauseClient`
+  - `game.ReplicatedStorage.ModuleScripts.ModalUiState`
+  - `game.StarterPlayer.StarterPlayerScripts.LocalScript.CameraMouseLock`
+
+### Validation
+
+- Studio grep confirmed `PortalUIClient` now initializes `screenGui.Enabled = false` and sets `currentRefs.gui.Enabled = isVisible`.
+- Studio grep confirmed active `Level` `UpgradesClient` opens with `gui.Enabled = true`, no longer uses `main.Visible == true` or `main.Visible = false` as the menu state, and level blocking checks now key off `UpgradesGUI.Enabled`.
+- Studio grep confirmed `USE_DEFAULT_TOUCH_CAMERA` exists in both active camera controllers.
+- `git diff --check` passed for the changed UI and camera files.
+- Play-tested `Level` startup in Studio. No errors were reported from the changed UI or camera scripts.
+- Play-tested `Four Peaks` startup in Studio. `PortalUIClient` reached `Ready`, and no errors were reported from the changed UI or camera scripts.
+
+### Runtime loops
+
+- No new `Heartbeat`, `Stepped`, `RenderStepped`, `while`, `task.spawn`, or `task.delay` loop was added.
+- Existing camera `BindToRenderStep` loops remain one per place; on touch-only devices they now return early after preserving default Roblox camera behavior.
+
+### Not verified
+
+- Real phone input was not physically tested; the phone path was verified by code path and Studio source grep only.
+- Opening the portal prompt and selecting an upgrade were not manually clicked in this pass.
+- `Level` Play output still contained unrelated pre-existing errors from `Hybrid Terrain Hex Generator` and the currently dirty `WaveController`.
+
+### Risks
+
+- Touch-only detection uses `UserInputService.TouchEnabled and not KeyboardEnabled and not MouseEnabled`; hybrid touch devices with keyboard or mouse still use the custom desktop camera.
+- Lobby modal UI movement locking on phones still depends on the existing camera controller render step, but the controller no longer writes camera CFrames on that path.
+
+### Rollback
+
+- Restore the previous versions of the six updated UI/camera scripts in repo and Studio.
+- Revert this changelog entry.
+
+## 2026-07-02 - Poziom WaveController stage 2C ability executor extraction
+
+### Summary
+
+- Completed Stage 2C for active `game.ServerScriptService.Script.Model.WaveController`.
+- Added `AbilityExecutor` as a server ModuleScript for elite and boss ability archetype execution.
+- Moved target impact, ground slam, dash, line strike, cone, TripleCombo, armor up, volley, teleport step, hazard cast, summon, shockwave sequence, meteor rain, arena pressure, enrage, VFX telegraphs/bursts, ability damage calls, ability cooldown writes, and ability windup scheduling out of `WaveController`.
+- Kept ability configuration tables in `WaveController` and preserved WaveController ownership of encounter selection, phase decisions, spawn scheduling, portal/end state, rewards, and debug hooks.
+- Kept all player damage through `DamageService`; hazards continue through `AbilityHazards`; hit geometry continues through `AbilityGeometry`.
+- Replaced the new `AbilityHazards` module dependency `WaitForChild()` chain with explicit `FindFirstChild`/`assert` loading to keep Stage 2 modules from adding an unbounded module wait.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/AbilityExecutor.lua`
+- Updated `Level/ServerScriptService/ModuleScript/AbilityHazards.lua`
+- Updated `Level/ServerScriptService/Script/Model/WaveController.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Active script path remained `game.ServerScriptService.Script.Model.WaveController`.
+- Created live `game.ServerScriptService.ModuleScript.AbilityExecutor`.
+- Synchronized active `WaveController`, `AbilityExecutor`, `AbilityGeometry`, and `AbilityHazards` with repo.
+- Repo/Studio source parity after cleanup:
+  - `WaveController`: length `71596`, hash `155116688`
+  - `AbilityExecutor`: length `23359`, hash `228098505`
+  - `AbilityGeometry`: length `2056`, hash `905137855`
+  - `AbilityHazards`: normalized source length `5232`
+
+### Validation
+
+- Dependency graph for 2C: `WaveController -> AbilityExecutor`; `AbilityExecutor -> AbilityGeometry`, `AbilityHazards`, `DamageService`, and `NpcService`; no dependency back to `WaveController`.
+- Play test used temporary non-persistent probes and removed them after validation.
+- Real elite/boss flow through `WaveController -> AbilityExecutor` validated:
+  - `RockToss` target impact: `1` hit, radius `5.5`, windup about `1.4` s in controlled probe.
+  - `DashThrust` dash/line: `1` hit, width `4`, windup `0.8` s.
+  - `ShieldCone`: cast observed and hit in the combined Knight probe.
+  - `TripleCombo`: sequence `ShieldCone -> TripleCombo`, `3` hits, hit intervals about `0.26/0.28` s.
+  - `RootCage`: hazard still produced `3` ticks through `AbilityHazards`, intervals `0.8/0.8`.
+  - `BoulderRain` meteor archetype: boss cast produced hits with windup `1.1` s.
+  - `Shockwave` sequence: boss cast reached `DamagePlayersInRadius`; final diagnostic recorded `1` Shockwave hit with player distance `3.2` inside radius `17`.
+  - Caster cleanup/despawn before delayed `RockToss` damage produced `0` damage events and no remaining VFX in the probe.
+- Output showed no `WaveController`, `AbilityExecutor`, `AbilityHazards`, `AbilityGeometry`, `DamageService`, missing-module, or fallback-damage errors. Existing unrelated Studio output remained from `Hybrid Terrain Hex Generator`, `RunStatsHud`, error reporter configuration, and missing TeleportData in Play Solo.
+- `script_grep` and repo grep found no temporary Stage 2C probe markers after cleanup.
+- No new `_G`, remotes, Heartbeat, fallback damage path, or bootstrap was added.
+- New Stage 2 module dependency loading contains no unbounded `WaitForChild()` calls in `AbilityGeometry`, `AbilityHazards`, or `AbilityExecutor`.
+
+### Not verified
+
+- `FlamePool` and `TeleportStep` were not runtime-tested because the active Studio Elite folder did not expose a `Demon` elite through the existing debug spawn path.
+- Natural random run progression was not used; validation forced real elite/boss spawns and controlled positions through existing debug hooks.
+- Full long-run cooldown matrix was not exhaustively replayed for every ability; cooldown gating was observed through no early RockToss recast and repeated boss ability casts in diagnostic sequences.
+
+### Risks
+
+- `AbilityExecutor` is intentionally a single archetype executor; future Stage 2D/2E work must not let it absorb spawn scheduling, rewards, portal state, or run end ownership.
+- `AbilityExecutor` now depends on `NpcService` for ability locks, movement, health, and status effects. `NpcService` must not add a reverse dependency to ability modules.
+
+### Rollback
+
+- Restore the previous `WaveController.lua` ability helper/cast functions.
+- Delete `Level/ServerScriptService/ModuleScript/AbilityExecutor.lua` and live `game.ServerScriptService.ModuleScript.AbilityExecutor`.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 2C notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
+## 2026-07-02 - Poziom WaveController stage 2B ability hazard extraction
+
+### Summary
+
+- Completed Stage 2B for active `game.ServerScriptService.Script.Model.WaveController`.
+- Added `AbilityHazards` as a server ModuleScript that owns enemy ability hazard zone parts, tick loops, player-in-radius checks for hazard ticks, DamageService calls for hazard damage, and active-zone cleanup.
+- Kept ability configs, hazard damage, duration, tick rate, telegraph visuals, context payloads, remotes, spawn timing, boss/elite ability selection, and public WaveController behavior unchanged.
+- Preserved the existing per-hazard task-loop model instead of adding a new central scheduler in this substage.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/AbilityHazards.lua`
+- Updated `Level/ServerScriptService/Script/Model/WaveController.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Active script path remained `game.ServerScriptService.Script.Model.WaveController`.
+- Created live `game.ServerScriptService.ModuleScript.AbilityHazards`.
+- Synchronized active `WaveController`, `AbilityGeometry`, and `AbilityHazards` with repo.
+- Repo/Studio parity hashes after cleanup:
+  - `WaveController`: length `91396`, hash `344334420`
+  - `AbilityGeometry`: length `2056`, hash `905137855`
+  - `AbilityHazards`: length `4920`, hash `725243347`
+
+### Validation
+
+- Dependency graph for 2B: `WaveController -> AbilityHazards`, `AbilityHazards -> AbilityGeometry`, and `AbilityHazards -> DamageService`; no reverse dependency to `WaveController`.
+- Play test used temporary non-persistent probes and removed them after validation.
+- `RootCage` real hazard flow through `WaveController -> AbilityHazards -> DamageService.Apply`:
+  - Tick count: `3`.
+  - Tick intervals: `0.8`, `0.8`.
+  - Config tick rate: `0.8`; duration: `3.6`.
+  - Thorns did not damage the Ent when hazard context had no `source` or `attacker`.
+  - Moving outside the hazard produced `0` hits; moving back inside produced `2` hits.
+  - Player death produced `0` post-death hits.
+- `RunStarted=false` cleanup now leaves `AbilityHazards.GetActiveCount() == 0` and destroys the hazard part (`partAlive=false`).
+- `ArenaPressure` real boss hazard flow produced `3` ticks with intervals `0.8`, `0.8`, config tick rate `0.8`, duration `4.5`, and context without `source`/`attacker`.
+- Output showed no `WaveController`, `AbilityHazards`, `AbilityGeometry`, `DamageService`, missing-module, or fallback-damage errors. Existing unrelated Studio output remained from `Hybrid Terrain Hex Generator`, `RunStatsHud`, and missing TeleportData in Play Solo.
+- `script_grep` and repo grep found no temporary Stage 2B probe markers after cleanup.
+- No new `_G`, remotes, fallback damage path, Heartbeat, or bootstrap was added.
+
+### Not verified
+
+- `FlamePool` was not runtime-tested because the active Studio Elite folder did not expose a `Demon` elite through the existing debug spawn path.
+- Full natural run progression to randomly selected hazards was not used; validation forced real elite/boss spawns through existing debug hooks.
+
+### Risks
+
+- `AbilityHazards` still preserves the existing per-hazard `task.spawn` tick loop; Stage 2D can decide whether scheduling should be centralized without changing gameplay.
+- `WaveController` still owns ability selection/execution, spawn scheduling, portal state, and debug hooks until later Stage 2 substages.
+
+### Rollback
+
+- Restore the previous `WaveController.lua` hazard helper implementation.
+- Delete `Level/ServerScriptService/ModuleScript/AbilityHazards.lua` and live `game.ServerScriptService.ModuleScript.AbilityHazards`.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 2B notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
+## 2026-07-02 - Poziom WaveController stage 2A ability geometry extraction
+
+### Summary
+
+- Completed Stage 2A for active `game.ServerScriptService.Script.Model.WaveController`.
+- Added `AbilityGeometry` as a small server ModuleScript for pure ability hit geometry.
+- Moved radius, line segment distance, cone, flat-vector, and groundify math out of `WaveController` without changing ability configs, damage values, cooldowns, tick rates, remotes, spawn timing, or hazard lifecycle.
+- Left `WaveController` as the owner of player iteration, ability execution, VFX, hazards, scheduling, damage application, and encounter state.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/AbilityGeometry.lua`
+- Updated `Level/ServerScriptService/Script/Model/WaveController.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Confirmed active script path: `game.ServerScriptService.Script.Model.WaveController`.
+- Confirmed stale duplicate `Level/ServerScriptService/Script/Model.model/WaveController.lua` is not present.
+- Created live `game.ServerScriptService.ModuleScript.AbilityGeometry`.
+- Synchronized active `WaveController` and `AbilityGeometry` with repo.
+- Repo/Studio parity hashes after cleanup:
+  - `WaveController`: length `91540`, hash `132201092`
+  - `AbilityGeometry`: length `2056`, hash `184505519`
+
+### Validation
+
+- Dependency graph for 2A: `WaveController -> AbilityGeometry`; `AbilityGeometry` has no `require()` dependencies.
+- Controlled before/after geometry baseline matched for radius edge/outside/height, line edge/outside/behind/height, cone inside/behind/55-degree edge/55.1-degree outside/height-ignored, and groundify hit/miss.
+- Play test used temporary non-persistent probes and removed them after validation.
+- Real ability call-site validation through `WaveController -> AbilityGeometry`:
+  - `GroundSlam` radius hit: geometry true `1`, damage call `1`.
+  - `GroundSlam` radius out-of-range miss: geometry false `1`, damage call `0`.
+  - `DashThrust` line hit: geometry true `1`, damage call `1`.
+  - `DashThrust` width miss: geometry false `1`, damage call `0`.
+  - `DashThrust` height miss: geometry false `1`, damage call `0`.
+  - `ShieldCone` cone hit near edge: geometry true `1`, damage call `1`.
+  - `ShieldCone` angle miss, behind miss, and range miss: geometry false `1` each, damage call `0`.
+- Output showed no `WaveController`, `AbilityGeometry`, `DamageService`, or missing-module errors.
+- `script_grep` and repo grep found no temporary Stage 2A probe markers after cleanup.
+- No new `_G`, remotes, fallback damage path, runtime loop, scheduler, or infinite `WaitForChild` was added.
+
+### Not verified
+
+- 2B hazard lifecycle was not changed in this substage.
+- Full natural run progression to random elite/boss ability usage was not used; validation forced real elite ability casts through existing debug spawn hooks in Studio.
+
+### Risks
+
+- `WaveController` still owns ability execution and hazard lifecycle; Stage 2B/2C must keep using `AbilityGeometry` without adding reverse dependencies.
+- The existing `WaveController` debug `_G` hooks remain unchanged and are still scheduled for later Stage 2E cleanup.
+
+### Rollback
+
+- Restore the previous `WaveController.lua` source.
+- Delete `Level/ServerScriptService/ModuleScript/AbilityGeometry.lua` and live `game.ServerScriptService.ModuleScript.AbilityGeometry`.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 2A notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-02 - Poziom ProgressService party XP declaration-order fix
 
 ### Summary

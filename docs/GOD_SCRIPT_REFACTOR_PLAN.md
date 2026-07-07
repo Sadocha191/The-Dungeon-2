@@ -9,7 +9,7 @@ Zakres: etapowy refaktor największych God Scriptów i gameplayowych zależnośc
 |---|---|---|---|
 | 0. Audyt i mapa zależności | Ukończony dla repo i aktywnych place `Level`/`Four Peaks`; `Guild` Studio nie było otwarte | Metryki plików, `_G`, `require`, pętle runtime, aktywne ścieżki Studio, plan migracji | Diff dokumentacji i changelog przechodzą walidację |
 | 1. `ProgressService` i gameplayowe `_G` | Ukończony w zatwierdzonym zakresie Stage 1; etap 2 nie rozpoczęty | `RunProgressApi` zastąpił `_G` dla XP/coins/souls/kills/run time/average level/boss/end run; party XP declaration-order bug naprawiony; martwy `SetGlobalRunPause` fallback usunięty z chest itemów | Przed etapem 2 pozostaje tylko osobna akceptacja dalszego zakresu i pełniejszy runtime test, jeżeli dostępny będzie multiplayer |
-| 2. `WaveController` | Zaplanowany | Najpierw geometria ability, hazard zones, execution boss/elite | Brak zmian damage/tick/cooldown/spawn rate |
+| 2. `WaveController` | 2A-2E ukończone | `AbilityGeometry` wydziela czystą geometrię ability; `AbilityHazards` wydziela hazard zones/ticki/cleanup; `AbilityExecutor` wydziela wykonanie ability elit i bossów; `EncounterScheduler` wydziela planowanie spawn/encounter; `RunPortalController` wydziela portal/prompt state; `WaveDebugApi` wydziela Studio-only debug hook registration | Brak zmian damage/tick/cooldown/spawn rate; po każdym podetapie Play test |
 | 3. `NpcService` | Zaplanowany | Registry/lifecycle, targeting/steering/combat/replication tylko po potwierdzeniu granic | Jeden centralny update, brak per-NPC Heartbeat |
 | 4. `SpellService` i projectiles | Zaplanowany | Centralny projectile service, targeting/effects/VFX dispatch | Jedno połączenie runtime dla pocisków |
 | 5. `RunStatsService` i `ShrineService` | Zaplanowany | Tylko pozostałe realnie mieszane odpowiedzialności | DamageService i RunDefenseState bez zmiany ownership |
@@ -32,6 +32,11 @@ Uwagi o parity:
 - `Four Peaks/StarterPlayer/StarterPlayerScripts/BlacksmithUI.lua` jest aktywną ścieżką Studio. `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/BlacksmithUI.lua` istnieje w repo jako rozjechana kopia i nie wolno jej aktualizować w ciemno.
 - `script_grep` w Studio potwierdził aktywne `_G` w `Level` i `Four Peaks`; przed każdą migracją trzeba ponownie sprawdzić konkretną dotykaną ścieżkę.
 - 2026-07-02: Stage 1 party XP fix verified `ProgressService` repo/Studio parity. MCP Play validated the Multi party award branch through `RunProgressApi.AwardPlayer`, no double award, Solo follow-up, and spell offer/pick flow. Full two-client multiplayer and natural normal/elite/boss kill runtime remain unverified because current MCP Play controls do not expose a true multi-client session.
+- 2026-07-02: Stage 2A verified `WaveController` repo/Studio parity after extracting `AbilityGeometry`. Stale `Model.model/WaveController.lua` remains absent.
+- 2026-07-02: Stage 2B verified `WaveController`, `AbilityGeometry`, and `AbilityHazards` repo/Studio parity after extracting hazard zone lifecycle. Temporary Play probes were removed from Studio.
+- 2026-07-02: Stage 2C verified `WaveController`, `AbilityExecutor`, `AbilityGeometry`, and `AbilityHazards` repo/Studio parity after extracting ability execution. Temporary Play probes were removed from Studio.
+- 2026-07-07: Stage 2D verified `WaveController` and `EncounterScheduler` after extracting encounter scheduling. Temporary Play probes were removed from Studio.
+- 2026-07-07: Stage 2E verified `WaveController`, `RunPortalController`, and `WaveDebugApi` after extracting portal/prompt state and Studio-only debug hook registration. Temporary Play probes were removed from Studio.
 
 ## Metryki największych plików
 
@@ -39,7 +44,7 @@ Liczby są statycznym skanem repo. `Remote names` to unikalne publiczne remotes 
 
 | Plik | Linie | Local/public functions | `require` | Remote names | Runtime loops i connections | `_G` reads/writes |
 |---|---:|---:|---:|---|---|---:|
-| `Level/ServerScriptService/Script/Model/WaveController.lua` | 2623 | 102 / 11 | 9 | `WaveStatusEvent` | 1 `Heartbeat`; liczne `task.delay`; hazard tick taski; 10 `:Connect` | 20 / 11 |
+| `Level/ServerScriptService/Script/Model/WaveController.lua` | 2576 | 101 / 11 | 10 | `WaveStatusEvent` | 1 `Heartbeat`; liczne `task.delay`; hazard tick taski; 10 `:Connect` | 20 / 11 |
 | `Four Peaks/StarterPlayer/StarterPlayerScripts/InventoryController.lua` | 2565 | 74 / 4 | 0 | `InventoryAction`, `InventorySync`, `RF_GetInventorySnapshot`, `PlayerProgressEvent` | event-driven UI, 28 connections, krótkie `task.delay` refresh | 0 / 0 |
 | `Level/ServerScriptService/ModuleScript/NpcService.lua` | 1666 | 60 / 20 | 4 | `NpcBatchEvent`, `NpcSyncRequest`, `DamageIndicatorEvent` | 1 `Heartbeat`, 1 remote connection | 0 / 0 |
 | `Level/ServerScriptService/Script/ProgressService.lua` | 1645 | 56 / 7 | 0 | `PlayerProgressEvent`, `MissionSummaryEvent`, `SpellEvent`, `PauseMenuEvent` | character health watch task co 0.25 s; remote/player connections | 4 / 8 |
@@ -92,20 +97,35 @@ Level:
 
 ```mermaid
 flowchart TD
-  WaveController --> DamageService
+  WaveController --> AbilityExecutor
+  WaveController --> EncounterScheduler
+  WaveController --> RunPortalController
+  WaveController --> WaveDebugApi
   WaveController --> NpcService
   WaveController --> PlayerData
   WaveController --> PickupToastService
   WaveController --> RunSpawnConfig
   WaveController --> WorldBounds
+  WaveController --> AbilityHazards
   WaveController --> CraftingConfig
   WaveController --> MissionProgress
   WaveController --> MobConfig
+  WaveController --> RunProgressApi
+  AbilityExecutor --> AbilityGeometry
+  AbilityExecutor --> AbilityHazards
+  AbilityExecutor --> DamageService
+  AbilityExecutor --> NpcService
+  EncounterScheduler
   NpcService --> WorldBounds
   NpcService --> NpcShared
   NpcService --> DamageService
   NpcService --> MissionProgress
   DamageService --> RunDefenseState
+  AbilityHazards --> AbilityGeometry
+  AbilityHazards --> DamageService
+  AbilityGeometry
+  RunPortalController
+  WaveDebugApi
   SpellService --> SpellDefinitions
   SpellService --> NpcService
   SpellService --> PlayerData
@@ -170,6 +190,58 @@ Etap 2, Wave:
 - Najpierw czyste helpery geometrii ability: radius, line, cone, ground query.
 - Potem hazard zones z zachowaniem tick rate/damage/duration.
 - Dopiero później boss/elite ability execution, spawn/scheduling, portal/end encounter.
+
+Status 2026-07-02:
+
+- 2A ukończony.
+- Dodano `Level/ServerScriptService/ModuleScript/AbilityGeometry.lua`.
+- `AbilityGeometry` nie wymaga `WaveController`, `DamageService`, hazardów, executorów ani konfiguracji fal.
+- Aktualny graf 2A: `WaveController -> AbilityGeometry`; brak zależności zwrotnej i brak cyklu.
+- Przeniesione funkcje/operacje: `FlatVector`, `HorizontalDistance`, `VerticalDelta`, `Groundify`, `DistancePointToSegment`, `IsPointInRadius`, `IsPointAlongLine`, `IsPointInCone`.
+- 2B ukończony.
+- Dodano `Level/ServerScriptService/ModuleScript/AbilityHazards.lua`.
+- `AbilityHazards` odpowiada za hazard zone part, tick loop, hazard radius damage przez `DamageService.Apply`, active-zone cleanup i `CancelAll`.
+- Aktualny graf 2B: `WaveController -> AbilityHazards`, `AbilityHazards -> AbilityGeometry`, `AbilityHazards -> DamageService`; brak zależności zwrotnej do `WaveController`.
+- `WaveController` nadal iteruje graczy dla jednorazowych ability, wywołuje `DamageService.Apply` dla non-hazard ability, tworzy non-hazard VFX, wybiera boss/elite ability i zarządza encounter state.
+- Rozmiar po 2B: `WaveController` 2572 linie, `AbilityGeometry` 63 linie, `AbilityHazards` 171 linii.
+- Pętle runtime po 2B: bez nowego `Heartbeat`; istniejący per-hazard `task.spawn` tick loop został przeniesiony z `WaveController` do `AbilityHazards` bez zmiany tick rate/duration.
+- 2C ukończony.
+- Dodano `Level/ServerScriptService/ModuleScript/AbilityExecutor.lua`.
+- `AbilityExecutor` odpowiada za wykonanie archetypów ability elit i bossów, telegraph/burst VFX, opóźnione windupy, cooldown writes, wywołania damage ability i przekazanie hazardów do `AbilityHazards`.
+- Aktualny graf 2C: `WaveController -> AbilityExecutor`; `AbilityExecutor -> AbilityGeometry`, `AbilityHazards`, `DamageService`, `NpcService`; `AbilityHazards -> AbilityGeometry`, `DamageService`; brak zależności zwrotnej do `WaveController`.
+- `WaveController` nadal posiada konfiguracje ability, wybór ability/phase, spawn scheduling, portal/end state, rewardy i debug hooks.
+- Rozmiar po 2C: `WaveController` 2087 linii, `AbilityExecutor` 573 linie, `AbilityGeometry` 63 linie, `AbilityHazards` 171 linii.
+- Pętle runtime po 2C: bez nowego `Heartbeat`; istniejące `task.delay`/`task.spawn` windupów ability zostały przeniesione z `WaveController` do `AbilityExecutor` bez zmiany opóźnień, a per-hazard tick loop pozostał w `AbilityHazards`.
+- Testy 2A: baseline przed/po dla radius/line/cone/groundify identyczny; Play test realnych ability potwierdził `GroundSlam`, `DashThrust` i `ShieldCone` hit/miss przez `WaveController -> AbilityGeometry`.
+- Testy 2B: Play test realnych hazardów potwierdził `RootCage` ticki `3` z odstępami `0.8/0.8`, exit/enter, zatrzymanie po śmierci gracza, cleanup przy `RunStarted=false`, brak thorns bez `source`/`attacker`, oraz `ArenaPressure` ticki `3` z odstępami `0.8/0.8`.
+- Testy 2C: Play test realnych call site'ów potwierdził `RockToss`, `DashThrust`, `ShieldCone`, `TripleCombo` z 3 trafieniami i odstępami około `0.26/0.28`, `RootCage` ticki `3` z odstępami `0.8/0.8`, `BoulderRain`, `Shockwave` przez `DamagePlayersInRadius`, oraz brak trafień po cleanupie castera przed opóźnionym `RockToss`.
+- 2D ukończony.
+- Dodano `Level/ServerScriptService/ModuleScript/EncounterScheduler.lua`.
+- `EncounterScheduler` odpowiada za stan i obliczenia planowania encounterów: pool spawnu, scaling czasu, max alive, interval/burst, elite cadence, swarm windows, catch-up debt i trim normalnych mobów podczas important encounter.
+- Aktualny graf 2D: `WaveController -> EncounterScheduler`; `EncounterScheduler` nie wymaga żadnych modułów i nie zależy zwrotnie od `WaveController`.
+- `WaveController` nadal wykonuje faktyczne klonowanie mobów, pozycje spawnu, `NpcService.Register`, death/reward flow, portal/boss execution, ability stepping, debug hooks i pojedynczy `Heartbeat`.
+- Rozmiar po 2D: `WaveController` 1888 linii, `EncounterScheduler` 407 linii, `AbilityExecutor` 573 linie, `AbilityGeometry` 63 linie, `AbilityHazards` 171 linii.
+- Pętle runtime po 2D: bez nowego `Heartbeat` i bez nowej pętli schedulerowej; istniejący pojedynczy `RunService.Heartbeat` pozostał w `WaveController`, a scheduler tylko zwraca plany/liczby.
+- Testy 2D: Play startup bez probe'a osiągnął `[HordeController] Ready`; tymczasowy probe potwierdził normal spawn `24/24` przy cap `100`, elite scheduler `1` spawn bez double, boss spawn, swarm `120/120` przy cap `120`, oraz cleanup `afterClearActive=0`.
+- Zachowane wartości 2D: `ELITE_INTERVAL_SECONDS=300`, `SWARM_EVENT_TIMES={240,720}`, `SWARM_DURATION=60`, initial `maxAlive=24`, active cap `100`, swarm cap `120`; formuły interval/burst/overtime/catch-up/trim przeniesiono bez zmian balansu.
+- 2E ukończony.
+- Dodano `Level/ServerScriptService/ModuleScript/RunPortalController.lua`.
+- Dodano `Level/ServerScriptService/ModuleScript/WaveDebugApi.lua`.
+- `RunPortalController` odpowiada za model portalu, `ProximityPrompt`, stan aktywacji portalu i stan boss defeated; faktyczny boss spawn, rewardy i end-run nadal pozostają w `WaveController`.
+- `WaveDebugApi` odpowiada za rejestrację debugowych `_G.Debug*` hooków wyłącznie w Studio; `WaveController` wymaga go tylko pod `RunService:IsStudio()`.
+- Aktualny graf 2E: `WaveController -> RunPortalController`; `WaveController -> WaveDebugApi` tylko w Studio; nowe moduły nie wymagają `WaveController` i nie tworzą cyklu.
+- Rozmiar po 2E: `WaveController` 1868 linii, `RunPortalController` 127 linii, `WaveDebugApi` 32 linie, `EncounterScheduler` 407 linii, `AbilityExecutor` 573 linie, `AbilityGeometry` 63 linie, `AbilityHazards` 171 linii.
+- Pętle runtime po 2E: bez nowego `Heartbeat`, bez nowego schedulera i bez nowych pętli runtime; zachowany pojedynczy `RunService.Heartbeat` w `WaveController`.
+- Testy 2E: Play startup bez probe'a osiągnął `[HordeController] Ready`; tymczasowy probe potwierdził portal `Awaken Boss`, debug hook registration w Studio, debug boss spawn `Boss_Golem`, prompt `Boss Active`, stan `Enter Portal` po boss defeated oraz cleanup bossa do `activeBossCount=0`.
+- Nieweryfikowane w 2B: `FlamePool`, bo aktywne Studio nie wystawia `Demon` elite przez istniejący debug spawn; pełny naturalny run do losowych elit/bossów zostaje do późniejszego runtime passu.
+- Nieweryfikowane w 2C: `FlamePool` i `TeleportStep`, bo aktywne Studio nie wystawia `Demon` elite przez istniejący debug spawn; pełna naturalna randomizacja runu i kompletna macierz cooldownów pozostają do późniejszego runtime passu.
+- Nieweryfikowane w 2D: naturalny wall-clock do 4:00/5:00/12:00 nie był odczekany; probe przyspieszał scheduler przez testowy stan i istniejące `DebugSettings`.
+- Nieweryfikowane w 2E: pełny manualny klik ProximityPrompt i pełny victory end-run po realnym killu bossa nie zostały wykonane; brak debug hooków na opublikowanym serwerze potwierdzono statycznie przez `RunService:IsStudio()` i assert w `WaveDebugApi.Register`.
+- Rollback 2A: przywrócić poprzedni `WaveController.lua`, usunąć `AbilityGeometry.lua` z repo i live Studio oraz cofnąć wpisy changeloga/planu.
+- Rollback 2B: przywrócić poprzedni `createHazardZone` w `WaveController.lua`, usunąć `AbilityHazards.lua` z repo i live Studio oraz cofnąć wpisy changeloga/planu.
+- Rollback 2C: przywrócić poprzednie helpery wykonania ability w `WaveController.lua`, usunąć `AbilityExecutor.lua` z repo i live Studio oraz cofnąć wpisy changeloga/planu.
+- Rollback 2D: przywrócić poprzednie helpery scheduling/spawn state w `WaveController.lua`, usunąć `EncounterScheduler.lua` z repo i live Studio oraz cofnąć wpisy changeloga/planu.
+- Rollback 2E: przywrócić poprzedni portal/debug block w `WaveController.lua`, usunąć `RunPortalController.lua` i `WaveDebugApi.lua` z repo i live Studio oraz cofnąć wpisy changeloga/planu.
 
 Etap 3, NPC:
 

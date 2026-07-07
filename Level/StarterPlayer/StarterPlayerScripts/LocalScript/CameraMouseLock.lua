@@ -13,6 +13,8 @@ local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
 local ModalUiState = require(moduleFolder:WaitForChild("ModalUiState"))
 
+local USE_DEFAULT_TOUCH_CAMERA = UIS.TouchEnabled and not UIS.KeyboardEnabled and not UIS.MouseEnabled
+
 local DISTANCE = 20
 local HEIGHT = 2.5
 local MOUSE_SENSITIVITY = 0.0022
@@ -128,6 +130,12 @@ local function setMovementLocked(locked: boolean)
 end
 
 UIS.TouchPan:Connect(function(touchPositions, totalTranslation, _velocity, state, gameProcessedEvent)
+	if USE_DEFAULT_TOUCH_CAMERA then
+		touchLookDelta = Vector2.zero
+		lastTouchPanTranslation = Vector2.zero
+		return
+	end
+
 	if gameProcessedEvent or shouldReleaseCursor() then
 		touchLookDelta = Vector2.zero
 		lastTouchPanTranslation = Vector2.zero
@@ -178,6 +186,19 @@ local function orbitStep(dt: number)
 	local now = os.clock()
 	local lookInputBlocked = blockingUiOpen or releaseCursor
 	setMovementLocked(blockingUiOpen)
+
+	if USE_DEFAULT_TOUCH_CAMERA then
+		if blockingUiOpen then
+			cancelCharacterMotion()
+		end
+		if camera.CameraType ~= Enum.CameraType.Custom then
+			camera.CameraType = Enum.CameraType.Custom
+		end
+		frozenCFrame = nil
+		touchLookDelta = Vector2.zero
+		lastTouchPanTranslation = Vector2.zero
+		return
+	end
 
 	if lookInputBlocked ~= lookInputBlockedLastFrame then
 		touchLookDelta = Vector2.zero

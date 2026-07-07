@@ -173,11 +173,11 @@ local function resolveRefs()
 		return nil
 	end
 
-	screenGui.Enabled = true
+	screenGui.Enabled = false
 	screenGui.ResetOnSpawn = false
 	screenGui:SetAttribute("Modal", false)
-	root.Visible = false
-	background.Visible = false
+	root.Visible = true
+	background.Visible = true
 
 	if root:IsA("CanvasGroup") then
 		root.GroupTransparency = 1
@@ -229,11 +229,10 @@ local function setPortalVisible(isVisible)
 		return
 	end
 
-	currentRefs.gui.Enabled = true
 	currentRefs.gui.DisplayOrder = 100
 	currentRefs.gui:SetAttribute("Modal", isVisible)
-	currentRefs.root.Visible = isVisible
-	currentRefs.background.Visible = isVisible
+	currentRefs.root.Visible = true
+	currentRefs.background.Visible = true
 
 	if currentRefs.root:IsA("CanvasGroup") then
 		currentRefs.root.GroupTransparency = isVisible and 0 or 1
@@ -242,6 +241,8 @@ local function setPortalVisible(isVisible)
 	if currentRefs.background:IsA("CanvasGroup") then
 		currentRefs.background.GroupTransparency = isVisible and 0 or 1
 	end
+
+	currentRefs.gui.Enabled = isVisible
 end
 
 local function resetScreenGuiState()
@@ -715,7 +716,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	end
 
 	local currentRefs = resolveRefs()
-	if currentRefs and currentRefs.root.Visible then
+	if currentRefs and currentRefs.gui.Enabled then
 		closeUI()
 	end
 end)

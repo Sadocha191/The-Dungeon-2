@@ -7,6 +7,8 @@ local Workspace = game:GetService("Workspace")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+local USE_DEFAULT_TOUCH_CAMERA = UIS.TouchEnabled and not UIS.KeyboardEnabled and not UIS.MouseEnabled
+
 local CAMERA_DISTANCES = {
 	Close = 12,
 	Medium = 20,
@@ -192,6 +194,12 @@ local function initializeAngles(hrp: BasePart)
 end
 
 UIS.TouchPan:Connect(function(touchPositions, totalTranslation, _velocity, state, gameProcessed)
+	if USE_DEFAULT_TOUCH_CAMERA then
+		touchLookDelta = Vector2.zero
+		lastTouchPanTranslation = Vector2.zero
+		return
+	end
+
 	if gameProcessed or shouldReleaseCursor() then
 		touchLookDelta = Vector2.zero
 		lastTouchPanTranslation = Vector2.zero
@@ -238,6 +246,16 @@ local function orbitStep(dt: number)
 		return
 	end
 	setMovementLocked(anyBlockingUiOpen())
+
+	if USE_DEFAULT_TOUCH_CAMERA then
+		if camera.CameraType ~= Enum.CameraType.Custom then
+			camera.CameraType = Enum.CameraType.Custom
+		end
+		frozenCFrame = nil
+		touchLookDelta = Vector2.zero
+		lastTouchPanTranslation = Vector2.zero
+		return
+	end
 
 	local hrp = getHRP()
 	if not hrp then
