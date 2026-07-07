@@ -1,5 +1,61 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Guild refactor stage 6 completion audit
+
+### Summary
+
+- Marked Stage 6 as complete after staged Guild refactors 6A-6E.
+- Confirmed active `Guild` place keeps `GuildPlace`, `GuildPlaceRemotes`, and `GuildPlaceLocations` in repo/Studio parity.
+- Confirmed active `Four Peaks` place keeps `GuildService`, `GuildRecordState`, and `GuildUpdateBroadcaster` in repo/Studio parity.
+- Confirmed both main Guild runtime scripts are now below the 1200-line hard review threshold while preserving public API, remote names, DataStore keys, teleport data, persistent data shape, and gameplay economics.
+
+### Files
+
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place checks:
+  - `Guild`: `GuildPlace` length `32813`, hash `312367508`; `GuildPlaceRemotes` length `1923`, hash `248263159`; `GuildPlaceLocations` length `11559`, hash `420695235`.
+  - `Four Peaks`: `GuildService` length `36581`, hash `45412315`; `GuildRecordState` length `9763`, hash `53470018`; `GuildUpdateBroadcaster` length `1721`, hash `304481289`.
+
+### Architecture
+
+- Final Stage 6 split:
+  - `GuildPlaceRemotes`: active Guild place remote factory.
+  - `GuildPlaceLocations`: active Guild place location config/status/model/prompt builder.
+  - `GuildRecordState`: Four Peaks guild record/state sanitization helpers.
+  - `GuildUpdateBroadcaster`: Four Peaks `GuildUpdated` remote fanout.
+- `GuildPlace` remains owner of Guild place auth, treasury callbacks, return teleport, and remote handlers.
+- `GuildService` remains owner of Four Peaks persistence, membership, join/invite/leave/kick/disband, treasury donate/upgrade, tasks, teleport, and public API.
+- No new gameplay `_G`, frame loop, per-object connection, remotes, DataStore keys, teleport data fields, fallback path, or require cycle was introduced.
+
+### Validation
+
+- Repo audit found no new `_G` in active Guild modules.
+- Repo audit found no new frame-loop usage in active Guild modules.
+- Connection sites after Stage 6 are the existing player/remote/prompt bindings: `GuildPlace` player added/request return/player removing, `GuildPlaceLocations` prompt trigger, and `GuildService` player removing.
+- Final line counts: `GuildPlace.server.lua` `1063`, `GuildService.lua` `1159`.
+- Prior checkpoint Play smokes covered `Guild` startup/location prompts and `Four Peaks` `GuildService.GetState`, record state, and update broadcast module loading.
+
+### Not Verified
+
+- Full guild create/join/invite/leave/kick/disband flows were not repeated end-to-end during the completion audit.
+- Treasury deposit/spend, upgrades, task progress, and teleport to/from guild castle remain covered only by smoke/no-error validation in this stage.
+
+### Risks
+
+- `GuildService` remains a broad owner of persistence and gameplay-facing guild flows, though it is now below the 1200-line threshold.
+- Future changes to persistent guild record defaults should update `GuildRecordState`; future `GuildUpdated` payload/fanout changes should update `GuildUpdateBroadcaster`.
+
+### Rollback
+
+- Revert Stage 6 checkpoints 6E, 6D, 6C, 6B, and 6A in reverse order.
+- Remove the corresponding live Studio modules if rolling back in Studio.
+- Run Play smoke in both `Guild` and `Four Peaks` after rollback.
+
 ## 2026-07-07 - Four Peaks GuildService stage 6E update broadcast extraction
 
 ### Summary

@@ -13,7 +13,7 @@ Zakres: etapowy refaktor największych God Scriptów i gameplayowych zależnośc
 | 3. `NpcService` | 3A-3F ukończone | Registry, movement/steering/ground, targeting/melee, lifecycle/status/death/despawn oraz batch replication wydzielone | Jeden centralny update, brak per-NPC Heartbeat |
 | 4. `SpellService` i projectiles | 4A-4F ukończone | `SpellProjectiles` wydziela projectile simulation i hit detection; `SpellTargeting` wydziela enemy query/target picking/beam segment distance; `SpellEffects` wydziela status/effect application; `SpellVisuals` wydziela server VFX dispatch/payload/orbit sync; `SpellSustained` wydziela zone/beam tick loopi; martwe server-side konstruktory VFX usunięte | Pociski mają jeden leniwy scheduler; targeting/effects/VFX dispatch oraz zone/beam tick loopi delegowane bez zmian balansu |
 | 5. `RunStatsService` i `ShrineService` | 5A ukończone | Usunięto nieużywane globalne shimy `RunStatsService`; `ShrineService` `_G.PrepareRunShrines` pozostaje aktywnym kontraktem `RunReadyGate` | DamageService i RunDefenseState bez zmiany ownership |
-| 6. Guild | 6A-6E ukończone | `GuildPlaceRemotes` wydziela remote factory aktywnego `Gildia`; `GuildPlaceLocations` wydziela config/status lokalizacji oraz budowę modeli/promptów; `GuildRecordState` wydziela sanitizację/state rekordów gildii w `Four Peaks`; `GuildUpdateBroadcaster` wydziela istniejący broadcast `GuildUpdated`; persistence, membership, treasury, upgrades i teleport bez zmian | Potwierdzony aktywny place `Gildia`/`Four Peaks`; po każdym kolejnym podetapie Play smoke |
+| 6. Guild | Ukończony (6A-6E) | `GuildPlaceRemotes` wydziela remote factory aktywnego `Gildia`; `GuildPlaceLocations` wydziela config/status lokalizacji oraz budowę modeli/promptów; `GuildRecordState` wydziela sanitizację/state rekordów gildii w `Four Peaks`; `GuildUpdateBroadcaster` wydziela istniejący broadcast `GuildUpdated`; persistence, membership, treasury, upgrades i teleport bez zmian | Potwierdzony aktywny place `Gildia`/`Four Peaks`; oba aktywne serwisy Guild poniżej 1200 linii; Play smoke wykonane po checkpointach |
 | 7. Duże kontrolery UI | Zaplanowany | Inventory/blacksmith/crafting UI po stabilizacji serwera | Brak zmian wyglądu/remotes/bindów |
 
 ## Aktywne ścieżki Studio
@@ -436,6 +436,7 @@ Etap 6, Guild:
 - 6C ukończony.
 - 6D ukończony.
 - 6E ukończony.
+- Etap 6 ukończony po audycie repo/Studio 2026-07-07.
 - 6A potwierdził aktywne Studio `Guild` i ścieżkę `game.ServerScriptService.Script.GuildPlace`.
 - 6A dodał `Guild/ServerScriptService/ModuleScript/GuildPlaceRemotes.lua`.
 - `GuildPlaceRemotes` odpowiada wyłącznie za utworzenie/odzyskanie istniejących `RemoteEvents` i `RemoteFunctions` Gildii: `RequestLobbyReturn`, `LobbyReturnStatus`, `GuildLocationOpened`, `GuildTreasuryUpdated`, `GetGuildCastleState`, `GetTreasury`, `DepositToTreasury`, `SpendFromTreasury`.
@@ -459,6 +460,8 @@ Etap 6, Guild:
 - Walidacja 6C: repo/Studio parity aktywnego `GuildPlace` i modułów potwierdzona bajtowym length/hash: `GuildPlace` `32813/312367508`, `GuildPlaceRemotes` `1923/248263159`, `GuildPlaceLocations` `11559/420695235`.
 - Walidacja 6D: repo/Studio parity aktywnego `Four Peaks` potwierdzona bajtowym length/hash: `GuildService` `37970/716157583`, `GuildRecordState` `9763/53470018`.
 - Walidacja 6E: repo/Studio parity aktywnego `Four Peaks` potwierdzona bajtowym length/hash: `GuildService` `36581/45412315`, `GuildRecordState` `9763/53470018`, `GuildUpdateBroadcaster` `1721/304481289`.
+- Audyt zamknięcia 6: `Guild` parity potwierdzone dla `GuildPlace` `32813/312367508`, `GuildPlaceRemotes` `1923/248263159`, `GuildPlaceLocations` `11559/420695235`; `Four Peaks` parity potwierdzone dla `GuildService` `36581/45412315`, `GuildRecordState` `9763/53470018`, `GuildUpdateBroadcaster` `1721/304481289`.
+- Audyt zamknięcia 6: repo grep dla aktywnych modułów Guild nie wykazał nowych `_G`, nowych pętli frame ani nowych connection poza istniejącymi player/remote/prompt bindingami; `GuildPlace` ma `1063` linii, `GuildService` ma `1159` linii.
 - Play test 6A w aktywnym `Gildia`: startup zakończył się logiem `[GuildPlace] Ready`; runtime inspection potwierdził te same cztery `RemoteEvent` i cztery `RemoteFunction` klasy pod `ReplicatedStorage.RemoteEvents`/`RemoteFunctions`.
 - Play test 6B w aktywnym `Gildia`: startup zakończył się logiem `[GuildPlace] Ready`; runtime inspection potwierdził `7` modeli pod `Workspace.GuildLocations`, każdy z `GuildLocationPrompt`, zachowane `GuildLocationId`, status `Treasury=Open`, pozostałe `Coming soon`, oraz billboard labels m.in. `Skarbiec`, `Łowiska`, `Sala chwały`.
 - Play test 6C w aktywnym `Gildia`: startup zakończył się logiem `[GuildPlace] Ready`; runtime inspection potwierdził `7` modeli pod `Workspace.GuildLocations`, `7` promptów, status `Treasury=Open`, pozostałe `Coming soon`, i zachowane billboard labels `Skarbiec`, `Łowiska`, `Sala chwały`.
@@ -470,6 +473,7 @@ Etap 6, Guild:
 - Rollback 6C: przywrócić inline `getFlatDirectionToCenter`, `ensurePart`, `ensureLocationBillboard`, `ensureLocationPrompt`, `ensureGuildLocations` i dotychczasowy prompt binding w `GuildPlace.server.lua`, zostawić w `GuildPlaceLocations` tylko config/status/state z 6B albo cofnąć cały moduł do wersji 6B oraz cofnąć wpisy planu/changeloga.
 - Rollback 6D: przywrócić inline helpery record/state (`clampInt`, `copyMap`, sanitize/ensure/rebuild helpers) w `GuildService.lua`, usunąć `GuildRecordState.lua` z repo i live Studio oraz cofnąć wpisy planu/changeloga.
 - Rollback 6E: przywrócić inline `getGuildUpdatedRemote`, `fireGuildUpdated` i `broadcastGuildUpdated` w `GuildService.lua`, usunąć `GuildUpdateBroadcaster.lua` z repo i live Studio oraz cofnąć wpisy planu/changeloga.
+- Rollback etapu 6: cofnąć checkpointy 6A-6E w odwrotnej kolejności, usunąć odpowiadające moduły z live Studio, przywrócić `GuildPlace.server.lua` i `GuildService.lua` do ostatniego stanu sprzed etapu 6, a następnie wykonać Play smoke w `Guild` i `Four Peaks`.
 
 ## Plan migracji `_G`
 
