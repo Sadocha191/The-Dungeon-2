@@ -1,5 +1,72 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Poziom SpellService stage 4D visual dispatch extraction
+
+### Summary
+
+- Completed Stage 4D for active `game.ServerScriptService.Script.SpellService`.
+- Added `SpellVisuals` for server-side spell VFX payload extraction, transient `SpellVFXEvent:FireAllClients`, `serverTime`, and orbit `FireClient` state sync.
+- Kept `SpellService` as the owner of spell archetype flow, cooldowns, main damage call, `PlayerData`/weapon multipliers, and the single global spell `Heartbeat`.
+- Preserved spell damage, cooldowns, tick rates, target selection, VFX payload shape, remotes, persistent data, attributes, and balance.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/SpellVisuals.lua`
+- Updated `Level/ServerScriptService/Script/SpellService.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Created live `game.ServerScriptService.ModuleScript.SpellVisuals`.
+- Synchronized active `game.ServerScriptService.Script.SpellService` to require/configure `SpellVisuals` and delegate VFX broadcast/orbit sync.
+- Repo/Studio parity after cleanup:
+  - `SpellService`: normalized length `42309`, hash `706239663`.
+  - `SpellVisuals`: normalized length `2543`, hash `314798517`.
+  - `SpellEffects`: normalized length `4120`, hash `920148350`.
+  - `SpellProjectiles`: normalized length `3187`, hash `229091311`.
+  - `SpellTargeting`: normalized length `2333`, hash `375152092`.
+- Temporary `Stage4DSpellVisualsHarness` and `ServerStorage.Stage4DResult` were removed; Studio grep and repo grep found no `Stage4D` markers.
+
+### Architecture
+
+- New graph: `SpellService -> SpellVisuals`, `SpellService -> SpellEffects`, `SpellService -> SpellProjectiles`, `SpellService -> SpellTargeting`, `SpellService -> NpcService`, `SpellService -> PlayerData`, `SpellService -> SpellDefinitions`, `SpellService -> WeaponConfigs`; `SpellTargeting -> NpcService`.
+- `SpellVisuals` requires no modules and owns only spell VFX dispatch helpers.
+- No new `_G`, remotes, fallback path, bootstrap, require cycle, runtime loop, scheduler, or connection was added.
+- Legacy unused server-side visual constructors in `SpellService` were left untouched for a separate audit.
+
+### Validation
+
+- Studio Play startup reached normal `SpellService` ready logs with no `SpellVisuals` or missing-module errors.
+- A temporary Studio-only server Script harness ran in the same server VM as live `SpellService` and wrapped `SpellVisuals.Broadcast`, `SpellVisuals.SyncOrbit`, and `NpcService.ApplyDamage` while real spell flow ran through `SpellService`.
+- Real `VoltNeedle` produced `projectile` and `impact` payloads.
+- Real `FlameBurst` produced a `nova` payload.
+- Real `ScorchField` produced a `ring` payload.
+- Real `ThunderRay` produced a `beam` payload.
+- Real `EmberOrbit` produced orbit enable and disable syncs through `SpellVisuals.SyncOrbit`.
+- Captured summary: `ok=true`, `damageCount=58`, `damageDealt=716`, `syncEnabled=169`, `syncDisabled=1`; all captured transient payloads had `serverTime`.
+- Output showed no `SpellService`, `SpellVisuals`, `SpellEffects`, `SpellProjectiles`, `SpellTargeting`, or `NpcService` errors. Existing unrelated Studio output remained from `Hybrid Terrain Hex Generator`, `ErrorReporter`, and missing TeleportData in Play Solo.
+- `git diff --check` passed with only existing CRLF warnings.
+
+### Not Verified
+
+- Full natural run with random spell acquisition was not repeated in this checkpoint.
+- Multiplayer spell VFX was not available through current MCP Play.
+- Client visual rendering was not inspected visually; this checkpoint validated server dispatch and payload shape.
+
+### Risks
+
+- `SpellVisuals` is configured by `SpellService`; direct use before `Configure` fails with an explicit assert.
+- Beam/zone task loops and legacy unused server-side visual constructor functions remain in `SpellService` for later audit/checkpoints.
+
+### Rollback
+
+- Restore inline `extractVisualStats`, `broadcastSpellVisual`, `syncOrbitVFX`, and orbit stop helper behavior in `SpellService.lua`.
+- Remove `Level/ServerScriptService/ModuleScript/SpellVisuals.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 4D notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Poziom SpellService stage 4C effects extraction
 
 ### Summary

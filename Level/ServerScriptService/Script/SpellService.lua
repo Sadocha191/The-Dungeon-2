@@ -47,6 +47,7 @@ local PlayerData = require(findServerModule("PlayerData") or error("[SpellServic
 local SpellEffects = require(findServerModule("SpellEffects") or error("[SpellService] Missing SpellEffects"))
 local SpellProjectiles = require(findServerModule("SpellProjectiles") or error("[SpellService] Missing SpellProjectiles"))
 local SpellTargeting = require(findServerModule("SpellTargeting") or error("[SpellService] Missing SpellTargeting"))
+local SpellVisuals = require(findServerModule("SpellVisuals") or error("[SpellService] Missing SpellVisuals"))
 local WeaponConfigs = modFolder and require(modFolder:WaitForChild("WeaponConfigs"))
 
 local vfxRoot = workspace:FindFirstChild("SpellVFX")
@@ -55,6 +56,13 @@ if not vfxRoot then
 	vfxRoot.Name = "SpellVFX"
 	vfxRoot.Parent = workspace
 end
+
+SpellVisuals.Configure({
+	spellVfxEvent = SpellVFXEvent,
+	getServerTimeNow = function()
+		return workspace:GetServerTimeNow()
+	end,
+})
 
 local pauseAccum = 0
 local pauseStart = nil
@@ -210,39 +218,6 @@ local function getVisualColors(stats)
 	local primary = typeof(stats and stats.visualColor) == "Color3" and stats.visualColor or Color3.fromRGB(255, 255, 255)
 	local secondary = typeof(stats and stats.visualSecondaryColor) == "Color3" and stats.visualSecondaryColor or brightenColor(primary, 0.32)
 	return primary, secondary
-end
-
-local function extractVisualStats(stats)
-	if typeof(stats) ~= "table" then
-		return {}
-	end
-
-	return {
-		spellId = stats.spellId,
-		level = tonumber(stats.level) or 1,
-		basePower = tonumber(stats.basePower) or 0,
-		upgradePower = tonumber(stats.upgradePower) or 0,
-		element = stats.element,
-		secondaryElement = stats.secondaryElement,
-		attackType = stats.attackType,
-		spellType = stats.spellType,
-		isCombo = stats.isCombo == true,
-		iconGlyph = stats.iconGlyph,
-		artMotif = stats.artMotif,
-		visualDirection = stats.visualDirection,
-		visualProfile = typeof(stats.visualProfile) == "table" and stats.visualProfile or nil,
-		radius = tonumber(stats.radius),
-		width = tonumber(stats.width),
-		visualColor = typeof(stats.visualColor) == "Color3" and stats.visualColor or nil,
-		visualSecondaryColor = typeof(stats.visualSecondaryColor) == "Color3" and stats.visualSecondaryColor or nil,
-	}
-end
-
-local function broadcastSpellVisual(action, payload)
-	payload = payload or {}
-	payload.action = action
-	payload.serverTime = workspace:GetServerTimeNow()
-	SpellVFXEvent:FireAllClients(payload)
 end
 
 local function ensureVfxPart(parent, name, size, color, transparency, material, shape)
@@ -492,9 +467,9 @@ local function hitEnemy(plr, enemy, damage, stats, sourcePos, impactPos)
 		if shouldSpawnImpact(plr, tostring(stats and stats.spellId or "Spell"), enemy) then
 			local hitPos = impactPos or getEnemyPosition(enemy) or sourcePos
 			if hitPos then
-				broadcastSpellVisual("impact", {
+				SpellVisuals.Broadcast("impact", {
 					pos = hitPos,
-					stats = extractVisualStats(stats),
+					stats = SpellVisuals.ExtractStats(stats),
 				})
 			end
 		end
@@ -503,9 +478,9 @@ end
 
 SpellProjectiles.Configure({
 	broadcastProjectile = function(payload)
-		broadcastSpellVisual("projectile", payload)
+		SpellVisuals.Broadcast("projectile", payload)
 	end,
-	extractVisualStats = extractVisualStats,
+	extractVisualStats = SpellVisuals.ExtractStats,
 	getEnemyPosition = getEnemyPosition,
 	getNearestEnemy = getNearestEnemy,
 	hitEnemy = hitEnemy,
@@ -555,43 +530,9 @@ local function consumeWindBladeSoundVariant(plr)
 	return current
 end
 
-local function syncOrbitVFX(plr, spellId, enabled, params)
-	local s = getState(plr)
-	s.vfx[spellId] = s.vfx[spellId] or {}
-	local last = s.vfx[spellId]
-
-	if not enabled then
-		if last.enabled ~= false then
-			last.enabled = false
-			SpellVFXEvent:FireClient(plr, spellId, false)
-		end
-		return
-	end
-
-	params = params or {}
-	local changed = last.enabled ~= true
-	for key, value in pairs(params) do
-		if last[key] ~= value then
-			changed = true
-			break
-		end
-	end
-	if changed then
-		last.enabled = true
-		for key, value in pairs(params) do
-			last[key] = value
-		end
-		SpellVFXEvent:FireClient(plr, spellId, true, params)
-	end
-end
-
 local function stopAllOrbitVfx(plr)
 	local s = getState(plr)
-	for spellId, info in pairs(s.vfx) do
-		if info and info.enabled == true then
-			syncOrbitVFX(plr, spellId, false)
-		end
-	end
+	SpellVisuals.StopAllOrbits(s.vfx, plr)
 end
 
 local function spawnRingVisual(pos, radius, duration, stats)
@@ -906,7 +847,7 @@ local function runOrbit(plr, spellId, stats, hrp, dt)
 	local orbitSpeed = stats.orbitSpeed or 2.6
 	local hitCooldown = stats.hitCooldown or 0.35
 
-	syncOrbitVFX(plr, spellId, true, {
+	SpellVisuals.SyncOrbit(s.vfx, plr, spellId, true, {
 		count = count,
 		radius = radius,
 		orbitSpeed = orbitSpeed,
@@ -963,12 +904,12 @@ local function runNova(plr, spellId, stats, hrp)
 		effectPos = effectPos,
 		dir = visualDir,
 		radius = radius,
-		stats = extractVisualStats(stats),
+		stats = SpellVisuals.ExtractStats(stats),
 	}
 	if isWindBladeSpellId(stats and stats.spellId) or isWindBladeSpellId(spellId) then
 		payload.windBladeSoundVariant = consumeWindBladeSoundVariant(plr)
 	end
-	broadcastSpellVisual("nova", {
+	SpellVisuals.Broadcast("nova", {
 		pos = payload.pos,
 		effectPos = payload.effectPos,
 		dir = payload.dir,
@@ -1003,11 +944,11 @@ local function runZone(plr, spellId, stats, hrp)
 	local duration = (stats.duration or 3) * getDurationMult(plr)
 	local tickRate = stats.tickRate or 0.45
 	local tickDamage = stats.damage * math.max(0.3, tickRate)
-	broadcastSpellVisual("ring", {
+	SpellVisuals.Broadcast("ring", {
 		pos = center,
 		radius = radius,
 		duration = duration,
-		stats = extractVisualStats(stats),
+		stats = SpellVisuals.ExtractStats(stats),
 	})
 
 	local endAt = spellClock() + duration
@@ -1046,13 +987,13 @@ local function runBeam(plr, spellId, stats, hrp)
 	local duration = stats.duration or 1.5
 	local tickRate = stats.tickRate or 0.18
 	local beamDamage = stats.damage * math.max(0.6, tickRate * 4)
-	broadcastSpellVisual("beam", {
+	SpellVisuals.Broadcast("beam", {
 		origin = origin,
 		dir = direction,
 		range = range,
 		width = width,
 		duration = duration,
-		stats = extractVisualStats(stats),
+		stats = SpellVisuals.ExtractStats(stats),
 	})
 
 	local endAt = spellClock() + duration
@@ -1087,7 +1028,7 @@ end
 local function stopOrbitIfNeeded(plr, spellId)
 	local s = getState(plr)
 	if s.vfx[spellId] and s.vfx[spellId].enabled then
-		syncOrbitVFX(plr, spellId, false)
+		SpellVisuals.SyncOrbit(s.vfx, plr, spellId, false)
 	end
 end
 

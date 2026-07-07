@@ -16,6 +16,7 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-07-07** — Poziom SpellService stage 4D visual dispatch extraction
 - **2026-07-07** — Poziom SpellService stage 4C effects extraction
 - **2026-07-07** — Poziom SpellService stage 4B targeting extraction
 - **2026-07-07** — Poziom SpellService stage 4A central projectile simulation
