@@ -1,5 +1,62 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Gildia GuildPlace stage 6C location builder extraction
+
+### Summary
+
+- Completed Stage 6C for active `game.ServerScriptService.Script.GuildPlace` in the `Guild` Studio place.
+- Extended `GuildPlaceLocations` to own physical guild location model creation, billboard creation, and existing prompt creation/binding.
+- Kept `GuildPlace` as the owner of guild authorization, DataStore profile/guild access, treasury deposit/spend, location-open business callback, return teleport, and remote callback handlers.
+- Preserved location ids, positions, sizes, colors, names, prompt attributes, remote names, persistent data, teleport data, and treasury behavior.
+
+### Files
+
+- Updated `Guild/ServerScriptService/ModuleScript/GuildPlaceLocations.lua`
+- Updated `Guild/ServerScriptService/Script/GuildPlace.server.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Guild`.
+- Synchronized active `game.ServerScriptService.Script.GuildPlace`.
+- Synchronized active `game.ServerScriptService.ModuleScript.GuildPlaceLocations`.
+- Repo/Studio parity after sync, measured as UTF-8 byte length plus rolling hash:
+  - `GuildPlace`: length `32813`, hash `312367508`.
+  - `GuildPlaceRemotes`: length `1923`, hash `248263159`.
+  - `GuildPlaceLocations`: length `11559`, hash `420695235`.
+
+### Architecture
+
+- Moved `getFlatDirectionToCenter`, `ensurePart`, `ensureLocationBillboard`, `ensureLocationPrompt`, `ensureGuildLocations`, and prompt binding from `GuildPlace` into `GuildPlaceLocations`.
+- `GuildPlaceLocations` still has no `require()` dependencies, no frame loop, no `_G`, and no fallback path.
+- Existing `ProximityPrompt.Triggered` bindings moved ownership from `GuildPlace` to `GuildPlaceLocations` without adding new prompt count or changing the callback target.
+- No remote names, DataStore keys, teleport data fields, runtime loops, schedulers, or require cycles were added.
+
+### Validation
+
+- Studio Play in `Guild` started successfully and logged `[GuildPlace] Ready`.
+- Runtime inspection in Play confirmed `7` models under `Workspace.GuildLocations`, `7` `GuildLocationPrompt` prompts, preserved `GuildLocationId`, expected status attributes, and billboard labels including `Skarbiec`, `Łowiska`, and `Sala chwały`.
+- Output contained only `[GuildPlace] Ready` during the smoke test.
+- `git diff --check` passed with only existing CRLF warnings.
+
+### Not Verified
+
+- Guild create/join/invite/leave/kick flows were not repeated in this checkpoint.
+- Treasury deposit/spend, upgrades, task progress, and return teleport were not executed because Stage 6C changed only location model/prompt ownership.
+
+### Risks
+
+- `GuildPlaceLocations` now owns existing prompt binding, so future location UI changes should update this module instead of `GuildPlace`.
+- `GuildPlace` remains a large script with DataStore, treasury, authorization, and teleport responsibilities; those are left for later staged checkpoints.
+
+### Rollback
+
+- Restore inline location model/prompt builder helpers and `bindGuildLocationPrompts` loop in `GuildPlace.server.lua`.
+- Revert `GuildPlaceLocations.lua` to the Stage 6B config/status/state-only version.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 6C notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Gildia GuildPlace stage 6B location config extraction
 
 ### Summary

@@ -13,7 +13,7 @@ Zakres: etapowy refaktor największych God Scriptów i gameplayowych zależnośc
 | 3. `NpcService` | 3A-3F ukończone | Registry, movement/steering/ground, targeting/melee, lifecycle/status/death/despawn oraz batch replication wydzielone | Jeden centralny update, brak per-NPC Heartbeat |
 | 4. `SpellService` i projectiles | 4A-4F ukończone | `SpellProjectiles` wydziela projectile simulation i hit detection; `SpellTargeting` wydziela enemy query/target picking/beam segment distance; `SpellEffects` wydziela status/effect application; `SpellVisuals` wydziela server VFX dispatch/payload/orbit sync; `SpellSustained` wydziela zone/beam tick loopi; martwe server-side konstruktory VFX usunięte | Pociski mają jeden leniwy scheduler; targeting/effects/VFX dispatch oraz zone/beam tick loopi delegowane bez zmian balansu |
 | 5. `RunStatsService` i `ShrineService` | 5A ukończone | Usunięto nieużywane globalne shimy `RunStatsService`; `ShrineService` `_G.PrepareRunShrines` pozostaje aktywnym kontraktem `RunReadyGate` | DamageService i RunDefenseState bez zmiany ownership |
-| 6. Guild | 6A-6B ukończone | `GuildPlaceRemotes` wydziela remote factory aktywnego `Gildia`; `GuildPlaceLocations` wydziela config/status lokalizacji; persistence, membership, treasury, upgrades i teleport bez zmian | Potwierdzony aktywny place `Gildia`; po każdym kolejnym podetapie Play smoke |
+| 6. Guild | 6A-6C ukończone | `GuildPlaceRemotes` wydziela remote factory aktywnego `Gildia`; `GuildPlaceLocations` wydziela config/status lokalizacji oraz budowę modeli/promptów; persistence, membership, treasury, upgrades i teleport bez zmian | Potwierdzony aktywny place `Gildia`; po każdym kolejnym podetapie Play smoke |
 | 7. Duże kontrolery UI | Zaplanowany | Inventory/blacksmith/crafting UI po stabilizacji serwera | Brak zmian wyglądu/remotes/bindów |
 
 ## Aktywne ścieżki Studio
@@ -67,9 +67,9 @@ Liczby są statycznym skanem repo. `Remote names` to unikalne publiczne remotes 
 | `Level/ServerScriptService/Script/ProgressService.lua` | 1645 | 56 / 7 | 0 | `PlayerProgressEvent`, `MissionSummaryEvent`, `SpellEvent`, `PauseMenuEvent` | character health watch task co 0.25 s; remote/player connections | 4 / 8 |
 | `Four Peaks/StarterPlayer/StarterPlayerScripts/BlacksmithUI.lua` | 1631 | 68 / 0 | 3 | `OpenBlacksmithUI`, `BlacksmithSync`, `BlacksmithAction` | event-driven UI, 18 connections | 0 / 0 |
 | `Four Peaks/ServerScriptService/ModuleScript/GuildService.lua` | 1503 | 52 / 23 | 3 | `GuildUpdated`, `TeleportStatus` | no frame loop; 1 player removing connection | 0 / 0 |
-| `Guild/ServerScriptService/Script/GuildPlace.server.lua` | 1262 | 59 / 4 | 3 | `GetGuildCastleState`, `GetTreasury`, `DepositToTreasury`, `SpendFromTreasury`, `GuildLocationOpened`, `GuildTreasuryUpdated`, `LobbyReturnStatus`, `RequestLobbyReturn` | no frame loop; prompt/player/remote connections | 0 / 0 |
+| `Guild/ServerScriptService/Script/GuildPlace.server.lua` | 1063 | 54 / 4 | 3 | `GetGuildCastleState`, `GetTreasury`, `DepositToTreasury`, `SpendFromTreasury`, `GuildLocationOpened`, `GuildTreasuryUpdated`, `LobbyReturnStatus`, `RequestLobbyReturn` | no frame loop; player/remote connections; prompt binding delegated to `GuildPlaceLocations` | 0 / 0 |
 | `Guild/ServerScriptService/ModuleScript/GuildPlaceRemotes.lua` | 79 | 3 / 1 | 0 | creates same guild RemoteEvents/RemoteFunctions | no runtime loop or connection | 0 / 0 |
-| `Guild/ServerScriptService/ModuleScript/GuildPlaceLocations.lua` | 141 | 0 / 4 | 0 | guild location definitions/status/state | no runtime loop or connection | 0 / 0 |
+| `Guild/ServerScriptService/ModuleScript/GuildPlaceLocations.lua` | 348 | 4 / 6 | 0 | guild location definitions/status/state and physical model/prompt builder | no frame loop; existing prompt `Triggered` binding moved here | 0 / 0 |
 | `Four Peaks/ServerScriptService/ModuleScript/CraftingService.lua` | 1287 | 41 / 16 | 6 | none | no runtime loop | 0 / 0 |
 | `Level/ServerScriptService/Script/SpellService.lua` | 594 | 44 / 0 | 9 | `SpellVFXEvent` | 1 global spell `Heartbeat`; projectile simulation delegated to `SpellProjectiles`; targeting delegated to `SpellTargeting`; effects delegated to `SpellEffects`; VFX dispatch delegated to `SpellVisuals`; zone/beam sustained loops delegated to `SpellSustained` | 0 / 0 |
 | `Level/ServerScriptService/ModuleScript/SpellSustained.lua` | 138 | 2 / 3 | 0 | none | existing zone and beam `task.spawn` tick loops moved from `SpellService`; no connection | 0 / 0 |
@@ -431,22 +431,28 @@ Etap 6, Guild:
 
 - 6A ukończony.
 - 6B ukończony.
+- 6C ukończony.
 - 6A potwierdził aktywne Studio `Guild` i ścieżkę `game.ServerScriptService.Script.GuildPlace`.
 - 6A dodał `Guild/ServerScriptService/ModuleScript/GuildPlaceRemotes.lua`.
 - `GuildPlaceRemotes` odpowiada wyłącznie za utworzenie/odzyskanie istniejących `RemoteEvents` i `RemoteFunctions` Gildii: `RequestLobbyReturn`, `LobbyReturnStatus`, `GuildLocationOpened`, `GuildTreasuryUpdated`, `GetGuildCastleState`, `GetTreasury`, `DepositToTreasury`, `SpendFromTreasury`.
 - 6B dodał `Guild/ServerScriptService/ModuleScript/GuildPlaceLocations.lua`.
 - `GuildPlaceLocations` odpowiada za definicje lokalizacji Gildii, lookup po id, status `Treasury/Open` vs `Coming soon` i budowę listy lokalizacji dla castle state.
-- `GuildPlace` po 6B nadal odpowiada za auth guild place, DataStore profile/guild loads, treasury deposit/spend, budowanie modeli/promptów lokalizacji, return teleport i remote callback handlers.
-- Graf 6B: `GuildPlace -> GuildPlaceRemotes`, `GuildPlace -> GuildPlaceLocations`, `GuildPlace -> GuildConfig`; `GuildPlaceRemotes` i `GuildPlaceLocations` nie wymagają modułów. Nie powstał cykl require.
+- 6C rozszerzył `GuildPlaceLocations` o budowę fizycznych modeli lokacji, billboardów i istniejących promptów lokalizacji.
+- `GuildPlace` po 6C nadal odpowiada za auth guild place, DataStore profile/guild loads, treasury deposit/spend, callback otwarcia lokacji, return teleport i remote callback handlers.
+- Graf 6C: `GuildPlace -> GuildPlaceRemotes`, `GuildPlace -> GuildPlaceLocations`, `GuildPlace -> GuildConfig`; `GuildPlaceRemotes` i `GuildPlaceLocations` nie wymagają modułów. Nie powstał cykl require.
 - Runtime 6A: nie dodano pętli, connection, schedulerów, remotes o nowych nazwach, `_G` ani fallbacków; przeniesiono tylko istniejące remote factory helpery.
 - Runtime 6B: nie dodano pętli, connection, schedulerów, remotes, `_G` ani fallbacków; przeniesiono tylko statyczny config/status lokalizacji.
+- Runtime 6C: nie dodano pętli, schedulerów, remotes, `_G` ani fallbacków; istniejące `ProximityPrompt.Triggered` bindingi przeniesiono z `GuildPlace` do `GuildPlaceLocations` bez zmiany liczby promptów ani callbacku biznesowego.
 - Walidacja 6A: repo/Studio parity aktywnego `GuildPlace` i nowego modułu potwierdzona bajtowym length/hash: `GuildPlace` `43272/661975836`, `GuildPlaceRemotes` `1923/248263159`.
 - Walidacja 6B: repo/Studio parity aktywnego `GuildPlace` i modułów potwierdzona bajtowym length/hash: `GuildPlace` `38838/189744719`, `GuildPlaceRemotes` `1923/248263159`, `GuildPlaceLocations` `5273/950361888`.
+- Walidacja 6C: repo/Studio parity aktywnego `GuildPlace` i modułów potwierdzona bajtowym length/hash: `GuildPlace` `32813/312367508`, `GuildPlaceRemotes` `1923/248263159`, `GuildPlaceLocations` `11559/420695235`.
 - Play test 6A w aktywnym `Gildia`: startup zakończył się logiem `[GuildPlace] Ready`; runtime inspection potwierdził te same cztery `RemoteEvent` i cztery `RemoteFunction` klasy pod `ReplicatedStorage.RemoteEvents`/`RemoteFunctions`.
 - Play test 6B w aktywnym `Gildia`: startup zakończył się logiem `[GuildPlace] Ready`; runtime inspection potwierdził `7` modeli pod `Workspace.GuildLocations`, każdy z `GuildLocationPrompt`, zachowane `GuildLocationId`, status `Treasury=Open`, pozostałe `Coming soon`, oraz billboard labels m.in. `Skarbiec`, `Łowiska`, `Sala chwały`.
-- Nieweryfikowane w 6B: create/join guild, treasury deposit/spend, upgrade, task progress i teleport do/z lobby nie były wykonywane, ponieważ checkpoint nie zmieniał DataStore, treasury ani teleport handlerów.
+- Play test 6C w aktywnym `Gildia`: startup zakończył się logiem `[GuildPlace] Ready`; runtime inspection potwierdził `7` modeli pod `Workspace.GuildLocations`, `7` promptów, status `Treasury=Open`, pozostałe `Coming soon`, i zachowane billboard labels `Skarbiec`, `Łowiska`, `Sala chwały`.
+- Nieweryfikowane w 6C: create/join guild, treasury deposit/spend, upgrade, task progress i teleport do/z lobby nie były wykonywane, ponieważ checkpoint nie zmieniał DataStore, treasury ani teleport handlerów.
 - Rollback 6A: przywrócić inline `getRemoteEventsFolder`, `ensureRemoteEvent`, `getRemoteFunctionsFolder`, `ensureRemoteFunction` w `GuildPlace.server.lua`, usunąć `GuildPlaceRemotes.lua` z repo i live Studio oraz cofnąć wpisy planu/changeloga.
 - Rollback 6B: przywrócić inline `LOCATION_STATUS`, `GUILD_LOCATION_DEFINITIONS`, `GUILD_LOCATION_BY_ID`, `getLocationStatus` i `buildGuildLocationState` w `GuildPlace.server.lua`, usunąć `GuildPlaceLocations.lua` z repo i live Studio oraz cofnąć wpisy planu/changeloga.
+- Rollback 6C: przywrócić inline `getFlatDirectionToCenter`, `ensurePart`, `ensureLocationBillboard`, `ensureLocationPrompt`, `ensureGuildLocations` i dotychczasowy prompt binding w `GuildPlace.server.lua`, zostawić w `GuildPlaceLocations` tylko config/status/state z 6B albo cofnąć cały moduł do wersji 6B oraz cofnąć wpisy planu/changeloga.
 
 ## Plan migracji `_G`
 
