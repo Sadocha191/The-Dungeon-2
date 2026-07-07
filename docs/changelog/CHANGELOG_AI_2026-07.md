@@ -1,5 +1,66 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Poziom SpellService stage 4E server visual dead code cleanup
+
+### Summary
+
+- Completed Stage 4E for active `game.ServerScriptService.Script.SpellService`.
+- Removed unused server-side spell visual constructors from `SpellService` after audit confirmed their only active call sites live in `SpellVFXClient`.
+- Kept `SpellVisuals` as the server VFX dispatch owner and left `SpellVFXClient` visual construction untouched.
+- Preserved spell damage, cooldowns, tick rates, target selection, payload shape, remotes, persistent data, attributes, and balance.
+
+### Files
+
+- Updated `Level/ServerScriptService/Script/SpellService.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Synchronized active `game.ServerScriptService.Script.SpellService`.
+- Repo/Studio parity after cleanup:
+  - `SpellService`: normalized length `19498`, hash `431803948`.
+  - `SpellVisuals`: normalized length `2543`, hash `314798517`.
+  - `SpellEffects`: normalized length `4120`, hash `920148350`.
+  - `SpellProjectiles`: normalized length `3187`, hash `229091311`.
+  - `SpellTargeting`: normalized length `2333`, hash `375152092`.
+- Temporary `Stage4ESpellSmokeHarness` and `ServerStorage.Stage4EResult` were removed; Studio grep and repo grep found no `Stage4E` markers.
+
+### Architecture
+
+- Removed dead local definitions from `SpellService`: `spawnImpactVisual`, `spawnRingVisual`, `spawnNovaVisual`, `spawnBeamVisual`, `createProjectileVisual`, `destroyProjectileVisual`, and their private server-side primitive/tween/emitter helpers.
+- Kept `workspace.SpellVFX` folder creation to preserve object presence.
+- No new `_G`, remotes, fallback path, bootstrap, require cycle, runtime loop, scheduler, or connection was added.
+
+### Validation
+
+- Static repo audit showed each removed server-side constructor had only its own definition in `SpellService`; active visual call sites remain in `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SpellVFXClient.lua`.
+- Studio Play startup reached normal `SpellService` ready logs with no missing helper errors.
+- A temporary Studio-only server Script harness ran in the same server VM as live `SpellService`.
+- Real `VoltNeedle` still produced `projectile` and `impact` payloads.
+- Real `ScorchField` still produced a `ring` payload.
+- Real `ThunderRay` still produced a `beam` payload.
+- Captured summary: `ok=true`, `damageCount=25`, `damageDealt=86`.
+- `git diff --check` passed with only existing CRLF warnings.
+
+### Not Verified
+
+- Full natural run with random spell acquisition was not repeated in this checkpoint.
+- Multiplayer spell VFX was not available through current MCP Play.
+- Client visual rendering was not inspected visually; this checkpoint validated server dispatch still reaches live call sites after dead code removal.
+
+### Risks
+
+- `SpellService` still owns beam/zone task loops; those remain for a separate checkpoint if the stage continues.
+- Visual rendering behavior still depends on `SpellVFXClient`, which was not changed in this checkpoint.
+
+### Rollback
+
+- Restore the removed server-side visual constructors/helpers from the commit before Stage 4E.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 4E notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Poziom SpellService stage 4D visual dispatch extraction
 
 ### Summary
