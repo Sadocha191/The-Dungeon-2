@@ -1,5 +1,62 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-08 - Four Peaks BlacksmithUI stage 7E entry builder extraction
+
+### Summary
+
+- Completed Stage 7E for active `game.StarterPlayer.StarterPlayerScripts.BlacksmithUI` in the `Four Peaks` Studio place.
+- Added `BlacksmithEntryBuilder` to own existing blacksmith craft-entry category grouping, selected entry fallback, weapon display/type text, and stat-line building.
+- Kept `BlacksmithUI` as the owner of UI layout, blacksmith camera, prompt hiding, character visibility, tooltips, category/entry rendering, crafting requests, remotes, and input bindings.
+- Preserved remote names, crafting action payloads, category order, selected-recipe behavior, material display, card templates, camera flow, and visual behavior.
+
+### Files
+
+- Added `Four Peaks/StarterPlayer/StarterPlayerScripts/BlacksmithEntryBuilder.lua`
+- Updated `Four Peaks/StarterPlayer/StarterPlayerScripts/BlacksmithUI.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Four Peaks`.
+- Created live `game.StarterPlayer.StarterPlayerScripts.BlacksmithEntryBuilder`.
+- Synchronized active `game.StarterPlayer.StarterPlayerScripts.BlacksmithUI`.
+- Repo/Studio parity after sync and Play, measured as UTF-8 byte length plus rolling hash:
+  - `BlacksmithUI`: length `42036`, hash `419752749`.
+  - `BlacksmithEntryBuilder`: length `3580`, hash `312108726`.
+
+### Architecture
+
+- Moved `buildEntriesByCategory`, selected category/entry fallback, weapon display name, weapon type label, and stat-line construction into `BlacksmithEntryBuilder`.
+- `BlacksmithEntryBuilder` has no ModuleScript dependencies, no runtime loop, no connection, no remote, no `_G`, and no fallback path.
+- `BlacksmithUI` passes explicit dependencies into the builder: `WeaponConfigs` and `ClampInt`.
+- No UI hierarchy, remote, action payload, camera/prompt flow, input binding, or balance data was changed.
+
+### Validation
+
+- Studio Play in `Four Peaks` started successfully with normal lobby ready logs and no `BlacksmithUI`/`BlacksmithEntryBuilder` errors.
+- Opened blacksmith through the existing server remote path with `OpenBlacksmithUI:FireClient(player)`.
+- Runtime inspection confirmed `BlacksmithEntryBuilder` cloned into `PlayerScripts` as a `ModuleScript` and `require` returned a valid table API.
+- Render inspection counted `44` image objects, all with non-empty images, plus `13` buttons (`12` visible) and `46` text labels.
+- Synthetic builder smoke confirmed category grouping `Sword=1`, `Bow=1`, fallback selected category `Sword`, selected recipe `r1`, and stat line `ATK 12`.
+- Clean Play session Output had no `BlacksmithUI`/`BlacksmithEntryBuilder` errors.
+
+### Not Verified
+
+- Craft/upgrade request, material tooltip matrix, manual category clicks, and full camera close/restore flow were not repeated because Stage 7E changed only craft-entry data helper ownership.
+
+### Risks
+
+- Missing `BlacksmithEntryBuilder` now fails `BlacksmithUI` startup with a clear assert instead of silently using inline helpers.
+- Future changes to blacksmith craft-entry grouping or display text should update `BlacksmithEntryBuilder`; rendering, tooltips, camera, prompt hiding, and remote calls should remain in `BlacksmithUI` or later dedicated UI modules.
+
+### Rollback
+
+- Restore inline `buildEntriesByCategory`, `getSelectedCategoryEntries`, `getSelectedEntry`, `getWeaponDisplayName`, `getWeaponTypeLabel`, and `buildStatLines` in `BlacksmithUI.lua`.
+- Remove `BlacksmithEntryBuilder.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 7E notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-08 - Four Peaks InventoryController stage 7D filter sorter extraction
 
 ### Summary

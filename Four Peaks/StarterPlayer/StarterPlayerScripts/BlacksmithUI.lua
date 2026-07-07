@@ -58,6 +58,9 @@ local BlacksmithTheme = require(moduleRoot:WaitForChild("BlacksmithTheme"))
 local blacksmithIconResolverModule = script.Parent:FindFirstChild("BlacksmithIconResolver")
 assert(blacksmithIconResolverModule and blacksmithIconResolverModule:IsA("ModuleScript"), "[BlacksmithUI] BlacksmithIconResolver ModuleScript is required")
 local BlacksmithIconResolver = require(blacksmithIconResolverModule)
+local blacksmithEntryBuilderModule = script.Parent:FindFirstChild("BlacksmithEntryBuilder")
+assert(blacksmithEntryBuilderModule and blacksmithEntryBuilderModule:IsA("ModuleScript"), "[BlacksmithUI] BlacksmithEntryBuilder ModuleScript is required")
+local BlacksmithEntryBuilder = require(blacksmithEntryBuilderModule)
 
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local OpenBlacksmithUI = remoteEvents:WaitForChild("OpenBlacksmithUI")
@@ -369,6 +372,10 @@ local normalizeElementName = BlacksmithIconResolver.NormalizeElementName
 local resetFolderCache = iconResolver.ResetFolderCache
 local resolveWeaponIconAsset = iconResolver.ResolveWeaponIconAsset
 local resolveElementIconAsset = iconResolver.ResolveElementIconAsset
+local entryBuilder = BlacksmithEntryBuilder.new({
+	WeaponConfigs = WeaponConfigs,
+	ClampInt = clampInt,
+})
 local refresh
 
 local function tutorialComplete()
@@ -826,101 +833,32 @@ local function clearRuntimeEntryButtons()
 end
 
 local function buildEntriesByCategory()
-	local byCategory = {}
-	for _, category in ipairs(CategoryOrder) do
-		byCategory[category] = {}
-	end
-
-	for _, entry in ipairs(getCraftEntries()) do
-		local weaponDef = WeaponConfigs.Get(entry.weaponId)
-		local category = tostring(entry.weaponType or (weaponDef and weaponDef.weaponType) or "")
-		if byCategory[category] then
-			table.insert(byCategory[category], entry)
-		end
-	end
-
-	return byCategory
+	return entryBuilder.BuildEntriesByCategory(getCraftEntries(), CategoryOrder)
 end
 
 local function getSelectedCategoryEntries()
 	local byCategory = buildEntriesByCategory()
-	if not byCategory[selectedCategory] or #byCategory[selectedCategory] == 0 then
-		for _, category in ipairs(CategoryOrder) do
-			if byCategory[category] and #byCategory[category] > 0 then
-				selectedCategory = category
-				break
-			end
-		end
-	end
+	selectedCategory = entryBuilder.ResolveSelectedCategory(byCategory, selectedCategory, CategoryOrder)
 	return byCategory[selectedCategory] or {}
 end
 
 local function getSelectedEntry()
 	local entries = getSelectedCategoryEntries()
-	for _, entry in ipairs(entries) do
-		if entry.recipeId == selectedRecipeId then
-			return entry
-		end
-	end
-	if entries[1] then
-		selectedRecipeId = entries[1].recipeId
-	end
-	return entries[1]
+	local entry, resolvedRecipeId = entryBuilder.GetSelectedEntry(entries, selectedRecipeId)
+	selectedRecipeId = resolvedRecipeId
+	return entry
 end
 
 local function getWeaponDisplayName(weaponDef, entry)
-	local value = (weaponDef and (weaponDef.weaponName or weaponDef.name or weaponDef.displayName)) or (entry and (entry.name or entry.weaponId)) or ""
-	return tostring(value)
+	return entryBuilder.GetWeaponDisplayName(weaponDef, entry)
 end
 
 local function getWeaponTypeLabel(weaponDef, entry, normalizedElement)
-	local value = weaponDef and weaponDef.weaponTypeLabel or nil
-	if typeof(value) == "string" and value ~= "" then
-		return value
-	end
-
-	local category = (weaponDef and (weaponDef.category or weaponDef.weaponType)) or (entry and entry.weaponType) or ""
-	category = tostring(category or "")
-	if category == "" then
-		return tostring(normalizedElement or "")
-	end
-
-	return string.format("%s %s", tostring(normalizedElement or ""), category)
+	return entryBuilder.GetWeaponTypeLabel(weaponDef, entry, normalizedElement)
 end
 
 local function buildStatLines(weaponDef)
-	local lines = {}
-	if not weaponDef then
-		return { "-", "-", "-", "-" }
-	end
-
-	local stats = weaponDef.stats or {}
-	local combat = weaponDef.combat or {}
-	lines[#lines + 1] = string.format("ATK %d", clampInt(combat.baseAtk or weaponDef.baseDamage, 0))
-
-	local candidates = {
-		{ label = "HP", value = clampInt(stats.HP, 0), suffix = "" },
-		{ label = "DEF", value = clampInt(stats.DEF, 0), suffix = "" },
-		{ label = "SPD", value = clampInt(stats.SPD, 0), suffix = "%" },
-		{ label = "CRIT", value = clampInt(stats.CRIT_RATE, 0), suffix = "%" },
-		{ label = "CRIT DMG", value = clampInt(stats.CRIT_DMG, 0), suffix = "%" },
-		{ label = "LIFESTEAL", value = clampInt(stats.LIFESTEAL, 0), suffix = "%" },
-	}
-
-	for _, candidate in ipairs(candidates) do
-		if candidate.value > 0 then
-			lines[#lines + 1] = string.format("%s +%d%s", candidate.label, candidate.value, candidate.suffix)
-		end
-		if #lines >= 4 then
-			break
-		end
-	end
-
-	while #lines < 4 do
-		lines[#lines + 1] = "-"
-	end
-
-	return lines
+	return entryBuilder.BuildStatLines(weaponDef)
 end
 
 local function bindMaterialTooltip(slotFrame)
