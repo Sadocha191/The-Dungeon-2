@@ -1,5 +1,49 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-08 - Four Peaks UI stage 7 completion audit
+
+### Summary
+
+- Marked Stage 7 complete after checkpoints 7A-7G for active `Four Peaks` UI controllers.
+- Confirmed `InventoryController` now delegates icon resolution, snapshot entry building, filter/sort, and character preview to explicit sibling ModuleScripts.
+- Confirmed `BlacksmithUI` now delegates icon resolution, craft-entry data helpers, and blacksmith scene lifecycle to explicit sibling ModuleScripts.
+- Kept remaining `InventoryController` responsibilities as UI layout, detail/card rendering, inventory actions, remotes, input bindings, and snapshot flow; further card/detail renderer extraction would be a separate larger UI renderer refactor.
+
+### Files
+
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Architecture
+
+- Final Stage 7 inventory graph: `InventoryController -> InventoryIconResolver`, `InventoryEntryBuilder`, `InventoryFilterSorter`, `InventoryCharacterPreview`.
+- Final Stage 7 blacksmith graph: `BlacksmithUI -> BlacksmithIconResolver`, `BlacksmithEntryBuilder`, `BlacksmithSceneController`.
+- No gameplay `_G`, remote, persistent data, teleport data, fallback, or per-object Heartbeat was added.
+- Existing runtime behavior stayed event-driven; moved blacksmith scene lifecycle kept the existing camera `BindToRenderStep`, and moved inventory preview kept the existing three viewport input connections.
+
+### Validation
+
+- Stage 7 Play tests covered real inventory open through `InventoryGui.ScreenButtonsAction`, snapshot render, search filtering, preview clone, and close toggle.
+- Stage 7 Play tests covered real blacksmith open through `OpenBlacksmithUI:FireClient(player)`, blacksmith render, entry-builder smoke, scene open/close lifecycle, prompt restore, character restore, lobby UI restore, and camera FOV restore.
+- Repo/Studio parity was recorded for every active script/module touched in Stage 7.
+- `git diff --check` passed on the final Stage 7G checkpoint before commit.
+
+### Not Verified
+
+- Full manual inventory matrix for every tab/filter/sort/action combination was not repeated.
+- Physical viewport drag, physical blacksmith ProximityPrompt traversal, BackButton click, craft/upgrade request, and all material tooltip combinations were not repeated.
+
+### Risks
+
+- `InventoryController` remains large because it is still the UI layout/card/detail/action owner; any future extraction should be planned as an explicit renderer/action split.
+- Missing new sibling modules fail startup with clear asserts, which is intentional but requires repo/Studio parity when syncing UI controllers.
+
+### Rollback
+
+- Roll back the individual Stage 7 commits in reverse order, or restore inline helpers and remove the corresponding sibling ModuleScripts listed in each 7A-7G entry.
+- Revert this audit entry and the Stage 7 status line in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-08 - Four Peaks InventoryController stage 7G character preview extraction
 
 ### Summary
