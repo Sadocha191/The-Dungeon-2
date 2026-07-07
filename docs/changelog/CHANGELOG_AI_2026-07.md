@@ -1,5 +1,68 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Poziom SpellService stage 4C effects extraction
+
+### Summary
+
+- Completed Stage 4C for active `game.ServerScriptService.Script.SpellService`.
+- Added `SpellEffects` for target damage multipliers, vulnerability multiplier, DOT, slow, stun/freeze, vulnerability attributes, knockback, pull, and pullStrength application.
+- Kept `SpellService` as the owner of spell archetype flow, cooldowns, main damage call, VFX dispatch/visual construction, and `SpellVFXEvent`.
+- Preserved effect formulas, DOT tick cadence, damage, speed, range, cooldown, tick rate, remotes, persistent data, attributes, and balance.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/SpellEffects.lua`
+- Updated `Level/ServerScriptService/Script/SpellService.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Created live `game.ServerScriptService.ModuleScript.SpellEffects`.
+- Synchronized active `game.ServerScriptService.Script.SpellService` to require `SpellEffects`, configure callbacks, and delegate effect application.
+- Repo/Studio parity after cleanup:
+  - `SpellService`: normalized length `43799`, hash `913598721`.
+  - `SpellEffects`: normalized length `4120`, hash `920148350`.
+  - `SpellProjectiles`: normalized length `3187`, hash `229091311`.
+  - `SpellTargeting`: normalized length `2333`, hash `375152092`.
+- Temporary `Stage4CSpellEffectsHarness` was removed; Studio grep and repo grep found no `Stage4C` markers.
+
+### Architecture
+
+- New graph: `SpellService -> SpellEffects`, `SpellService -> SpellProjectiles`, `SpellService -> SpellTargeting`, `SpellService -> NpcService`, `SpellService -> PlayerData`, `SpellService -> SpellDefinitions`, `SpellService -> WeaponConfigs`; `SpellTargeting -> NpcService`.
+- `SpellEffects` requires no modules and depends on callbacks configured by `SpellService`.
+- The existing DOT `task.spawn` loop moved from `SpellService` to `SpellEffects` with the same `0.5s` wait cadence.
+- No new `_G`, remotes, fallback damage path, bootstrap, require cycle, or additional runtime scheduler was added.
+
+### Validation
+
+- Studio Play startup reached normal `SpellService` ready logs with no `SpellEffects` or missing-module errors.
+- A temporary Studio-only server Script harness ran in the same server VM as live `SpellService` and wrapped `SpellEffects.Apply` plus existing `NpcService` effect APIs during real spell flow.
+- Real `VoltNeedle` called `SpellEffects.Apply`, called `NpcService.ApplyFreeze` once with duration `0.22`, and dealt `18` damage.
+- Real `FireBolt` called `SpellEffects.Apply`, dealt direct damage `19`, and produced DOT damage calls with `showFloating=false`.
+- Real `WaterShard` called `SpellEffects.Apply`, called `NpcService.ApplySlow` once with `slowPct = 0.3` and `duration = 1.3`, and dealt `17` damage.
+- Output showed no `SpellService`, `SpellEffects`, `SpellProjectiles`, `SpellTargeting`, or `NpcService` errors. Existing unrelated Studio output remained from `Hybrid Terrain Hex Generator`, `ErrorReporter`, and missing TeleportData in Play Solo.
+- Repo grep and Studio grep found no temporary harness/probe markers after cleanup.
+
+### Not Verified
+
+- Full natural run with random spell acquisition was not repeated in this checkpoint.
+- Multiplayer spell targeting/effects were not available through current MCP Play.
+- Knockback, pull, pullStrength, and vulnerability stacking remain for later Stage 4/final audit; 4C directly validated DOT, stun/freeze, and slow.
+
+### Risks
+
+- `SpellEffects` uses callbacks configured by `SpellService`; direct calls before `SpellEffects.Configure` fail with an explicit assert.
+- VFX dispatch/visual construction and beam/zone task loops still live in `SpellService` for later Stage 4 checkpoints.
+
+### Rollback
+
+- Restore the previous inline target damage multiplier, vulnerability multiplier, DOT, and effect-application helpers in `SpellService.lua`.
+- Remove `Level/ServerScriptService/ModuleScript/SpellEffects.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 4C notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Poziom SpellService stage 4B targeting extraction
 
 ### Summary

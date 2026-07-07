@@ -44,6 +44,7 @@ local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or Replicate
 local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions"))
 local NpcService = require(findServerModule("NpcService") or error("[SpellService] Missing NpcService"))
 local PlayerData = require(findServerModule("PlayerData") or error("[SpellService] Missing PlayerData"))
+local SpellEffects = require(findServerModule("SpellEffects") or error("[SpellService] Missing SpellEffects"))
 local SpellProjectiles = require(findServerModule("SpellProjectiles") or error("[SpellService] Missing SpellProjectiles"))
 local SpellTargeting = require(findServerModule("SpellTargeting") or error("[SpellService] Missing SpellTargeting"))
 local WeaponConfigs = modFolder and require(modFolder:WaitForChild("WeaponConfigs"))
@@ -417,103 +418,27 @@ local function getCooldownMult(plr)
 	return math.max(0.72, 1 - weaponCooldownBonus)
 end
 
-local function isBossEnemy(model)
-	return model and (model:GetAttribute("IsBoss") == true or string.sub(model.Name, 1, 5) == "Boss_")
-end
-
-local function isEliteEnemy(model)
-	return model and (model:GetAttribute("IsElite") == true or isBossEnemy(model))
-end
+SpellEffects.Configure({
+	addImpulse = addImpulse,
+	applyFreeze = applyFreeze,
+	applySlow = applySlow,
+	getDurationMult = getDurationMult,
+	getEnemyPosition = getEnemyPosition,
+	isEnemyAlive = enemyAlive,
+	safeDamage = safeDamage,
+	spellClock = spellClock,
+})
 
 local function getTargetDamageMultiplier(enemy, stats)
-	if isBossEnemy(enemy) then
-		return tonumber(stats and stats.bossDamageMultiplier) or 1
-	end
-	if isEliteEnemy(enemy) then
-		return tonumber(stats and stats.eliteDamageMultiplier) or 1
-	end
-	return 1
-end
-
-local function getEffectResistance(enemy)
-	if isBossEnemy(enemy) then
-		return {
-			dot = 0.70,
-			vulnerability = 0.55,
-			duration = 0.45,
-		}
-	end
-	if isEliteEnemy(enemy) then
-		return {
-			dot = 0.85,
-			vulnerability = 0.75,
-			duration = 0.72,
-		}
-	end
-	return {
-		dot = 1,
-		vulnerability = 1,
-		duration = 1,
-	}
+	return SpellEffects.GetTargetDamageMultiplier(enemy, stats)
 end
 
 local function distancePointToSegment(point, a, b)
 	return SpellTargeting.DistancePointToSegment(point, a, b)
 end
 
-local function applyTimedDot(plr, enemy, dps, duration)
-	local endAt = spellClock() + duration
-	task.spawn(function()
-		while spellClock() < endAt and enemyAlive(enemy) do
-			safeDamage(enemy, dps * 0.5, { player = plr, showFloating = false })
-			task.wait(0.5)
-		end
-	end)
-end
-
 local function applyEffects(plr, enemy, stats, sourcePos)
-	local effects = stats.effects or {}
-	local effectPower = stats.effectPower or 1
-	local durationMult = getDurationMult(plr)
-	local enemyPos = getEnemyPosition(enemy)
-	local resist = getEffectResistance(enemy)
-
-	if effects.dot then
-		applyTimedDot(
-			plr,
-			enemy,
-			(effects.dot.dps or 0) * effectPower * resist.dot,
-			(effects.dot.duration or 0) * durationMult * resist.duration
-		)
-	end
-	if effects.slow then
-		applySlow(enemy, math.clamp((effects.slow.pct or 0) * (0.9 + (effectPower * 0.1)), 0, 0.7), (effects.slow.duration or 0) * durationMult)
-	end
-	if effects.stun then
-		applyFreeze(enemy, (effects.stun.duration or 0) * durationMult * (0.9 + (effectPower * 0.1)))
-	end
-	if effects.vulnerability then
-		enemy:SetAttribute("VulnerableUntil", spellClock() + ((effects.vulnerability.duration or 0) * durationMult * resist.duration))
-		enemy:SetAttribute("VulnerablePct", (effects.vulnerability.pct or 0) * (0.9 + (effectPower * 0.1)) * resist.vulnerability)
-	end
-	if enemyPos and sourcePos and effects.knockback then
-		local direction = enemyPos - sourcePos
-		if direction.Magnitude > 0.01 then
-			addImpulse(enemy, direction.Unit * (effects.knockback.force or 0) * (0.8 + (effectPower * 0.2)))
-		end
-	end
-	if enemyPos and sourcePos and effects.pull then
-		local direction = sourcePos - enemyPos
-		if direction.Magnitude > 0.01 then
-			addImpulse(enemy, direction.Unit * (effects.pull.force or 0) * (0.8 + (effectPower * 0.2)))
-		end
-	end
-	if enemyPos and sourcePos and tonumber(stats.pullStrength) and tonumber(stats.pullStrength) > 0 then
-		local direction = sourcePos - enemyPos
-		if direction.Magnitude > 0.01 then
-			addImpulse(enemy, direction.Unit * 10 * tonumber(stats.pullStrength) * (0.8 + (effectPower * 0.2)))
-		end
-	end
+	SpellEffects.Apply(plr, enemy, stats, sourcePos)
 end
 
 local function shouldSpawnImpact(plr, spellId, enemy)
@@ -560,11 +485,7 @@ local function hitEnemy(plr, enemy, damage, stats, sourcePos, impactPos)
 		return
 	end
 	local dealt = damage * getAtkMult(plr) * getTargetDamageMultiplier(enemy, stats)
-	local vulnUntil = tonumber(enemy:GetAttribute("VulnerableUntil")) or 0
-	local vulnPct = tonumber(enemy:GetAttribute("VulnerablePct")) or 0
-	if vulnUntil > spellClock() and vulnPct > 0 then
-		dealt *= (1 + vulnPct)
-	end
+	dealt *= SpellEffects.GetVulnerabilityDamageMultiplier(enemy, spellClock())
 	local applied = safeDamage(enemy, dealt, { player = plr })
 	if applied > 0 then
 		applyEffects(plr, enemy, stats, sourcePos)
