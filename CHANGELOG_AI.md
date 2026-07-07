@@ -16,6 +16,7 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-07-07** — Poziom NpcService stage 3D targeting and melee extraction
 - **2026-07-07** — Poziom NpcService stage 3C movement extraction
 - **2026-07-07** — Poziom NpcService stage 3B registry lifecycle extraction and validation
 - **2026-07-07** — Poziom NpcService stage 3A runtime audit and baseline

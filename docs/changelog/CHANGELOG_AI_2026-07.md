@@ -1,5 +1,74 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Poziom NpcService stage 3D targeting and melee extraction
+
+### Summary
+
+- Completed Stage 3D for active `game.ServerScriptService.ModuleScript.NpcService`.
+- Added `NpcTargeting` for alive player snapshots, engagement slots, targetability, target priority metrics, distance despawn checks, and target cache scan cadence.
+- Added `NpcMelee` for contact damage dispatch through `DamageService.Apply` and the existing vertical/3D melee validation.
+- Kept `NpcService` as the public API facade and the only central scheduler owner.
+- Preserved all public `NpcService` function names, arguments, and return behavior.
+- Did not move status effects, death callbacks, despawn side effects, rewards, remotes, persistent data, attributes, or balancing.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/NpcTargeting.lua`
+- Added `Level/ServerScriptService/ModuleScript/NpcMelee.lua`
+- Updated `Level/ServerScriptService/ModuleScript/NpcService.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Created live `game.ServerScriptService.ModuleScript.NpcTargeting`.
+- Created live `game.ServerScriptService.ModuleScript.NpcMelee`.
+- Synchronized active `game.ServerScriptService.ModuleScript.NpcService` to require the new modules and delegate targeting/melee responsibilities.
+- Repo/Studio parity for `NpcService`, `NpcRegistry`, `NpcMovement`, `NpcTargeting`, and `NpcMelee` was confirmed by normalized length/checksum/line-count metrics.
+- Temporary Server harnesses were executed during Play and removed automatically with no script markers left in Studio or repo.
+
+### Architecture
+
+- New graph: `NpcService -> NpcRegistry`, `NpcService -> NpcMovement`, `NpcService -> NpcTargeting`, `NpcService -> NpcMelee`, `NpcService -> NpcShared`, optional `NpcService -> MissionProgress`; `NpcTargeting -> NpcMovement`; `NpcMelee -> DamageService`; `NpcMovement -> WorldBounds`.
+- `NpcTargeting` does not require `NpcService`, `NpcRegistry`, `DamageService`, `WaveController`, `RunStatsService`, or `ShrineService`.
+- `NpcMelee` requires only `DamageService` through an explicit ModuleScript assert and does not call `Humanoid:TakeDamage` or `_G`.
+- No module added a `Heartbeat`, event connection, task scheduler, remote, gameplay `_G`, or fallback damage path.
+
+### Validation
+
+- Play startup reached normal service-ready logs with no `NpcService`, `NpcTargeting`, `NpcMelee`, or `DamageService` errors.
+- Public targeting query validation used controlled normal/elite/boss `Slime` models registered through public `NpcService.Register`.
+- `GetNearestEnemy` preferred boss priority over closer normal/elite candidates.
+- `GetEnemiesInRadius` returned boss, elite, normal in the expected effective-distance/priority order.
+- `GetTargetingMetrics` for the boss returned `effective=6`, `actual=30`, `priority=3`.
+- Real contact melee through the central `Heartbeat` damaged the player for `36` HP in the first harness.
+- Invalid height contact damaged the player for `0` HP.
+- After requiring existing `RunStatsService` so the thorns callback was registered, real contact melee damaged the player for `45` HP and thorns dealt `20` HP to the attacking NPC with `RunStat_Thorns=4`.
+- Cleanup through public `NpcService.Despawn` returned `NpcService.GetActiveCount()` to `0`.
+- Repo `rg` and Studio `script_grep` found no temporary harness markers after cleanup.
+- `git diff --check` passed.
+
+### Not Verified
+
+- Full natural long-run movement/targeting with 100+ NPC was not repeated in 3D; the 3A 10/25/50 baseline remains the comparison point until 3F optimization.
+- True multiplayer target switching remains unverified in current MCP Play.
+- Full death/drop/reward/status matrices remain for Stage 3E/3F.
+- Thorns before any runtime load of `RunStatsService` remains a load-order caveat; direct diagnostics showed `DamageService` had no thorns callback until the existing stats module was required.
+
+### Risks
+
+- `NpcTargeting` now owns target scan cadence and engagement slot formation ordering. Values were moved unchanged, but Stage 3F should re-measure formation scan cost before optimizing.
+- `NpcMelee` now owns contact damage context construction. Validation confirmed the attacker model is preserved for thorns once the existing callback is active.
+- Existing thorns callback registration depends on `RunStatsService` being loaded; Stage 3D did not change bootstrap order.
+
+### Rollback
+
+- Restore the previous inline alive player snapshot, engagement slot, targetability, target metric, target scan, melee validation, and contact damage helpers in `NpcService.lua`.
+- Remove `Level/ServerScriptService/ModuleScript/NpcTargeting.lua` and `Level/ServerScriptService/ModuleScript/NpcMelee.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 3D notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Poziom NpcService stage 3C movement extraction
 
 ### Summary

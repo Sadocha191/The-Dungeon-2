@@ -15,9 +15,12 @@ local NpcRegistry = require(npcRegistryModule)
 local npcMovementModule = serverModuleFolder:FindFirstChild("NpcMovement")
 assert(npcMovementModule and npcMovementModule:IsA("ModuleScript"), "[NpcService] NpcMovement ModuleScript is required")
 local NpcMovement = require(npcMovementModule)
-local damageServiceModule = serverModuleFolder:FindFirstChild("DamageService")
-assert(damageServiceModule and damageServiceModule:IsA("ModuleScript"), "[NpcService] DamageService ModuleScript is required for player damage")
-local DamageService = require(damageServiceModule)
+local npcTargetingModule = serverModuleFolder:FindFirstChild("NpcTargeting")
+assert(npcTargetingModule and npcTargetingModule:IsA("ModuleScript"), "[NpcService] NpcTargeting ModuleScript is required")
+local NpcTargeting = require(npcTargetingModule)
+local npcMeleeModule = serverModuleFolder:FindFirstChild("NpcMelee")
+assert(npcMeleeModule and npcMeleeModule:IsA("ModuleScript"), "[NpcService] NpcMelee ModuleScript is required")
+local NpcMelee = require(npcMeleeModule)
 local MissionProgress = nil
 if serverModuleFolder then
 	pcall(function()
@@ -146,34 +149,17 @@ type NpcRecord = {
 
 local NpcService = {}
 
-local NPC_FORMATION_LANE_ORDER = { 0, -1, 1, -2, 2, -3, 3 }
-local NPC_FORMATION_LANE_COUNT = #NPC_FORMATION_LANE_ORDER
-local NPC_FORMATION_LANE_SPACING = 1.85
-local NPC_FORMATION_RING_SPACING = 0.95
-local NPC_FORMATION_JITTER_SCALE = 0.22
-local NPC_FORMATION_COLLAPSE_BUFFER = 2.75
-local NPC_FORMATION_BLEND_DISTANCE = 7.5
-local TARGET_PRIORITY_ELITE_DISTANCE_BONUS = 12
-local TARGET_PRIORITY_BOSS_DISTANCE_BONUS = 24
 local NORMAL_DESPAWN_DISTANCE = 100
-local ENEMY_MELEE_MAX_VERTICAL_DELTA = 5
-local ENEMY_MELEE_MAX_HIT_HEIGHT_ABOVE_ENEMY = 4.5
-local ENEMY_MELEE_USE_3D_DISTANCE = true
-local ENEMY_MELEE_DEBUG = false
-local NPC_FORMATION_MOVEMENT_CONFIG = {
-	laneSpacing = NPC_FORMATION_LANE_SPACING,
-	ringSpacing = NPC_FORMATION_RING_SPACING,
-	jitterScale = NPC_FORMATION_JITTER_SCALE,
-}
+local NPC_FORMATION_MOVEMENT_CONFIG = NpcTargeting.FormationMovementConfig
 local clampMagnitude = NpcMovement.ClampMagnitude
 local flat = NpcMovement.Flat
-local flatMagnitude = NpcMovement.FlatMagnitude
-local nearestAlivePlayerFlatDistance = NpcMovement.NearestAlivePlayerFlatDistance
 local safeUnit = NpcMovement.SafeUnit
 local repairDetachedVisualParts = NpcMovement.RepairDetachedVisualParts
 local computeGroundOffset = NpcMovement.ComputeGroundOffset
 local beginSpawnEmergence = NpcMovement.BeginSpawnEmergence
 local moveNpcModelToRoot = NpcMovement.MoveModelToRoot
+local applyPlayerDamage = NpcMelee.ApplyPlayerDamage
+local canApplyMeleeDamage = NpcMelee.CanApplyDamage
 local RUNTIME_ATTRIBUTE_NAMES = {
 	ATTR.State,
 	ATTR.LegacyState,
@@ -259,95 +245,6 @@ local function stripLegacyNpcScripts(model: Model)
 	end
 end
 
-local function getAlivePlayers(): {AlivePlayerInfo}
-	local result = {}
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr:GetAttribute("RunEnded") ~= true then
-			local char = plr.Character
-			local hum = char and char:FindFirstChildOfClass("Humanoid")
-			local hrp = char and char:FindFirstChild("HumanoidRootPart")
-			if hum and hrp and hrp:IsA("BasePart") and hum.Health > 0 then
-				table.insert(result, {
-					player = plr,
-					hrp = hrp,
-					humanoid = hum,
-				})
-			end
-		end
-	end
-	return result
-end
-
-local function buildEngagementSlots(alivePlayers: {AlivePlayerInfo}): {[string]: NpcEngagementSlot}
-	local slots = {}
-	if #alivePlayers == 0 then
-		return slots
-	end
-
-	local groups = {}
-	for _, npc in NpcRegistry.Pairs() do
-		if not npc.dead and npc.model.Parent then
-			local bestInfo = nil
-			local bestDist = math.huge
-			for _, info in ipairs(alivePlayers) do
-				local dist = flatMagnitude(info.hrp.Position, npc.position)
-				if dist < bestDist then
-					bestDist = dist
-					bestInfo = info
-				end
-			end
-
-			if bestInfo then
-				local key = tostring(bestInfo.player.UserId)
-				local bucket = groups[key]
-				if not bucket then
-					bucket = {
-						npcs = {},
-						playerPos = bestInfo.hrp.Position,
-					}
-					groups[key] = bucket
-				else
-					bucket.playerPos = bestInfo.hrp.Position
-				end
-				bucket.npcs[#bucket.npcs + 1] = npc
-			end
-		end
-	end
-
-	for _, group in pairs(groups) do
-		local playerPos = group.playerPos
-		local centroid = Vector3.zero
-		for _, npc in ipairs(group.npcs) do
-			centroid += npc.position
-		end
-		if #group.npcs > 0 then
-			centroid /= #group.npcs
-		else
-			centroid = playerPos
-		end
-		local approachDir = safeUnit(flat(centroid - playerPos), Vector3.new(0, 0, -1))
-		table.sort(group.npcs, function(a, b)
-			local distA = flatMagnitude(playerPos, a.position)
-			local distB = flatMagnitude(playerPos, b.position)
-			if math.abs(distA - distB) > 0.1 then
-				return distA < distB
-			end
-			return a.spawnTime < b.spawnTime
-		end)
-
-		for index, npc in ipairs(group.npcs) do
-			local slotIndex = index - 1
-			slots[npc.id] = {
-				lane = NPC_FORMATION_LANE_ORDER[(slotIndex % NPC_FORMATION_LANE_COUNT) + 1] or 0,
-				depth = math.floor(slotIndex / NPC_FORMATION_LANE_COUNT),
-				approachDir = approachDir,
-			}
-		end
-	end
-
-	return slots
-end
-
 local function writeStateAttributes(npc: NpcRecord)
 	ensureRuntimeAttributesCleared(npc)
 end
@@ -430,36 +327,6 @@ local function matchesActiveCountFilter(npc: NpcRecord, filter: ActiveCountFilte
 		return includeElite == true
 	end
 	return includeNormal == true
-end
-
-local function isNpcTargetable(npc: NpcRecord): boolean
-	return not npc.dead and npc.model.Parent ~= nil and typeof(npc.spawnSurfacePosition) ~= "Vector3"
-end
-
-local function getTargetPriority(npc: NpcRecord): number
-	if npc.isBoss then
-		return 3
-	end
-	if npc.isElite then
-		return 2
-	end
-	return 1
-end
-
-local function getTargetPriorityDistanceBonus(npc: NpcRecord): number
-	if npc.isBoss then
-		return TARGET_PRIORITY_BOSS_DISTANCE_BONUS
-	end
-	if npc.isElite then
-		return TARGET_PRIORITY_ELITE_DISTANCE_BONUS
-	end
-	return 0
-end
-
-local function computeTargetingMetrics(npc: NpcRecord, fromPos: Vector3): (number, number, number)
-	local actualDistance = (npc.position - fromPos).Magnitude
-	local effectiveDistance = math.max(0, actualDistance - getTargetPriorityDistanceBonus(npc))
-	return effectiveDistance, actualDistance, getTargetPriority(npc)
 end
 
 local function fireDamageIndicator(sourcePlayer: Player?, npc: NpcRecord, amount: number, crit: boolean?)
@@ -552,128 +419,7 @@ local function despawnNpcRecord(npc: NpcRecord)
 end
 
 local function shouldDistanceDespawn(npc: NpcRecord, alivePlayers: {AlivePlayerInfo}): boolean
-	if npc.isElite or npc.isBoss or #alivePlayers == 0 then
-		return false
-	end
-	return nearestAlivePlayerFlatDistance(npc.position, alivePlayers) > NORMAL_DESPAWN_DISTANCE
-end
-
-local function applyPlayerDamage(player: Player, amount: number, sourceModel: Model?)
-	if amount <= 0 then
-		return
-	end
-
-	DamageService.Apply(player, amount, {
-		source = sourceModel,
-		sourceType = "npc",
-		damageType = "contact",
-		attacker = sourceModel,
-	})
-end
-
-local function getNpcBooleanAttribute(model: Model, attributeName: string, fallback: boolean): boolean
-	local value = model:GetAttribute(attributeName)
-	if typeof(value) == "boolean" then
-		return value
-	end
-	return fallback
-end
-
-local function getNpcNumberAttribute(model: Model, attributeName: string, fallback: number): number
-	local value = model:GetAttribute(attributeName)
-	if typeof(value) == "number" then
-		return value
-	end
-	return fallback
-end
-
-local function debugMeleeSkip(npc: NpcRecord, targetInfo: AlivePlayerInfo, reason: string, detail: string)
-	if ENEMY_MELEE_DEBUG ~= true then
-		return
-	end
-
-	print(string.format(
-		"[NpcService] Skip melee hit %s -> %s: %s (%s)",
-		npc.model.Name,
-		targetInfo.player.Name,
-		reason,
-		detail
-		))
-end
-
-local function canApplyMeleeDamage(npc: NpcRecord, targetInfo: AlivePlayerInfo): boolean
-	if npc.isRanged then
-		return true
-	end
-
-	local targetRoot = targetInfo.hrp
-	local npcRoot = npc.root
-	if not targetRoot.Parent then
-		debugMeleeSkip(npc, targetInfo, "missing_target_root", "HumanoidRootPart is no longer parented")
-		return false
-	end
-	if not npcRoot.Parent then
-		debugMeleeSkip(npc, targetInfo, "missing_npc_root", "NPC root is no longer parented")
-		return false
-	end
-
-	local targetPos = targetRoot.Position
-	local npcPos = npc.position
-	local verticalDelta = targetPos.Y - npcPos.Y
-	local verticalDeltaAbs = math.abs(verticalDelta)
-	local maxVerticalDelta = math.max(0, getNpcNumberAttribute(npc.model, "EnemyMeleeMaxVerticalDelta", ENEMY_MELEE_MAX_VERTICAL_DELTA))
-	local maxHitHeightAboveEnemy = math.max(0, getNpcNumberAttribute(npc.model, "EnemyMeleeMaxHitHeightAboveEnemy", ENEMY_MELEE_MAX_HIT_HEIGHT_ABOVE_ENEMY))
-	local ignoreVerticalValidation = getNpcBooleanAttribute(npc.model, "EnemyMeleeIgnoreVerticalValidation", false)
-
-	if not ignoreVerticalValidation and verticalDelta > maxHitHeightAboveEnemy then
-		debugMeleeSkip(npc, targetInfo, "target_above_enemy", string.format("verticalDelta=%.2f limit=%.2f", verticalDelta, maxHitHeightAboveEnemy))
-		return false
-	end
-
-	if not ignoreVerticalValidation and verticalDeltaAbs > maxVerticalDelta then
-		debugMeleeSkip(npc, targetInfo, "vertical_delta", string.format("absDelta=%.2f limit=%.2f", verticalDeltaAbs, maxVerticalDelta))
-		return false
-	end
-
-	if getNpcBooleanAttribute(npc.model, "EnemyMeleeUse3DDistance", ENEMY_MELEE_USE_3D_DISTANCE) then
-		local max3DDistance = math.sqrt((npc.attackRange * npc.attackRange) + (maxVerticalDelta * maxVerticalDelta))
-		local fullDistance = (targetPos - npcPos).Magnitude
-		if fullDistance > max3DDistance then
-			debugMeleeSkip(npc, targetInfo, "3d_distance", string.format("distance=%.2f limit=%.2f", fullDistance, max3DDistance))
-			return false
-		end
-	end
-
-	return true
-end
-
-local function findNearestTarget(npc: NpcRecord, alivePlayers: {AlivePlayerInfo}, now: number): AlivePlayerInfo?
-	local targetPlayer = npc.targetPlayer
-	if targetPlayer then
-		for _, info in ipairs(alivePlayers) do
-			if info.player == targetPlayer then
-				return info
-			end
-		end
-	end
-
-	if now < npc.nextTargetScanAt then
-		return nil
-	end
-	npc.nextTargetScanAt = now + 0.35
-
-	local bestInfo = nil
-	local bestDist = math.huge
-	for _, info in ipairs(alivePlayers) do
-		local dist = flatMagnitude(info.hrp.Position, npc.position)
-		if dist < bestDist then
-			bestDist = dist
-			bestInfo = info
-		end
-	end
-
-	npc.targetPlayer = bestInfo and bestInfo.player or nil
-	return bestInfo
+	return NpcTargeting.ShouldDistanceDespawn(npc, alivePlayers, NORMAL_DESPAWN_DISTANCE)
 end
 
 local function getCurrentSpeed(npc: NpcRecord, now: number): number
@@ -713,14 +459,6 @@ local function getControlResistance(npc: NpcRecord)
 		freezeDuration = 1,
 		impulse = 1,
 	}
-end
-
-local function computeFormationWeight(dist: number, stopDistance: number): number
-	local collapseDistance = stopDistance + NPC_FORMATION_COLLAPSE_BUFFER
-	if dist <= collapseDistance then
-		return 0
-	end
-	return math.clamp((dist - collapseDistance) / NPC_FORMATION_BLEND_DISTANCE, 0, 1)
 end
 
 local function updateNpc(
@@ -768,7 +506,7 @@ local function updateNpc(
 	end
 	npc.aiLookTarget = nil
 
-	local targetInfo = findNearestTarget(npc, alivePlayers, now)
+	local targetInfo = NpcTargeting.FindNearestTarget(npc, alivePlayers, now)
 	if not targetInfo then
 		npc.velocity = Vector3.zero
 		setState(npc, STATE.Idle)
@@ -780,7 +518,7 @@ local function updateNpc(
 	local toTarget = flat(targetPos - npc.position)
 	local dist = toTarget.Magnitude
 	local stopDistance = math.max(1.25, npc.attackRange - 0.2)
-	local formationWeight = computeFormationWeight(dist, stopDistance)
+	local formationWeight = NpcTargeting.ComputeFormationWeight(dist, stopDistance)
 	local baseMove = Vector3.zero
 
 	if npc.attackUntil > now then
@@ -946,7 +684,7 @@ end
 function NpcService.GetLivingModels(): {Model}
 	local result = {}
 	for _, npc in NpcRegistry.Pairs() do
-		if isNpcTargetable(npc) then
+		if NpcTargeting.IsTargetable(npc) then
 			table.insert(result, npc.model)
 		end
 	end
@@ -965,7 +703,7 @@ end
 
 function NpcService.DespawnOldestFarNormal(minDistance: number): Model?
 	local threshold = math.max(0, tonumber(minDistance) or 0)
-	local alivePlayers = getAlivePlayers()
+	local alivePlayers = NpcTargeting.GetAlivePlayers()
 	if #alivePlayers == 0 then
 		return nil
 	end
@@ -975,7 +713,7 @@ function NpcService.DespawnOldestFarNormal(minDistance: number): Model?
 		if not npc.dead and npc.model.Parent and not npc.isElite and npc.model:GetAttribute("IsBoss") ~= true then
 			local nearestDist = math.huge
 			for _, info in ipairs(alivePlayers) do
-				nearestDist = math.min(nearestDist, flatMagnitude(info.hrp.Position, npc.position))
+				nearestDist = math.min(nearestDist, NpcMovement.FlatMagnitude(info.hrp.Position, npc.position))
 			end
 			if nearestDist >= threshold then
 				if not bestNpc or npc.spawnTime < bestNpc.spawnTime then
@@ -1001,10 +739,10 @@ function NpcService.GetNearestEnemy(fromPos: Vector3, maxRange: number): (Model?
 	local bestEffectiveDist = math.huge
 	local bestPriority = -math.huge
 	for _, npc in NpcRegistry.Pairs() do
-		if isNpcTargetable(npc) then
+		if NpcTargeting.IsTargetable(npc) then
 			local dist = (npc.position - fromPos).Magnitude
 			if dist <= searchRange then
-				local effectiveDist, actualDist, priority = computeTargetingMetrics(npc, fromPos)
+				local effectiveDist, actualDist, priority = NpcTargeting.ComputeTargetingMetrics(npc, fromPos)
 				if effectiveDist < bestEffectiveDist
 					or (math.abs(effectiveDist - bestEffectiveDist) <= 1e-4 and priority > bestPriority)
 					or (math.abs(effectiveDist - bestEffectiveDist) <= 1e-4 and priority == bestPriority and actualDist < bestDist)
@@ -1023,10 +761,10 @@ end
 function NpcService.GetEnemiesInRadius(fromPos: Vector3, radius: number): {Model}
 	local hits = {}
 	for _, npc in NpcRegistry.Pairs() do
-		if isNpcTargetable(npc) then
+		if NpcTargeting.IsTargetable(npc) then
 			local dist = (npc.position - fromPos).Magnitude
 			if dist <= radius then
-				local effectiveDist, actualDist, priority = computeTargetingMetrics(npc, fromPos)
+				local effectiveDist, actualDist, priority = NpcTargeting.ComputeTargetingMetrics(npc, fromPos)
 				table.insert(hits, {
 					model = npc.model,
 					effectiveDist = effectiveDist,
@@ -1063,11 +801,11 @@ function NpcService.GetTargetingMetrics(fromPos: Vector3, target: any): (number?
 	end
 
 	local npc = resolveNpc(target)
-	if not npc or not isNpcTargetable(npc) then
+	if not npc or not NpcTargeting.IsTargetable(npc) then
 		return nil, nil, nil
 	end
 
-	return computeTargetingMetrics(npc, fromPos)
+	return NpcTargeting.ComputeTargetingMetrics(npc, fromPos)
 end
 
 function NpcService.ApplySlow(target: any, slowPct: number, duration: number)
@@ -1332,8 +1070,8 @@ local batchAccumulator = 0
 
 RunService.Heartbeat:Connect(function(dt)
 	local now = os.clock()
-	local alivePlayers = getAlivePlayers()
-	local engagementSlots = buildEngagementSlots(alivePlayers)
+	local alivePlayers = NpcTargeting.GetAlivePlayers()
+	local engagementSlots = NpcTargeting.BuildEngagementSlots(alivePlayers, NpcRegistry.Pairs)
 
 	for _, npc in NpcRegistry.Pairs() do
 		updateNpc(npc, dt, alivePlayers, now, engagementSlots)
