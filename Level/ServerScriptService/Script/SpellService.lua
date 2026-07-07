@@ -44,6 +44,7 @@ local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or Replicate
 local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions"))
 local NpcService = require(findServerModule("NpcService") or error("[SpellService] Missing NpcService"))
 local PlayerData = require(findServerModule("PlayerData") or error("[SpellService] Missing PlayerData"))
+local SpellProjectiles = require(findServerModule("SpellProjectiles") or error("[SpellService] Missing SpellProjectiles"))
 local WeaponConfigs = modFolder and require(modFolder:WaitForChild("WeaponConfigs"))
 
 local vfxRoot = workspace:FindFirstChild("SpellVFX")
@@ -607,6 +608,18 @@ local function hitEnemy(plr, enemy, damage, stats, sourcePos, impactPos)
 	end
 end
 
+SpellProjectiles.Configure({
+	broadcastProjectile = function(payload)
+		broadcastSpellVisual("projectile", payload)
+	end,
+	extractVisualStats = extractVisualStats,
+	getEnemyPosition = getEnemyPosition,
+	getNearestEnemy = getNearestEnemy,
+	hitEnemy = hitEnemy,
+	isPaused = isPaused,
+	isPlayerRunActive = isPlayerRunActive,
+})
+
 local function getCastOrigin(hrp)
 	return hrp.Position + Vector3.new(0, 1.2, 0)
 end
@@ -937,50 +950,16 @@ local function destroyProjectileVisual(visual)
 end
 
 local function fireProjectile(plr, origin, dir, speed, range, damage, pierce, stats)
-	broadcastSpellVisual("projectile", {
+	SpellProjectiles.Fire({
+		player = plr,
 		origin = origin,
 		dir = dir,
 		speed = speed,
 		range = range,
-		startTime = workspace:GetServerTimeNow(),
-		stats = extractVisualStats(stats),
+		damage = damage,
+		pierce = pierce,
+		stats = stats,
 	})
-
-	local pos = origin
-	local traveled = 0
-	local remainingPierce = math.max(0, math.floor(pierce or 0))
-	local hit = {}
-	local collisionRadius = stats.element == "Physical" and 3.6 or 3.3
-	local conn
-	conn = RunService.Heartbeat:Connect(function(dt)
-		if not isPlayerRunActive(plr) then
-			conn:Disconnect()
-			return
-		end
-		if isPaused() then
-			return
-		end
-
-		local step = speed * dt
-		traveled += step
-		pos += dir * step
-
-		local enemy = getNearestEnemy(pos, collisionRadius)
-		local enemyPos = enemy and getEnemyPosition(enemy)
-		if enemy and enemyPos and (enemyPos - pos).Magnitude <= collisionRadius and not hit[enemy] then
-			hit[enemy] = true
-			hitEnemy(plr, enemy, damage, stats, pos, pos)
-			if remainingPierce <= 0 then
-				conn:Disconnect()
-				return
-			end
-			remainingPierce -= 1
-		end
-
-		if traveled >= range then
-			conn:Disconnect()
-		end
-	end)
 end
 
 local function runProjectile(plr, spellId, stats, hrp)

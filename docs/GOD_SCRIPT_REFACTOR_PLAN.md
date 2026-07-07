@@ -11,7 +11,7 @@ Zakres: etapowy refaktor największych God Scriptów i gameplayowych zależnośc
 | 1. `ProgressService` i gameplayowe `_G` | Ukończony w zatwierdzonym zakresie Stage 1; etap 2 nie rozpoczęty | `RunProgressApi` zastąpił `_G` dla XP/coins/souls/kills/run time/average level/boss/end run; party XP declaration-order bug naprawiony; martwy `SetGlobalRunPause` fallback usunięty z chest itemów | Przed etapem 2 pozostaje tylko osobna akceptacja dalszego zakresu i pełniejszy runtime test, jeżeli dostępny będzie multiplayer |
 | 2. `WaveController` | 2A-2E ukończone | `AbilityGeometry` wydziela czystą geometrię ability; `AbilityHazards` wydziela hazard zones/ticki/cleanup; `AbilityExecutor` wydziela wykonanie ability elit i bossów; `EncounterScheduler` wydziela planowanie spawn/encounter; `RunPortalController` wydziela portal/prompt state; `WaveDebugApi` wydziela Studio-only debug hook registration | Brak zmian damage/tick/cooldown/spawn rate; po każdym podetapie Play test |
 | 3. `NpcService` | 3A-3F ukończone | Registry, movement/steering/ground, targeting/melee, lifecycle/status/death/despawn oraz batch replication wydzielone | Jeden centralny update, brak per-NPC Heartbeat |
-| 4. `SpellService` i projectiles | Zaplanowany | Centralny projectile service, targeting/effects/VFX dispatch | Jedno połączenie runtime dla pocisków |
+| 4. `SpellService` i projectiles | 4A ukończone | `SpellProjectiles` wydziela projectile simulation i hit detection z `SpellService`; pozostałe targeting/effects/VFX dispatch są nadal w `SpellService` | Pociski mają jeden leniwy scheduler zamiast per-projectile `Heartbeat`; kolejne checkpointy bez zmian balansu |
 | 5. `RunStatsService` i `ShrineService` | Zaplanowany | Tylko pozostałe realnie mieszane odpowiedzialności | DamageService i RunDefenseState bez zmiany ownership |
 | 6. Guild | Zablokowany do czasu otwarcia `Guild` Studio | Persistence, membership, treasury, upgrades, teleport | Potwierdzony aktywny place `Gildia` |
 | 7. Duże kontrolery UI | Zaplanowany | Inventory/blacksmith/crafting UI po stabilizacji serwera | Brak zmian wyglądu/remotes/bindów |
@@ -43,6 +43,7 @@ Uwagi o parity:
 - 2026-07-07: Stage 3D added `NpcTargeting` and `NpcMelee` for player targeting, target priority metrics, engagement slots, melee height/range validation, and contact damage dispatch. `NpcService` still owns the public API and single central scheduler.
 - 2026-07-07: Stage 3E added `NpcLifecycle` for runtime attributes, state/health writers, tombstones, kill/despawn, death callbacks, status/control effects, damage modifiers, impulse, and ability lock. `NpcService` still owns remotes, MissionProgress, damage indicator dispatch, public API, and the single central scheduler.
 - 2026-07-07: Stage 3F added `NpcReplication` for NPC snapshot, full sync, broadcast batch payloads, and tombstone inclusion. `NpcService` still owns remote creation and the single central scheduler; `NpcShared.BatchRate` was not changed.
+- 2026-07-07: Stage 4A added `SpellProjectiles` for active projectile state, movement, pierce tracking, and hit detection. `SpellService` still owns spell cooldowns, target selection, VFX payload shape, effects, damage formulas, and the global spell scheduler.
 
 ## Metryki największych plików
 
@@ -63,7 +64,8 @@ Liczby są statycznym skanem repo. `Remote names` to unikalne publiczne remotes 
 | `Four Peaks/ServerScriptService/ModuleScript/GuildService.lua` | 1503 | 52 / 23 | 3 | `GuildUpdated`, `TeleportStatus` | no frame loop; 1 player removing connection | 0 / 0 |
 | `Guild/ServerScriptService/Script/GuildPlace.server.lua` | 1422 | 63 / 4 | 1 | `GetGuildCastleState`, `GetTreasury`, `DepositToTreasury`, `SpendFromTreasury`, `GuildLocationOpened`, `GuildTreasuryUpdated`, `LobbyReturnStatus`, `RequestLobbyReturn` | no frame loop; prompt/player/remote connections | 0 / 0 |
 | `Four Peaks/ServerScriptService/ModuleScript/CraftingService.lua` | 1287 | 41 / 16 | 6 | none | no runtime loop | 0 / 0 |
-| `Level/ServerScriptService/Script/SpellService.lua` | 1280 | 68 / 0 | 4 | `SpellVFXEvent` | per-projectile `Heartbeat`; global spell `Heartbeat`; beam/zone/orbit task loops | 0 / 0 |
+| `Level/ServerScriptService/Script/SpellService.lua` | 1259 | 68 / 0 | 5 | `SpellVFXEvent` | 1 global spell `Heartbeat`; beam/zone/dot task loops; projectile simulation delegated to `SpellProjectiles` | 0 / 0 |
+| `Level/ServerScriptService/ModuleScript/SpellProjectiles.lua` | 125 | 6 / 3 | 0 | none | 1 lazy `Heartbeat` only while active projectiles exist | 0 / 0 |
 | `Level/ServerScriptService/Script/ShrineService.server.lua` | 651 | 19 / 1 | 1 | `WaveStatusEvent` | 1 `Heartbeat`, player/run connections | 0 / 1 |
 | `Level/ServerScriptService/ModuleScript/Stats/RunStatsService.lua` | 462 | 14 / 16 | 4 | none | 1 `Heartbeat`, player/run connections | 0 / 2 |
 | `Four Peaks/ServerScriptService/Script/BlacksmithService.lua` | 312 | 12 / 0 | 3 | `OpenBlacksmithUI`, `BlacksmithSync`, `BlacksmithAction` | prompt/workspace/player/remote connections | 0 / 0 |
@@ -338,9 +340,19 @@ Etap 3, NPC:
 
 Etap 4, Spell/projectiles:
 
-- Centralny projectile owner z jedną pętlą.
-- `SpellService` powinien koordynować cast/scheduler i delegować projectile simulation/hit detection.
-- Nie zmieniać prędkości, range, damage, cooldown, VFX payloadów.
+- 4A ukończony.
+- 4A dodał `Level/ServerScriptService/ModuleScript/SpellProjectiles.lua`.
+- `SpellProjectiles` odpowiada za aktywną listę pocisków, ruch po `dt`, dystans/range, pierce/hit-once tracking i hit detection przez callbacki z `SpellService`.
+- `SpellService` po 4A nadal odpowiada za cooldowny, wybór targetu, `SpellVFXEvent`, VFX payload shape, damage/effect formulas, orbit/nova/zone/beam flow, `PlayerData`/weapon multipliers i jeden globalny spell `Heartbeat`.
+- Graf po 4A: `SpellService -> SpellProjectiles`, `SpellService -> NpcService`, `SpellService -> PlayerData`, `SpellService -> SpellDefinitions`, `SpellService -> WeaponConfigs`; `SpellProjectiles` nie wymaga modułów i nie zależy od `SpellService`, `NpcService`, `WaveController`, `DamageService`, `RunStatsService` ani `ShrineService`.
+- Runtime po 4A: per-projectile `Heartbeat` został usunięty z `SpellService`; `SpellProjectiles` tworzy co najwyżej jedno leniwe połączenie `RunService.Heartbeat`, tylko gdy istnieje aktywny pocisk, i rozłącza je po opróżnieniu listy.
+- Nie zmieniono prędkości, range, damage, cooldown, pierce, target selection, VFX payloadów, nazw remotes, persistent data ani atrybutów.
+- Walidacja 4A: live Studio `SpellProjectiles` utworzony, live `SpellService` zsynchronizowany; repo/Studio parity potwierdzona przez znormalizowane length/hash: `SpellService` `46747/771417623`, `SpellProjectiles` `3187/229091311`.
+- Play test 4A: tymczasowy Studio-only `Stage4ASpellProjectileHarness` uruchomiony jako zwykły server `Script` w tym samym VM co `SpellService`; realny `VoltNeedle` przeszedł przez `SpellService -> fireProjectile -> SpellProjectiles.Fire -> NpcService.ApplyDamage`, utworzył `1` pocisk (`before=0`, `after=1`), trafił target `Stage4A_VoltNeedle_Target`, zadał `18` damage i zmienił HP `200 -> 182`; po trafieniu aktywne pociski wróciły do `0`.
+- Cleanup 4A: tymczasowy harness usunięty ze Studio; `script_grep` i repo grep nie znajdują markerów `Stage4A`.
+- Nieweryfikowane w 4A: pełny naturalny run z losowymi spellami, multiplayer, oraz orbit/nova/zone/beam matrix. Te archetypy nie były zmieniane w 4A poza współdzieleniem dotychczasowego `SpellService`.
+- Pozostałe prace etapu 4: osobno rozważyć extraction targeting/effects/VFX dispatch i ewentualne uporządkowanie beam/zone/dot task loopów bez zmiany balansu.
+- Rollback 4A: przywrócić poprzedni inline `fireProjectile` z per-projectile `RunService.Heartbeat` w `SpellService.lua`, usunąć `SpellProjectiles.lua` z repo i live Studio oraz cofnąć wpisy planu/changeloga.
 
 Etapy 5-7:
 

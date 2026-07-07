@@ -1,5 +1,69 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Poziom SpellService stage 4A central projectile simulation
+
+### Summary
+
+- Completed Stage 4A for active `game.ServerScriptService.Script.SpellService`.
+- Added `SpellProjectiles` as the owner of active projectile state, movement, range expiry, pierce tracking, and hit detection.
+- Replaced the old per-projectile `RunService.Heartbeat` connection in `SpellService.fireProjectile` with a call to `SpellProjectiles.Fire`.
+- Kept `SpellService` as the owner of spell cooldowns, target selection, VFX payload shape, damage/effect formulas, `SpellVFXEvent`, and the global spell scheduler.
+- Preserved projectile speed, range, damage, cooldown, pierce, target selection, remotes, persistent data, attributes, and balance.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/SpellProjectiles.lua`
+- Updated `Level/ServerScriptService/Script/SpellService.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Created live `game.ServerScriptService.ModuleScript.SpellProjectiles`.
+- Synchronized active `game.ServerScriptService.Script.SpellService` to require `SpellProjectiles` and delegate projectile simulation.
+- Repo/Studio parity after cleanup:
+  - `SpellService`: normalized length `46747`, hash `771417623`.
+  - `SpellProjectiles`: normalized length `3187`, hash `229091311`.
+- Temporary source probes and the temporary `Stage4ASpellProjectileHarness` Script were removed; Studio grep and repo grep found no `Stage4A` markers.
+
+### Architecture
+
+- New graph: `SpellService -> SpellProjectiles`, `SpellService -> NpcService`, `SpellService -> PlayerData`, `SpellService -> SpellDefinitions`, `SpellService -> WeaponConfigs`.
+- `SpellProjectiles` requires no modules and has no dependency on `SpellService`, `NpcService`, `WaveController`, `DamageService`, `RunStatsService`, or `ShrineService`.
+- `SpellProjectiles` owns one lazy `RunService.Heartbeat` connection while active projectiles exist, then disconnects when the active list is empty.
+- No new `_G`, remotes, fallback damage path, bootstrap, or per-projectile runtime connection was added.
+
+### Validation
+
+- Studio Play startup reached normal `SpellService` ready logs with no `SpellProjectiles` or missing-module errors.
+- A temporary Studio-only server Script harness was used so the test ran in the same server VM and shared ModuleScript cache with live `SpellService`.
+- Real `VoltNeedle` projectile flow went through `SpellService -> fireProjectile -> SpellProjectiles.Fire -> NpcService.ApplyDamage`.
+- Captured projectile config: `spellId = "VoltNeedle"`, `damage = 18`, `speed = 108`, `range = 70.04`, `pierce = 0`, `count = 1`.
+- Projectile active count changed `0 -> 1` when fired and returned to `0` after the hit.
+- Target `Stage4A_VoltNeedle_Target` health changed `200 -> 182`; captured `NpcService.ApplyDamage` amount was `18`.
+- Output showed no `SpellService`, `SpellProjectiles`, or `NpcService` errors. Existing unrelated Studio output remained from `Hybrid Terrain Hex Generator`, `ErrorReporter`, and missing TeleportData in Play Solo.
+- Repo grep and Studio grep found no temporary harness/probe markers after cleanup.
+
+### Not Verified
+
+- Full natural run with randomly acquired/projectile spells was not repeated in this checkpoint.
+- Multiplayer spell targeting was not available through current MCP Play.
+- Orbit, nova, zone, and beam archetypes were not behavior-tested in 4A because their code paths were not changed except for sharing the existing `SpellService`.
+
+### Risks
+
+- `SpellProjectiles` uses callbacks configured by `SpellService`; direct calls before `SpellProjectiles.Configure` fail with an explicit assert.
+- Future MCP tests that require `NpcService` state should use a temporary normal server Script or existing gameplay/debug flow, because direct `execute_luau` requires can run outside the live ModuleScript cache used by game scripts.
+- Beam, zone, and dot loops still use existing task loops and remain for later Stage 4 checkpoints.
+
+### Rollback
+
+- Restore the previous inline `fireProjectile` implementation in `SpellService.lua`, including its per-projectile `RunService.Heartbeat`.
+- Remove `Level/ServerScriptService/ModuleScript/SpellProjectiles.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 4A notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Poziom NpcService stage 3F replication update cleanup
 
 ### Summary
