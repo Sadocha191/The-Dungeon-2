@@ -1,5 +1,63 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Four Peaks BlacksmithUI stage 7B icon resolver extraction
+
+### Summary
+
+- Completed Stage 7B for active `game.StarterPlayer.StarterPlayerScripts.BlacksmithUI` in the `Four Peaks` Studio place.
+- Added `BlacksmithIconResolver` to own existing blacksmith weapon/element icon folder lookup, apostrophe variants, folder cache, and missing-icon warnings.
+- Kept `BlacksmithUI` as the owner of UI layout, blacksmith camera, prompt hiding, character visibility, tooltips, category/entry rendering, crafting requests, remotes, and input bindings.
+- Preserved remote names, crafting action payloads, prompt behavior, camera flow, movement restore flow, categories, entry templates, icons, and visual behavior.
+
+### Files
+
+- Added `Four Peaks/StarterPlayer/StarterPlayerScripts/BlacksmithIconResolver.lua`
+- Updated `Four Peaks/StarterPlayer/StarterPlayerScripts/BlacksmithUI.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Four Peaks`.
+- Confirmed active `game.StarterPlayer.StarterPlayerScripts.BlacksmithUI` is a `LocalScript`.
+- Confirmed stale repo duplicate `Four Peaks/StarterPlayer/StarterPlayerScripts/LocalScript/BlacksmithUI.lua` has no corresponding active Studio object and was not edited.
+- Created live `game.StarterPlayer.StarterPlayerScripts.BlacksmithIconResolver`.
+- Repo/Studio parity after sync, measured as UTF-8 byte length plus rolling hash:
+  - `BlacksmithUI`: length `43556`, hash `278059761`.
+  - `BlacksmithIconResolver`: length `4372`, hash `278762766`.
+
+### Architecture
+
+- Moved asset reference reads, unique candidate push, typography variants, folder cache, weapon icon resolution, and element icon resolution into `BlacksmithIconResolver`.
+- `BlacksmithIconResolver` has no ModuleScript dependencies, no runtime loop, no connection, no remote, no `_G`, and no fallback path.
+- `BlacksmithUI` keeps local aliases for `normalizeElementName`, `resetFolderCache`, `resolveWeaponIconAsset`, and `resolveElementIconAsset`.
+- No UI hierarchy, remote, crafting payload, camera flow, movement flow, prompt hiding, or input binding was changed.
+
+### Validation
+
+- Studio Play in `Four Peaks` started successfully with normal lobby ready logs and no `BlacksmithUI`/`BlacksmithIconResolver` errors.
+- Opened blacksmith through the existing server remote path with `OpenBlacksmithUI:FireClient(player)`.
+- Runtime inspection confirmed `BlacksmithGui.Enabled=true`, `Modal=true`, `BlacksmithIconResolver` cloned into `PlayerScripts` as a `ModuleScript`, and `require` returned a table.
+- Render inspection counted `44` image objects, all with non-empty images, plus `13` buttons (`12` visible) and `46` text labels.
+- `git diff --check` passed with only existing CRLF warnings.
+
+### Not Verified
+
+- Manual clicks across every blacksmith category were not repeated in this checkpoint.
+- Craft/upgrade request, material tooltip matrix, and full camera close/restore flow were not executed because Stage 7B changed only icon resolver ownership.
+
+### Risks
+
+- Missing `BlacksmithIconResolver` now fails `BlacksmithUI` startup with a clear assert instead of silently using inline helpers.
+- Future blacksmith icon lookup changes should update `BlacksmithIconResolver`; future UI/camera/prompt changes should remain in `BlacksmithUI` or a dedicated later module.
+
+### Rollback
+
+- Restore the moved icon helper functions and icon cache tables inline in `BlacksmithUI.lua`.
+- Remove `BlacksmithIconResolver.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 7B notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Four Peaks InventoryController stage 7A icon resolver extraction
 
 ### Summary
