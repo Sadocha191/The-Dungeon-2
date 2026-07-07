@@ -1,5 +1,66 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Poziom NpcService stage 3C movement extraction
+
+### Summary
+
+- Completed Stage 3C for active `game.ServerScriptService.ModuleScript.NpcService`.
+- Added `NpcMovement` as a neutral ModuleScript for NPC movement math, ground sampling, spawn emerge, visual repair, model translation, ground-adjusted positions, orbit target math, and obstacle steering.
+- Kept `NpcService` as the public API facade and the only central scheduler owner.
+- Preserved all public `NpcService` function names, arguments, and return behavior.
+- Did not move targeting, melee damage, status effects, death callbacks, despawn side effects, rewards, remotes, persistent data, attributes, or balancing.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/NpcMovement.lua`
+- Updated `Level/ServerScriptService/ModuleScript/NpcService.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Created live `game.ServerScriptService.ModuleScript.NpcMovement`.
+- Synchronized active `game.ServerScriptService.ModuleScript.NpcService` to require `NpcMovement` and delegate movement/grounding/steering helpers to it.
+- Repo/Studio parity for `NpcService`, `NpcRegistry`, and `NpcMovement` was confirmed by normalized length/checksum/line-count metrics.
+- A temporary Studio-only movement validation harness was created for Play validation and removed afterward; no test script or marker was left in Studio or repo.
+
+### Architecture
+
+- New graph: `NpcService -> NpcRegistry`, `NpcService -> NpcMovement`, `NpcService -> NpcShared`, `NpcService -> DamageService`, optional `NpcService -> MissionProgress`; `NpcMovement -> WorldBounds`.
+- `NpcMovement` does not require `NpcService`, `NpcRegistry`, `DamageService`, `WaveController`, `RunStatsService`, or `ShrineService`.
+- `NpcMovement` has no remotes, no `_G`, no `Heartbeat`, no event connections, no `task.spawn`, and no `task.delay`.
+- `NpcService` still owns the single `NpcSyncRequest.OnServerEvent` connection and single central `RunService.Heartbeat`.
+
+### Validation
+
+- Play startup reached normal service-ready logs with no `NpcService` or `NpcMovement` errors.
+- Controlled Play validation used a real `ReplicatedStorage.Enemies.Normal.Slime` template registered through public `NpcService.Register`.
+- Spawn emerge moved the controlled NPC from initial server position `Y=6.25` to surface position `Y=12`.
+- Open chase moved the NPC `8.678` studs during the measured window.
+- Obstacle steering moved the NPC `11.525` studs with `1.322` studs of lateral `Z` displacement around a temporary collidable blocker.
+- Cleanup through public `NpcService.Despawn` returned `NpcService.GetActiveCount()` to `0`.
+- Studio `script_search`, Studio `script_grep`, and repo `rg` found no temporary harness markers after cleanup.
+- Repo grep confirmed `NpcMovement` has no runtime loop, connection, `_G`, remotes, or `Humanoid:TakeDamage`; active `NpcService` still has only the existing remote connection and central `Heartbeat`.
+
+### Not verified
+
+- Full natural long-run movement with 100+ NPC was not repeated in 3C; the 3A 10/25/50 baseline remains the comparison point until 3F optimization.
+- True multiplayer target switching remains unverified in current MCP Play.
+- Full melee/death/drop/thorns matrices remain for Stage 3D/3E.
+
+### Risks
+
+- `NpcMovement` now owns raycast ignore construction for movement and ground sampling. It preserves the previous folders and player-character exclusions, but later optimization should measure allocation/raycast cost before changing behavior.
+- The Play harness used elevated test NPC HP so existing auto-attacks would not kill the NPC before movement measurement; this did not change production balance.
+
+### Rollback
+
+- Restore the previous inline movement, grounding, spawn emerge, visual repair, model translation, orbit target, and obstacle steering helpers in `NpcService.lua`.
+- Remove `Level/ServerScriptService/ModuleScript/NpcMovement.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 3C notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Poziom NpcService stage 3B registry lifecycle extraction and validation
 
 ### Summary

@@ -10,7 +10,7 @@ Zakres: etapowy refaktor największych God Scriptów i gameplayowych zależnośc
 | 0. Audyt i mapa zależności | Ukończony dla repo i aktywnych place `Level`/`Four Peaks`; `Guild` Studio nie było otwarte | Metryki plików, `_G`, `require`, pętle runtime, aktywne ścieżki Studio, plan migracji | Diff dokumentacji i changelog przechodzą walidację |
 | 1. `ProgressService` i gameplayowe `_G` | Ukończony w zatwierdzonym zakresie Stage 1; etap 2 nie rozpoczęty | `RunProgressApi` zastąpił `_G` dla XP/coins/souls/kills/run time/average level/boss/end run; party XP declaration-order bug naprawiony; martwy `SetGlobalRunPause` fallback usunięty z chest itemów | Przed etapem 2 pozostaje tylko osobna akceptacja dalszego zakresu i pełniejszy runtime test, jeżeli dostępny będzie multiplayer |
 | 2. `WaveController` | 2A-2E ukończone | `AbilityGeometry` wydziela czystą geometrię ability; `AbilityHazards` wydziela hazard zones/ticki/cleanup; `AbilityExecutor` wydziela wykonanie ability elit i bossów; `EncounterScheduler` wydziela planowanie spawn/encounter; `RunPortalController` wydziela portal/prompt state; `WaveDebugApi` wydziela Studio-only debug hook registration | Brak zmian damage/tick/cooldown/spawn rate; po każdym podetapie Play test |
-| 3. `NpcService` | 3A-3B ukończone; 3C następny | Registry/lifecycle wydzielone; movement/steering/ground następne | Jeden centralny update, brak per-NPC Heartbeat |
+| 3. `NpcService` | 3A-3C ukończone; 3D następny | Registry/lifecycle oraz movement/steering/ground wydzielone; targeting/melee następne | Jeden centralny update, brak per-NPC Heartbeat |
 | 4. `SpellService` i projectiles | Zaplanowany | Centralny projectile service, targeting/effects/VFX dispatch | Jedno połączenie runtime dla pocisków |
 | 5. `RunStatsService` i `ShrineService` | Zaplanowany | Tylko pozostałe realnie mieszane odpowiedzialności | DamageService i RunDefenseState bez zmiany ownership |
 | 6. Guild | Zablokowany do czasu otwarcia `Guild` Studio | Persistence, membership, treasury, upgrades, teleport | Potwierdzony aktywny place `Gildia` |
@@ -39,6 +39,7 @@ Uwagi o parity:
 - 2026-07-07: Stage 2E verified `WaveController`, `RunPortalController`, and `WaveDebugApi` after extracting portal/prompt state and Studio-only debug hook registration. Temporary Play probes were removed from Studio.
 - 2026-07-07: Stage 3A verified active `NpcService`, captured baseline metrics, and mirrored live Studio ground/visual repair behavior into the repo before any Stage 3 split. Temporary Play probes were removed from Studio.
 - 2026-07-07: Stage 3B added `NpcRegistry` and moved NPC id/model maps plus tombstones behind a neutral registry module. `NpcService` remains the public facade and single central scheduler owner.
+- 2026-07-07: Stage 3C added `NpcMovement` and moved NPC movement math, ground sampling, spawn emerge, visual repair, model translation, and obstacle steering out of `NpcService`. `NpcService` still owns the single central scheduler.
 
 ## Metryki największych plików
 
@@ -48,7 +49,8 @@ Liczby są statycznym skanem repo. `Remote names` to unikalne publiczne remotes 
 |---|---:|---:|---:|---|---|---:|
 | `Level/ServerScriptService/Script/Model/WaveController.lua` | 2576 | 101 / 11 | 10 | `WaveStatusEvent` | 1 `Heartbeat`; liczne `task.delay`; hazard tick taski; 10 `:Connect` | 20 / 11 |
 | `Four Peaks/StarterPlayer/StarterPlayerScripts/InventoryController.lua` | 2565 | 74 / 4 | 0 | `InventoryAction`, `InventorySync`, `RF_GetInventorySnapshot`, `PlayerProgressEvent` | event-driven UI, 28 connections, krótkie `task.delay` refresh | 0 / 0 |
-| `Level/ServerScriptService/ModuleScript/NpcService.lua` | 1666 | 60 / 20 | 4 | `NpcBatchEvent`, `NpcSyncRequest`, `DamageIndicatorEvent` | 1 `Heartbeat`, 1 remote connection | 0 / 0 |
+| `Level/ServerScriptService/ModuleScript/NpcService.lua` | 1350 | 40 / 20 | 5 | `NpcBatchEvent`, `NpcSyncRequest`, `DamageIndicatorEvent` | 1 `Heartbeat`, 1 remote connection | 0 / 0 |
+| `Level/ServerScriptService/ModuleScript/NpcMovement.lua` | 401 | 11 / 15 | 1 | none | no runtime loop or connection | 0 / 0 |
 | `Level/ServerScriptService/Script/ProgressService.lua` | 1645 | 56 / 7 | 0 | `PlayerProgressEvent`, `MissionSummaryEvent`, `SpellEvent`, `PauseMenuEvent` | character health watch task co 0.25 s; remote/player connections | 4 / 8 |
 | `Four Peaks/StarterPlayer/StarterPlayerScripts/BlacksmithUI.lua` | 1631 | 68 / 0 | 3 | `OpenBlacksmithUI`, `BlacksmithSync`, `BlacksmithAction` | event-driven UI, 18 connections | 0 / 0 |
 | `Four Peaks/ServerScriptService/ModuleScript/GuildService.lua` | 1503 | 52 / 23 | 3 | `GuildUpdated`, `TeleportStatus` | no frame loop; 1 player removing connection | 0 / 0 |
@@ -249,13 +251,14 @@ Etap 3, NPC:
 
 - 3A ukończony.
 - 3B ukończony.
+- 3C ukończony.
 - Aktywna ścieżka Studio: `game.ServerScriptService.ModuleScript.NpcService`.
 - Plik repo: `Level/ServerScriptService/ModuleScript/NpcService.lua`.
 - Checkpoint przed etapem 3: `3780841 Refactor dungeon NPC and reward systems`; worktree był czysty przed 3A.
 - Wykryto drift Studio/repo: aktywne Studio miało nowszy ground/visual repair (`DETACHED_VISUAL_REPAIR_MIN_FLAT_DISTANCE`, `repairDetachedVisualParts`, `modelYExtents`, `moveNpcModelToRoot`) niż repo. Repo zostało zsynchronizowane do aktywnej wersji bez zmiany zachowania Studio.
 - Publiczne API do zachowania: `GetRoot`, `GetPosition`, `IsAlive`, `GetHealth`, `GetLivingModels`, `GetActiveCount`, `DespawnOldestFarNormal`, `GetNearestEnemy`, `GetEnemiesInRadius`, `GetTargetingMetrics`, `ApplySlow`, `ApplyFreeze`, `AddImpulse`, `BindDeath`, `ApplyDamage`, `Register`, `SetIncomingDamageModifier`, `LockForAbility`, `SetPosition`, `Despawn`.
 - Aktywni callerzy: `WaveController`, `WeaponCombat`, `SpellService`, `StatueService`, `RunStatsService`, `AbilityExecutor`.
-- Obecny graf po 3B: `NpcService -> NpcRegistry`, `NpcService -> WorldBounds`, `NpcService -> NpcShared`, `NpcService -> DamageService`, opcjonalnie `NpcService -> MissionProgress`; `NpcRegistry` nie wymaga żadnego modułu i nie tworzy cyklu.
+- Obecny graf po 3C: `NpcService -> NpcRegistry`, `NpcService -> NpcMovement`, `NpcService -> NpcShared`, `NpcService -> DamageService`, opcjonalnie `NpcService -> MissionProgress`; `NpcMovement -> WorldBounds`; `NpcRegistry` nie wymaga żadnego modułu i nie tworzy cyklu.
 - Stan runtime po 3B: `NpcRegistry` przechowuje `nextNpcId`, `npcById`, `npcByModel` i `tombstones`; per-entry `deathCallbacks` pozostają w rekordzie NPC tworzonym przez `NpcService`.
 - Połączenia runtime: `NpcSyncRequest.OnServerEvent` i jeden centralny `RunService.Heartbeat`.
 - Pętla runtime: jeden `Heartbeat` wykonuje `getAlivePlayers`, `buildEngagementSlots`, `updateNpc` dla każdego wpisu i batch replication co `NpcShared.BatchRate = 0.1`.
@@ -285,11 +288,19 @@ Etap 3, NPC:
 - Kontrolowany Studio-only harness 3B potwierdził: zwykłą rejestrację, duplicate register zwracający ten sam id bez wzrostu registry, rejestrację elity i bossa, manual `Destroy` cleanup, death callback dokładnie raz, despawn bez death callbacku, reset registry oraz 20 cykli register/remove bez narastania callbacków.
 - Zachowanie `nextNpcId` po 3B pozostaje monotoniczne: `NpcRegistry.Reset()` czyści mapy/tombstones, ale nie resetuje licznika id, zgodnie z brakiem resetu `nextNpcId` w poprzednim inline stanie.
 - Ograniczenia testu 3B: dokładna liczba natywnych `RBXScriptConnection` nie była mierzona; potwierdzono brak dodatkowych wywołań callbacków, brak nowych pętli oraz statycznie jeden `RunService.Heartbeat` i jedno `NpcSyncRequest.OnServerEvent`. Tombstone po manualnym `Destroy` mógł zostać skonsumowany przez batch broadcast w tej samej klatce, więc obserwacja tombstone dla tej ścieżki pozostaje pośrednia.
+- 3C dodał `Level/ServerScriptService/ModuleScript/NpcMovement.lua`.
+- `NpcMovement` odpowiada za `Flat`, `FlatMagnitude`, `SafeUnit`, `ClampMagnitude`, `NearestAlivePlayerFlatDistance`, visual repair, ground offset/height, spawn emerge, model translation, ground-adjusted position, orbit target math i obstacle steering.
+- `NpcMovement` wymaga tylko `WorldBounds` i Roblox services potrzebnych do ruchu/raycast ignore; nie wymaga `NpcService`, `NpcRegistry`, `DamageService`, `WaveController`, `RunStatsService` ani `ShrineService`.
+- `NpcService` po 3C nadal zachowuje publiczne API i jest właścicielem jednego `NpcSyncRequest.OnServerEvent` oraz jednego centralnego `RunService.Heartbeat`; nie dodano per-NPC connection, nowej pętli, remotes ani gameplay `_G`.
+- Walidacja 3C: live Studio `NpcMovement` utworzony, live `NpcService` zsynchronizowany; repo/Studio parity dla `NpcService`, `NpcRegistry` i `NpcMovement` potwierdzona przez length/checksum/line count.
+- Play test 3C przez tymczasowy Studio-only harness na realnym template `Slime` i publicznym `NpcService.Register`: spawn emerge przesunął pozycję z `Y=6.25` do `Y=12`, open chase przesunął NPC o `8.678` studs, obstacle steering przesunął NPC o `11.525` studs z bocznym zejściem `1.322` studs, a cleanup przez `NpcService.Despawn` zostawił `GetActiveCount() = 0`.
+- Ograniczenia testu 3C: naturalny długi run, multiplayer target switching i pełna macierz melee/death/drop/thorns pozostają dla 3D/3E; tymczasowy harness miał testowo podniesione HP NPC, aby automatyczne ataki gracza nie kończyły walidacji ruchu przed pomiarem.
 - `NpcService` zostaje właścicielem publicznego API i centralnego schedulera.
-- Kandydaci 3C-3F: movement/grounding, targeting/melee, status/death/despawn, central update optimization.
+- Kandydaci 3D-3F: targeting/melee, status/death/despawn, central update optimization.
 - Główny `Heartbeat` pozostaje centralny; żadnych per-NPC połączeń.
 - Rollback 3A: cofnąć parity sync `NpcService.lua` tylko jeśli świadomie wracamy do stale repo copy, oraz cofnąć wpisy planu/changeloga.
 - Rollback 3B: przywrócić inline `nextNpcId`, `npcById`, `npcByModel` i `tombstones` w `NpcService.lua`, usunąć `NpcRegistry.lua` z repo i live Studio oraz cofnąć wpisy planu/changeloga.
+- Rollback 3C: przywrócić przeniesione helpery movement/grounding/steering inline w `NpcService.lua`, usunąć `NpcMovement.lua` z repo i live Studio oraz cofnąć wpisy planu/changeloga.
 
 Etap 4, Spell/projectiles:
 
