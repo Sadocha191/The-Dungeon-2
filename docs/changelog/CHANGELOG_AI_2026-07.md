@@ -1,5 +1,63 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-07 - Gildia GuildPlace stage 6A remote factory extraction
+
+### Summary
+
+- Completed Stage 6A for active `game.ServerScriptService.Script.GuildPlace` in the `Guild` Studio place.
+- Added `GuildPlaceRemotes` to own guild place RemoteEvent/RemoteFunction creation.
+- Kept `GuildPlace` as the owner of guild authorization, DataStore profile/guild access, treasury deposit/spend, location prompts, return teleport, and remote callback handlers.
+- Preserved remote names, persistent data, teleport data, treasury math, authorization checks, location objects, and client contracts.
+
+### Files
+
+- Added `Guild/ServerScriptService/ModuleScript/GuildPlaceRemotes.lua`
+- Updated `Guild/ServerScriptService/Script/GuildPlace.server.lua`
+- Updated `docs/GOD_SCRIPT_REFACTOR_PLAN.md`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Guild`.
+- Created live `game.ServerScriptService.ModuleScript.GuildPlaceRemotes`.
+- Synchronized active `game.ServerScriptService.Script.GuildPlace`.
+- Repo/Studio parity after sync, measured as UTF-8 byte length plus rolling hash:
+  - `GuildPlace`: length `43272`, hash `661975836`.
+  - `GuildPlaceRemotes`: length `1923`, hash `248263159`.
+
+### Architecture
+
+- Moved remote folder and remote instance creation from `GuildPlace` into `GuildPlaceRemotes.EnsureAll`.
+- `GuildPlaceRemotes` has no `require()` dependencies, no runtime loop, no connection, and no `_G`.
+- `GuildPlace` now explicitly requires `GuildPlaceRemotes` through an asserted `ServerScriptService.ModuleScript` lookup.
+- No new remotes, fallback paths, DataStore keys, teleport data fields, runtime loops, schedulers, or require cycles were added.
+
+### Validation
+
+- Studio inspection confirmed all existing guild remotes still exist with the same classes:
+  - `RequestLobbyReturn`, `LobbyReturnStatus`, `GuildLocationOpened`, `GuildTreasuryUpdated` as `RemoteEvent`.
+  - `GetGuildCastleState`, `GetTreasury`, `DepositToTreasury`, `SpendFromTreasury` as `RemoteFunction`.
+- Studio Play in `Guild` started successfully and logged `[GuildPlace] Ready`.
+- Runtime inspection in Play confirmed the same remote classes under `ReplicatedStorage.RemoteEvents` and `ReplicatedStorage.RemoteFunctions`.
+- `git diff --check` passed with only existing CRLF warnings.
+
+### Not Verified
+
+- Guild create/join/invite/leave/kick flows were not repeated in this checkpoint.
+- Treasury deposit/spend, upgrades, task progress, and return teleport were not executed because Stage 6A changed only remote construction.
+
+### Risks
+
+- `GuildPlace` remains a large script with DataStore, treasury, location, and teleport responsibilities; those are left for later staged checkpoints.
+- Missing `GuildPlaceRemotes` now fails startup with a clear assert instead of silently creating remotes inline.
+
+### Rollback
+
+- Restore the inline remote helper functions and remote assignments in `GuildPlace.server.lua`.
+- Remove `GuildPlaceRemotes.lua` from repo and live Studio.
+- Revert this changelog entry, the `CHANGELOG_AI.md` index line, and the Stage 6A notes in `docs/GOD_SCRIPT_REFACTOR_PLAN.md`.
+
 ## 2026-07-07 - Poziom RunStatsService stage 5A unused global shim removal
 
 ### Summary

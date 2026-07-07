@@ -2,10 +2,16 @@ local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local ServerScriptService = game:GetService("ServerScriptService")
 local TeleportService = game:GetService("TeleportService")
 local Workspace = game:GetService("Workspace")
 
 local GuildConfig = require(ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("GuildConfig"))
+local serverModuleFolder = ServerScriptService:FindFirstChild("ModuleScript") or ServerScriptService:FindFirstChild("ModuleScripts")
+assert(serverModuleFolder, "[GuildPlace] Server ModuleScript folder is required")
+local guildPlaceRemotesModule = serverModuleFolder:FindFirstChild("GuildPlaceRemotes")
+assert(guildPlaceRemotesModule and guildPlaceRemotesModule:IsA("ModuleScript"), "[GuildPlace] GuildPlaceRemotes ModuleScript is required")
+local GuildPlaceRemotes = require(guildPlaceRemotesModule)
 
 local playerProfileStore = DataStoreService:GetDataStore("GlobalPlayerProgress_v1")
 local guildStore = DataStoreService:GetDataStore("GuildRecords_v1")
@@ -127,66 +133,15 @@ for _, definition in ipairs(GUILD_LOCATION_DEFINITIONS) do
 	GUILD_LOCATION_BY_ID[definition.Id] = definition
 end
 
-local function getRemoteEventsFolder()
-	local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
-	if not remoteEvents then
-		remoteEvents = Instance.new("Folder")
-		remoteEvents.Name = "RemoteEvents"
-		remoteEvents.Parent = ReplicatedStorage
-	end
-	return remoteEvents
-end
-
-local function ensureRemoteEvent(name)
-	local remoteEvents = getRemoteEventsFolder()
-	local event = remoteEvents:FindFirstChild(name)
-	if event and event:IsA("RemoteEvent") then
-		return event
-	end
-	if event then
-		event:Destroy()
-	end
-
-	event = Instance.new("RemoteEvent")
-	event.Name = name
-	event.Parent = remoteEvents
-	return event
-end
-
-local function getRemoteFunctionsFolder()
-	local remoteFunctions = ReplicatedStorage:FindFirstChild("RemoteFunctions")
-	if not remoteFunctions then
-		remoteFunctions = Instance.new("Folder")
-		remoteFunctions.Name = "RemoteFunctions"
-		remoteFunctions.Parent = ReplicatedStorage
-	end
-	return remoteFunctions
-end
-
-local function ensureRemoteFunction(name)
-	local remoteFunctions = getRemoteFunctionsFolder()
-	local fn = remoteFunctions:FindFirstChild(name)
-	if fn and fn:IsA("RemoteFunction") then
-		return fn
-	end
-	if fn then
-		fn:Destroy()
-	end
-
-	fn = Instance.new("RemoteFunction")
-	fn.Name = name
-	fn.Parent = remoteFunctions
-	return fn
-end
-
-local requestLobbyReturn = ensureRemoteEvent("RequestLobbyReturn")
-local lobbyReturnStatus = ensureRemoteEvent("LobbyReturnStatus")
-local guildLocationOpened = ensureRemoteEvent("GuildLocationOpened")
-local guildTreasuryUpdated = ensureRemoteEvent("GuildTreasuryUpdated")
-local getGuildCastleState = ensureRemoteFunction("GetGuildCastleState")
-local getTreasury = ensureRemoteFunction("GetTreasury")
-local depositToTreasury = ensureRemoteFunction("DepositToTreasury")
-local spendFromTreasury = ensureRemoteFunction("SpendFromTreasury")
+local guildRemotes = GuildPlaceRemotes.EnsureAll(ReplicatedStorage)
+local requestLobbyReturn = guildRemotes.RequestLobbyReturn
+local lobbyReturnStatus = guildRemotes.LobbyReturnStatus
+local guildLocationOpened = guildRemotes.GuildLocationOpened
+local guildTreasuryUpdated = guildRemotes.GuildTreasuryUpdated
+local getGuildCastleState = guildRemotes.GetGuildCastleState
+local getTreasury = guildRemotes.GetTreasury
+local depositToTreasury = guildRemotes.DepositToTreasury
+local spendFromTreasury = guildRemotes.SpendFromTreasury
 
 local function clampInt(value, minValue)
 	local n = math.floor(tonumber(value) or 0)

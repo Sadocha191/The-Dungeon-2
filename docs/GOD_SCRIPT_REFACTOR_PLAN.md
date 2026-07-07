@@ -13,7 +13,7 @@ Zakres: etapowy refaktor największych God Scriptów i gameplayowych zależnośc
 | 3. `NpcService` | 3A-3F ukończone | Registry, movement/steering/ground, targeting/melee, lifecycle/status/death/despawn oraz batch replication wydzielone | Jeden centralny update, brak per-NPC Heartbeat |
 | 4. `SpellService` i projectiles | 4A-4F ukończone | `SpellProjectiles` wydziela projectile simulation i hit detection; `SpellTargeting` wydziela enemy query/target picking/beam segment distance; `SpellEffects` wydziela status/effect application; `SpellVisuals` wydziela server VFX dispatch/payload/orbit sync; `SpellSustained` wydziela zone/beam tick loopi; martwe server-side konstruktory VFX usunięte | Pociski mają jeden leniwy scheduler; targeting/effects/VFX dispatch oraz zone/beam tick loopi delegowane bez zmian balansu |
 | 5. `RunStatsService` i `ShrineService` | 5A ukończone | Usunięto nieużywane globalne shimy `RunStatsService`; `ShrineService` `_G.PrepareRunShrines` pozostaje aktywnym kontraktem `RunReadyGate` | DamageService i RunDefenseState bez zmiany ownership |
-| 6. Guild | Zablokowany do czasu otwarcia `Guild` Studio | Persistence, membership, treasury, upgrades, teleport | Potwierdzony aktywny place `Gildia` |
+| 6. Guild | 6A ukończone | `GuildPlaceRemotes` wydziela remote factory aktywnego `Gildia`; persistence, membership, treasury, upgrades i teleport bez zmian | Potwierdzony aktywny place `Gildia`; po każdym kolejnym podetapie Play smoke |
 | 7. Duże kontrolery UI | Zaplanowany | Inventory/blacksmith/crafting UI po stabilizacji serwera | Brak zmian wyglądu/remotes/bindów |
 
 ## Aktywne ścieżki Studio
@@ -24,7 +24,7 @@ Potwierdzone przez MCP 2026-07-01:
 |---|---|---|
 | Level | `Level` | `ServerScriptService.Script.ProgressService`, `ServerScriptService.Script.Model.WaveController`, `ServerScriptService.ModuleScript.NpcService`, `ServerScriptService.ModuleScript.Stats.RunStatsService`, `ServerScriptService.Script.SpellService`, `ServerScriptService.Script.ShrineService`, `ServerScriptService.Script.DropService`, `ServerScriptService.ModuleScript.DamageService` |
 | Four Peaks | `Four Peaks` | `ServerScriptService.ModuleScript.GuildService`, `ServerScriptService.ModuleScript.CraftingService`, `ServerScriptService.Script.BlacksmithService`, `StarterPlayer.StarterPlayerScripts.InventoryController`, `StarterPlayer.StarterPlayerScripts.BlacksmithUI`, `StarterPlayer.StarterPlayerScripts.GuildClient` |
-| Guild | niedostępny | `Guild/` przeanalizowano tylko z repo; przed etapem 6 trzeba otworzyć i ustawić Studio `Gildia` |
+| Guild | `Guild` | `ServerScriptService.Script.GuildPlace`, `ServerScriptService.ModuleScript.GuildPlaceRemotes`, `StarterPlayer.StarterPlayerScripts.GuildCastleClient` |
 
 Uwagi o parity:
 
@@ -67,7 +67,8 @@ Liczby są statycznym skanem repo. `Remote names` to unikalne publiczne remotes 
 | `Level/ServerScriptService/Script/ProgressService.lua` | 1645 | 56 / 7 | 0 | `PlayerProgressEvent`, `MissionSummaryEvent`, `SpellEvent`, `PauseMenuEvent` | character health watch task co 0.25 s; remote/player connections | 4 / 8 |
 | `Four Peaks/StarterPlayer/StarterPlayerScripts/BlacksmithUI.lua` | 1631 | 68 / 0 | 3 | `OpenBlacksmithUI`, `BlacksmithSync`, `BlacksmithAction` | event-driven UI, 18 connections | 0 / 0 |
 | `Four Peaks/ServerScriptService/ModuleScript/GuildService.lua` | 1503 | 52 / 23 | 3 | `GuildUpdated`, `TeleportStatus` | no frame loop; 1 player removing connection | 0 / 0 |
-| `Guild/ServerScriptService/Script/GuildPlace.server.lua` | 1422 | 63 / 4 | 1 | `GetGuildCastleState`, `GetTreasury`, `DepositToTreasury`, `SpendFromTreasury`, `GuildLocationOpened`, `GuildTreasuryUpdated`, `LobbyReturnStatus`, `RequestLobbyReturn` | no frame loop; prompt/player/remote connections | 0 / 0 |
+| `Guild/ServerScriptService/Script/GuildPlace.server.lua` | 1377 | 59 / 4 | 2 | `GetGuildCastleState`, `GetTreasury`, `DepositToTreasury`, `SpendFromTreasury`, `GuildLocationOpened`, `GuildTreasuryUpdated`, `LobbyReturnStatus`, `RequestLobbyReturn` | no frame loop; prompt/player/remote connections | 0 / 0 |
+| `Guild/ServerScriptService/ModuleScript/GuildPlaceRemotes.lua` | 79 | 3 / 1 | 0 | creates same guild RemoteEvents/RemoteFunctions | no runtime loop or connection | 0 / 0 |
 | `Four Peaks/ServerScriptService/ModuleScript/CraftingService.lua` | 1287 | 41 / 16 | 6 | none | no runtime loop | 0 / 0 |
 | `Level/ServerScriptService/Script/SpellService.lua` | 594 | 44 / 0 | 9 | `SpellVFXEvent` | 1 global spell `Heartbeat`; projectile simulation delegated to `SpellProjectiles`; targeting delegated to `SpellTargeting`; effects delegated to `SpellEffects`; VFX dispatch delegated to `SpellVisuals`; zone/beam sustained loops delegated to `SpellSustained` | 0 / 0 |
 | `Level/ServerScriptService/ModuleScript/SpellSustained.lua` | 138 | 2 / 3 | 0 | none | existing zone and beam `task.spawn` tick loops moved from `SpellService`; no connection | 0 / 0 |
@@ -424,6 +425,20 @@ Etap 5, RunStatsService/ShrineService:
 - Cleanup 5A: tymczasowy target folder usunięty; repo grep i Studio grep nie znajdują markerów `Stage5A`.
 - Nieweryfikowane w 5A: pełny naturalny long-run z chest item modifiers i shrine completion nie był powtarzany; test dotyczył usunięcia nieużywanych globali oraz publicznego direct API.
 - Rollback 5A: przywrócić dwa końcowe przypisania `_G.GetRunStat` i `_G.HealRunPlayer` w `RunStatsService.lua` oraz cofnąć wpisy planu/changeloga.
+
+Etap 6, Guild:
+
+- 6A ukończony.
+- 6A potwierdził aktywne Studio `Guild` i ścieżkę `game.ServerScriptService.Script.GuildPlace`.
+- 6A dodał `Guild/ServerScriptService/ModuleScript/GuildPlaceRemotes.lua`.
+- `GuildPlaceRemotes` odpowiada wyłącznie za utworzenie/odzyskanie istniejących `RemoteEvents` i `RemoteFunctions` Gildii: `RequestLobbyReturn`, `LobbyReturnStatus`, `GuildLocationOpened`, `GuildTreasuryUpdated`, `GetGuildCastleState`, `GetTreasury`, `DepositToTreasury`, `SpendFromTreasury`.
+- `GuildPlace` po 6A nadal odpowiada za auth guild place, DataStore profile/guild loads, treasury deposit/spend, locations/prompts, return teleport i remote callback handlers.
+- Graf 6A: `GuildPlace -> GuildPlaceRemotes`, `GuildPlace -> GuildConfig`; `GuildPlaceRemotes` nie wymaga modułów. Nie powstał cykl require.
+- Runtime 6A: nie dodano pętli, connection, schedulerów, remotes o nowych nazwach, `_G` ani fallbacków; przeniesiono tylko istniejące remote factory helpery.
+- Walidacja 6A: repo/Studio parity aktywnego `GuildPlace` i nowego modułu potwierdzona bajtowym length/hash: `GuildPlace` `43272/661975836`, `GuildPlaceRemotes` `1923/248263159`.
+- Play test 6A w aktywnym `Gildia`: startup zakończył się logiem `[GuildPlace] Ready`; runtime inspection potwierdził te same cztery `RemoteEvent` i cztery `RemoteFunction` klasy pod `ReplicatedStorage.RemoteEvents`/`RemoteFunctions`.
+- Nieweryfikowane w 6A: create/join guild, treasury deposit/spend, upgrade, task progress i teleport do/z lobby nie były wykonywane, ponieważ checkpoint nie zmieniał DataStore ani handlerów biznesowych.
+- Rollback 6A: przywrócić inline `getRemoteEventsFolder`, `ensureRemoteEvent`, `getRemoteFunctionsFolder`, `ensureRemoteFunction` w `GuildPlace.server.lua`, usunąć `GuildPlaceRemotes.lua` z repo i live Studio oraz cofnąć wpisy planu/changeloga.
 
 ## Plan migracji `_G`
 
