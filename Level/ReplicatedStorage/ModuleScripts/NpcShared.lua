@@ -37,6 +37,8 @@ NpcShared.Attributes = table.freeze({
 	Damage = "Damage",
 	AttackRange = "AttackRange",
 	AttackCooldown = "AttackCooldown",
+	MovementMode = "MovementMode",
+	MovementProfile = "MovementProfile",
 })
 
 NpcShared.AnimationStateByNpcState = table.freeze({

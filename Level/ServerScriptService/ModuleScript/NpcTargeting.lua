@@ -6,6 +6,7 @@ assert(serverModuleFolder, "[NpcTargeting] Server ModuleScript folder is require
 local npcMovementModule = serverModuleFolder:FindFirstChild("NpcMovement")
 assert(npcMovementModule and npcMovementModule:IsA("ModuleScript"), "[NpcTargeting] NpcMovement ModuleScript is required")
 local NpcMovement = require(npcMovementModule)
+local NpcNavigationConfig = require(serverModuleFolder:WaitForChild("NpcNavigationConfig"))
 
 local NpcTargeting = {}
 
@@ -51,17 +52,13 @@ function NpcTargeting.BuildEngagementSlots(alivePlayers: {any}, npcPairs: () -> 
 	end
 
 	local groups = {}
+	local playerInfo = {}
+	for _, info in ipairs(alivePlayers) do
+		playerInfo[info.player] = info
+	end
 	for _, npc in npcPairs() do
 		if not npc.dead and npc.model.Parent then
-			local bestInfo = nil
-			local bestDist = math.huge
-			for _, info in ipairs(alivePlayers) do
-				local dist = NpcMovement.FlatMagnitude(info.hrp.Position, npc.position)
-				if dist < bestDist then
-					bestDist = dist
-					bestInfo = info
-				end
-			end
+			local bestInfo = playerInfo[npc.targetPlayer]
 
 			if bestInfo then
 				local key = tostring(bestInfo.player.UserId)
@@ -148,36 +145,70 @@ function NpcTargeting.ShouldDistanceDespawn(npc: any, alivePlayers: {any}, maxDi
 	if npc.isElite or npc.isBoss or #alivePlayers == 0 then
 		return false
 	end
-	return NpcMovement.NearestAlivePlayerFlatDistance(npc.position, alivePlayers) > maxDistance
+	local nearest = math.huge
+	for _, info in ipairs(alivePlayers) do
+		nearest = math.min(nearest, (info.hrp.Position - npc.position).Magnitude)
+	end
+	return nearest > maxDistance
 end
 
-function NpcTargeting.FindNearestTarget(npc: any, alivePlayers: {any}, now: number): any?
-	local targetPlayer = npc.targetPlayer
-	if targetPlayer then
-		for _, info in ipairs(alivePlayers) do
-			if info.player == targetPlayer then
-				return info
+local function targetScore(npc: any, info: any): number
+	local delta = info.hrp.Position - npc.position
+	local verticalPenalty = npc.movementMode == "Flying" and 0.1 or 1.35
+	return delta.Magnitude + math.abs(delta.Y) * verticalPenalty
+end
+
+function NpcTargeting.RefreshTargets(npcPairs: () -> (), alivePlayers: {any}, now: number)
+	local aliveByPlayer = {}
+	for _, info in ipairs(alivePlayers) do
+		aliveByPlayer[info.player] = info
+	end
+
+	for _, npc in npcPairs() do
+		if not npc.dead and npc.model.Parent then
+			local current = aliveByPlayer[npc.targetPlayer]
+			local unreachableExpired = npc.unreachableSince ~= nil
+				and now - npc.unreachableSince >= NpcNavigationConfig.Scheduler.UnreachableRetargetSeconds
+			if unreachableExpired then
+				npc.retargetBlockedPlayer = npc.targetPlayer
+				npc.retargetBlockedUntil = now + NpcNavigationConfig.Scheduler.UnreachableRetargetSeconds
+				npc.unreachableSince = nil
+				current = nil
+			end
+
+			local bestInfo = current
+			local bestScore = current and targetScore(npc, current) * 0.9 or math.huge
+			for _, info in ipairs(alivePlayers) do
+				if not (info.player == npc.retargetBlockedPlayer and now < (npc.retargetBlockedUntil or 0)) then
+					local score = targetScore(npc, info)
+					if score < bestScore then
+						bestScore = score
+						bestInfo = info
+					end
+				end
+			end
+			npc.targetPlayer = bestInfo and bestInfo.player or nil
+			if now >= (npc.retargetBlockedUntil or 0) then
+				npc.retargetBlockedPlayer = nil
+				npc.retargetBlockedUntil = nil
+			end
+			if bestInfo and bestInfo.player ~= (current and current.player) then
+				npc.unreachableSince = nil
 			end
 		end
 	end
+end
 
-	if now < npc.nextTargetScanAt then
+function NpcTargeting.FindNearestTarget(npc: any, alivePlayers: {any}, _now: number): any?
+	if not npc.targetPlayer then
 		return nil
 	end
-	npc.nextTargetScanAt = now + 0.35
-
-	local bestInfo = nil
-	local bestDist = math.huge
 	for _, info in ipairs(alivePlayers) do
-		local dist = NpcMovement.FlatMagnitude(info.hrp.Position, npc.position)
-		if dist < bestDist then
-			bestDist = dist
-			bestInfo = info
+		if info.player == npc.targetPlayer then
+			return info
 		end
 	end
-
-	npc.targetPlayer = bestInfo and bestInfo.player or nil
-	return bestInfo
+	return nil
 end
 
 function NpcTargeting.ComputeFormationWeight(dist: number, stopDistance: number): number

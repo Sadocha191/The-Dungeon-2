@@ -1,5 +1,67 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-11 - Poziom kompletna przebudowa nawigacji NPC
+
+### Summary
+
+- Zachowano kinematyczny `NpcService`, publiczne API, istniejące remotes oraz klientową interpolację.
+- Dodano profile `GroundSmall`, `GroundLarge` i `Flying`, lokalne warstwy gruntu, objętościowe sprawdzanie korytarzy, ograniczoną kolejkę `PathfindingService`, cache tras, graf air nodes, no-fly zones i przestrzenną separację.
+- Scheduler centralny pracuje z ruchem 12 Hz, targetowaniem 3 Hz, formacjami 2 Hz i replikacją 10 Hz. Pathfinding ma limit 2 aktywnych obliczeń, 15 startów/s i 160 oczekujących żądań.
+- Targetowanie używa dystansu 3D i wysokości, formacje grupują według rzeczywistego targetu, melee odrzuca nieskuteczną wysokość, a ranged wymaga LOS.
+- `WorldBounds` zachowuje tag `Terrain` i dodaje `NpcWalkable`; profile rozpoznają koszty modifierów oraz przejścia `Jump`, `Climb` i `Drop`.
+- Naprawiono istniejący helper odłączonych wizualnych części: wyrównuje wizualne części do rootu bez przesuwania samego serwerowego rootu.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/NpcNavigationConfig.lua`
+- Added `Level/ServerScriptService/ModuleScript/NpcGroundNavigation.lua`
+- Added `Level/ServerScriptService/ModuleScript/NpcFlightNavigation.lua`
+- Added `Level/ServerScriptService/ModuleScript/NpcNavigationDebug.lua`
+- Added `docs/NPC_NAVIGATION.md`
+- Updated `Level/ServerScriptService/ModuleScript/NpcService.lua`
+- Updated `Level/ServerScriptService/ModuleScript/NpcMovement.lua`
+- Updated `Level/ServerScriptService/ModuleScript/NpcTargeting.lua`
+- Updated `Level/ServerScriptService/ModuleScript/NpcMelee.lua`
+- Updated `Level/ServerScriptService/ModuleScript/NpcReplication.lua`
+- Updated `Level/ServerScriptService/ModuleScript/WorldBounds.lua`
+- Updated `Level/ServerScriptService/ModuleScript/MobConfig.lua`
+- Updated `Level/ReplicatedStorage/ModuleScripts/NpcShared.lua`
+- Updated `Level/StarterPlayer/StarterPlayerScripts/LocalScript/NpcPresentation.client.lua`
+- Updated `Level/ServerScriptService/Script/Model/WaveController.lua`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio and validation
+
+- Active place: `Level`; all active changed sources and four new ModuleScripts were synchronized through MCP.
+- Compile/startup smoke passed. The only startup exception remained the pre-existing unrelated `Hybrid Terrain Hex Generator:16` toolbar error.
+- Controlled Play arenas verified: flat movement, underground emergence, `NpcWalkable`, Roblox Terrain and BasePart wall avoidance without climbing, canyon rejection, valid bridge crossing, under/over bridge layer retention, water avoidance, high-target melee rejection, ranged LOS, flight clearance, 3D flight, obstacle routing through air nodes, no-fly zone avoidance, slow/freeze/impulse/pause/ability lock, damage, death, despawn and two death callbacks.
+- Client validation confirmed `NpcBatchEvent`, interpolation of ground/flying models and non-flattened flying orientation (`LookVector.Y = -1` in the controlled vertical-look probe).
+- Final isolated flat stress: 100/120 NPC moved with `0` path requests and an empty queue. Approximate movement tick was `2.87 ms` at 100 and `3.24 ms` for the following 120-NPC interval; maximum observed was `8.21 ms`.
+- Controlled 500-NPC test moved all 500 with `0` path requests. After direct-probe staggering/LOD the one-second sample averaged `12.10 ms`, max `20.08 ms`, about `7.3k` navigation/combat casts/s and cleaned active count back to `0`.
+- No per-NPC runtime loop or connection was added. The only new `task.spawn` is a bounded single path computation owned by the shared queue.
+
+### Not verified
+
+- Natural multiplayer target switching was not available in the single-client MCP session.
+- No production map currently contains authored `PathfindingLink` transitions for a full real-content Jump/Climb/Drop traversal test; label filtering and compile/runtime integration were verified through the shared path pipeline.
+- The 500-NPC result is a short controlled stress sample, not a full encounter soak. It shows the architecture remains bounded but that 500 simultaneously near-relevant NPCs are above the comfortable 120-NPC runtime target.
+- Existing Slime uses procedural presentation, so the client probe validated interpolation/orientation but did not produce an `AnimationTrack`; existing presentation animation code remained intact.
+
+### Risks
+
+- Navigation mesh quality still depends on correctly authored walkable proxies, modifiers and links. Complex visual meshes should not be used directly as navigation collision.
+- `GroundLarge` is a practical gameplay agent envelope, not the full decorative bounds of the largest Ent canopy; oversized content may need a dedicated profile and proxy audit.
+- At 500 simultaneously relevant NPCs the measured average movement tick was about 12 ms with 20 ms peaks. Distance LOD and stagger prevent the initial all-at-once probe, but a longer 500-NPC soak should precede raising the live cap.
+- Full snapshot replication remains at the compatible 10 Hz contract and can become the next scaling bottleneck even though this change did not alter its cadence.
+
+### Rollback
+
+- Restore the previous versions of all updated active Level scripts listed above.
+- Delete the four new navigation ModuleScripts from repo and active Studio.
+- Remove `docs/NPC_NAVIGATION.md` and revert this changelog/index entry.
+- No DataStore, TeleportData, remote name, persistent schema or map object migration is required.
+
 ## 2026-07-08 - God Script refactor final audit
 
 ### Summary

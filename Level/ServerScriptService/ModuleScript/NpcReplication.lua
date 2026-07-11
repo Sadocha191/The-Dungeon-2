@@ -16,6 +16,8 @@ local function buildSnapshot(npc: any)
 		maxHp = npc.maxHealth,
 		dead = npc.dead,
 		despawned = false,
+		movementMode = npc.movementMode,
+		movementProfile = npc.movementProfile,
 	}
 	if typeof(npc.spawnSurfacePosition) == "Vector3" then
 		snapshot.spawnSurfacePos = npc.spawnSurfacePosition

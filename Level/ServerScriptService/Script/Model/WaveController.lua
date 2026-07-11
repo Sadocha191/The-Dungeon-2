@@ -299,6 +299,7 @@ end
 function WorldBounds.BuildMobGrounding(mob: Model?, spawnConfig)
 	local grounding = {
 		groundSnapDisabled = false,
+		flightAltitude = 0,
 		root = nil,
 		rootLocalCFrame = nil,
 		rootGroundOffset = 0,
@@ -308,9 +309,16 @@ function WorldBounds.BuildMobGrounding(mob: Model?, spawnConfig)
 		return grounding
 	end
 
+	local configuredFlight = type(spawnConfig) == "table"
+		and (spawnConfig.canFly == true
+			or spawnConfig.movementMode == "Flying"
+			or spawnConfig.movementProfile == "Flying")
 	grounding.groundSnapDisabled = mob:GetAttribute("IgnoreGroundSnap") == true
 		or mob:GetAttribute("CanFly") == true
-		or (type(spawnConfig) == "table" and (spawnConfig.ignoreGroundSnap == true or spawnConfig.canFly == true))
+		or configuredFlight
+	if configuredFlight or mob:GetAttribute("CanFly") == true then
+		grounding.flightAltitude = math.max(0, tonumber(type(spawnConfig) == "table" and spawnConfig.preferredFlightAltitude) or 14)
+	end
 	if grounding.groundSnapDisabled then
 		return grounding
 	end
@@ -349,7 +357,7 @@ end
 function WorldBounds.CFrameFromGround(surfacePos: Vector3, grounding, rotation: CFrame?): CFrame
 	local rootRotation = rotation or CFrame.identity
 	if not grounding or not grounding.root or not grounding.rootLocalCFrame or grounding.groundSnapDisabled then
-		return CFrame.new(surfacePos + Vector3.new(0, WorldBounds.SpawnGroundClearance, 0)) * rootRotation
+		return CFrame.new(surfacePos + Vector3.new(0, WorldBounds.SpawnGroundClearance + (grounding and grounding.flightAltitude or 0), 0)) * rootRotation
 	end
 
 	local targetRootPos = Vector3.new(
@@ -834,6 +842,10 @@ local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, i
 	mob:SetAttribute("IsDead", false)
 	mob:SetAttribute("IsAttacking", false)
 	setOptionalMobAttribute(mob, "NpcFacingYawDegrees", stats.facingYawDegrees)
+	setOptionalMobAttribute(mob, "MovementProfile", stats.movementProfile)
+	setOptionalMobAttribute(mob, "MovementMode", stats.movementMode)
+	setOptionalMobAttribute(mob, "CanFly", stats.canFly)
+	setOptionalMobAttribute(mob, "NpcGroundOffset", stats.groundOffset)
 	setOptionalMobAttribute(mob, "EnemyMeleeIgnoreVerticalValidation", stats.meleeIgnoreVerticalValidation)
 	setOptionalMobAttribute(mob, "EnemyMeleeMaxVerticalDelta", stats.meleeMaxVerticalDelta)
 	setOptionalMobAttribute(mob, "EnemyMeleeMaxHitHeightAboveEnemy", stats.meleeMaxHitHeightAboveEnemy)
@@ -849,6 +861,10 @@ local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, i
         isElite = isElite,
         isBoss = isBoss == true,
         isRanged = stats.isRanged == true,
+		movementProfile = stats.movementProfile,
+		movementMode = stats.movementMode,
+		canFly = stats.canFly,
+		groundOffset = stats.groundOffset,
         despawnDelay = 3,
         attackWindup = math.min(0.6, math.max(0.2, stats.cd * 0.45)),
         onDeath = function(_npc, ctx)
@@ -919,6 +935,10 @@ local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vecto
         cd = cd,
         dmg = dmg,
         isRanged = cfg.isRanged == true,
+		movementProfile = cfg.movementProfile,
+		movementMode = cfg.movementMode,
+		canFly = cfg.canFly,
+		groundOffset = cfg.groundOffset,
 		meleeIgnoreVerticalValidation = cfg.meleeIgnoreVerticalValidation,
 		meleeMaxVerticalDelta = cfg.meleeMaxVerticalDelta,
 		meleeMaxHitHeightAboveEnemy = cfg.meleeMaxHitHeightAboveEnemy,

@@ -13,6 +13,11 @@ local ENEMY_MELEE_MAX_HIT_HEIGHT_ABOVE_ENEMY = 4.5
 local ENEMY_MELEE_USE_3D_DISTANCE = true
 local ENEMY_MELEE_DEBUG = false
 
+local lineOfSightParams = RaycastParams.new()
+lineOfSightParams.FilterType = Enum.RaycastFilterType.Exclude
+lineOfSightParams.IgnoreWater = false
+local lineOfSightRaycasts = 0
+
 local function getNpcBooleanAttribute(model: Model, attributeName: string, fallback: boolean): boolean
 	local value = model:GetAttribute(attributeName)
 	if typeof(value) == "boolean" then
@@ -58,7 +63,34 @@ end
 
 function NpcMelee.CanApplyDamage(npc: any, targetInfo: any): boolean
 	if npc.isRanged then
-		return true
+		local targetPosition = targetInfo.hrp.Position
+		if (targetPosition - npc.position).Magnitude > npc.attackRange then
+			return false
+		end
+		local now = os.clock()
+		if npc.lineOfSightTarget == targetInfo.player and now < (npc.nextLineOfSightAt or 0) then
+			return npc.hasLineOfSight == true
+		end
+		local ignore = { npc.model }
+		local enemyFolder = workspace:FindFirstChild("Enemies") or workspace:FindFirstChild("Mobs")
+		if enemyFolder then
+			table.insert(ignore, enemyFolder)
+		end
+		local drops = workspace:FindFirstChild("Drops")
+		if drops then
+			table.insert(ignore, drops)
+		end
+		local vfx = workspace:FindFirstChild("SpellVFX")
+		if vfx then
+			table.insert(ignore, vfx)
+		end
+		lineOfSightParams.FilterDescendantsInstances = ignore
+		lineOfSightRaycasts += 1
+		local hit = workspace:Raycast(npc.position, targetPosition - npc.position, lineOfSightParams)
+		npc.lineOfSightTarget = targetInfo.player
+		npc.nextLineOfSightAt = now + 0.2
+		npc.hasLineOfSight = hit == nil or hit.Instance:IsDescendantOf(targetInfo.hrp.Parent)
+		return npc.hasLineOfSight
 	end
 
 	local targetRoot = targetInfo.hrp
@@ -100,6 +132,10 @@ function NpcMelee.CanApplyDamage(npc: any, targetInfo: any): boolean
 	end
 
 	return true
+end
+
+function NpcMelee.GetMetrics(): {[string]: number}
+	return { lineOfSightRaycasts = lineOfSightRaycasts }
 end
 
 return NpcMelee

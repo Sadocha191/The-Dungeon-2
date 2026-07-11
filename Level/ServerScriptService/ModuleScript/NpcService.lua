@@ -21,6 +21,10 @@ local NpcReplication = require(npcReplicationModule)
 local npcMovementModule = serverModuleFolder:FindFirstChild("NpcMovement")
 assert(npcMovementModule and npcMovementModule:IsA("ModuleScript"), "[NpcService] NpcMovement ModuleScript is required")
 local NpcMovement = require(npcMovementModule)
+local NpcNavigationConfig = require(serverModuleFolder:WaitForChild("NpcNavigationConfig"))
+local NpcGroundNavigation = require(serverModuleFolder:WaitForChild("NpcGroundNavigation"))
+local NpcFlightNavigation = require(serverModuleFolder:WaitForChild("NpcFlightNavigation"))
+local NpcNavigationDebug = require(serverModuleFolder:WaitForChild("NpcNavigationDebug"))
 local npcTargetingModule = serverModuleFolder:FindFirstChild("NpcTargeting")
 assert(npcTargetingModule and npcTargetingModule:IsA("ModuleScript"), "[NpcService] NpcTargeting ModuleScript is required")
 local NpcTargeting = require(npcTargetingModule)
@@ -81,6 +85,10 @@ type NpcConfig = {
 	isElite: boolean?,
 	isBoss: boolean?,
 	isRanged: boolean?,
+	movementProfile: string?,
+	movementMode: string?,
+	canFly: boolean?,
+	groundOffset: number?,
 	despawnDelay: number?,
 	attackWindup: number?,
 	onDeath: ((any, {[string]: any}) -> ())?,
@@ -118,6 +126,16 @@ type NpcRecord = {
 	isElite: boolean,
 	isBoss: boolean,
 	isRanged: boolean,
+	movementProfile: string,
+	movementMode: string,
+	navigationProfile: {[string]: any},
+	navigation: {[string]: any}?,
+	unreachableSince: number?,
+	retargetBlockedPlayer: Player?,
+	retargetBlockedUntil: number?,
+	lineOfSightTarget: Player?,
+	nextLineOfSightAt: number?,
+	hasLineOfSight: boolean?,
 	despawnDelay: number,
 	attackWindup: number,
 	state: string,
@@ -157,7 +175,6 @@ local NpcService = {}
 
 local NORMAL_DESPAWN_DISTANCE = 100
 local NPC_FORMATION_MOVEMENT_CONFIG = NpcTargeting.FormationMovementConfig
-local clampMagnitude = NpcMovement.ClampMagnitude
 local flat = NpcMovement.Flat
 local safeUnit = NpcMovement.SafeUnit
 local repairDetachedVisualParts = NpcMovement.RepairDetachedVisualParts
@@ -170,10 +187,33 @@ local clearRuntimeAttributes = NpcLifecycle.ClearRuntimeAttributes
 local writeStateAttributes = NpcLifecycle.WriteStateAttributes
 local writeHealthAttributes = NpcLifecycle.WriteHealthAttributes
 local setState = NpcLifecycle.SetState
-local unregisterNpc = NpcLifecycle.Unregister
-local killNpc = NpcLifecycle.Kill
-local despawnNpcRecord = NpcLifecycle.Despawn
+local lifecycleUnregisterNpc = NpcLifecycle.Unregister
+local lifecycleKillNpc = NpcLifecycle.Kill
+local lifecycleDespawnNpcRecord = NpcLifecycle.Despawn
 local getCurrentSpeed = NpcLifecycle.GetCurrentSpeed
+
+local function cleanupNavigation(npc: NpcRecord)
+	if npc.movementMode == "Flying" then
+		NpcFlightNavigation.Cleanup(npc)
+	else
+		NpcGroundNavigation.Cleanup(npc)
+	end
+end
+
+local function unregisterNpc(npc: NpcRecord, addTombstone: boolean?)
+	cleanupNavigation(npc)
+	lifecycleUnregisterNpc(npc, addTombstone)
+end
+
+local function killNpc(npc: NpcRecord, context: {[string]: any})
+	cleanupNavigation(npc)
+	lifecycleKillNpc(npc, context)
+end
+
+local function despawnNpcRecord(npc: NpcRecord)
+	cleanupNavigation(npc)
+	lifecycleDespawnNpcRecord(npc)
+end
 
 local function setAttributeIfChanged(inst: Instance, name: string, value: any)
 	if inst:GetAttribute(name) ~= value then
@@ -316,7 +356,8 @@ local function updateNpc(
 	dt: number,
 	alivePlayers: {AlivePlayerInfo},
 	now: number,
-	engagementSlots: {[string]: NpcEngagementSlot}
+	engagementSlots: {[string]: NpcEngagementSlot},
+	spatialGrid: {[string]: {any}}
 )
 	if npc.dead then
 		return
@@ -348,7 +389,8 @@ local function updateNpc(
 	if now < npc.aiLockUntil then
 		npc.velocity = Vector3.zero
 		if npc.aiLookTarget then
-			npc.look = safeUnit(flat(npc.aiLookTarget - npc.position), npc.look)
+			local lookDelta = npc.aiLookTarget - npc.position
+			npc.look = safeUnit(npc.movementMode == "Flying" and lookDelta or flat(lookDelta), npc.look)
 		end
 		setState(npc, STATE.Attacking)
 		writeStateAttributes(npc)
@@ -365,26 +407,29 @@ local function updateNpc(
 	end
 
 	local targetPos = targetInfo.hrp.Position
-	local toTarget = flat(targetPos - npc.position)
+	local toTarget3D = targetPos - npc.position
+	local toTarget = npc.movementMode == "Flying" and toTarget3D or flat(toTarget3D)
 	local dist = toTarget.Magnitude
-	local stopDistance = math.max(1.25, npc.attackRange - 0.2)
+	local fullDistance = toTarget3D.Magnitude
+	local stopDistance = npc.isRanged
+		and math.max(3, npc.attackRange * 0.72)
+		or math.max(1.25, npc.attackRange - 0.2)
 	local formationWeight = NpcTargeting.ComputeFormationWeight(dist, stopDistance)
 	local baseMove = Vector3.zero
+	local canAttack = fullDistance <= npc.attackRange and canApplyMeleeDamage(npc, targetInfo)
 
 	if npc.attackUntil > now then
 		npc.velocity = Vector3.zero
 		npc.look = safeUnit(toTarget, npc.look)
 		setState(npc, STATE.Attacking)
-	elseif dist <= npc.attackRange then
+	elseif canAttack then
 		npc.look = safeUnit(toTarget, npc.look)
 		npc.velocity = Vector3.zero
 		if now >= npc.nextAttackAt then
 			npc.nextAttackAt = now + npc.attackCooldown
 			npc.attackUntil = now + npc.attackWindup
 			setState(npc, STATE.Attacking)
-			if canApplyMeleeDamage(npc, targetInfo) then
-				applyPlayerDamage(targetInfo.player, npc.damage, npc.model)
-			end
+			applyPlayerDamage(targetInfo.player, npc.damage, npc.model)
 		else
 			setState(npc, STATE.Idle)
 		end
@@ -405,15 +450,28 @@ local function updateNpc(
 			end
 		end
 		local speed = getCurrentSpeed(npc, now)
-		if speed > 0 and desiredMove.Magnitude > 0.05 then
-			baseMove = clampMagnitude(desiredMove, speed * dt)
-			baseMove = NpcMovement.SteerAroundObstacles(npc, baseMove, targetPos)
+		if speed > 0 and (desiredMove.Magnitude > 0.05 or npc.movementMode == "Flying") then
+			local navigationStatus = "Idle"
+			if npc.movementMode == "Flying" then
+				baseMove, navigationStatus = NpcFlightNavigation.Step(npc, targetPos, speed, dt, now)
+			else
+				local separation = NpcGroundNavigation.GetSeparation(npc, spatialGrid)
+				baseMove, navigationStatus = NpcGroundNavigation.Step(
+					npc,
+					targetPos,
+					desiredPos,
+					speed,
+					dt,
+					now,
+					separation
+				)
+			end
 			if baseMove.Magnitude > 0.05 then
 				npc.look = safeUnit(baseMove, safeUnit(toTarget, npc.look))
 				setState(npc, STATE.Chasing)
 			else
 				npc.look = safeUnit(toTarget, npc.look)
-				setState(npc, STATE.Idle)
+				setState(npc, navigationStatus == "Unreachable" and STATE.Idle or STATE.Chasing)
 			end
 		else
 			npc.look = safeUnit(toTarget, npc.look)
@@ -422,9 +480,15 @@ local function updateNpc(
 	end
 
 
-	local impulseMove = flat(npc.impulse) * dt
+	local impulseMove = (npc.movementMode == "Flying" and npc.impulse or flat(npc.impulse)) * dt
 	local nextPos = npc.position + baseMove + impulseMove
-	nextPos = NpcMovement.GroundAdjustedPosition(npc, nextPos, now, dt)
+	if npc.movementMode == "Flying" then
+		if impulseMove.Magnitude > 0.01 then
+			nextPos = NpcFlightNavigation.ClampPosition(npc, nextPos)
+		end
+	else
+		nextPos = NpcGroundNavigation.ConstrainPosition(npc, nextPos, now)
+	end
 
 	local newVelocity = Vector3.zero
 	if dt > 1e-4 then
@@ -725,6 +789,14 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 	local mobType = tostring((config and config.mobType) or model.Name)
 	local maxHealth = math.max(1, math.floor(tonumber(config and config.maxHealth) or 1))
 	local speed = math.max(0, tonumber(config and config.speed) or 0)
+	local movementProfile, navigationProfile = NpcNavigationConfig.Resolve(model, config)
+	local movementMode = navigationProfile.Mode
+	setAttributeIfChanged(model, "MovementProfile", movementProfile)
+	setAttributeIfChanged(model, "MovementMode", movementMode)
+	setAttributeIfChanged(model, "CanFly", movementMode == "Flying")
+	if config and typeof(config.groundOffset) == "number" then
+		setAttributeIfChanged(model, "NpcGroundOffset", config.groundOffset)
+	end
 	local groundOffset = computeGroundOffset(model, root)
 	local now = os.clock()
 	local initialPosition, spawnSurfacePosition, spawnHoldUntil, spawnEmergeEnd, spawnEmergeDepth =
@@ -744,6 +816,16 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		isElite = config and config.isElite == true or false,
 		isBoss = config and config.isBoss == true or false,
 		isRanged = config and config.isRanged == true or false,
+		movementProfile = movementProfile,
+		movementMode = movementMode,
+		navigationProfile = navigationProfile,
+		navigation = nil,
+		unreachableSince = nil,
+		retargetBlockedPlayer = nil,
+		retargetBlockedUntil = nil,
+		lineOfSightTarget = nil,
+		nextLineOfSightAt = 0,
+		hasLineOfSight = false,
 		despawnDelay = math.max(0.1, tonumber(config and config.despawnDelay) or 3),
 		attackWindup = math.max(0.15, tonumber(config and config.attackWindup) or 0.35),
 		state = STATE.Spawn,
@@ -792,6 +874,9 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 	setAttributeIfChanged(model, ATTR.IsElite, npc.isElite)
 	setAttributeIfChanged(model, ATTR.IsBoss, npc.isBoss)
 	setAttributeIfChanged(model, ATTR.IsRanged, npc.isRanged)
+	setAttributeIfChanged(model, "MovementProfile", npc.movementProfile)
+	setAttributeIfChanged(model, "MovementMode", npc.movementMode)
+	setAttributeIfChanged(model, "CanFly", npc.movementMode == "Flying")
 	setAttributeIfChanged(model, ATTR.Damage, npc.damage)
 	setAttributeIfChanged(model, ATTR.AttackRange, npc.attackRange)
 	setAttributeIfChanged(model, ATTR.AttackCooldown, npc.attackCooldown)
@@ -831,8 +916,64 @@ function NpcService.SetPosition(target: any, pos: Vector3, lookDir: Vector3?)
 		npc.look = lookDir.Unit
 	end
 	npc.velocity = Vector3.zero
+	if npc.movementMode == "Flying" then
+		NpcFlightNavigation.Invalidate(npc, "external_set_position")
+	else
+		NpcGroundNavigation.Invalidate(npc, "external_set_position")
+	end
 	moveNpcModelToRoot(npc)
 	writeStateAttributes(npc)
+end
+
+local navigationStartedAt = os.clock()
+local movementTickCount = 0
+local movementTickTotal = 0
+local movementTickMax = 0
+
+function NpcService.GetNavigationMetrics(): {[string]: any}
+	local ground = NpcGroundNavigation.GetMetrics()
+	local flight = NpcFlightNavigation.GetMetrics()
+	local combat = NpcMelee.GetMetrics()
+	local elapsed = math.max(0.001, os.clock() - navigationStartedAt)
+	local castCount = ground.raycastCount
+		+ ground.blockcastCount
+		+ flight.spherecastCount
+		+ flight.groundRaycastCount
+		+ combat.lineOfSightRaycasts
+	return {
+		movementHz = NpcNavigationConfig.Scheduler.MovementHz,
+		targetingHz = NpcNavigationConfig.Scheduler.TargetingHz,
+		formationHz = NpcNavigationConfig.Scheduler.FormationHz,
+		movementTickCount = movementTickCount,
+		averageMovementTickMs = movementTickCount > 0 and (movementTickTotal / movementTickCount) * 1000 or 0,
+		maximumMovementTickMs = movementTickMax * 1000,
+		raycastCount = castCount,
+		raycastsPerSecond = castCount / elapsed,
+		ground = ground,
+		flight = flight,
+		combat = combat,
+	}
+end
+
+function NpcService.GetNavigationDebug(target: any): {[string]: any}?
+	if not RunService:IsStudio() then
+		return nil
+	end
+	local npc = resolveNpc(target)
+	if not npc then
+		return nil
+	end
+	local result = npc.movementMode == "Flying"
+		and NpcFlightNavigation.GetDebug(npc)
+		or NpcGroundNavigation.GetDebug(npc)
+	if result then
+		result.metrics = NpcService.GetNavigationMetrics()
+	end
+	return result
+end
+
+function NpcService.SetNavigationDebugEnabled(enabled: boolean, npcId: string?): boolean
+	return NpcNavigationDebug.SetEnabled(enabled, npcId)
 end
 
 function NpcService.Despawn(target: any)
@@ -849,19 +990,60 @@ syncRequestEvent.OnServerEvent:Connect(function(player: Player, requestId: numbe
 end)
 
 local batchAccumulator = 0
+local movementAccumulator = 1 / NpcNavigationConfig.Scheduler.MovementHz
+local targetingAccumulator = 1 / NpcNavigationConfig.Scheduler.TargetingHz
+local formationAccumulator = 1 / NpcNavigationConfig.Scheduler.FormationHz
+local cachedAlivePlayers = {}
+local cachedEngagementSlots = {}
 
 RunService.Heartbeat:Connect(function(dt)
 	local now = os.clock()
-	local alivePlayers = NpcTargeting.GetAlivePlayers()
-	local engagementSlots = NpcTargeting.BuildEngagementSlots(alivePlayers, NpcRegistry.Pairs)
+	targetingAccumulator += dt
+	formationAccumulator += dt
+	movementAccumulator += dt
+	batchAccumulator += dt
 
-	for _, npc in NpcRegistry.Pairs() do
-		updateNpc(npc, dt, alivePlayers, now, engagementSlots)
+	local targetingInterval = 1 / NpcNavigationConfig.Scheduler.TargetingHz
+	if targetingAccumulator >= targetingInterval then
+		targetingAccumulator %= targetingInterval
+		cachedAlivePlayers = NpcTargeting.GetAlivePlayers()
+		NpcTargeting.RefreshTargets(NpcRegistry.Pairs, cachedAlivePlayers, now)
 	end
 
-	batchAccumulator += dt
+	local formationInterval = 1 / NpcNavigationConfig.Scheduler.FormationHz
+	if formationAccumulator >= formationInterval then
+		formationAccumulator %= formationInterval
+		cachedEngagementSlots = NpcTargeting.BuildEngagementSlots(cachedAlivePlayers, NpcRegistry.Pairs)
+		if NpcNavigationDebug.IsEnabled() then
+			NpcNavigationDebug.Render(NpcRegistry.Pairs, function(npc)
+				return npc.movementMode == "Flying"
+					and NpcFlightNavigation.GetDebug(npc)
+					or NpcGroundNavigation.GetDebug(npc)
+			end, NpcService.GetNavigationMetrics())
+		end
+	end
+
+	local movementInterval = 1 / NpcNavigationConfig.Scheduler.MovementHz
+	if movementAccumulator >= movementInterval then
+		local movementDt = math.min(movementAccumulator, movementInterval * 2)
+		movementAccumulator %= movementInterval
+		NpcGroundNavigation.BeginTick(cachedAlivePlayers)
+		NpcFlightNavigation.BeginTick(cachedAlivePlayers)
+		NpcGroundNavigation.StepScheduler(now)
+		local spatialGrid = NpcGroundNavigation.BuildSpatialGrid(NpcRegistry.Pairs)
+		local tickStartedAt = os.clock()
+		for _, npc in NpcRegistry.Pairs() do
+			updateNpc(npc, movementDt, cachedAlivePlayers, now, cachedEngagementSlots, spatialGrid)
+		end
+		NpcGroundNavigation.StepScheduler(os.clock())
+		local tickDuration = os.clock() - tickStartedAt
+		movementTickCount += 1
+		movementTickTotal += tickDuration
+		movementTickMax = math.max(movementTickMax, tickDuration)
+	end
+
 	if batchAccumulator >= NpcShared.BatchRate then
-		batchAccumulator = 0
+		batchAccumulator %= NpcShared.BatchRate
 		broadcastBatch()
 	end
 end)

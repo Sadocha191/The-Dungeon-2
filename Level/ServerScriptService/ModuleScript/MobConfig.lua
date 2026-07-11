@@ -3,6 +3,7 @@ local MobConfig = {}
 -- Main mob tuning table.
 -- visualScale controls the spawned model size.
 -- facingYawDegrees rotates the visual model around the vertical axis.
+-- groundOffset is the animated root-center height above terrain used for final grounding.
 MobConfig.Mobs = {
 	Slime = {
 		hp = 22,
@@ -13,6 +14,7 @@ MobConfig.Mobs = {
 		xp = 5,
 		coins = 1,
 		visualScale = 1,
+		groundOffset = 2.55,
 	},
 
 	Zombie = {
@@ -59,6 +61,7 @@ MobConfig.Mobs = {
 		coins = 2,
 		visualScale = 1,
 		facingYawDegrees = -90,
+		movementProfile = "GroundLarge",
 	},
 
 	Warewolf = {
@@ -118,6 +121,7 @@ MobConfig.Mobs = {
 		xp = 30,
 		coins = 5,
 		visualScale = 3,
+		movementProfile = "GroundLarge",
 	},
 
 	Knight = {
@@ -129,6 +133,7 @@ MobConfig.Mobs = {
 		xp = 27,
 		coins = 4,
 		visualScale = 3,
+		movementProfile = "GroundLarge",
 	},
 
 	Ent = {
@@ -141,6 +146,7 @@ MobConfig.Mobs = {
 		coins = 6,
 		visualScale = 3.3,
 		facingYawDegrees = -90,
+		movementProfile = "GroundLarge",
 	},
 }
 

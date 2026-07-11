@@ -239,7 +239,12 @@ function NpcMovement.RepairDetachedVisualParts(model: Model, root: BasePart)
 		return
 	end
 
-	translateModel(model, root.Position - center)
+	local delta = root.Position - center
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") and descendant ~= root then
+			descendant.CFrame += delta
+		end
+	end
 end
 
 function NpcMovement.ComputeGroundOffset(model: Model, root: BasePart): number

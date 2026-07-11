@@ -9,7 +9,7 @@ local DEFAULT_RANDOM_TRIES = 40
 local DEFAULT_RAY_ORIGIN_Y = 420
 local DEFAULT_RAY_DISTANCE = 900
 local DEFAULT_NEARBY_RADII = { 0, 4, 8, 12 }
-local GROUND_SURFACE_TAG = "Terrain"
+local GROUND_SURFACE_TAGS = { "Terrain", "NpcWalkable" }
 
 local function mergeBounds(bounds, minX, maxX, minZ, maxZ)
 	if minX == nil or maxX == nil or minZ == nil or maxZ == nil then
@@ -49,8 +49,10 @@ end
 local function hasGroundTag(inst): boolean
 	local current = inst
 	while current and current ~= Workspace do
-		if CollectionService:HasTag(current, GROUND_SURFACE_TAG) then
-			return true
+		for _, tagName in ipairs(GROUND_SURFACE_TAGS) do
+			if CollectionService:HasTag(current, tagName) then
+				return true
+			end
 		end
 		current = current.Parent
 	end
@@ -59,17 +61,19 @@ end
 
 local function forEachTaggedGroundPart(visitor)
 	local seen = {}
-	for _, inst in ipairs(CollectionService:GetTagged(GROUND_SURFACE_TAG)) do
-		if inst:IsA("BasePart") then
-			if not seen[inst] then
-				seen[inst] = true
-				visitor(inst)
-			end
-		else
-			for _, descendant in ipairs(inst:GetDescendants()) do
-				if descendant:IsA("BasePart") and not seen[descendant] then
-					seen[descendant] = true
-					visitor(descendant)
+	for _, tagName in ipairs(GROUND_SURFACE_TAGS) do
+		for _, inst in ipairs(CollectionService:GetTagged(tagName)) do
+			if inst:IsA("BasePart") then
+				if not seen[inst] then
+					seen[inst] = true
+					visitor(inst)
+				end
+			else
+				for _, descendant in ipairs(inst:GetDescendants()) do
+					if descendant:IsA("BasePart") and not seen[descendant] then
+						seen[descendant] = true
+						visitor(descendant)
+					end
 				end
 			end
 		end
@@ -193,6 +197,10 @@ end
 
 function WorldBounds.GetTerrain()
 	return getTerrain()
+end
+
+function WorldBounds.IsGroundSurface(inst: Instance?): boolean
+	return isGroundSurface(inst)
 end
 
 function WorldBounds.GetXZ(pad: number?, fallbackMin: Vector2?, fallbackMax: Vector2?)

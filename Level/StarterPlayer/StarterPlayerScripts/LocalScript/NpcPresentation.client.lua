@@ -79,6 +79,23 @@ local function flatSpeed(v: Vector3?): number
 	return math.sqrt((v.X * v.X) + (v.Z * v.Z))
 end
 
+local function movementDir(v: Vector3?, movementMode: string?): Vector3
+	if movementMode ~= "Flying" then
+		return flatDir(v)
+	end
+	if typeof(v) ~= "Vector3" or v.Magnitude <= 1e-4 then
+		return Vector3.new(0, 0, -1)
+	end
+	return v.Unit
+end
+
+local function movementSpeed(v: Vector3?, movementMode: string?): number
+	if movementMode == "Flying" and typeof(v) == "Vector3" then
+		return v.Magnitude
+	end
+	return flatSpeed(v)
+end
+
 local function resolveRoot(model: Model): BasePart?
 	local root = model:FindFirstChild("HumanoidRootPart")
 	if root and root:IsA("BasePart") then
@@ -424,10 +441,10 @@ local function updateAnimationMotion(entry, dt: number, now: number)
 	local previousPos = entry.lastRenderPos or renderPos
 	local displayedSpeed = 0
 	if typeof(previousPos) == "Vector3" and dt > 1e-4 then
-		displayedSpeed = flatSpeed(renderPos - previousPos) / dt
+		displayedSpeed = movementSpeed(renderPos - previousPos, entry.movementMode) / dt
 	end
 
-	local targetSpeed = math.max(displayedSpeed, flatSpeed(entry.velocity))
+	local targetSpeed = math.max(displayedSpeed, movementSpeed(entry.velocity, entry.movementMode))
 	if entry.animMotionSpeed == nil then
 		entry.animMotionSpeed = targetSpeed
 	else
@@ -610,6 +627,8 @@ local function ensureEntry(id: string)
 		targetDir = Vector3.new(0, 0, -1),
 		renderDir = Vector3.new(0, 0, -1),
 		velocity = Vector3.zero,
+		movementMode = "Ground",
+		movementProfile = "GroundSmall",
 		hp = 0,
 		maxHp = 1,
 		dead = false,
@@ -688,6 +707,12 @@ batchEvent.OnClientEvent:Connect(function(payload)
 			local id = tostring(item.id)
 			local isNew = presentations[id] == nil
 			local entry = ensureEntry(id)
+			if typeof(item.movementMode) == "string" then
+				entry.movementMode = item.movementMode
+			end
+			if typeof(item.movementProfile) == "string" then
+				entry.movementProfile = item.movementProfile
+			end
 			if seen then
 				seen[id] = true
 			end
@@ -709,7 +734,7 @@ batchEvent.OnClientEvent:Connect(function(payload)
 				end
 			end
 			if typeof(item.dir) == "Vector3" then
-				entry.targetDir = flatDir(item.dir)
+				entry.targetDir = movementDir(item.dir, entry.movementMode)
 				if fullSnapshot or not entry.renderDir then
 					entry.renderDir = entry.targetDir
 				end
@@ -794,19 +819,20 @@ RunService.RenderStepped:Connect(function(dt)
 		if typeof(entry.velocity) == "Vector3" and not entry.dead then
 			goalPos += entry.velocity * 0.05
 		end
-		local goalDir = flatDir(entry.targetDir or entry.velocity)
+		local goalDir = movementDir(entry.targetDir or entry.velocity, entry.movementMode)
 		if typeof(entry.velocity) == "Vector3" and entry.velocity.Magnitude > 0.2 then
-			goalDir = flatDir(entry.velocity)
+			goalDir = movementDir(entry.velocity, entry.movementMode)
 		end
 
 		entry.renderPos = entry.renderPos and entry.renderPos:Lerp(goalPos, math.clamp(dt * 12, 0, 1)) or goalPos
 		entry.renderDir = entry.renderDir and entry.renderDir:Lerp(goalDir, math.clamp(dt * 14, 0, 1)) or goalDir
-		entry.renderDir = flatDir(entry.renderDir)
+		entry.renderDir = movementDir(entry.renderDir, entry.movementMode)
 
 		updateAnimationMotion(entry, dt, now)
 		refreshRigBinding(entry)
 		local displayPos = entry.renderPos + getSpawnRiseOffset(entry, now)
-		local rootFrame = CFrame.lookAt(displayPos, displayPos + entry.renderDir)
+		local up = math.abs(entry.renderDir:Dot(Vector3.yAxis)) > 0.98 and Vector3.xAxis or Vector3.yAxis
+		local rootFrame = CFrame.lookAt(displayPos, displayPos + entry.renderDir, up)
 		if isProceduralVisualModel(model) then
 			rootFrame = rootFrame * buildProceduralPose(entry, now)
 		end
@@ -828,5 +854,4 @@ requestFullSync()
 localPlayer.CharacterAdded:Connect(function()
 	requestFullSync()
 end)
-
 
