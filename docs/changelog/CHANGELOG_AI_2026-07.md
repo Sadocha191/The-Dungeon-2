@@ -1,5 +1,59 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-12 - Poziom/Four Peaks sterowana predkosc animacji biegania z PR #94
+
+### Summary
+
+- Inspected GitHub PR #94, `Keep run animation speed constant`, and applied its locomotion-animation intent locally without merging the PR on GitHub.
+- Added `LocomotionAnimationSpeed` as a client `LocalScript` in `StarterCharacterScripts` for both `Level` and `Four Peaks`, so Roblox clones it into the live player character.
+- Corrected the PR's original `StarterCharacter` placement after Play showed that the new script existed on the template but did not appear in `Workspace.Sadroacha`.
+- Added script attributes `WalkPlaybackSpeed` and `RunPlaybackSpeed`, defaulting to `1`, so playback can be tuned in Studio without changing movement speed, sprint, slide or momentum behavior.
+- Attribute changes update active walk/run `AnimationTrack`s during Play. Playback values are clamped to `0..4`.
+- The controller uses one lightweight client `RunService.PreAnimation` guard per player character. No NPC loop, remote, persistent data, teleport data, server authority path or gameplay movement value was changed.
+
+### Files
+
+- Added `Level/StarterPlayer/StarterCharacterScripts/LocomotionAnimationSpeed.client.lua`
+- Added `Four Peaks/StarterPlayer/StarterCharacterScripts/LocomotionAnimationSpeed.client.lua`
+- Removed `Level/StarterPlayer/StarterCharacter/LocomotionAnimationSpeed.client.lua`
+- Removed `Four Peaks/StarterPlayer/StarterCharacter/LocomotionAnimationSpeed.client.lua`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active `Level` and `Four Peaks` Studio places were both updated.
+- Created `game.StarterPlayer.StarterCharacterScripts.LocomotionAnimationSpeed` in both places.
+- Removed the transient PR-path copies from `game.StarterPlayer.StarterCharacter.LocomotionAnimationSpeed`.
+- Set edit-time template attributes in both places:
+  - `WalkPlaybackSpeed = 1`
+  - `RunPlaybackSpeed = 1`
+- Final repo/Studio source parity for the new script in both places: length `3341`, hash `302835954`.
+
+### Validation
+
+- GitHub PR #94 metadata and diff were inspected. It was open, mergeable, and changed two files, originally under `StarterCharacter`.
+- `Level` Play smoke passed: the live character received `LocomotionAnimationSpeed`; setting runtime `RunPlaybackSpeed = 0.65` forced a test `Run` track from `2.000` back to `0.650`.
+- `Four Peaks` Play smoke passed with the same runtime result: `RunPlaybackSpeed = 0.65`, test `Run` track `2.000 -> 0.650`.
+- The original PR placement was explicitly checked in Play and confirmed not to clone into the live character in either place.
+- No new `_G` dependency, remote, DataStore path, teleport data, server-side loop or per-NPC update was added.
+
+### Not verified
+
+- Physical manual sprint/slide/momentum feel was not tested with keyboard input; the underlying movement controllers were intentionally left unchanged.
+- Non-default edit-time attribute values were not committed as repo metadata because this repo mirror stores script source, not Roblox instance attributes. The script initializes missing attributes to safe defaults at runtime.
+
+### Risks
+
+- If a future sync recreates the LocalScript from the `.lua` file only, edit-time Studio attributes may reset to defaults unless the place file preserves them. Runtime still works and recreates missing defaults.
+- The clamp prevents extreme playback values above `4`; if a special animation needs a higher multiplier, adjust `MAX_PLAYBACK_SPEED` deliberately.
+
+### Rollback
+
+- Delete `game.StarterPlayer.StarterCharacterScripts.LocomotionAnimationSpeed` from `Level` and `Four Peaks` Studio places.
+- Delete `Level/StarterPlayer/StarterCharacterScripts/LocomotionAnimationSpeed.client.lua` and `Four Peaks/StarterPlayer/StarterCharacterScripts/LocomotionAnimationSpeed.client.lua`.
+- Revert this changelog entry and the `CHANGELOG_AI.md` index line.
+
 ## 2026-07-12 - Poziom slope-aware ground NPC navigation regression fix
 
 ### Summary
