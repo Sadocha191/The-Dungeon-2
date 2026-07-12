@@ -6,6 +6,7 @@ local enabled = false
 local selectedNpcId = nil
 local DEBUG_FOLDER_NAME = "_NpcNavigationDebug"
 local MAX_DEBUG_NPCS = 24
+local lastLogByNpc = {}
 
 local function clearFolder()
 	local existing = workspace:FindFirstChild(DEBUG_FOLDER_NAME)
@@ -64,7 +65,7 @@ local function addLabel(adornee: BasePart, text: string)
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "NavigationState"
 	billboard.Adornee = adornee
-	billboard.Size = UDim2.fromOffset(280, 74)
+	billboard.Size = UDim2.fromOffset(360, 126)
 	billboard.StudsOffset = Vector3.new(0, 3.5, 0)
 	billboard.AlwaysOnTop = true
 	billboard.Parent = adornee
@@ -88,10 +89,60 @@ function NpcNavigationDebug.SetEnabled(newEnabled: boolean, npcId: string?)
 	end
 	enabled = newEnabled == true
 	selectedNpcId = npcId and tostring(npcId) or nil
+	table.clear(lastLogByNpc)
 	if not enabled then
 		clearFolder()
 	end
 	return enabled
+end
+
+local function compactNumber(value: any): string
+	return typeof(value) == "number" and string.format("%.2f", value) or "?"
+end
+
+local function logSelectedNpcChange(npc, debugInfo)
+	if not selectedNpcId or tostring(npc.id) ~= selectedNpcId then
+		return
+	end
+	local directReason = debugInfo.directCheck and debugInfo.directCheck.reason or "none"
+	local stepReason = debugInfo.stepCheck and debugInfo.stepCheck.reason or "none"
+	local signature = table.concat({
+		debugInfo.status or "?",
+		debugInfo.lastMoveReason or "?",
+		directReason,
+		stepReason,
+		tostring(debugInfo.pathPending == true),
+		tostring(debugInfo.generation or 0),
+		tostring(debugInfo.waypointIndex or 0),
+	}, "|")
+	local previous = lastLogByNpc[selectedNpcId]
+	local stalled = (debugInfo.consecutiveZeroMoveTicks or 0) >= 2
+	if not previous or previous.signature ~= signature or (stalled and previous.stalledTicks ~= debugInfo.consecutiveZeroMoveTicks) then
+		warn(string.format(
+			"[NpcNavigationDebug] npc=%s status=%s move=%s direct=%s step=%s bodyHit=%s normal=%s slope=%s surfaceY=%s->%s delta=%s failures=%d/%d pending=%s generation=%d waypoint=%d stalled=%d",
+			tostring(npc.id),
+			debugInfo.status or "?",
+			debugInfo.lastMoveReason or "?",
+			directReason,
+			stepReason,
+			debugInfo.bodyHit or "none",
+			tostring(debugInfo.surfaceNormal or "none"),
+			compactNumber(debugInfo.slopeDegrees),
+			compactNumber(debugInfo.startSurfaceY),
+			compactNumber(debugInfo.endSurfaceY),
+			compactNumber(debugInfo.deltaY),
+			debugInfo.directFailureCount or 0,
+			debugInfo.stepFailureCount or 0,
+			tostring(debugInfo.pathPending == true),
+			debugInfo.generation or 0,
+			debugInfo.waypointIndex or 0,
+			debugInfo.consecutiveZeroMoveTicks or 0
+		))
+		lastLogByNpc[selectedNpcId] = {
+			signature = signature,
+			stalledTicks = debugInfo.consecutiveZeroMoveTicks or 0,
+		}
+	end
 end
 
 function NpcNavigationDebug.IsEnabled(): boolean
@@ -113,21 +164,35 @@ function NpcNavigationDebug.Render(npcPairs: () -> (), getDebug: (any) -> any, m
 		if rendered >= MAX_DEBUG_NPCS then
 			break
 		end
-		if not selectedNpcId or npc.id == selectedNpcId then
+		if not selectedNpcId or tostring(npc.id) == selectedNpcId then
 			local debugInfo = getDebug(npc)
 			if debugInfo then
+				logSelectedNpcChange(npc, debugInfo)
 				rendered += 1
 				local npcFolder = Instance.new("Folder")
 				npcFolder.Name = npc.id
 				npcFolder.Parent = folder
 				local marker = makePart(npcFolder, "Npc", npc.position, Color3.fromRGB(70, 210, 255), 0.8)
+				local directReason = debugInfo.directCheck and debugInfo.directCheck.reason or "none"
+				local stepReason = debugInfo.stepCheck and debugInfo.stepCheck.reason or "none"
 				addLabel(marker, string.format(
-					"%s | %s | target=%s\n%s | unreachable=%s\nqueue=%d active=%d",
+					"%s | %s | target=%s\nmove=%s\ndirect=%s (%d) step=%s (%d)\nY=%s->%s d=%s slope=%s\npending=%s gen=%d wp=%d stalled=%d\nqueue=%d active=%d",
 					debugInfo.profile or "?",
 					debugInfo.status or "?",
 					debugInfo.target or "none",
-					debugInfo.lastRepathReason or "none",
-					tostring(debugInfo.unreachable == true),
+					debugInfo.lastMoveReason or "none",
+					directReason,
+					debugInfo.directFailureCount or 0,
+					stepReason,
+					debugInfo.stepFailureCount or 0,
+					compactNumber(debugInfo.startSurfaceY),
+					compactNumber(debugInfo.endSurfaceY),
+					compactNumber(debugInfo.deltaY),
+					compactNumber(debugInfo.slopeDegrees),
+					tostring(debugInfo.pathPending == true),
+					debugInfo.generation or 0,
+					debugInfo.waypointIndex or 0,
+					debugInfo.consecutiveZeroMoveTicks or 0,
 					metrics.ground and metrics.ground.pendingPaths or 0,
 					metrics.ground and metrics.ground.activePaths or 0
 				))
@@ -164,6 +229,7 @@ end
 function NpcNavigationDebug.Destroy()
 	enabled = false
 	selectedNpcId = nil
+	table.clear(lastLogByNpc)
 	clearFolder()
 end
 

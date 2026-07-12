@@ -1,26 +1,13 @@
 local PathfindingService = game:GetService("PathfindingService")
-local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local moduleFolder = ServerScriptService:FindFirstChild("ModuleScript") or ServerScriptService:FindFirstChild("ModuleScripts")
 assert(moduleFolder, "[NpcGroundNavigation] Server ModuleScript folder is required")
 local Config = require(moduleFolder:WaitForChild("NpcNavigationConfig"))
-local WorldBounds = require(moduleFolder:WaitForChild("WorldBounds"))
+local NpcGroundSurface = require(moduleFolder:WaitForChild("NpcGroundSurface"))
 
 local NpcGroundNavigation = {}
 
-local corridorParams = RaycastParams.new()
-corridorParams.FilterType = Enum.RaycastFilterType.Exclude
-corridorParams.IgnoreWater = false
-corridorParams.RespectCanCollide = true
-
-local groundParams = RaycastParams.new()
-groundParams.FilterType = Enum.RaycastFilterType.Exclude
-groundParams.IgnoreWater = false
-
-local sharedIgnore = {}
-local groundIgnore = {}
-local surfaceCache = {}
 local pathCache = {}
 local requestQueue = {}
 local queuedNpc = setmetatable({}, { __mode = "k" })
@@ -30,15 +17,18 @@ local lastTokenAt = os.clock()
 local lastCacheCleanupAt = os.clock()
 
 local metrics = {
-	raycastCount = 0,
-	blockcastCount = 0,
-	surfaceCacheHits = 0,
+	directChecks = 0,
+	directCheckFailures = 0,
+	stepValidationFailures = 0,
+	waitingPathTicks = 0,
+	stalledMovementTicks = 0,
 	pathRequests = 0,
 	pathStarts = 0,
 	pathSuccesses = 0,
 	pathFailures = 0,
 	pathCacheHits = 0,
 	stalePathResults = 0,
+	stateTransitions = 0,
 }
 
 local function flat(v: Vector3): Vector3
@@ -52,130 +42,34 @@ local function safeUnit(v: Vector3, fallback: Vector3?): Vector3
 	return v.Unit
 end
 
-local function sectorKey(pos: Vector3): string
+local function horizontalSectorKey(pos: Vector3): string
 	local size = Config.Scheduler.PathSectorSize
-	return string.format("%d:%d:%d", math.floor(pos.X / size), math.floor(pos.Y / 8), math.floor(pos.Z / size))
+	return string.format("%d:%d", math.floor(pos.X / size), math.floor(pos.Z / size))
 end
 
-local function pathKey(profile, startPos: Vector3, goalPos: Vector3): string
-	return profile.Name .. ":" .. sectorKey(startPos) .. ">" .. sectorKey(goalPos)
+local function setStatus(nav, status: string)
+	if nav.status ~= status then
+		nav.status = status
+		metrics.stateTransitions += 1
+	end
 end
 
-local function slopeDegrees(normal: Vector3): number
-	return math.deg(math.acos(math.clamp(normal:Dot(Vector3.yAxis), -1, 1)))
+local function surfaceIdentity(sample): string
+	local resolution = Config.Scheduler.PathLayerResolution
+	local instanceKey = sample.instance == workspace.Terrain and "Terrain" or sample.instance:GetFullName()
+	return string.format("%s@%d", instanceKey, math.floor((sample.position.Y / resolution) + 0.5))
 end
 
-local function surfaceAllowed(hit: RaycastResult, profile): boolean
-	if not WorldBounds.IsGroundSurface(hit.Instance) then
-		return false
-	end
-	if hit.Material == Enum.Material.Water and (profile.Costs.Water or 0) >= 1000 then
-		return false
-	end
-	local current = hit.Instance
-	while current and current ~= workspace do
-		local modifier = current:FindFirstChildWhichIsA("PathfindingModifier")
-		if modifier and (profile.Costs[modifier.Label] or 0) >= 1000 then
-			return false
-		end
-		current = current.Parent
-	end
-	return slopeDegrees(hit.Normal) <= profile.MaxSlopeDegrees
-end
-
-local function surfaceKey(pos: Vector3, expectedY: number, profile): string
-	local cell = math.max(2.5, profile.AgentRadius * 1.5)
-	return string.format(
-		"%s:%d:%d:%d",
-		profile.Name,
-		math.floor(pos.X / cell),
-		math.floor(expectedY / 5),
-		math.floor(pos.Z / cell)
-	)
-end
-
-local function sampleSurface(pos: Vector3, expectedSurfaceY: number, profile, now: number): RaycastResult?
-	local key = surfaceKey(pos, expectedSurfaceY, profile)
-	local cached = surfaceCache[key]
-	if cached and cached.expiresAt >= now then
-		metrics.surfaceCacheHits += 1
-		return cached.hit ~= false and cached.hit or nil
-	end
-
-	local rise = profile.MaxStepUp + 2.5
-	local origin = Vector3.new(pos.X, expectedSurfaceY + rise, pos.Z)
-	local distance = rise + profile.MaxDrop + 3
-	metrics.raycastCount += 1
-	local hit = workspace:Raycast(origin, Vector3.new(0, -distance, 0), groundParams)
-	if hit and not surfaceAllowed(hit, profile) then
-		hit = nil
-	end
-	surfaceCache[key] = {
-		expiresAt = now + Config.Scheduler.SurfaceCacheTtl,
-		hit = hit or false,
-	}
-	return hit
-end
-
-local function bodyCenter(npc, profile): Vector3
-	local surfaceY = npc.position.Y - npc.groundOffset
-	return Vector3.new(npc.position.X, surfaceY + (profile.AgentHeight * 0.5) + 0.15, npc.position.Z)
-end
-
-local function corridorBlocked(npc, direction: Vector3, profile): boolean
-	if direction.Magnitude <= 0.05 then
-		return false
-	end
-	metrics.blockcastCount += 1
-	local maximumProbe = math.max(18, profile.AgentRadius * 5)
-	if direction.Magnitude > maximumProbe then
-		direction = direction.Unit * maximumProbe
-	end
-	local size = Vector3.new(profile.AgentRadius * 2, math.max(2, profile.AgentHeight - 0.5), profile.AgentRadius * 2)
-	local hit = workspace:Blockcast(CFrame.new(bodyCenter(npc, profile)), size, direction, corridorParams)
-	return hit ~= nil
-end
-
-local function continuityClear(npc, destination: Vector3, profile, now: number): boolean
-	local delta = flat(destination - npc.position)
-	local distance = delta.Magnitude
-	if distance <= 0.05 then
-		return true
-	end
-
-	local samples = math.clamp(math.ceil(distance / math.max(4, profile.AgentRadius * 2)), 2, 10)
-	local previousY = npc.position.Y - npc.groundOffset
-	local destinationSurfaceY = destination.Y - npc.groundOffset
-	for index = 1, samples do
-		local alpha = index / samples
-		local point = npc.position + delta * alpha
-		local expectedY = previousY + ((destinationSurfaceY - previousY) * alpha)
-		local hit = sampleSurface(point, expectedY, profile, now)
-		if not hit then
-			return false
-		end
-		local verticalDelta = hit.Position.Y - previousY
-		if verticalDelta > profile.MaxStepUp + 0.05 or verticalDelta < -profile.MaxDrop - 0.05 then
-			return false
-		end
-		previousY = hit.Position.Y
-	end
-	return true
-end
-
-local function canTraverse(npc, destination: Vector3, profile, now: number): boolean
-	local delta = destination - npc.position
-	local flatDelta = flat(delta)
-	local probeDestination = destination
-	if flatDelta.Magnitude > profile.DirectProbeDistance then
-		local alpha = profile.DirectProbeDistance / flatDelta.Magnitude
-		probeDestination = npc.position + flatDelta.Unit * profile.DirectProbeDistance + Vector3.new(0, delta.Y * alpha, 0)
-	end
-	local direction = flat(probeDestination - npc.position)
-	if corridorBlocked(npc, direction, profile) then
-		return false
-	end
-	return continuityClear(npc, probeDestination, profile, now)
+local function pathKey(profile, startSample, goalSample): string
+	return profile.Name
+		.. ":"
+		.. horizontalSectorKey(startSample.position)
+		.. ":"
+		.. surfaceIdentity(startSample)
+		.. ">"
+		.. horizontalSectorKey(goalSample.position)
+		.. ":"
+		.. surfaceIdentity(goalSample)
 end
 
 local function getNavigation(npc)
@@ -183,19 +77,34 @@ local function getNavigation(npc)
 	if nav and nav.mode == "Ground" then
 		return nav
 	end
-	local profile = npc.navigationProfile
-	local numericId = tonumber(npc.id) or 0
+	local now = os.clock()
 	nav = {
 		mode = "Ground",
 		generation = 0,
 		waypoints = nil,
 		waypointIndex = 1,
-		nextDirectCheckAt = os.clock() + ((numericId % 12) / 12) * profile.DirectCheckInterval,
+		nextDirectCheckAt = 0,
 		directClear = nil,
 		directSector = nil,
+		directFailureCount = 0,
+		stepFailureCount = 0,
+		blockedSince = nil,
+		pathPending = false,
+		pendingGeneration = nil,
+		lastSafeSurfaceY = npc.position.Y - npc.groundOffset,
+		lastSafePosition = npc.position,
+		lastMoveReason = "initial",
+		lastDirectCheck = nil,
+		lastStepCheck = nil,
+		zeroMoveTicksWithTarget = 0,
+		consecutiveZeroMoveTicks = 0,
+		goalLayerId = 0,
+		goalSurfaceSample = nil,
+		goalSurfacePosition = nil,
+		nextGoalLayerCheckAt = 0,
 		nextRepathAt = 0,
 		pathExpiresAt = 0,
-		lastProgressAt = os.clock(),
+		lastProgressAt = now,
 		lastProgressPosition = npc.position,
 		unreachableSince = nil,
 		lastRepathReason = "initial",
@@ -229,10 +138,14 @@ local function copyWaypoints(path): {any}?
 			Label = waypoint.Label,
 		})
 	end
-	if #result < 2 then
-		return nil
+	return #result >= 2 and result or nil
+end
+
+local function clearPendingForRequest(nav, request)
+	if nav and nav.pendingGeneration == request.generation then
+		nav.pathPending = false
+		nav.pendingGeneration = nil
 	end
-	return result
 end
 
 local function applyPathResult(request, waypoints, reason: string)
@@ -240,13 +153,15 @@ local function applyPathResult(request, waypoints, reason: string)
 	local nav = npc.navigation
 	if npc.dead or not npc.model.Parent or not nav or nav.generation ~= request.generation then
 		metrics.stalePathResults += 1
+		clearPendingForRequest(nav, request)
 		return
 	end
+	clearPendingForRequest(nav, request)
 	if waypoints then
 		nav.waypoints = waypoints
 		nav.waypointIndex = math.min(2, #waypoints)
 		nav.pathExpiresAt = os.clock() + request.profile.PathRefreshSeconds
-		nav.status = "Path"
+		setStatus(nav, "Path")
 		nav.unreachableSince = nil
 		npc.unreachableSince = nil
 		if not request.cached then
@@ -254,7 +169,7 @@ local function applyPathResult(request, waypoints, reason: string)
 		end
 	else
 		nav.waypoints = nil
-		nav.status = "Unreachable"
+		setStatus(nav, "Unreachable")
 		nav.unreachableSince = nav.unreachableSince or os.clock()
 		npc.unreachableSince = nav.unreachableSince
 		nav.lastRepathReason = reason
@@ -264,53 +179,87 @@ local function applyPathResult(request, waypoints, reason: string)
 	end
 end
 
-local function queuePath(npc, goalPosition: Vector3, profile, now: number, reason: string)
+local function updateGoalLayer(nav, goalPosition: Vector3, sample, profile): boolean
+	local changed = false
+	if nav.goalSurfaceSample and nav.goalSurfacePosition then
+		local distance = flat(goalPosition - nav.goalSurfacePosition).Magnitude
+		local allowedDelta = math.tan(math.rad(profile.MaxSlopeDegrees)) * distance
+			+ Config.Scheduler.SurfaceLayerTolerance
+		if math.abs(sample.position.Y - nav.goalSurfaceSample.position.Y) > allowedDelta then
+			nav.goalLayerId += 1
+			changed = true
+		end
+	end
+	nav.goalSurfaceSample = sample
+	nav.goalSurfacePosition = goalPosition
+	return changed
+end
+
+local function invalidateRoute(npc, nav, reason: string)
+	nav.generation += 1
+	nav.waypoints = nil
+	nav.pathPending = false
+	nav.pendingGeneration = nil
+	nav.nextDirectCheckAt = 0
+	nav.lastRepathReason = reason
+	queuedNpc[npc] = nil
+end
+
+local function queuePath(npc, goalPosition: Vector3, profile, now: number, reason: string): boolean
 	local nav = getNavigation(npc)
-	if queuedNpc[npc] or now < nav.nextRepathAt then
-		return
+	if nav.pathPending or queuedNpc[npc] or now < nav.nextRepathAt then
+		return false
 	end
 
-	local startSurface = npc.position - Vector3.new(0, npc.groundOffset, 0)
-	local expectedGoalY = goalPosition.Y - npc.groundOffset
-	local goalHit = sampleSurface(goalPosition, expectedGoalY, profile, now)
-	if not goalHit then
+	local currentSurfaceY = npc.position.Y - npc.groundOffset
+	local startSample = NpcGroundSurface.SamplePrecise(npc.position, currentSurfaceY, profile)
+	local goalSample = NpcGroundSurface.SamplePrecise(goalPosition, goalPosition.Y - npc.groundOffset, profile)
+	if not startSample or not goalSample or NpcGroundSurface.GetFailureReason(goalSample, profile) then
 		nav.unreachableSince = nav.unreachableSince or now
 		npc.unreachableSince = nav.unreachableSince
-		nav.status = "Unreachable"
-		nav.lastRepathReason = "missing_goal_surface"
-		return
+		setStatus(nav, "Unreachable")
+		nav.lastRepathReason = not goalSample and "missing_goal_surface" or "invalid_goal_surface"
+		return false
 	end
+	updateGoalLayer(nav, goalPosition, goalSample, profile)
 
-	local goalSurface = goalHit.Position
-	local cacheKey = pathKey(profile, startSurface, goalSurface)
+	local cacheKey = pathKey(profile, startSample, goalSample)
 	local cached = pathCache[cacheKey]
 	if cached and cached.expiresAt >= now then
 		metrics.pathCacheHits += 1
 		nav.generation += 1
+		nav.pathGoalPosition = goalPosition
+		nav.pathGoalLayerId = nav.goalLayerId
 		applyPathResult({ npc = npc, generation = nav.generation, profile = profile, cached = true }, cached.waypoints, "cache")
-		return
+		return true
 	end
 	if #requestQueue >= Config.Scheduler.MaxPendingPaths then
-		nav.status = "PathQueueFull"
+		setStatus(nav, "PathQueueFull")
 		nav.unreachableSince = nav.unreachableSince or now
 		npc.unreachableSince = nav.unreachableSince
 		nav.lastRepathReason = "path_queue_full"
-		return
+		return false
 	end
 
 	nav.generation += 1
 	nav.nextRepathAt = now + profile.RepathCooldown
 	nav.lastRepathReason = reason
-	queuedNpc[npc] = true
+	nav.pathPending = true
+	nav.pendingGeneration = nav.generation
+	nav.pathGoalPosition = goalPosition
+	nav.pathGoalLayerId = nav.goalLayerId
 	metrics.pathRequests += 1
-	table.insert(requestQueue, {
+	local request = {
 		npc = npc,
 		generation = nav.generation,
 		profile = profile,
-		startPosition = startSurface,
-		goalPosition = goalSurface,
+		startPosition = startSample.position,
+		goalPosition = goalSample.position,
 		cacheKey = cacheKey,
-	})
+	}
+	queuedNpc[npc] = request
+	table.insert(requestQueue, request)
+	return true
 end
 
 local function startPathRequest(request)
@@ -357,21 +306,6 @@ local function startPathRequest(request)
 	end)
 end
 
-local function constrainStep(npc, candidate: Vector3, profile, now: number, expectedY: number?): Vector3?
-	local currentSurfaceY = npc.position.Y - npc.groundOffset
-	local hit = sampleSurface(candidate, expectedY or currentSurfaceY, profile, now)
-	local nav = getNavigation(npc)
-	nav.debugGroundProbe = hit and hit.Position or nil
-	if not hit then
-		return nil
-	end
-	local deltaY = hit.Position.Y - currentSurfaceY
-	if deltaY > profile.MaxStepUp + 0.05 or deltaY < -profile.MaxDrop - 0.05 then
-		return nil
-	end
-	return Vector3.new(candidate.X, hit.Position.Y + npc.groundOffset, candidate.Z)
-end
-
 local function markProgress(npc, nav, nextPosition: Vector3, profile, now: number)
 	if flat(nextPosition - nav.lastProgressPosition).Magnitude >= profile.StuckDistance then
 		nav.lastProgressPosition = nextPosition
@@ -381,31 +315,23 @@ local function markProgress(npc, nav, nextPosition: Vector3, profile, now: numbe
 	end
 end
 
+local function finishStep(nav, move: Vector3, reason: string, expectedDistance: number): (Vector3, string)
+	nav.lastMoveReason = reason
+	if nav.status == "WaitingPath" then
+		metrics.waitingPathTicks += 1
+	end
+	if expectedDistance > 0.05 and move.Magnitude < expectedDistance * 0.1 then
+		metrics.stalledMovementTicks += 1
+		nav.zeroMoveTicksWithTarget += 1
+		nav.consecutiveZeroMoveTicks += 1
+	else
+		nav.consecutiveZeroMoveTicks = 0
+	end
+	return move, nav.status
+end
+
 function NpcGroundNavigation.BeginTick(alivePlayers: {any})
-	table.clear(sharedIgnore)
-	table.clear(groundIgnore)
-	for _, name in ipairs({ "Enemies", "Mobs", "Drops", "SpellVFX" }) do
-		local inst = workspace:FindFirstChild(name)
-		if inst then
-			table.insert(sharedIgnore, inst)
-			table.insert(groundIgnore, inst)
-		end
-	end
-	for _, name in ipairs({ "Chests", "Shrines", "Statues" }) do
-		local inst = workspace:FindFirstChild(name)
-		if inst then
-			table.insert(groundIgnore, inst)
-		end
-	end
-	for _, info in ipairs(alivePlayers) do
-		local character = info.player.Character
-		if character then
-			table.insert(sharedIgnore, character)
-			table.insert(groundIgnore, character)
-		end
-	end
-	corridorParams.FilterDescendantsInstances = sharedIgnore
-	groundParams.FilterDescendantsInstances = groundIgnore
+	NpcGroundSurface.BeginTick(alivePlayers)
 end
 
 function NpcGroundNavigation.BuildSpatialGrid(npcPairs: () -> ()): {[string]: {any}}
@@ -447,10 +373,7 @@ function NpcGroundNavigation.GetSeparation(npc, grid): Vector3
 			end
 		end
 	end
-	if neighborCount <= 0 then
-		return Vector3.zero
-	end
-	return separation / neighborCount
+	return neighborCount > 0 and separation / neighborCount or Vector3.zero
 end
 
 function NpcGroundNavigation.Step(
@@ -464,13 +387,23 @@ function NpcGroundNavigation.Step(
 ): (Vector3, string)
 	local profile = npc.navigationProfile
 	local nav = getNavigation(npc)
-	local goalSector = sectorKey(goalPosition)
-	if nav.goalSector and nav.goalSector ~= goalSector then
-		nav.waypoints = nil
-		nav.generation += 1
-		nav.lastRepathReason = "goal_sector_changed"
+	local goalHorizontalSector = horizontalSectorKey(goalPosition)
+	local goalMoved = nav.pathGoalPosition
+		and flat(goalPosition - nav.pathGoalPosition).Magnitude >= profile.PathGoalMoveDistance
+	if now >= nav.nextGoalLayerCheckAt or nav.goalHorizontalSector ~= goalHorizontalSector then
+		nav.nextGoalLayerCheckAt = now + profile.DirectCheckInterval
+		local goalSample = NpcGroundSurface.SampleCached(goalPosition, goalPosition.Y - npc.groundOffset, profile, now)
+		if goalSample then
+			local layerChanged = updateGoalLayer(nav, goalPosition, goalSample, profile)
+			if layerChanged and (nav.waypoints or nav.pathPending) then
+				invalidateRoute(npc, nav, "goal_layer_changed")
+			end
+		end
 	end
-	nav.goalSector = goalSector
+	if goalMoved and (nav.waypoints or nav.pathPending) then
+		invalidateRoute(npc, nav, "goal_moved")
+	end
+	nav.goalHorizontalSector = goalHorizontalSector
 
 	if nav.waypoints and now >= nav.pathExpiresAt then
 		nav.waypoints = nil
@@ -503,76 +436,115 @@ function NpcGroundNavigation.Step(
 	end
 
 	if not nav.waypoints then
-		local desiredSector = sectorKey(desiredPosition)
+		local desiredSector = horizontalSectorKey(desiredPosition)
 		local directSectorChanged = nav.directSector ~= nil and nav.directSector ~= desiredSector
 		if now >= nav.nextDirectCheckAt or directSectorChanged then
-			nav.directClear = canTraverse(npc, desiredPosition, profile, now)
+			metrics.directChecks += 1
+			local directResult = NpcGroundSurface.CanTraverse(npc, desiredPosition, profile, now)
+			if not directResult.clear then
+				metrics.directCheckFailures += 1
+			end
+			nav.lastDirectCheck = directResult
+			nav.directClear = directResult.clear
 			nav.directSector = desiredSector
 			local targetDistance = flat(goalPosition - npc.position).Magnitude
 			local lodMultiplier = targetDistance >= 160 and 2.5 or (targetDistance >= 80 and 1.5 or 1)
 			nav.nextDirectCheckAt = now + profile.DirectCheckInterval * lodMultiplier
-		elseif nav.directClear == nil then
-			nav.status = "CheckingDirect"
-			return Vector3.zero, nav.status
-		end
-		if not nav.directClear then
-			queuePath(npc, goalPosition, profile, now, "direct_blocked")
-			nav.status = nav.waypoints and "Path" or "WaitingPath"
-			if not nav.unreachableSince and now - nav.lastProgressAt >= profile.StuckSeconds then
-				nav.unreachableSince = now
-				npc.unreachableSince = now
+			if directResult.clear then
+				nav.directFailureCount = 0
+				nav.blockedSince = nil
+				if not nav.pathPending then
+					setStatus(nav, "Direct")
+				end
+			else
+				nav.directFailureCount += 1
+				nav.blockedSince = nav.blockedSince or now
+				if nav.directFailureCount >= profile.DirectFailureThreshold then
+					queuePath(npc, goalPosition, profile, now, "direct_blocked:" .. directResult.reason)
+				end
 			end
-			return Vector3.zero, nav.status
 		end
-		nav.status = "Direct"
+		if nav.pathPending then
+			setStatus(nav, "WaitingPath")
+		elseif nav.directClear == false then
+			setStatus(nav, "DirectSuspect")
+		else
+			setStatus(nav, "Direct")
+		end
 	end
 
 	local toTarget = specialTransition and (moveTarget - npc.position) or flat(moveTarget - npc.position)
 	if toTarget.Magnitude <= 0.05 or speed <= 0 then
-		return Vector3.zero, nav.status
+		return finishStep(nav, Vector3.zero, "no_move_requested", 0)
 	end
 
-	local step = safeUnit(toTarget) * math.min(toTarget.Magnitude, speed * dt)
+	local expectedDistance = math.min(toTarget.Magnitude, speed * dt)
+	local step = safeUnit(toTarget) * expectedDistance
 	if not specialTransition and separation and separation.Magnitude > 0.01 then
 		step += safeUnit(separation) * math.min(speed * dt * 0.3, separation.Magnitude)
 	end
 	local candidate = npc.position + step
-	local constrained = nil
+	local stepResult
 	if specialTransition then
-		constrained = candidate
+		stepResult = {
+			clear = true,
+			reason = "special_transition",
+			position = candidate,
+			surfaceSamples = {},
+		}
 	else
 		local expectedY = nav.waypoints and (moveTarget.Y - npc.groundOffset) or nil
-		constrained = constrainStep(npc, candidate, profile, now, expectedY)
+		stepResult = NpcGroundSurface.ValidateStep(npc, candidate, profile, expectedY)
 	end
+	nav.lastStepCheck = stepResult
+	local endSample = stepResult.surfaceSamples and stepResult.surfaceSamples[2] or nil
+	nav.debugGroundProbe = endSample and endSample.position or nil
 
-	if not constrained or corridorBlocked(npc, flat(constrained - npc.position), profile) then
-		queuePath(npc, goalPosition, profile, now, "step_blocked")
-		if nav.waypoints then
+	if not stepResult.clear or not stepResult.position then
+		metrics.stepValidationFailures += 1
+		nav.stepFailureCount += 1
+		nav.blockedSince = nav.blockedSince or now
+		queuePath(npc, goalPosition, profile, now, "step_blocked:" .. stepResult.reason)
+		if nav.waypoints and nav.stepFailureCount >= profile.StepFailureThreshold then
 			nav.waypoints = nil
 		end
-		nav.status = "WaitingPath"
-		return Vector3.zero, nav.status
+		setStatus(nav, nav.pathPending and "WaitingPath" or "Blocked")
+		return finishStep(nav, Vector3.zero, stepResult.reason, expectedDistance)
 	end
 
+	local constrained = stepResult.position
+	nav.stepFailureCount = 0
+	nav.blockedSince = nil
+	nav.lastSafeSurfaceY = constrained.Y - npc.groundOffset
+	nav.lastSafePosition = constrained
 	markProgress(npc, nav, constrained, profile, now)
 	if now - nav.lastProgressAt >= profile.StuckSeconds then
 		queuePath(npc, goalPosition, profile, now, "stuck")
+		if nav.pathPending then
+			setStatus(nav, "WaitingPath")
+		end
 	end
-	return constrained - npc.position, nav.status
+	local moveReason = nav.status == "WaitingPath" and "waiting_path_safe_step"
+		or (nav.waypoints and "waypoint_safe" or "direct_safe")
+	return finishStep(nav, constrained - npc.position, moveReason, expectedDistance)
 end
 
 function NpcGroundNavigation.ConstrainPosition(npc, candidate: Vector3, now: number): Vector3
-	return constrainStep(npc, candidate, npc.navigationProfile, now) or npc.position
+	local nav = getNavigation(npc)
+	if nav.lastSafePosition and (candidate - nav.lastSafePosition).Magnitude <= 0.01 then
+		return candidate
+	end
+	if flat(candidate - npc.position).Magnitude <= 0.05 then
+		return npc.position
+	end
+	local result = NpcGroundSurface.ValidateStep(npc, candidate, npc.navigationProfile)
+	return result.clear and result.position or npc.position
 end
 
 function NpcGroundNavigation.StepScheduler(now: number)
 	if now - lastCacheCleanupAt >= 2 then
 		lastCacheCleanupAt = now
-		for key, cached in pairs(surfaceCache) do
-			if cached.expiresAt < now then
-				surfaceCache[key] = nil
-			end
-		end
+		NpcGroundSurface.CleanupCache(now)
 		for key, cached in pairs(pathCache) do
 			if cached.expiresAt < now then
 				pathCache[key] = nil
@@ -587,11 +559,10 @@ function NpcGroundNavigation.StepScheduler(now: number)
 	)
 	while activePaths < Config.Scheduler.MaxConcurrentPaths and pathTokens >= 1 and #requestQueue > 0 do
 		local request = table.remove(requestQueue, 1)
-		if request.npc.dead
-			or not request.npc.model.Parent
-			or not request.npc.navigation
-			or request.npc.navigation.generation ~= request.generation then
+		local nav = request.npc.navigation
+		if request.npc.dead or not request.npc.model.Parent or not nav or nav.generation ~= request.generation then
 			queuedNpc[request.npc] = nil
+			clearPendingForRequest(nav, request)
 		else
 			pathTokens -= 1
 			startPathRequest(request)
@@ -602,12 +573,8 @@ end
 function NpcGroundNavigation.Invalidate(npc, reason: string?)
 	local nav = npc.navigation
 	if nav then
-		nav.generation += 1
-		nav.waypoints = nil
-		nav.nextDirectCheckAt = 0
-		nav.lastRepathReason = reason or "invalidated"
+		invalidateRoute(npc, nav, reason or "invalidated")
 	end
-	queuedNpc[npc] = nil
 end
 
 function NpcGroundNavigation.Cleanup(npc)
@@ -618,6 +585,9 @@ end
 
 function NpcGroundNavigation.GetMetrics(): {[string]: any}
 	local result = table.clone(metrics)
+	for key, value in pairs(NpcGroundSurface.GetMetrics()) do
+		result[key] = value
+	end
 	result.pendingPaths = #requestQueue
 	result.activePaths = activePaths
 	result.pathCacheEntries = 0
@@ -627,11 +597,18 @@ function NpcGroundNavigation.GetMetrics(): {[string]: any}
 	return result
 end
 
+local function hitName(result): string?
+	local hit = result and result.hit
+	return hit and hit.Instance and hit.Instance:GetFullName() or nil
+end
+
 function NpcGroundNavigation.GetDebug(npc): {[string]: any}?
 	local nav = npc.navigation
 	if not nav or nav.mode ~= "Ground" then
 		return nil
 	end
+	local stepCheck = nav.lastStepCheck
+	local endSample = stepCheck and stepCheck.surfaceSamples and stepCheck.surfaceSamples[2] or nil
 	return {
 		profile = npc.movementProfile,
 		target = npc.targetPlayer and npc.targetPlayer.Name or nil,
@@ -641,11 +618,27 @@ function NpcGroundNavigation.GetDebug(npc): {[string]: any}?
 			and npc.targetPlayer.Character.HumanoidRootPart.Position
 			or nil,
 		status = nav.status,
+		lastMoveReason = nav.lastMoveReason,
+		directCheck = nav.lastDirectCheck,
+		stepCheck = nav.lastStepCheck,
+		bodyHit = hitName(stepCheck) or hitName(nav.lastDirectCheck),
+		surfaceNormal = endSample and endSample.normal or nil,
+		slopeDegrees = stepCheck and stepCheck.slopeDegrees or nil,
+		startSurfaceY = stepCheck and stepCheck.startSurfaceY or nil,
+		endSurfaceY = stepCheck and stepCheck.endSurfaceY or nil,
+		deltaY = stepCheck and stepCheck.deltaY or nil,
+		directFailureCount = nav.directFailureCount,
+		stepFailureCount = nav.stepFailureCount,
+		blockedSince = nav.blockedSince,
+		pathPending = nav.pathPending,
+		generation = nav.generation,
 		waypoints = nav.waypoints,
 		waypointIndex = nav.waypointIndex,
 		lastRepathReason = nav.lastRepathReason,
 		unreachable = nav.unreachableSince ~= nil,
 		groundProbe = nav.debugGroundProbe,
+		zeroMoveTicksWithTarget = nav.zeroMoveTicksWithTarget,
+		consecutiveZeroMoveTicks = nav.consecutiveZeroMoveTicks,
 	}
 end
 

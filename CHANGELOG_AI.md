@@ -16,6 +16,7 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-07-12** — Poziom naprawa regresji ruchu naziemnych NPC na zboczach Roblox Terrain
 - **2026-07-11** — Poziom kompletna przebudowa nawigacji NPC
 - **2026-07-08** — God Script refactor final audit
 - **2026-07-08** — Four Peaks UI stage 7 completion audit

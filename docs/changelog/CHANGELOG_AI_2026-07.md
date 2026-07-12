@@ -1,5 +1,51 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-12 - Poziom slope-aware ground NPC navigation regression fix
+
+### Summary
+
+- Replaced horizontal full-body Terrain checks with surface-sampled, Y-aware body segments. Direct probes now collect the complete surface route first, validate step/drop/slope/layer continuity, then cast separately between consecutive body centers.
+- Added precise uncached sampling for the actual movement step (center, front, left and right) and a separate route-only cache with `0.5`-stud X/Z and expected-Y resolution, `0.4`-stud reuse limits and `0.08`-second TTL.
+- Added bounded follow-through for non-walkable probe hits and enabled `RespectCanCollide`, so non-collidable visual effects do not become ground while water, forbidden modifiers and missing surfaces retain explicit failure reasons.
+- Added direct/path hysteresis: two consecutive long-corridor failures are required before requesting a path, a safe local step continues while a path is pending, and existing waypoints survive the first failed step validation.
+- Split horizontal goal sectors from continuity-based surface-layer tracking. Crossing the former `floor(Y / 8)` boundary on a continuous slope no longer invalidates a route.
+- Extended disabled-by-default Studio diagnostics and metrics with direct/step results, body hit, surface normal/slope/Y values, failure counters, pending generation, stalled movement and state transitions.
+- Kept the central movement scheduler at 12 Hz. No per-NPC loop, connection, remote/API change, `_G` dependency, persistent-data change or map-object migration was added.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/NpcGroundSurface.lua`
+- Updated `Level/ServerScriptService/ModuleScript/NpcGroundNavigation.lua`
+- Updated `Level/ServerScriptService/ModuleScript/NpcNavigationConfig.lua`
+- Updated `Level/ServerScriptService/ModuleScript/NpcNavigationDebug.lua`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Root cause and validation
+
+- The old corridor box started about `0.4` studs above the current surface and moved horizontally. Rising Roblox Terrain therefore entered the lower face of the box and was treated as a wall. A second voxel-specific case exposed vertical Terrain faces between otherwise legal surface samples and stopped all ground profiles at repeatable map coordinates.
+- On the original Terrain regression point `(120, 97.89, -660) -> (121.5, 98.64, -660)`, the old code returned zero movement, `WaitingPath` and one path request. The final code returned `(1.5, 0.746, 0)`, `Direct`, no stalled tick and no path request.
+- On the user-visible shared ground route `(-370.42, -328.44) -> (-314.58, -291.96)`, the intermediate implementation reproduced `121` stopped ticks at a vertical voxel face. The final route covered `66.8` studs with `0` stopped ticks, `0` step failures and `0` path requests.
+- A real registered Slime completed five ascents and five descents on the existing hill (`10/10`) with `0` stalled ticks, direct failures, step failures and path requests. Each leg ended in `Direct` with direct and step checks both `clear`.
+- Existing Terrain safety cases passed: a `64.3`-degree rock face remained blocked, the canyon-edge width probe returned `missing_surface`, a non-collidable effect was skipped, and temporary Play-only bridge tagging kept under-bridge sampling on Terrain (`Y 3.53 -> 3.74`) and over-bridge sampling on the bridge (`Y 86.89 -> 86.72`).
+- Twenty-NPC formation tests completed the existing hill ascent with `0` stopped ticks, path requests and step failures. The descent also had `0` stopped ticks and step failures, with four non-serial path requests across 20 formation routes.
+- The corrected 100-NPC, 60-second simulated Terrain pass had `0` stopped ticks and `0` step failures. It issued 100 bounded requests (at most one per NPC across six target reversals); 720 synthetic 100-NPC movement iterations took about `2.0` seconds total in the server probe.
+- Continuous Terrain movement across the old Y-sector boundary (`12 -> 11`) retained the active waypoints and navigation generation.
+- Slow reduced measured movement, a non-elite freeze produced `0` movement, ability lock and pause produced `0` movement, impulse moved the NPC, damage/death callback/despawn passed, ranged LOS accepted clear/rejected blocked, and melee height accepted same-height/rejected a target 10 studs above.
+- Fresh Play startup compiled all touched modules. No navigation/NpcService exception appeared; the existing unrelated `Hybrid Terrain Hex Generator:16` toolbar error and `RunStatsHud` re-entrancy error remained.
+- Final checksums matched repo and Studio for the four touched/new modules and remained unchanged for `NpcMovement`, `NpcService`, `WorldBounds` and `NpcPresentation`.
+
+### Risks
+
+- Actual steps now use five precise ground probes plus a body cast; legal voxel faces can trigger one raised retry cast. The 100-NPC probe stayed bounded, but a production encounter profiler pass is still useful if the live cap grows substantially.
+- Bridge-over/under validation used the existing bridge with a temporary Play-only `NpcWalkable` tag because the current authored bridge has no persistent walkable tag. No map tag was changed in Edit mode.
+- The 100-NPC result is a deterministic server simulation of 60 seconds, not a 60-second wall-clock multiplayer soak.
+
+### Rollback
+
+- Restore the previous `NpcGroundNavigation.lua`, `NpcNavigationConfig.lua` and `NpcNavigationDebug.lua` sources in repo and Studio, then delete `NpcGroundSurface.lua` from both.
+- No DataStore, TeleportData, remote, attribute schema or map-object rollback is required.
+
 ## 2026-07-11 - Poziom kompletna przebudowa nawigacji NPC
 
 ### Summary
