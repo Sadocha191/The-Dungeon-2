@@ -1,5 +1,72 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-12 - Poziom PR #99 kierunek spawn NPC i orientacja Golem
+
+### Summary
+
+- Inspected GitHub PR #99, `Fix NPC spawn facing and Ent/Golem orientation`, and applied its changes locally and in active `Level` Studio.
+- `NpcReplication` now resolves snapshot direction through a dedicated helper:
+  - emerging NPCs face the nearest alive player using `spawnSurfacePosition`;
+  - `MobConfig.facingYawDegrees` is used as a replication fallback when the runtime model does not already carry `NpcFacingYawDegrees`;
+  - existing model `NpcFacingYawDegrees` is preserved to avoid applying yaw correction twice.
+- Added the missing `facingYawDegrees = -90` configuration for `Golem`.
+- Merged PR #99 and deleted the remote branch `fix/npc-spawn-facing`.
+
+### Files
+
+- Updated `Level/ServerScriptService/ModuleScript/NpcReplication.lua`
+- Updated `Level/ServerScriptService/ModuleScript/MobConfig.lua`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Synchronized:
+  - `game.ServerScriptService.ModuleScript.NpcReplication`
+  - `game.ServerScriptService.ModuleScript.MobConfig`
+- Final repo/Studio source parity before Play:
+  - `NpcReplication`: length `3888`, hash `649373220`
+  - `MobConfig`: length `2530`, hash `225028423`
+- Removed the stale `game.StarterPlayer.StarterPlayerScripts.LocalScript.ChestOpeningRootMotion` Studio-only object from the failed/unmerged PR #98 attempt before validating PR #99.
+
+### Validation
+
+- GitHub PR #99 metadata and diff were inspected. It was open, mergeable, based on current `main`, and changed two NPC config/replication modules.
+- `Level` Play server require loaded `NpcReplication` and `MobConfig`.
+- Controlled server probe through `NpcReplication.CollectBatchItems` with a real alive player target confirmed:
+  - `MobConfig.Mobs.Golem.facingYawDegrees == -90`;
+  - a spawning Slime snapshot at the origin produced `dir = (1, 0, 0)` toward the player at `+X`;
+  - `spawnSurfacePos` and `spawnEmergeDepth` still replicated for emerging NPCs;
+  - a Golem without `NpcFacingYawDegrees` used the config fallback yaw;
+  - a Golem already carrying `NpcFacingYawDegrees = -90` preserved the existing model attribute path and did not double-rotate;
+  - a spawning Golem combined player-facing direction with the yaw fallback.
+- Temporary probe models were destroyed and the player root/attributes were restored after the test.
+- `git diff --check` passed with only existing LF-to-CRLF working-copy warnings.
+- Static grep found no new runtime loop, `_G`, DataStore, Teleport, `task.spawn`, `task.delay`, `Heartbeat`, `Stepped` or `RenderStepped` in the changed modules. The `RemoteEvent` hits are existing type annotations/signatures in `NpcReplication`.
+- GitHub verification after merge showed PR #99 merged at `2026-07-12T20:36:18Z`, merge commit `f2c69a922181cf324bf464e06dcdaf88e5871825`.
+- `git ls-remote --heads origin fix/npc-spawn-facing` returned no ref after merge/fetch, confirming branch deletion.
+
+### Not verified
+
+- Full visual camera inspection of real Ent and Golem models emerging in a natural run was not completed.
+- Multi-player nearest-target tie behavior was not manually tested; the helper selects the closest alive player by flat X/Z distance.
+
+### Runtime cost and risks
+
+- No new runtime loop or connection was added.
+- `NpcReplication` now scans `Players:GetPlayers()` only when building a snapshot for an NPC that still has `spawnSurfacePosition`, i.e. during its underground emergence window. This cost is `spawning NPC count * player count` per replication batch while those NPCs are emerging.
+- If future content spawns hundreds of NPCs simultaneously for long emergence windows in larger multiplayer sessions, consider caching alive player roots once per replication batch instead of scanning inside each emerging NPC snapshot.
+- The config fallback intentionally skips yaw rotation when the model already has non-zero `NpcFacingYawDegrees`; this avoids double rotation but depends on callers keeping that attribute meaningful.
+
+### Rollback
+
+- Restore the previous `NpcReplication.lua` snapshot direction assignment to `dir = npc.look`.
+- Remove `facingYawDegrees = -90` from the `Golem` entry in `MobConfig.lua`.
+- Sync both ModuleScripts back to `Level` Studio.
+- Revert PR #99 merge commit `f2c69a922181cf324bf464e06dcdaf88e5871825` on GitHub if rollback is needed remotely.
+- Revert this changelog entry and the `CHANGELOG_AI.md` index line.
+
 ## 2026-07-12 - Poziom PR #97 chesty z ReplicatedStorage.Assets.Chest
 
 ### Summary
