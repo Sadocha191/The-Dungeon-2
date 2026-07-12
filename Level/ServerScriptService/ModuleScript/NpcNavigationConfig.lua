@@ -1,5 +1,7 @@
 local NpcNavigationConfig = {}
 
+local DIRECT_FAILURE_REPATH_DISABLED = math.huge
+
 NpcNavigationConfig.Scheduler = {
 	MovementHz = 12,
 	TargetingHz = 3,
@@ -40,7 +42,7 @@ NpcNavigationConfig.Profiles = {
 		DirectSampleSpacing = 2.75,
 		-- A failed long-range direct probe must not force a repath by itself.
 		-- ValidateStep still queues a path immediately when the next real movement step is blocked.
-		DirectFailureThreshold = 999,
+		DirectFailureThreshold = DIRECT_FAILURE_REPATH_DISABLED,
 		StepFailureThreshold = 2,
 		FrontProbeScale = 0.65,
 		WidthProbeScale = 0.8,
@@ -79,7 +81,7 @@ NpcNavigationConfig.Profiles = {
 		GroundSkin = 0.5,
 		DirectSampleSpacing = 4,
 		-- Large NPCs use the same rule: only a blocked local step should trigger repathing.
-		DirectFailureThreshold = 999,
+		DirectFailureThreshold = DIRECT_FAILURE_REPATH_DISABLED,
 		StepFailureThreshold = 2,
 		FrontProbeScale = 0.65,
 		WidthProbeScale = 0.8,
