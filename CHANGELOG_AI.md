@@ -16,6 +16,9 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-07-12** — Poziom PR #97 chesty z ReplicatedStorage.Assets.Chest
+- **2026-07-12** — Poziom PR #96 blokowanie targetowania czarow przez sciany
+- **2026-07-12** — Poziom PR #95 ograniczenie falszywych repathow NPC na zboczach
 - **2026-07-12** — Poziom/Four Peaks sterowana predkosc animacji biegania z PR #94
 - **2026-07-12** — Poziom naprawa regresji ruchu naziemnych NPC na zboczach Roblox Terrain
 - **2026-07-11** — Poziom kompletna przebudowa nawigacji NPC

@@ -1,5 +1,194 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-12 - Poziom PR #97 chesty z ReplicatedStorage.Assets.Chest
+
+### Summary
+
+- Inspected GitHub PR #97, `Use ReplicatedStorage chest model for world chests`, and applied its focused Level bootstrap script locally.
+- Added a startup adapter that clones `ReplicatedStorage.Assets.Chest` into the existing `Workspace.skrzynia` runtime template contract consumed by `ChestService`.
+- The runtime template is marked with source attributes, parked at `Y=-100000`, stripped of embedded scripts/prompts, anchored, and left as a direct child of `Workspace`.
+- Kept `ChestService` ownership of terrain placement, random yaw, ProximityPrompt creation, costs, rewards, recipe rewards, open handling and cleanup unchanged.
+- After validating PR #97, merged GitHub PRs #95, #96 and #97 with head-SHA checks and deleted their head branches:
+  - #95 `fix/npc-slope-repath-stutter`
+  - #96 `fix/spell-wall-collision`
+  - #97 `feat/use-replicated-chest-model`
+
+### Files
+
+- Added `Level/ServerScriptService/Script/ChestAssetTemplateBootstrap.server.lua`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Created `game.ServerScriptService.Script.ChestAssetTemplateBootstrap`.
+- Confirmed `ReplicatedStorage.Assets.Chest` exists in Studio and is a `Model`.
+- Final Studio script source parity: length `2465`, hash `275413366` (`repo` has the same source plus the trailing newline).
+
+### Validation
+
+- GitHub PR #97 metadata and diff were inspected. It was open, mergeable, based on current `main`, and added one Level server script.
+- Inspected `ChestService.server.lua` and confirmed the existing contract:
+  - it reads `Workspace.skrzynia` through `getWorldChestTemplate()`;
+  - it clones the template only when spawning a chest;
+  - it adds the single server-authoritative `OpenPrompt` itself.
+- Edit-time Studio check confirmed `ReplicatedStorage.Assets.Chest` was a `Model` and no stale `Workspace.skrzynia` template existed before runtime.
+- `Level` Play validation confirmed the bootstrap created `Workspace.skrzynia` from the ReplicatedStorage asset:
+  - direct child of `Workspace`;
+  - `ChestAssetRuntimeTemplate = true`;
+  - `ChestTemplateSource = "ReplicatedStorage.Assets.Chest"`;
+  - pivot `Y = -100000`;
+  - `5` BaseParts, `0` unanchored parts, `0` CanTouch parts;
+  - `0` embedded `BaseScript` instances and `0` embedded `ProximityPrompt` instances.
+- Real run startup spawned `342` world chest models under `Workspace.Chests`; the first inspected chest:
+  - inherited `ChestAssetRuntimeTemplate = true`;
+  - had exactly `1` ProximityPrompt added by `ChestService`;
+  - had `0` embedded scripts;
+  - was not the generated blockout fallback.
+- `git diff --check` passed with only existing LF-to-CRLF working-copy warnings.
+- GitHub verification after merge showed:
+  - #95 merged at `2026-07-12T19:54:21Z`, merge commit `9bea78694e41cc1ddc5707ea21f27bc18c6811f0`;
+  - #96 merged at `2026-07-12T19:54:27Z`, merge commit `00f6c9d889f4bb048d153b5fca7d02cb5de7e833`;
+  - #97 merged at `2026-07-12T19:54:33Z`, merge commit `881ca37ba187e81cb5a05557fe064945c2b0c67e`.
+- `git ls-remote --heads origin fix/npc-slope-repath-stutter fix/spell-wall-collision feat/use-replicated-chest-model` returned no refs, confirming branch deletion.
+- No new `_G`, remote, DataStore path, teleport data, runtime loop, per-chest event connection or gameplay reward API was added.
+
+### Not verified
+
+- Manual player chest opening and reward UI flow were not repeated with keyboard/mouse input.
+- Normal, free and recipe/reward chest opening were not manually exercised end-to-end after the model swap.
+- Visual grounding/rotation was validated through real spawned chest instances existing from the asset path, not by screenshot/video review.
+
+### Runtime cost and risks
+
+- The new script is a one-time server startup bootstrap. It performs one bounded `WaitForChild` lookup for `Assets`, one bounded lookup for `Chest`, one clone, and one descendant cleanup pass over the chest template.
+- Because startup now asserts if `ReplicatedStorage.Assets.Chest` is missing or not a `Model`, a content regression in that asset will fail loudly and `ChestService` would fall back only if the bootstrap is disabled/restored.
+- `Workspace.skrzynia` remains a legacy runtime template contract. Future chest refactors should either preserve that contract or move template ownership into `ChestService` deliberately.
+
+### Rollback
+
+- Delete `Level/ServerScriptService/Script/ChestAssetTemplateBootstrap.server.lua` from repo.
+- Delete `game.ServerScriptService.Script.ChestAssetTemplateBootstrap` from `Level` Studio.
+- Remove any runtime `Workspace.skrzynia` created by the bootstrap, or restart the server after deleting the script.
+- `ChestService` will return to its previous generated blockout fallback if no valid `Workspace.skrzynia` model exists.
+- Revert this changelog entry and the `CHANGELOG_AI.md` index line.
+
+## 2026-07-12 - Poziom PR #96 blokowanie targetowania czarow przez sciany
+
+### Summary
+
+- Inspected GitHub PR #96, `Prevent targeted spells from firing through walls`, and applied its spell-wall-collision changes locally. The PR was later merged after validation during the PR #97 cleanup step.
+- Added shared world line-of-sight helpers to `SpellTargeting`.
+- Priority enemy selection now keeps only enemies with clear line of sight from the spell origin.
+- Projectile firing now clamps server-side projectile range and VFX range to the first world obstruction.
+- Projectile simulation clamps each movement step to the remaining wall-limited range.
+- Beam range and VFX length are clamped to the first world obstruction.
+- Beam and sustained-zone damage ticks now require line of sight before damaging an enemy.
+
+### Files
+
+- Updated `Level/ServerScriptService/ModuleScript/SpellTargeting.lua`
+- Updated `Level/ServerScriptService/ModuleScript/SpellProjectiles.lua`
+- Updated `Level/ServerScriptService/ModuleScript/SpellSustained.lua`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Synchronized:
+  - `game.ServerScriptService.ModuleScript.SpellTargeting`
+  - `game.ServerScriptService.ModuleScript.SpellProjectiles`
+  - `game.ServerScriptService.ModuleScript.SpellSustained`
+- Final repo/Studio source parity:
+  - `SpellTargeting`: length `4313`, hash `931472151`
+  - `SpellProjectiles`: length `3899`, hash `720147422`
+  - `SpellSustained`: length `4401`, hash `83617495`
+
+### Validation
+
+- GitHub PR #96 metadata and diff were inspected. It was open, mergeable, based on current `main`, and changed three spell modules.
+- Fresh `Level` Play server require loaded `SpellTargeting`, `SpellProjectiles` and `SpellSustained` with no module-load errors.
+- Isolated wall probe far from authored map geometry confirmed line-of-sight and obstruction distance:
+  - no wall: `openLos=true`, unobstructed distance `80.00`
+  - test wall at 20 studs: `blockedLos=false`, unobstructed distance `18.90`
+- Priority target probe with two registered temporary NPCs confirmed that the blocked enemy was filtered out while the visible enemy was picked:
+  - `blockedLos=false`
+  - `visibleLos=true`
+  - `picked=PR96Visible`
+  - visible list contained only `PR96Visible`
+- Temporary probe models, wall parts and folders were removed after each test.
+- No new runtime loop, per-projectile connection, remote, `_G`, DataStore path, teleport data or public spell API was added.
+
+### Not verified
+
+- Full manual spell matrix from the PR description was not repeated with real player input, authored walls and live spell VFX.
+- Piercing projectile behavior against several real enemies with a wall behind them was not manually exercised.
+- Beam and sustained-zone live visual length were validated indirectly through clamped server range logic, not by screenshot/video inspection.
+
+### Runtime cost and risks
+
+- Existing target selection, beam ticks and zone ticks now add world raycasts for relevant candidate enemies. This is bounded by existing spell candidate sets and existing tick rates, but a large encounter spell soak should watch raycast cost.
+- `SpellTargeting` builds raycast ignore params per LOS/range query so current player characters and dynamic folders are respected. If spell volume grows substantially, cache/batch the ignore list per spell cast or tick.
+- Obstruction checks ignore player characters, enemy folders, drops and `SpellVFX`; unusual map blockers outside normal collidable world geometry may need tagging or hierarchy cleanup if they should not block spells.
+
+### Rollback
+
+- Restore the previous `SpellTargeting.lua`, `SpellProjectiles.lua` and `SpellSustained.lua` sources in repo and Studio.
+- Revert this changelog entry and the `CHANGELOG_AI.md` index line.
+- No remote, DataStore, teleport data or map-object rollback is required.
+
+## 2026-07-12 - Poziom PR #95 ograniczenie falszywych repathow NPC na zboczach
+
+### Summary
+
+- Inspected GitHub PR #95, `Prevent NPC slope repath stutter`, and applied its `NpcNavigationConfig` change locally. The PR was later merged after validation during the PR #97 cleanup step.
+- Added `DIRECT_FAILURE_REPATH_DISABLED = math.huge`.
+- Set `DirectFailureThreshold = DIRECT_FAILURE_REPATH_DISABLED` for `GroundSmall` and `GroundLarge`.
+- Kept `StepFailureThreshold = 2`, so blocked local `ValidateStep` movement still requests pathfinding immediately.
+- No scheduler frequency, movement speed, path queue limit, remote, persistent data, teleport data or public API was changed.
+
+### Files
+
+- Updated `Level/ServerScriptService/ModuleScript/NpcNavigationConfig.lua`
+- Updated `CHANGELOG_AI.md`
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`
+
+### Studio
+
+- Active place: `Level`.
+- Synchronized `game.ServerScriptService.ModuleScript.NpcNavigationConfig`.
+- Final repo/Studio source parity: length `4296`, hash `985882022`.
+
+### Validation
+
+- GitHub PR #95 metadata and diff were inspected. It was open, mergeable, and changed one file.
+- Fresh `Level` Play server require confirmed:
+  - `GroundSmall.DirectFailureThreshold == math.huge`
+  - `GroundLarge.DirectFailureThreshold == math.huge`
+  - both ground profiles kept `StepFailureThreshold = 2`
+  - `Flying.DirectFailureThreshold` remained unset.
+- Controlled server probe on real Terrain sample reproduced repeated false direct-probe failures with no path queue growth: `directFailures=4`, `pendingDelta=0`, `pathRequestsDelta=0`, movement `4.963` studs and status `DirectSuspect`.
+- Source audit confirmed `NpcGroundNavigation` still calls `queuePath` immediately when `ValidateStep` fails.
+- No new `_G`, remote, DataStore path, teleport data, server loop, per-NPC loop or event connection was added.
+
+### Not verified
+
+- Full manual keyboard/player-position test on multiple authored hills and behind real obstacles was not repeated.
+- Large mob live-content movement was validated through shared config only, not a physical Ent/Golem hill traversal run.
+
+### Risks
+
+- Direct probe failures can now remain in `DirectSuspect` indefinitely until a local step, stuck timer, path expiry or other route condition requires pathfinding. This is intended for slope false positives but should be watched around unusual terrain gaps.
+- If an obstacle is only detectable by the long-range body corridor and every local step remains valid, the NPC may approach closer before pathing around it.
+
+### Rollback
+
+- Restore `GroundSmall.DirectFailureThreshold = 2` and `GroundLarge.DirectFailureThreshold = 2` in `NpcNavigationConfig.lua`, then sync `game.ServerScriptService.ModuleScript.NpcNavigationConfig`.
+- Remove `DIRECT_FAILURE_REPATH_DISABLED` if no longer used.
+- Revert this changelog entry and the `CHANGELOG_AI.md` index line.
+
 ## 2026-07-12 - Poziom/Four Peaks sterowana predkosc animacji biegania z PR #94
 
 ### Summary

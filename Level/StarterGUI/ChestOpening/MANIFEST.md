@@ -17,7 +17,8 @@ Authored chest-opening reward UI used by `StarterPlayer.StarterPlayerScripts.Loc
       - `skrzynia` (`Model`)
         - Has `AnimationController.Animator`.
         - Has `OpenAnimation` (`Animation`) with `AnimationId = rbxassetid://128606196135074`.
-        - The client waits `0.5` seconds after showing the GUI, then plays the full animation and freezes it at the final frame.
+        - Has the animated armature root `Bone`; its authored root motion is transferred to the model pivot by `ChestOpeningRootMotion.client.lua`.
+        - The client plays the full animation and freezes it at the final frame.
   - `Camera` (`Camera`)
     - Assigned to `ViewportFrame.CurrentCamera` by the client.
   - `Frame` (`Frame`)
@@ -25,6 +26,11 @@ Authored chest-opening reward UI used by `StarterPlayer.StarterPlayerScripts.Loc
       - Hidden while the chest animation plays.
       - Receives the rolled item icon after the animation finishes.
       - Gets a runtime transparent `TakeRewardButton` child so clicking/tapping the item claims the reward.
+
+## Runtime Scripts
+
+- `ChestRewardClient.client.lua` starts the authored animation and controls the reward reveal.
+- `ChestOpeningRootMotion.client.lua` reads the animated root `Bone.Transform` after animation evaluation, applies the same transform to the `skrzynia` model pivot, and clears the bone transform to prevent doubled movement. It does not create a replacement tween or procedural jump.
 
 ## Notes
 
