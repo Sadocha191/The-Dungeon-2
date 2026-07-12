@@ -1,3 +1,5 @@
+local SpellTargeting = require(script.Parent:WaitForChild("SpellTargeting"))
+
 local SpellSustained = {}
 
 local callbacks = nil
@@ -79,7 +81,9 @@ function SpellSustained.RunZone(config)
 				break
 			end
 			for _, enemy in ipairs(callbacks.getEnemiesInRadius(center, radius)) do
-				callbacks.hitEnemy(plr, enemy, tickDamage, stats, center, callbacks.getEnemyPosition(enemy))
+				if SpellTargeting.HasLineOfSight(center, enemy) then
+					callbacks.hitEnemy(plr, enemy, tickDamage, stats, center, callbacks.getEnemyPosition(enemy))
+				end
 			end
 			task.wait(tickRate)
 		end
@@ -101,7 +105,10 @@ function SpellSustained.RunBeam(config)
 	end
 	direction = direction.Unit
 
-	local range = stats.range or 50
+	local range = SpellTargeting.GetUnobstructedDistance(origin, direction, stats.range or 50)
+	if range <= 0.05 then
+		return
+	end
 	local width = stats.width or 4
 	local duration = stats.duration or 1.5
 	local tickRate = stats.tickRate or 0.18
@@ -125,7 +132,11 @@ function SpellSustained.RunBeam(config)
 			local beamEnd = origin + (direction * range)
 			for _, enemy in ipairs(callbacks.getAllEnemies()) do
 				local enemyPos = callbacks.getEnemyPosition(enemy)
-				if enemyPos and not hitThisTick[enemy] and callbacks.distancePointToSegment(enemyPos, origin, beamEnd) <= (width * 0.5) then
+				if enemyPos
+					and not hitThisTick[enemy]
+					and callbacks.distancePointToSegment(enemyPos, origin, beamEnd) <= (width * 0.5)
+					and SpellTargeting.HasLineOfSight(origin, enemy)
+				then
 					hitThisTick[enemy] = true
 					callbacks.hitEnemy(plr, enemy, beamDamage, stats, origin, getBeamImpactPosition(enemyPos, origin, beamEnd))
 				end

@@ -1,5 +1,7 @@
 local RunService = game:GetService("RunService")
 
+local SpellTargeting = require(script.Parent:WaitForChild("SpellTargeting"))
+
 local SpellProjectiles = {}
 
 local callbacks = nil
@@ -47,7 +49,12 @@ local function stepProjectile(projectile, dt)
 		return true
 	end
 
-	local step = projectile.speed * dt
+	local remainingDistance = projectile.range - projectile.traveled
+	if remainingDistance <= 1e-4 then
+		return false
+	end
+
+	local step = math.min(projectile.speed * dt, remainingDistance)
 	projectile.traveled += step
 	projectile.pos += projectile.dir * step
 
@@ -62,7 +69,7 @@ local function stepProjectile(projectile, dt)
 		projectile.remainingPierce -= 1
 	end
 
-	return projectile.traveled < projectile.range
+	return projectile.traveled + 1e-4 < projectile.range
 end
 
 local function stepProjectiles(dt)
@@ -92,22 +99,36 @@ function SpellProjectiles.Fire(config)
 	assert(callbacks, "[SpellProjectiles] Configure must be called before Fire")
 	assert(typeof(config) == "table", "[SpellProjectiles] projectile config is required")
 
+	local origin = config.origin
+	local direction = config.dir
+	local speed = math.max(0, tonumber(config.speed) or 0)
+	local maxRange = math.max(0, tonumber(config.range) or 0)
+	if typeof(origin) ~= "Vector3" or typeof(direction) ~= "Vector3" or direction.Magnitude <= 0.01 or speed <= 0 or maxRange <= 0 then
+		return
+	end
+
+	direction = direction.Unit
+	local unobstructedRange = SpellTargeting.GetUnobstructedDistance(origin, direction, maxRange)
+	if unobstructedRange <= 0.05 then
+		return
+	end
+
 	local stats = config.stats or {}
 	callbacks.broadcastProjectile({
-		origin = config.origin,
-		dir = config.dir,
-		speed = config.speed,
-		range = config.range,
+		origin = origin,
+		dir = direction,
+		speed = speed,
+		range = unobstructedRange,
 		startTime = workspace:GetServerTimeNow(),
 		stats = callbacks.extractVisualStats(stats),
 	})
 
 	table.insert(activeProjectiles, {
 		player = config.player,
-		pos = config.origin,
-		dir = config.dir,
-		speed = config.speed,
-		range = config.range,
+		pos = origin,
+		dir = direction,
+		speed = speed,
+		range = unobstructedRange,
 		damage = config.damage,
 		stats = stats,
 		traveled = 0,
