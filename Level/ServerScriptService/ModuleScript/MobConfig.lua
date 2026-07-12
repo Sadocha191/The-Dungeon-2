@@ -121,6 +121,7 @@ MobConfig.Mobs = {
 		xp = 30,
 		coins = 5,
 		visualScale = 3,
+		facingYawDegrees = -90,
 		movementProfile = "GroundLarge",
 	},
 
