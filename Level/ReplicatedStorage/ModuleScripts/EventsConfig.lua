@@ -62,14 +62,12 @@ return {
 				RequiredCompletedTasks = 4,
 				Rewards = {
 					{ Type = "Ticket", Amount = 5 },
-					{ Type = "Title", BackendId = "BloodMoonSurvivor", DisplayName = "Blood Moon Survivor" },
 				},
 			},
 		},
 
 		FinalRewards = {
 			{ Type = "Ticket", Amount = 5 },
-			{ Type = "CosmeticPlaceholder", BackendId = "BloodMoonCosmetic", DisplayName = "Blood Moon Cosmetic" },
 		},
 	},
 }
