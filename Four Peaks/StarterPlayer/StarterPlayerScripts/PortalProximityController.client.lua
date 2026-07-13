@@ -60,6 +60,17 @@ local function closePortalUi()
 	end
 end
 
+local function keepProximityUiNonModal()
+	if not wasInside or not openAccepted then
+		return
+	end
+
+	local gui = playerGui:FindFirstChild("PortalUI")
+	if gui and gui:IsA("ScreenGui") and gui.Enabled then
+		gui:SetAttribute("Modal", false)
+	end
+end
+
 local function getRootPart()
 	local character = player.Character
 	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
@@ -113,11 +124,13 @@ local function updatePortalState()
 	local threshold = wasInside and CLOSE_DISTANCE or OPEN_DISTANCE
 	setInside(distance <= threshold)
 	requestOpenIfNeeded()
+	keepProximityUiNonModal()
 end
 
 openLevelSelect.OnClientEvent:Connect(function()
 	if wasInside then
 		openAccepted = true
+		task.defer(keepProximityUiNonModal)
 	end
 end)
 
