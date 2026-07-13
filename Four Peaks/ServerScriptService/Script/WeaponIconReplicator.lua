@@ -23,6 +23,34 @@ local function buildAssetReference(iconName)
 	return string.format("rbxgameasset://%s/%s", IMAGE_CATEGORY, tostring(iconName))
 end
 
+local function readImageReference(object)
+	if not object then
+		return nil
+	end
+	if object:IsA("StringValue") then
+		return object.Value ~= "" and object.Value or nil
+	elseif object:IsA("ImageLabel") or object:IsA("ImageButton") then
+		return object.Image ~= "" and object.Image or nil
+	elseif object:IsA("Decal") or object:IsA("Texture") then
+		return object.Texture ~= "" and object.Texture or nil
+	end
+	return nil
+end
+
+local function findNestedImageReference(root)
+	local direct = readImageReference(root)
+	if direct then
+		return direct
+	end
+	for _, descendant in ipairs(root:GetDescendants()) do
+		local asset = readImageReference(descendant)
+		if asset then
+			return asset
+		end
+	end
+	return nil
+end
+
 local function ensureFolder(folderName)
 	local folder = ReplicatedStorage:FindFirstChild(folderName)
 	if folder and folder:IsA("Folder") then
@@ -45,7 +73,14 @@ local function ensureStringValue(folder, valueName, defaultValue)
 
 	local existing = folder:FindFirstChild(valueName)
 	if existing and not existing:IsA("StringValue") then
-		return false
+		local nestedAsset = findNestedImageReference(existing)
+		if not nestedAsset then
+			return false
+		end
+
+		existing:Destroy()
+		existing = nil
+		defaultValue = nestedAsset
 	end
 
 	if not existing then
