@@ -10,7 +10,7 @@ local requestPortalOpen = remoteEvents:WaitForChild("RequestPortalOpen")
 local openLevelSelect = remoteEvents:WaitForChild("OpenLevelSelect")
 
 local OPEN_DISTANCE = 12
-local CLOSE_DISTANCE = 16
+local CLOSE_DISTANCE = 14
 local UPDATE_INTERVAL = 0.1
 local RETRY_INTERVAL = 1
 
