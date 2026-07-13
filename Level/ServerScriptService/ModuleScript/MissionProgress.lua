@@ -123,13 +123,24 @@ end
 --  lowHpSeconds, maxNoDamageStreak, minHpRatio,
 --  bossNoHit20, bossClutch, burst90, burst120,
 --  noRerollWin, max1RerollWin, max1SkipWin, level10,
---  multikill30_5, multikill60_20, spells3, winStreak3
+--  multikill30_5, multikill60_20, spells3
 function MissionProgress.OnRunComplete(plr: Player, waves: number, seconds: number, diedThisRun: boolean, extraStats: any?)
 	waves = math.floor(tonumber(waves) or 0)
 	seconds = math.floor(tonumber(seconds) or 0)
 
 	MissionProgress.Add(plr, "RUNS", 1)
 	MissionProgress.Add(plr, "RUNS_WITH_WEAPON", 1)
+
+	local missionState = ensureState(plr)
+	if diedThisRun == false then
+		missionState.WeeklyWinStreak = math.max(0, math.floor(tonumber(missionState.WeeklyWinStreak) or 0)) + 1
+		if missionState.WeeklyWinStreak == 3 then
+			MissionProgress.Add(plr, "WIN_STREAK_3", 1)
+		end
+	else
+		missionState.WeeklyWinStreak = 0
+	end
+	PlayerData.MarkDirty(plr)
 
 	-- Tryb horde jest czasowy, ale utrzymujemy liczniki WAVE* pod stare questy:
 	-- 1 pseudo-fala = 30 sekund aktywnej gry.
@@ -169,7 +180,6 @@ function MissionProgress.OnRunComplete(plr: Player, waves: number, seconds: numb
 		if extraStats.max1RerollWin then MissionProgress.Add(plr, "MAX1_REROLL_WINS", 1) end
 		if extraStats.max1SkipWin then MissionProgress.Add(plr, "MAX1_SKIP_WINS", 1) end
 		if extraStats.hp50plusWin then MissionProgress.Add(plr, "HP50PLUS_WINS", 1) end
-		if extraStats.winStreak3 then MissionProgress.Add(plr, "WIN_STREAK_3", 1) end
 	end
 
 	if diedThisRun == false then
