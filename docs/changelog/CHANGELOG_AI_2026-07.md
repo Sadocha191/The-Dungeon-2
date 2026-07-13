@@ -1,5 +1,81 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-13 - Level consolidated mission, DPS and return flow fixes (PR #120)
+
+### Summary
+
+- Consolidated event mission forwarding, incremental survival-time accounting, final XP mission persistence and persistent weekly win streaks.
+- Added a server-authoritative rolling DPS HUD with batched damage delivery.
+- Hardened end-run return ordering and per-player teleport locking, including token-scoped timeout/init-failure cleanup and client failure notification.
+
+### Files
+
+- Updated `Level/ServerScriptService/ModuleScript/MissionProgress.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/MissionState.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/RunProgressApi.lua`.
+- Updated `Level/ServerScriptService/Script/ReturnToLobby.lua`.
+- Added `Level/StarterPlayer/StarterPlayerScripts/LocalScript/CurrentDpsHud.client.lua`.
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`.
+
+### Studio and validation
+
+- Synchronized all five runtime scripts to active `Level` Studio.
+- `Level` Play loaded the mission, progress and return systems without new errors.
+- Confirmed creation of the server `DpsDamageEvent` and client `CurrentDpsHud` ScreenGui.
+- Confirmed `TeleportOptions` preserves the per-attempt token attribute used to reject stale init failures.
+- `git diff --check` passed.
+
+### Not verified
+
+- Real multiplayer DPS batching, three separate weekly wins, DataStore persistence, live teleport success/failure callbacks and a forced 15-second teleport timeout were not exercised.
+
+### Runtime loops, cost and risks
+
+- `MissionProgress` owns one global `Heartbeat` accumulator and sends only pending per-player damage batches at 10 Hz; the pending table removes entries after send and on player removal.
+- `CurrentDpsHud` owns one client `Heartbeat` connection with 10 Hz UI work and a two-second bounded sample window; it disconnects camera viewport listeners when rebinding.
+- A pending return uses one bounded 20 Hz poll for at most 30 seconds; each teleport attempt has one token-guarded 15-second delayed cleanup.
+- No per-NPC, projectile or drop loop and no new `_G` dependency was added.
+- Mission XP now performs a final dirty-profile save before immediate return; this favors persistence but adds one DataStore attempt at run completion when XP is positive.
+- A teleport that remains genuinely in flight beyond the lock timeout can expose retry after the client receives `teleport_timeout`; attempt tokens prevent stale cleanup from unlocking a newer retry.
+
+### Rollback
+
+- Revert PR #120 and this changelog entry. The added weekly streak fields are backward-compatible and can be ignored; no persistent data migration is required.
+
+## 2026-07-13 - Four Peaks daily login material bundle prevalidation (PR #116)
+
+### Summary
+
+- Daily login material bundles are fully validated against the canonical `CraftingConfig` before the first material is granted.
+- Unknown or empty positive-amount material IDs now reject the whole bundle without advancing the daily claim.
+- A post-validation `CraftingService.AddMaterial` failure is propagated instead of being silently ignored.
+
+### Files
+
+- Updated `Four Peaks/ServerScriptService/ModuleScript/DailyLoginService.lua`.
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`.
+
+### Validation
+
+- Confirmed validation uses `CraftingConfig.GetMaterialBucket` for every positive bundle entry before any mutation.
+- Confirmed valid bundles still use the existing `CraftingService.AddMaterial` path and toast metadata.
+- Confirmed validation failure returns before the daily login claim state is advanced.
+- `git diff --check` passed.
+
+### Not verified
+
+- Live daily-login claiming and DataStore-backed persistence were not verified in Studio; testing a real claim could mutate the active test profile.
+
+### Runtime cost and risks
+
+- No runtime loop, connection, remote, persistent schema, reward config format or DataStore key was added or changed.
+- Claim cost adds one bounded linear validation pass over the configured material bundle before the existing grant pass.
+- A misconfigured material now intentionally blocks the entire bundle until the configuration is corrected; a rare backend failure after some validated grants can still produce a partial grant because `AddMaterial` is not transactional.
+
+### Rollback
+
+- Remove the `CraftingConfig` require and `validateMaterialBundle` helper, restore the previous warn-and-continue material loop, and revert this changelog entry. No data migration is required.
+
 ## 2026-07-12 - Poziom PR #99 kierunek spawn NPC i orientacja Golem
 
 ### Summary

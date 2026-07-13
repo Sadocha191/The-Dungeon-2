@@ -2,6 +2,7 @@
 -- Lightweight party system for multiplayer teleports.
 -- Server-authoritative. Clients call via remotes; server broadcasts PartyUpdated/PartyInvite.
 
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -32,14 +33,16 @@ local PartyService = {}
 -- state
 local partiesById: {[string]: any} = {}
 local partyIdByUser: {[number]: string} = {}
-local pendingInvites: {[number]: {[number]: number}} = {} -- toUserId -> { fromUserId = expiresAt }
+local pendingInvites: {[number]: {[number]: {expiresAt: number, partyId: string}}} = {}
 
 local function now(): number
 	return os.clock()
 end
 
 local function newPartyId(leaderUserId: number): string
-	return string.format("p_%d_%d", leaderUserId, math.floor(os.time()))
+	-- Party IDs are short-lived server state, but they still need to remain unique
+	-- when a leader disbands and recreates a party within the same second.
+	return string.format("p_%d_%s", leaderUserId, HttpService:GenerateGUID(false))
 end
 
 local function getPlayer(userId: number): Player?
@@ -79,8 +82,31 @@ local function clearPartyForUser(userId: number)
 	partyIdByUser[userId] = nil
 end
 
+local function clearInvitesFromUser(fromUserId: number)
+	for toUserId, invites in pairs(pendingInvites) do
+		invites[fromUserId] = nil
+		if next(invites) == nil then
+			pendingInvites[toUserId] = nil
+		end
+	end
+end
+
+local function clearInvitesForParty(partyId: string)
+	for toUserId, invites in pairs(pendingInvites) do
+		for fromUserId, invite in pairs(invites) do
+			if typeof(invite) ~= "table" or invite.partyId == partyId then
+				invites[fromUserId] = nil
+			end
+		end
+		if next(invites) == nil then
+			pendingInvites[toUserId] = nil
+		end
+	end
+end
+
 local function removeParty(party: any)
 	partiesById[party.id] = nil
+	clearInvitesForParty(party.id)
 	for userId, _ in pairs(party.members) do
 		clearPartyForUser(userId)
 	end
@@ -141,6 +167,7 @@ function PartyService.Leave(plr: Player)
 
 	party.members[plr.UserId] = nil
 	clearPartyForUser(plr.UserId)
+	clearInvitesFromUser(plr.UserId)
 
 	local count = memberCount(party)
 	if count <= 0 then
@@ -171,6 +198,7 @@ function PartyService.Kick(leader: Player, targetUserId: number)
 
 	party.members[targetUserId] = nil
 	clearPartyForUser(targetUserId)
+	clearInvitesFromUser(targetUserId)
 	broadcastParty(party)
 
 	local targetPlr = getPlayer(targetUserId)
@@ -201,7 +229,10 @@ function PartyService.Invite(leader: Player, targetPlr: Player)
 	end
 
 	pendingInvites[targetPlr.UserId] = pendingInvites[targetPlr.UserId] or {}
-	pendingInvites[targetPlr.UserId][leader.UserId] = now() + INVITE_TTL_SECONDS
+	pendingInvites[targetPlr.UserId][leader.UserId] = {
+		expiresAt = now() + INVITE_TTL_SECONDS,
+		partyId = party.id,
+	}
 
 	PartyInvite:FireClient(targetPlr, {
 		type = "invite",
@@ -217,9 +248,9 @@ end
 
 function PartyService.AcceptInvite(plr: Player, fromUserId: number)
 	local invites = pendingInvites[plr.UserId]
-	local exp = invites and invites[fromUserId]
-	if not exp then return false, "no_invite" end
-	if exp < now() then
+	local invite = invites and invites[fromUserId]
+	if typeof(invite) ~= "table" then return false, "no_invite" end
+	if (tonumber(invite.expiresAt) or 0) < now() then
 		invites[fromUserId] = nil
 		return false, "expired"
 	end
@@ -237,7 +268,7 @@ function PartyService.AcceptInvite(plr: Player, fromUserId: number)
 	end
 
 	local party = PartyService.GetPartyForPlayer(leaderPlr)
-	if not party or party.leaderUserId ~= fromUserId then
+	if not party or party.leaderUserId ~= fromUserId or party.id ~= invite.partyId then
 		invites[fromUserId] = nil
 		return false, "party_missing"
 	end
@@ -259,6 +290,9 @@ function PartyService.DeclineInvite(plr: Player, fromUserId: number)
 	local invites = pendingInvites[plr.UserId]
 	if invites then
 		invites[fromUserId] = nil
+		if next(invites) == nil then
+			pendingInvites[plr.UserId] = nil
+		end
 	end
 	return true
 end
@@ -280,6 +314,7 @@ end
 -- cleanup
 Players.PlayerRemoving:Connect(function(plr)
 	pendingInvites[plr.UserId] = nil
+	clearInvitesFromUser(plr.UserId)
 	PartyService.Leave(plr)
 end)
 

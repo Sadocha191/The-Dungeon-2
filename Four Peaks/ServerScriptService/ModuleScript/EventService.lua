@@ -7,6 +7,7 @@ local replicatedModules = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
 	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
 
+local CraftingConfig = require(replicatedModules:WaitForChild("CraftingConfig"))
 local EventsConfig = require(replicatedModules:WaitForChild("EventsConfig"))
 local EventUtil = require(replicatedModules:WaitForChild("EventUtil"))
 local PlayerData = require(moduleFolder:WaitForChild("PlayerData"))
@@ -267,6 +268,37 @@ local function getCraftingService()
 	return nil
 end
 
+local function validateMaterial(materialId, amount)
+	if amount <= 0 then
+		return true
+	end
+	if materialId == "" or not CraftingConfig.GetMaterialBucket(materialId) then
+		return false, "UnknownMaterial:" .. materialId
+	end
+	return true
+end
+
+local function validateRewardConfiguration(reward)
+	if typeof(reward) ~= "table" then
+		return false, "InvalidReward"
+	end
+	local rewardType = tostring(reward.Type or "")
+	if rewardType == "Material" then
+		return validateMaterial(tostring(reward.MaterialId or reward.Id or ""), math.max(0, clampInt(reward.Amount)))
+	elseif rewardType == "MaterialBundle" then
+		for _, entry in ipairs(reward.Materials or {}) do
+			local valid, err = validateMaterial(
+				tostring(entry.MaterialId or entry.Id or ""),
+				math.max(0, clampInt(entry.Amount))
+			)
+			if not valid then
+				return false, err
+			end
+		end
+	end
+	return true
+end
+
 local function pushCurrencyToast(player, variant, label, amount)
 	if amount <= 0 or not PickupToastService or typeof(PickupToastService.Push) ~= "function" then
 		return
@@ -367,9 +399,18 @@ function EventService.ApplyReward(player, reward)
 end
 
 local function applyRewards(player, rewards)
-	local granted = {}
+	local rewardCopies = {}
 	for _, reward in ipairs(rewards or {}) do
 		local rewardCopy = deepCopy(reward)
+		local valid, validationError = validateRewardConfiguration(rewardCopy)
+		if not valid then
+			return false, validationError or "InvalidRewardConfiguration", {}
+		end
+		table.insert(rewardCopies, rewardCopy)
+	end
+
+	local granted = {}
+	for _, rewardCopy in ipairs(rewardCopies) do
 		local ok, err = EventService.ApplyReward(player, rewardCopy)
 		if not ok then
 			return false, err or "RewardGrantFailed", granted
