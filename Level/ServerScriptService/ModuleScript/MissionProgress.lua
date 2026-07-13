@@ -91,7 +91,12 @@ end
 function MissionProgress.OnReward(plr: Player, xp: number, coins: number)
 	xp = math.floor(tonumber(xp) or 0)
 	coins = math.floor(tonumber(coins) or 0)
-	if xp > 0 then MissionProgress.Add(plr, "XP_EARNED", xp) end
+	if xp > 0 then
+		MissionProgress.Add(plr, "XP_EARNED", xp)
+		-- ProgressService calls OnReward after OnRunComplete has already flushed mission state.
+		-- Save this final counter update before the player can immediately teleport away.
+		PlayerData.Save(plr, false)
+	end
 end
 
 function MissionProgress.OnDamage(plr: Player, amount: number, isCrit: boolean)
