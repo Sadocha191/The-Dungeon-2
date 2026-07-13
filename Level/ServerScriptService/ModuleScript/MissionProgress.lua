@@ -72,6 +72,13 @@ function MissionProgress.Add(plr: Player, key: string, amount: number)
 
 	PlayerData.MarkDirty(plr)
 	queueDailyMissionSync(plr, key)
+
+	if EventProgress and typeof(EventProgress.AddFromMissionKey) == "function" then
+		local ok, err = pcall(EventProgress.AddFromMissionKey, plr, key, amount, "MissionProgress")
+		if not ok then
+			warn("[MissionProgress] Event progress update failed:", err)
+		end
+	end
 end
 
 function MissionProgress.SetMax(plr: Player, key: string, value: number)
