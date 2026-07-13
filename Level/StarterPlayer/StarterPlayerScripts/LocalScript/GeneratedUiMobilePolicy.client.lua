@@ -4,7 +4,6 @@ local Workspace = game:GetService("Workspace")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local MIN_SCALE = 0.55
 local SCREEN_MARGIN = 20
 local EXCLUDED_NAME_PARTS = {
 	"loading",
@@ -155,11 +154,11 @@ local function updateScales()
 		if not panel.Parent then
 			trackedPanels[panel] = nil
 		else
-			state.scale.Scale = math.clamp(math.min(
+			state.scale.Scale = math.min(
 				availableWidth / state.designWidth,
 				availableHeight / state.designHeight,
 				1
-			), MIN_SCALE, 1)
+			)
 		end
 	end
 end
