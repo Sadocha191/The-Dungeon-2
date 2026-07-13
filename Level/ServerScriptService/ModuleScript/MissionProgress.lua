@@ -4,11 +4,30 @@
 -- Reset dzienny/tygodniowy (UTC) + kasowanie selection, aby Lobby wylosowało spójne 6/12.
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 local PlayerData = require(serverModules:WaitForChild("PlayerData"))
 local MissionState = require(serverModules:WaitForChild("MissionState"))
+
+local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+if not remotes then
+	remotes = Instance.new("Folder")
+	remotes.Name = "Remotes"
+	remotes.Parent = ReplicatedStorage
+end
+
+local dpsDamageEvent = remotes:FindFirstChild("DpsDamageEvent")
+if dpsDamageEvent and not dpsDamageEvent:IsA("RemoteEvent") then
+	dpsDamageEvent:Destroy()
+	dpsDamageEvent = nil
+end
+if not dpsDamageEvent then
+	dpsDamageEvent = Instance.new("RemoteEvent")
+	dpsDamageEvent.Name = "DpsDamageEvent"
+	dpsDamageEvent.Parent = remotes
+end
 
 local DailyMissionService = nil
 do
@@ -97,6 +116,13 @@ end
 function MissionProgress.OnDamage(plr: Player, amount: number, isCrit: boolean)
 	amount = math.floor(tonumber(amount) or 0)
 	if amount <= 0 then return end
+
+	if plr and plr.Parent == Players and plr:GetAttribute("RunEnded") ~= true then
+		dpsDamageEvent:FireClient(plr, {
+			amount = amount,
+		})
+	end
+
 	MissionProgress.Add(plr, "DAMAGE", amount)
 	if isCrit then
 		MissionProgress.Add(plr, "CRITS", 1)
