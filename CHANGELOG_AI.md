@@ -16,6 +16,7 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-07-13** — Poziom blokada zduplikowanych teleportów powrotnych i obsługa `TeleportInitFailed`
 - **2026-07-12** — Poziom PR #99 kierunek spawn NPC i orientacja Golem
 - **2026-07-12** — Poziom PR #97 chesty z ReplicatedStorage.Assets.Chest
 - **2026-07-12** — Poziom PR #96 blokowanie targetowania czarow przez sciany
