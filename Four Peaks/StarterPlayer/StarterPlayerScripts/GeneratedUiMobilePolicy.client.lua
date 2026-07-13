@@ -24,6 +24,8 @@ local GENERATED_NAME_PARTS = {
 }
 
 local trackedPanels = {}
+local trackedDimmers = {}
+local processedGuis = {}
 local viewportConnection = nil
 
 local function containsNamePart(name, parts)
@@ -59,27 +61,48 @@ local function isDarkColor(color)
 	return luminance <= 0.22
 end
 
-local function removeDimBackground(object)
+local function enforceDimmerRemoval(object)
+	if not object.Parent or not isFullScreen(object) or not isDarkColor(object.BackgroundColor3) then
+		return
+	end
+
+	local transparency = object.BackgroundTransparency
+	if transparency > 0 and transparency < 1 then
+		object.BackgroundTransparency = 1
+	end
+end
+
+local function trackDimBackground(object)
 	if not object:IsA("GuiObject") or not isFullScreen(object) then
 		return
 	end
-	if object.BackgroundTransparency <= 0 or object.BackgroundTransparency >= 1 then
+	if trackedDimmers[object] then
+		enforceDimmerRemoval(object)
 		return
 	end
-	if isDarkColor(object.BackgroundColor3) then
-		object.BackgroundTransparency = 1
-	end
+
+	trackedDimmers[object] = true
+	object:GetPropertyChangedSignal("BackgroundTransparency"):Connect(function()
+		enforceDimmerRemoval(object)
+	end)
+	object:GetPropertyChangedSignal("BackgroundColor3"):Connect(function()
+		enforceDimmerRemoval(object)
+	end)
+	enforceDimmerRemoval(object)
 end
 
 local function getDesignSize(object)
 	local width = math.abs(object.Size.X.Offset)
 	local height = math.abs(object.Size.Y.Offset)
-	if width < 1 then
-		width = object.AbsoluteSize.X
+	local constraint = object:FindFirstChildOfClass("UISizeConstraint")
+
+	if constraint then
+		width = math.max(width, constraint.MinSize.X)
+		height = math.max(height, constraint.MinSize.Y)
 	end
-	if height < 1 then
-		height = object.AbsoluteSize.Y
-	end
+
+	width = math.max(width, object.AbsoluteSize.X)
+	height = math.max(height, object.AbsoluteSize.Y)
 	return math.max(1, width), math.max(1, height)
 end
 
@@ -87,16 +110,15 @@ local function canScalePanel(object)
 	if not object:IsA("GuiObject") or isFullScreen(object) then
 		return false
 	end
-	local size = object.Size
-	if math.abs(size.X.Offset) < 160 or math.abs(size.Y.Offset) < 80 then
-		return false
-	end
-	if size.X.Scale > 0.25 or size.Y.Scale > 0.25 then
+
+	local parent = object.Parent
+	local isTopLevel = parent:IsA("ScreenGui") or (parent:IsA("GuiObject") and isFullScreen(parent))
+	if not isTopLevel then
 		return false
 	end
 
-	local parent = object.Parent
-	return parent:IsA("ScreenGui") or (parent:IsA("GuiObject") and isFullScreen(parent))
+	local width, height = getDesignSize(object)
+	return width >= 160 and height >= 80
 end
 
 local function ensurePanelScale(panel)
@@ -142,34 +164,47 @@ local function updateScales()
 	end
 end
 
-local function processGui(gui)
-	if not isGeneratedGui(gui) then
+local function processObject(object)
+	if not object:IsA("GuiObject") then
 		return
 	end
 
-	for _, object in ipairs(gui:GetDescendants()) do
-		if object:IsA("GuiObject") then
-			removeDimBackground(object)
-			if canScalePanel(object) then
-				ensurePanelScale(object)
-			end
-		end
+	trackDimBackground(object)
+	if canScalePanel(object) then
+		ensurePanelScale(object)
 	end
+end
+
+local function rescanGui(gui)
+	for _, object in ipairs(gui:GetDescendants()) do
+		processObject(object)
+	end
+	updateScales()
+end
+
+local function processGui(gui)
+	if not isGeneratedGui(gui) or processedGuis[gui] then
+		return
+	end
+	processedGuis[gui] = true
+
+	rescanGui(gui)
 
 	gui.DescendantAdded:Connect(function(object)
 		task.defer(function()
-			if not object.Parent or not object:IsA("GuiObject") then
+			if not object.Parent then
 				return
 			end
-			removeDimBackground(object)
-			if canScalePanel(object) then
-				ensurePanelScale(object)
-				updateScales()
-			end
+			processObject(object)
+			updateScales()
 		end)
 	end)
 
-	updateScales()
+	gui:GetPropertyChangedSignal("Enabled"):Connect(function()
+		if gui.Enabled then
+			task.defer(rescanGui, gui)
+		end
+	end)
 end
 
 local function bindCamera(camera)
