@@ -77,6 +77,20 @@ local function getRootPart()
 	return rootPart and rootPart:IsA("BasePart") and rootPart or nil
 end
 
+local function isWithinCloseRadius()
+	if player:GetAttribute("TutorialComplete") ~= true then
+		return false
+	end
+
+	local part = resolvePortalPart()
+	local rootPart = getRootPart()
+	if not part or not rootPart then
+		return false
+	end
+
+	return (rootPart.Position - part.Position).Magnitude <= CLOSE_DISTANCE
+end
+
 local function requestOpenIfNeeded()
 	if not wasInside or openAccepted then
 		return
@@ -128,6 +142,15 @@ local function updatePortalState()
 end
 
 openLevelSelect.OnClientEvent:Connect(function()
+	if not isWithinCloseRadius() then
+		openAccepted = false
+		closePortalUi()
+		-- PortalUIClient listens to the same remote and may run after this callback.
+		-- Close once more after all current event listeners have had a chance to run.
+		task.defer(closePortalUi)
+		return
+	end
+
 	if wasInside then
 		openAccepted = true
 		task.defer(keepProximityUiNonModal)
