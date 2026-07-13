@@ -62,11 +62,10 @@ function BlacksmithIconResolver.new(deps)
 	end
 
 	local function pushUnique(listRef, seen, value)
-		local key = normalizeKey(value)
-		if key == "" or seen[key] then
+		if typeof(value) ~= "string" or value == "" or seen[value] then
 			return
 		end
-		seen[key] = true
+		seen[value] = true
 		table.insert(listRef, value)
 	end
 
@@ -100,9 +99,15 @@ function BlacksmithIconResolver.new(deps)
 	end
 
 	local function cacheAsset(index, rawName, assetRef)
+		if typeof(rawName) ~= "string" or rawName == "" then
+			return
+		end
+		if not index.exact[rawName] then
+			index.exact[rawName] = assetRef
+		end
 		local key = normalizeKey(rawName)
-		if key ~= "" and not index[key] then
-			index[key] = assetRef
+		if key ~= "" and not index.normalized[key] then
+			index.normalized[key] = assetRef
 		end
 	end
 
@@ -116,7 +121,10 @@ function BlacksmithIconResolver.new(deps)
 		end
 
 		watchFolder(folderName, folder)
-		local index = {}
+		local index = {
+			exact = {},
+			normalized = {},
+		}
 		for _, object in ipairs(folder:GetDescendants()) do
 			local assetRef = readAssetReference(object)
 			if assetRef then
@@ -146,7 +154,14 @@ function BlacksmithIconResolver.new(deps)
 		end
 
 		for _, candidate in ipairs(candidates) do
-			local assetRef = index[normalizeKey(candidate)]
+			local assetRef = index.exact[candidate]
+			if assetRef then
+				return assetRef
+			end
+		end
+
+		for _, candidate in ipairs(candidates) do
+			local assetRef = index.normalized[normalizeKey(candidate)]
 			if assetRef then
 				return assetRef
 			end
