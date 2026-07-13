@@ -385,8 +385,8 @@ end
 
 dropSyncRequest.OnServerEvent:Connect(function(player: Player, requestId: number?)
 	local nowClock = os.clock()
-	local lastRequestAt = tonumber(lastDropSyncRequestAt[player.UserId]) or 0
-	if nowClock - lastRequestAt < DROP_SYNC_REQUEST_COOLDOWN then
+	local lastRequestAt = lastDropSyncRequestAt[player.UserId]
+	if lastRequestAt and nowClock - lastRequestAt < DROP_SYNC_REQUEST_COOLDOWN then
 		return
 	end
 	lastDropSyncRequestAt[player.UserId] = nowClock
