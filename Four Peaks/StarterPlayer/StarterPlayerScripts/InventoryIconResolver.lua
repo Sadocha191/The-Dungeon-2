@@ -109,25 +109,30 @@ function InventoryIconResolver.new(deps)
 		return nil
 	end
 
+	local function appendCandidate(candidates, value)
+		if typeof(value) == "string" and value ~= "" then
+			table.insert(candidates, value)
+		end
+	end
+
 	local resolver = {}
 
 	function resolver.WeaponImage(entry)
 		local def = entry and entry.def or nil
-		local candidates = {
-			entry and entry.weaponId,
-			entry and entry.id,
-			entry and entry.displayName,
-			entry and entry.name,
-			def and def.iconName,
-			def and def.id,
-			def and def.name,
-			def and def.weaponName,
-			def and def.displayName,
-		}
+		local candidates = {}
+		appendCandidate(candidates, entry and entry.weaponId)
+		appendCandidate(candidates, entry and entry.id)
+		appendCandidate(candidates, entry and entry.displayName)
+		appendCandidate(candidates, entry and entry.name)
+		appendCandidate(candidates, def and def.iconName)
+		appendCandidate(candidates, def and def.id)
+		appendCandidate(candidates, def and def.name)
+		appendCandidate(candidates, def and def.weaponName)
+		appendCandidate(candidates, def and def.displayName)
 		for _, fallback in ipairs((def and def.iconFallbackNames) or {}) do
-			table.insert(candidates, fallback)
+			appendCandidate(candidates, fallback)
 		end
-		table.insert(candidates, def and def.categoryIconName)
+		appendCandidate(candidates, def and def.categoryIconName)
 		return resolveImage("WeaponIcons", candidates)
 	end
 
