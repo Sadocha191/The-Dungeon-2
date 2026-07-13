@@ -6,7 +6,7 @@ local Workspace = game:GetService("Workspace")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local runStarted = ReplicatedStorage:WaitForChild("RunStarted")
-local damageIndicatorEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("DamageIndicatorEvent")
+local dpsDamageEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("DpsDamageEvent")
 
 local WINDOW_SECONDS = 2
 local UPDATE_INTERVAL = 0.1
@@ -85,6 +85,10 @@ local function clearSamples()
 	label.Text = "DPS  0"
 end
 
+local function isRunActiveForPlayer()
+	return runStarted.Value == true and player:GetAttribute("RunEnded") ~= true
+end
+
 local viewportConnection = nil
 local function updateScale()
 	local camera = Workspace.CurrentCamera
@@ -111,17 +115,18 @@ Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
 end)
 
 local function updateVisibility()
-	gui.Enabled = runStarted.Value == true
+	gui.Enabled = isRunActiveForPlayer()
 	if not gui.Enabled then
 		clearSamples()
 	end
 end
 
 runStarted:GetPropertyChangedSignal("Value"):Connect(updateVisibility)
+player:GetAttributeChangedSignal("RunEnded"):Connect(updateVisibility)
 updateVisibility()
 
-damageIndicatorEvent.OnClientEvent:Connect(function(payload)
-	if runStarted.Value ~= true or typeof(payload) ~= "table" then
+dpsDamageEvent.OnClientEvent:Connect(function(payload)
+	if not isRunActiveForPlayer() or typeof(payload) ~= "table" then
 		return
 	end
 
@@ -139,7 +144,7 @@ damageIndicatorEvent.OnClientEvent:Connect(function(payload)
 end)
 
 RunService.Heartbeat:Connect(function(dt)
-	if runStarted.Value ~= true then
+	if not isRunActiveForPlayer() then
 		return
 	end
 
