@@ -49,11 +49,10 @@ DailyLoginRewardsConfig.Rewards = {
 	},
 	{
 		Day = 6,
-		RewardType = "Booster",
-		Amount = 1,
-		DisplayName = "EXP Booster",
-		Icon = "Booster",
-		BackendId = "EXPBooster",
+		RewardType = "Souls",
+		Amount = 1000,
+		DisplayName = "Souls",
+		Icon = "Souls",
 	},
 	{
 		Day = 7,
