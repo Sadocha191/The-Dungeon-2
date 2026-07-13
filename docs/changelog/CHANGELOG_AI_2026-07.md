@@ -1,5 +1,44 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-13 - Level authoritative drop synchronization optimization (PR #118)
+
+### Summary
+
+- Rate-limited client full-sync requests to one accepted request per player per second with sanitized request IDs.
+- Reused one alive-player snapshot and one raycast blacklist per server frame.
+- Stopped settled stationary drops from raycasting continuously and capped active settling checks at 10 Hz.
+- Preserved authoritative pickup rewards, attraction ranges, global magnet behavior and visual payload contracts.
+
+### Files
+
+- Updated `Level/ServerScriptService/Script/DropService.lua`.
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`.
+
+### Studio and validation
+
+- Synchronized `game.ServerScriptService.Script.DropService` to active `Level` Studio.
+- `Level` Play loaded the service without new errors.
+- A burst of ten client `DropSyncRequest` events produced one full-sync response; the first request was accepted immediately.
+- An ephemeral Studio probe spawned 300 authoritative drops away from the player, completed a 90-frame loaded sample without script errors, and was removed after Play.
+- The loaded sample averaged 6.345 ms per server heartbeat with a 119.668 ms maximum; the startup-contaminated baseline is not suitable for a before/after performance claim.
+- `git diff --check` passed.
+
+### Not verified
+
+- A multiplayer soak, MicroProfiler scope-level comparison against the previous implementation, pickup of all 300 probe drops and behavior on moving dynamic platforms were not verified.
+
+### Runtime loops, cost and risks
+
+- `DropService` retains one global `Heartbeat`; it performs one player snapshot and one ground-filter refresh per frame, then iterates active drops once.
+- Ground raycasts are limited to drops with `needsGroundSettle == true` and at most 10 Hz per such drop; grounded stationary drops disable further settle checks until attraction moves them.
+- Full-sync rebuild cost remains linear in active drop count, but client requests are limited to 1 Hz per player and request state is cleared on player removal.
+- At the target scale of 300 drops, player discovery is `O(players)` once per frame and target selection remains `O(active drops * alive players)`; no per-drop connection or new `_G` dependency was added.
+- Settled drops assume static ground until attraction re-enables settling, so moving platforms are not followed continuously.
+
+### Rollback
+
+- Revert PR #118 and this changelog entry to restore unrestricted sync requests and per-frame settling. No persistent data migration is required.
+
 ## 2026-07-13 - Level consolidated mission, DPS and return flow fixes (PR #120)
 
 ### Summary
