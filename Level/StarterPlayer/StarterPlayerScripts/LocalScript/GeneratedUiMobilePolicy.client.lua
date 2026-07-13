@@ -55,13 +55,29 @@ local function isFullScreen(object)
 	return size.X.Scale >= 0.9 and size.Y.Scale >= 0.9
 end
 
+local function isViewportOverlay(object)
+	if not isFullScreen(object) then
+		return false
+	end
+
+	local parent = object.Parent
+	if parent and parent:IsA("ScreenGui") then
+		return true
+	end
+
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	local absoluteSize = object.AbsoluteSize
+	return absoluteSize.X >= viewport.X * 0.85 and absoluteSize.Y >= viewport.Y * 0.85
+end
+
 local function isDarkColor(color)
 	local luminance = color.R * 0.2126 + color.G * 0.7152 + color.B * 0.0722
 	return luminance <= 0.22
 end
 
 local function enforceDimmerRemoval(object)
-	if not object.Parent or not isFullScreen(object) or not isDarkColor(object.BackgroundColor3) then
+	if not object.Parent or not isViewportOverlay(object) or not isDarkColor(object.BackgroundColor3) then
 		return
 	end
 
@@ -72,7 +88,7 @@ local function enforceDimmerRemoval(object)
 end
 
 local function trackDimBackground(object)
-	if not object:IsA("GuiObject") or not isFullScreen(object) then
+	if not object:IsA("GuiObject") or not isViewportOverlay(object) then
 		return
 	end
 	if trackedDimmers[object] then
@@ -212,7 +228,12 @@ local function bindCamera(camera)
 		viewportConnection = nil
 	end
 	if camera then
-		viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScales)
+		viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+			updateScales()
+			for dimmer in pairs(trackedDimmers) do
+				enforceDimmerRemoval(dimmer)
+			end
+		end)
 	end
 	updateScales()
 end
