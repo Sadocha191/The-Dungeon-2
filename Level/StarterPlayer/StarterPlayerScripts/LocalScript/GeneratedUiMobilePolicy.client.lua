@@ -5,6 +5,9 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 local SCREEN_MARGIN = 20
+local MIN_PANEL_WIDTH = 160
+local MIN_PANEL_HEIGHT = 80
+local SHORT_PANEL_WIDTH_THRESHOLD = 320
 local EXCLUDED_NAME_PARTS = {
 	"loading",
 	"teleport",
@@ -133,7 +136,8 @@ local function canScalePanel(object)
 	end
 
 	local width, height = getDesignSize(object)
-	return width >= 160 and height >= 80
+	return width >= MIN_PANEL_WIDTH
+		and (height >= MIN_PANEL_HEIGHT or width >= SHORT_PANEL_WIDTH_THRESHOLD)
 end
 
 local function ensurePanelScale(panel)
