@@ -8,6 +8,7 @@ local TeleportService = game:GetService("TeleportService")
 local LOBBY_PLACE_ID = 88516424167732
 local FINALIZATION_TIMEOUT = 30
 local TELEPORT_LOCK_TIMEOUT = 15
+local ATTEMPT_TOKEN_ATTRIBUTE = "ReturnToLobbyAttemptToken"
 local RunProgressApi = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunProgressApi"))
 
 local pendingReturns: {[number]: boolean} = {}
@@ -43,12 +44,13 @@ local function fireTeleportStatus(player: Player, statusType: string, reason: st
 	})
 end
 
-local function releaseTeleportLock(player: Player, attemptToken: number?)
+local function releaseTeleportLock(player: Player, attemptToken: number?): boolean
 	local userId = player.UserId
 	if attemptToken ~= nil and teleporting[userId] ~= attemptToken then
-		return
+		return false
 	end
 	teleporting[userId] = nil
+	return true
 end
 
 local function acquireTeleportLock(player: Player): number?
@@ -61,8 +63,8 @@ local function acquireTeleportLock(player: Player): number?
 	local attemptToken = nextTeleportAttempt
 	teleporting[userId] = attemptToken
 	task.delay(TELEPORT_LOCK_TIMEOUT, function()
-		if teleporting[userId] == attemptToken then
-			teleporting[userId] = nil
+		if releaseTeleportLock(player, attemptToken) and player.Parent == Players then
+			fireTeleportStatus(player, "failed", "teleport_timeout")
 		end
 	end)
 	return attemptToken
@@ -75,6 +77,7 @@ local function teleportToLobby(player: Player)
 	end
 
 	local options = Instance.new("TeleportOptions")
+	options:SetAttribute(ATTEMPT_TOKEN_ATTRIBUTE, attemptToken)
 	fireTeleportStatus(player, "teleporting")
 	task.wait(0.18)
 	if player.Parent ~= Players then
@@ -122,12 +125,13 @@ local function queueReturnAfterFinalization(player: Player)
 	end)
 end
 
-TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage, placeId)
-	if placeId ~= LOBBY_PLACE_ID or teleporting[player.UserId] == nil then
+TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage, placeId, teleportOptions)
+	local attemptToken = teleportOptions and tonumber(teleportOptions:GetAttribute(ATTEMPT_TOKEN_ATTRIBUTE))
+	if placeId ~= LOBBY_PLACE_ID or attemptToken == nil or teleporting[player.UserId] ~= attemptToken then
 		return
 	end
 
-	releaseTeleportLock(player)
+	releaseTeleportLock(player, attemptToken)
 	warn("[ReturnToLobby] Teleport initialization failed:", teleportResult, errorMessage)
 	if player.Parent == Players then
 		fireTeleportStatus(player, "failed", "teleport_failed")
