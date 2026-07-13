@@ -3,6 +3,7 @@ local RunProgressApi = {}
 local implementations = {}
 local pendingWrappers = {}
 local warnedMissing = {}
+local endRunFinalizingCounts = {}
 
 local function assertFunction(name: string, fn: any)
 	assert(type(fn) == "function", string.format("[RunProgressApi] %s must be a function", name))
@@ -109,8 +110,30 @@ function RunProgressApi.GetRunSeconds(): number
 	return tonumber(call("GetRunSeconds")) or 0
 end
 
+function RunProgressApi.IsEndRunFinalizing(player: Player): boolean
+	if not player then
+		return false
+	end
+	return (endRunFinalizingCounts[player.UserId] or 0) > 0
+end
+
 function RunProgressApi.EndRunForPlayer(player: Player, reason: string)
-	return call("EndRunForPlayer", player, reason)
+	local userId = player and player.UserId
+	if userId then
+		endRunFinalizingCounts[userId] = (endRunFinalizingCounts[userId] or 0) + 1
+	end
+
+	local results = table.pack(pcall(call, "EndRunForPlayer", player, reason))
+
+	if userId then
+		local remaining = (endRunFinalizingCounts[userId] or 1) - 1
+		endRunFinalizingCounts[userId] = remaining > 0 and remaining or nil
+	end
+
+	if not results[1] then
+		error(results[2], 0)
+	end
+	return table.unpack(results, 2, results.n)
 end
 
 return RunProgressApi
