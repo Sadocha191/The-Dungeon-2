@@ -10,6 +10,10 @@ local PlayerData = {}
 PlayerData._cache = {}
 PlayerData._dirty = {}
 PlayerData._saving = {}
+PlayerData._revision = {}
+
+local SAVE_WAIT_TIMEOUT_SECONDS = 8
+local RELEASE_SAVE_ATTEMPTS = 3
 
 local replicatedModules = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:FindFirstChild("ModuleScript")
@@ -126,6 +130,17 @@ local function defaultProfile()
 
 		crafting = defaultCraftingData(),
 	}
+end
+
+local function cloneForSave(value)
+	if typeof(value) ~= "table" then
+		return value
+	end
+	local copy = {}
+	for key, nested in pairs(value) do
+		copy[cloneForSave(key)] = cloneForSave(nested)
+	end
+	return copy
 end
 
 local function clampInt(x)
@@ -404,6 +419,7 @@ function PlayerData.Get(plr)
 
 	PlayerData._cache[uid] = data
 	PlayerData._dirty[uid] = false
+	PlayerData._revision[uid] = 0
 	return data
 end
 
@@ -412,7 +428,9 @@ function PlayerData.RollNextXp(level: number): number
 end
 
 function PlayerData.MarkDirty(plr)
-	PlayerData._dirty[plr.UserId] = true
+	local uid = plr.UserId
+	PlayerData._revision[uid] = (PlayerData._revision[uid] or 0) + 1
+	PlayerData._dirty[uid] = true
 end
 
 local function validateSpellLoadout(rawLoadout, unlocked)
@@ -594,24 +612,41 @@ end
 
 function PlayerData.Save(plr, force: boolean)
 	local uid = plr.UserId
-	if PlayerData._saving[uid] then return end
-	local data = PlayerData._cache[uid]
-	if not data then return end
-	if (not force) and (not PlayerData._dirty[uid]) then return end
+	if PlayerData._saving[uid] then
+		if not force then
+			return false, "SaveInProgress"
+		end
+		local deadline = os.clock() + SAVE_WAIT_TIMEOUT_SECONDS
+		while PlayerData._saving[uid] and os.clock() < deadline do
+			task.wait(0.05)
+		end
+		if PlayerData._saving[uid] then
+			return false, "SaveWaitTimeout"
+		end
+	end
 
+	local data = PlayerData._cache[uid]
+	if not data then
+		return false, "ProfileMissing"
+	end
+	if (not force) and (not PlayerData._dirty[uid]) then
+		return true
+	end
+
+	local revision = PlayerData._revision[uid] or 0
+	local snapshot = cloneForSave(data)
 	PlayerData._saving[uid] = true
-	local ok = pcall(function()
-		store:SetAsync(tostring(uid), data)
+	local ok, err = pcall(function()
+		store:SetAsync(tostring(uid), snapshot)
 	end)
 	PlayerData._saving[uid] = false
 
-	-- keep dirty flag when DataStore write fails,
-	-- so autosave / PlayerRemoving can retry persist.
-	if ok then
+	if ok and (PlayerData._revision[uid] or 0) == revision then
 		PlayerData._dirty[uid] = false
 	else
 		PlayerData._dirty[uid] = true
 	end
+	return ok, err
 end
 
 function PlayerData.Release(plr, force: boolean?)
@@ -620,15 +655,28 @@ function PlayerData.Release(plr, force: boolean?)
 	end
 
 	local uid = plr.UserId
-	PlayerData.Save(plr, force == true)
+	local attempts = force == true and RELEASE_SAVE_ATTEMPTS or 1
+	for attempt = 1, attempts do
+		local ok = PlayerData.Save(plr, force == true)
+		if not force or (ok and not PlayerData._dirty[uid]) then
+			break
+		end
+		if attempt < attempts then
+			task.wait(0.1 * attempt)
+		end
+	end
+
 	PlayerData._cache[uid] = nil
 	PlayerData._dirty[uid] = nil
 	PlayerData._saving[uid] = nil
+	PlayerData._revision[uid] = nil
 end
 
 function PlayerData.Reset(plr)
-	PlayerData._cache[plr.UserId] = defaultProfile()
-	PlayerData._dirty[plr.UserId] = true
+	local uid = plr.UserId
+	PlayerData._cache[uid] = defaultProfile()
+	PlayerData._revision[uid] = (PlayerData._revision[uid] or 0) + 1
+	PlayerData._dirty[uid] = true
 end
 
 Players.PlayerRemoving:Connect(function(plr)

@@ -1,5 +1,39 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-13 - Four Peaks daily login material bundle prevalidation (PR #116)
+
+### Summary
+
+- Daily login material bundles are fully validated against the canonical `CraftingConfig` before the first material is granted.
+- Unknown or empty positive-amount material IDs now reject the whole bundle without advancing the daily claim.
+- A post-validation `CraftingService.AddMaterial` failure is propagated instead of being silently ignored.
+
+### Files
+
+- Updated `Four Peaks/ServerScriptService/ModuleScript/DailyLoginService.lua`.
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`.
+
+### Validation
+
+- Confirmed validation uses `CraftingConfig.GetMaterialBucket` for every positive bundle entry before any mutation.
+- Confirmed valid bundles still use the existing `CraftingService.AddMaterial` path and toast metadata.
+- Confirmed validation failure returns before the daily login claim state is advanced.
+- `git diff --check` passed.
+
+### Not verified
+
+- Live daily-login claiming and DataStore-backed persistence were not verified in Studio; testing a real claim could mutate the active test profile.
+
+### Runtime cost and risks
+
+- No runtime loop, connection, remote, persistent schema, reward config format or DataStore key was added or changed.
+- Claim cost adds one bounded linear validation pass over the configured material bundle before the existing grant pass.
+- A misconfigured material now intentionally blocks the entire bundle until the configuration is corrected; a rare backend failure after some validated grants can still produce a partial grant because `AddMaterial` is not transactional.
+
+### Rollback
+
+- Remove the `CraftingConfig` require and `validateMaterialBundle` helper, restore the previous warn-and-continue material loop, and revert this changelog entry. No data migration is required.
+
 ## 2026-07-12 - Poziom PR #99 kierunek spawn NPC i orientacja Golem
 
 ### Summary
