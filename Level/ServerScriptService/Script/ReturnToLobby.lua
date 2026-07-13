@@ -6,6 +6,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local TeleportService = game:GetService("TeleportService")
 
 local LOBBY_PLACE_ID = 88516424167732
+local FINALIZATION_TIMEOUT = 30
 local RunProgressApi = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunProgressApi"))
 
 local remotes = ReplicatedStorage:FindFirstChild("Remotes")
@@ -29,6 +30,8 @@ if not remote then
 	remote.Parent = ReplicatedStorage
 end
 
+local pendingReturns = {}
+
 local function fireTeleportStatus(player: Player, statusType: string, reason: string?)
 	teleportStatus:FireClient(player, {
 		type = statusType,
@@ -50,12 +53,43 @@ local function teleportToLobby(player: Player)
 	end
 end
 
+local function queueReturnAfterFinalization(player: Player)
+	local userId = player.UserId
+	if pendingReturns[userId] then
+		return
+	end
+	pendingReturns[userId] = true
+
+	task.spawn(function()
+		local deadline = os.clock() + FINALIZATION_TIMEOUT
+		while player.Parent == Players and RunProgressApi.IsEndRunFinalizing(player) and os.clock() < deadline do
+			task.wait(0.05)
+		end
+
+		pendingReturns[userId] = nil
+		if player.Parent ~= Players then
+			return
+		end
+		if RunProgressApi.IsEndRunFinalizing(player) then
+			fireTeleportStatus(player, "failed", "run_finalization_timeout")
+			return
+		end
+		if player:GetAttribute("RunEnded") ~= true then
+			fireTeleportStatus(player, "failed", "run_finalization_failed")
+			return
+		end
+
+		teleportToLobby(player)
+	end)
+end
+
 remote.OnServerEvent:Connect(function(player)
 	if not player or player.Parent ~= Players then
 		return
 	end
 
 	if RunProgressApi.IsEndRunFinalizing(player) then
+		queueReturnAfterFinalization(player)
 		return
 	end
 
@@ -63,8 +97,8 @@ remote.OnServerEvent:Connect(function(player)
 		if RunProgressApi.IsConfigured("EndRunForPlayer") then
 			local ok, err = pcall(RunProgressApi.EndRunForPlayer, player, "Surrendered")
 			if ok then
-				-- The API keeps finalization marked in progress until mission counters and
-				-- their save attempts finish, regardless of which system ended the run.
+				-- Preserve the existing two-step flow: this request ends and banks the run;
+				-- the summary's later Return action performs the teleport.
 				return
 			end
 			warn("[ReturnToLobby] EndRunForPlayer failed:", err)
@@ -72,4 +106,8 @@ remote.OnServerEvent:Connect(function(player)
 	end
 
 	teleportToLobby(player)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	pendingReturns[player.UserId] = nil
 end)
