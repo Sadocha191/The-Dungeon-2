@@ -45,6 +45,8 @@ function MissionState.Ensure(plr: Player)
 
 	missions.LastClaimTsDaily = tonumber(missions.LastClaimTsDaily) or 0
 	missions.LastClaimTsWeekly = tonumber(missions.LastClaimTsWeekly) or 0
+	missions.WeeklyWinStreak = math.max(0, math.floor(tonumber(missions.WeeklyWinStreak) or 0))
+	missions.WinStreakWeekKey = tonumber(missions.WinStreakWeekKey) or 0
 
 	local dirty = false
 
@@ -65,6 +67,16 @@ function MissionState.Ensure(plr: Player)
 		missions.CountersWeekly = {}
 		missions.ClaimsWeekly = 0
 		missions.LastClaimTsWeekly = 0
+		missions.WeeklyWinStreak = 0
+		missions.WinStreakWeekKey = weeklyKey
+		dirty = true
+	end
+
+	-- The lobby can refresh WeeklyKey before the dungeon sees the new week.
+	-- Keep a dedicated streak key so a previous week's wins never leak forward.
+	if missions.WinStreakWeekKey ~= weeklyKey then
+		missions.WinStreakWeekKey = weeklyKey
+		missions.WeeklyWinStreak = 0
 		dirty = true
 	end
 
