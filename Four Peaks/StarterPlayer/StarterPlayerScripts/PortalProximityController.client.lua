@@ -7,13 +7,17 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local requestPortalOpen = remoteEvents:WaitForChild("RequestPortalOpen")
+local openLevelSelect = remoteEvents:WaitForChild("OpenLevelSelect")
 
 local OPEN_DISTANCE = 12
 local CLOSE_DISTANCE = 16
 local UPDATE_INTERVAL = 0.1
+local RETRY_INTERVAL = 1
 
 local portalPart = nil
 local wasInside = false
+local openAccepted = false
+local lastOpenRequest = 0
 local accumulator = 0
 
 local function resolvePortalPart()
@@ -62,14 +66,29 @@ local function getRootPart()
 	return rootPart and rootPart:IsA("BasePart") and rootPart or nil
 end
 
+local function requestOpenIfNeeded()
+	if not wasInside or openAccepted then
+		return
+	end
+
+	local now = os.clock()
+	if now - lastOpenRequest < RETRY_INTERVAL then
+		return
+	end
+	lastOpenRequest = now
+	requestPortalOpen:FireServer()
+end
+
 local function setInside(nextInside)
 	if nextInside == wasInside then
 		return
 	end
 
 	wasInside = nextInside
+	openAccepted = false
+	lastOpenRequest = 0
 	if nextInside then
-		requestPortalOpen:FireServer()
+		requestOpenIfNeeded()
 	else
 		closePortalUi()
 	end
@@ -93,7 +112,14 @@ local function updatePortalState()
 	local distance = (rootPart.Position - part.Position).Magnitude
 	local threshold = wasInside and CLOSE_DISTANCE or OPEN_DISTANCE
 	setInside(distance <= threshold)
+	requestOpenIfNeeded()
 end
+
+openLevelSelect.OnClientEvent:Connect(function()
+	if wasInside then
+		openAccepted = true
+	end
+end)
 
 player.CharacterRemoving:Connect(function()
 	setInside(false)
