@@ -37,6 +37,7 @@ local dropSyncRequest = ensureRemoteEvent("DropSyncRequest")
 local activeDrops = {}
 local nextDropId = 0
 local activeGlobalMagnets = {}
+local lastDropSyncRequestAt = {}
 
 local ATTRACT_RADIUS = 8
 local PICKUP_DIST = 2.5
@@ -50,6 +51,7 @@ local ORB_HALF_HEIGHT = 0.5
 local ORB_SETTLE_SPEED = 42
 local ORB_SETTLE_EPSILON = 0.05
 local GLOBAL_MAGNET_ATTR = "DropGlobalMagnetExpiresAt"
+local DROP_SYNC_REQUEST_COOLDOWN = 1
 
 local GROUND_RAY_PARAMS = RaycastParams.new()
 GROUND_RAY_PARAMS.FilterType = Enum.RaycastFilterType.Blacklist
@@ -382,7 +384,27 @@ function _G.ActivateGlobalMagnet(plr: Player, duration: number)
 end
 
 dropSyncRequest.OnServerEvent:Connect(function(player: Player, requestId: number?)
-	sendFullSync(player, tonumber(requestId))
+	local nowClock = os.clock()
+	local lastRequestAt = tonumber(lastDropSyncRequestAt[player.UserId]) or 0
+	if nowClock - lastRequestAt < DROP_SYNC_REQUEST_COOLDOWN then
+		return
+	end
+	lastDropSyncRequestAt[player.UserId] = nowClock
+
+	local cleanRequestId = tonumber(requestId)
+	if cleanRequestId then
+		if cleanRequestId ~= cleanRequestId or cleanRequestId == math.huge or cleanRequestId == -math.huge then
+			cleanRequestId = nil
+		else
+			cleanRequestId = math.floor(cleanRequestId)
+		end
+	end
+	sendFullSync(player, cleanRequestId)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	lastDropSyncRequestAt[player.UserId] = nil
+	activeGlobalMagnets[player.UserId] = nil
 end)
 
 RunService.Heartbeat:Connect(function(dt)
