@@ -5,6 +5,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
@@ -28,6 +29,31 @@ if not dpsDamageEvent then
 	dpsDamageEvent.Name = "DpsDamageEvent"
 	dpsDamageEvent.Parent = remotes
 end
+
+local DPS_SEND_INTERVAL = 0.1
+local pendingDpsDamage = {}
+local dpsSendAccumulator = 0
+
+RunService.Heartbeat:Connect(function(dt)
+	dpsSendAccumulator += dt
+	if dpsSendAccumulator < DPS_SEND_INTERVAL then
+		return
+	end
+	dpsSendAccumulator = 0
+
+	for plr, amount in pairs(pendingDpsDamage) do
+		pendingDpsDamage[plr] = nil
+		if amount > 0 and plr.Parent == Players and plr:GetAttribute("RunEnded") ~= true then
+			dpsDamageEvent:FireClient(plr, {
+				amount = amount,
+			})
+		end
+	end
+end)
+
+Players.PlayerRemoving:Connect(function(plr)
+	pendingDpsDamage[plr] = nil
+end)
 
 local DailyMissionService = nil
 do
@@ -118,9 +144,7 @@ function MissionProgress.OnDamage(plr: Player, amount: number, isCrit: boolean)
 	if amount <= 0 then return end
 
 	if plr and plr.Parent == Players and plr:GetAttribute("RunEnded") ~= true then
-		dpsDamageEvent:FireClient(plr, {
-			amount = amount,
-		})
+		pendingDpsDamage[plr] = (pendingDpsDamage[plr] or 0) + amount
 	end
 
 	MissionProgress.Add(plr, "DAMAGE", amount)
