@@ -6,7 +6,10 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local TeleportService = game:GetService("TeleportService")
 
 local LOBBY_PLACE_ID = 88516424167732
+local TELEPORT_LOCK_TIMEOUT = 15
 local RunProgressApi = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunProgressApi"))
+
+local teleporting: {[number]: boolean} = {}
 
 local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 if not remotes then
@@ -37,18 +40,59 @@ local function fireTeleportStatus(player: Player, statusType: string, reason: st
 	})
 end
 
+local function releaseTeleportLock(player: Player)
+	teleporting[player.UserId] = nil
+end
+
+local function acquireTeleportLock(player: Player): boolean
+	local userId = player.UserId
+	if teleporting[userId] then
+		return false
+	end
+
+	teleporting[userId] = true
+	task.delay(TELEPORT_LOCK_TIMEOUT, function()
+		if teleporting[userId] and player.Parent == Players then
+			teleporting[userId] = nil
+		end
+	end)
+	return true
+end
+
 local function teleportToLobby(player: Player)
+	if not acquireTeleportLock(player) then
+		return
+	end
+
 	local options = Instance.new("TeleportOptions")
 	fireTeleportStatus(player, "teleporting")
 	task.wait(0.18)
+	if player.Parent ~= Players then
+		releaseTeleportLock(player)
+		return
+	end
+
 	local ok, err = pcall(function()
 		TeleportService:TeleportAsync(LOBBY_PLACE_ID, { player }, options)
 	end)
 	if not ok then
+		releaseTeleportLock(player)
 		warn("[ReturnToLobby] TeleportAsync failed:", err)
 		fireTeleportStatus(player, "failed", "teleport_failed")
 	end
 end
+
+TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage, placeId)
+	if placeId ~= LOBBY_PLACE_ID or not teleporting[player.UserId] then
+		return
+	end
+
+	releaseTeleportLock(player)
+	warn("[ReturnToLobby] Teleport initialization failed:", teleportResult, errorMessage)
+	if player.Parent == Players then
+		fireTeleportStatus(player, "failed", "teleport_failed")
+	end
+end)
 
 remote.OnServerEvent:Connect(function(player)
 	if not player or player.Parent ~= Players then
@@ -66,4 +110,8 @@ remote.OnServerEvent:Connect(function(player)
 	end
 
 	teleportToLobby(player)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	releaseTeleportLock(player)
 end)
