@@ -10,7 +10,6 @@ local CATEGORY_DEFAULT_ICONS = {
 	Staff = "Apprentice Arcstaff",
 	Pistol = "Blackpowder Flintlock",
 }
-local CURLY_APOSTROPHE = utf8.char(8217)
 
 function BlacksmithIconResolver.NormalizeElementName(element)
 	local value = tostring(element or "")
@@ -30,6 +29,8 @@ function BlacksmithIconResolver.new(deps)
 		WeaponIcons = nil,
 		ElementIcons = nil,
 	}
+	local indexCache = {}
+	local folderConnections = {}
 	local missingWeaponIconWarnings = {}
 	local missingElementIconWarnings = {}
 
@@ -53,31 +54,19 @@ function BlacksmithIconResolver.new(deps)
 		return nil
 	end
 
+	local function normalizeKey(value)
+		if typeof(value) ~= "string" then
+			return ""
+		end
+		return string.lower(value):gsub("[^%w]", "")
+	end
+
 	local function pushUnique(listRef, seen, value)
 		if typeof(value) ~= "string" or value == "" or seen[value] then
 			return
 		end
 		seen[value] = true
 		table.insert(listRef, value)
-	end
-
-	local function buildTypographyVariants(value)
-		local variants = {}
-		local seen = {}
-
-		local function push(valueToPush)
-			pushUnique(variants, seen, valueToPush)
-		end
-
-		push(value)
-		if typeof(value) ~= "string" or value == "" then
-			return variants
-		end
-
-		push(value:gsub("'", CURLY_APOSTROPHE))
-		push(value:gsub(CURLY_APOSTROPHE, "'"))
-
-		return variants
 	end
 
 	local function getFolder(folderName)
@@ -90,23 +79,89 @@ function BlacksmithIconResolver.new(deps)
 		return folder
 	end
 
-	local function resolveIconAsset(folderName, rawCandidates)
+	local function disconnectFolderConnections(folderName)
+		for _, connection in ipairs(folderConnections[folderName] or {}) do
+			connection:Disconnect()
+		end
+		folderConnections[folderName] = nil
+	end
+
+	local function watchFolder(folderName, folder)
+		disconnectFolderConnections(folderName)
+		folderConnections[folderName] = {
+			folder.DescendantAdded:Connect(function()
+				indexCache[folderName] = nil
+			end),
+			folder.DescendantRemoving:Connect(function()
+				indexCache[folderName] = nil
+			end),
+		}
+	end
+
+	local function cacheAsset(index, rawName, assetRef)
+		if typeof(rawName) ~= "string" or rawName == "" then
+			return
+		end
+		if not index.exact[rawName] then
+			index.exact[rawName] = assetRef
+		end
+		local key = normalizeKey(rawName)
+		if key ~= "" and not index.normalized[key] then
+			index.normalized[key] = assetRef
+		end
+	end
+
+	local function buildIconIndex(folderName)
 		local folder = getFolder(folderName)
 		if not folder then
+			return nil
+		end
+		if indexCache[folderName] then
+			return indexCache[folderName]
+		end
+
+		watchFolder(folderName, folder)
+		local index = {
+			exact = {},
+			normalized = {},
+		}
+		for _, object in ipairs(folder:GetDescendants()) do
+			local assetRef = readAssetReference(object)
+			if assetRef then
+				cacheAsset(index, object.Name, assetRef)
+
+				local ancestor = object.Parent
+				while ancestor and ancestor ~= folder do
+					cacheAsset(index, ancestor.Name, assetRef)
+					ancestor = ancestor.Parent
+				end
+			end
+		end
+		indexCache[folderName] = index
+		return index
+	end
+
+	local function resolveIconAsset(folderName, rawCandidates)
+		local index = buildIconIndex(folderName)
+		if not index then
 			return nil
 		end
 
 		local seen = {}
 		local candidates = {}
 		for _, candidate in ipairs(rawCandidates or {}) do
-			for _, variant in ipairs(buildTypographyVariants(candidate)) do
-				pushUnique(candidates, seen, variant)
+			pushUnique(candidates, seen, candidate)
+		end
+
+		for _, candidate in ipairs(candidates) do
+			local assetRef = index.exact[candidate]
+			if assetRef then
+				return assetRef
 			end
 		end
 
 		for _, candidate in ipairs(candidates) do
-			local iconObject = folder:FindFirstChild(candidate)
-			local assetRef = readAssetReference(iconObject)
+			local assetRef = index.normalized[normalizeKey(candidate)]
 			if assetRef then
 				return assetRef
 			end
@@ -120,6 +175,10 @@ function BlacksmithIconResolver.new(deps)
 	function resolver.ResetFolderCache()
 		folderCache.WeaponIcons = nil
 		folderCache.ElementIcons = nil
+		indexCache.WeaponIcons = nil
+		indexCache.ElementIcons = nil
+		disconnectFolderConnections(WEAPON_ICON_FOLDER_NAME)
+		disconnectFolderConnections(ELEMENT_ICON_FOLDER_NAME)
 	end
 
 	function resolver.ResolveWeaponIconAsset(weaponDef, weaponId, weaponType)
@@ -129,6 +188,11 @@ function BlacksmithIconResolver.new(deps)
 
 		local candidates = {}
 		local seen = {}
+		pushUnique(candidates, seen, weaponId)
+		pushUnique(candidates, seen, weaponDef.id)
+		pushUnique(candidates, seen, weaponDef.name)
+		pushUnique(candidates, seen, weaponDef.weaponName)
+		pushUnique(candidates, seen, weaponDef.displayName)
 		pushUnique(candidates, seen, weaponDef.iconName)
 		for _, fallbackName in ipairs(weaponDef.iconFallbackNames or {}) do
 			pushUnique(candidates, seen, fallbackName)
