@@ -29,8 +29,6 @@ if not remote then
 	remote.Parent = ReplicatedStorage
 end
 
-local runFinalizationInProgress = {}
-
 local function fireTeleportStatus(player: Player, statusType: string, reason: string?)
 	teleportStatus:FireClient(player, {
 		type = statusType,
@@ -57,19 +55,16 @@ remote.OnServerEvent:Connect(function(player)
 		return
 	end
 
-	local userId = player.UserId
-	if runFinalizationInProgress[userId] then
+	if RunProgressApi.IsEndRunFinalizing(player) then
 		return
 	end
 
 	if player:GetAttribute("RunEnded") ~= true then
 		if RunProgressApi.IsConfigured("EndRunForPlayer") then
-			runFinalizationInProgress[userId] = true
 			local ok, err = pcall(RunProgressApi.EndRunForPlayer, player, "Surrendered")
-			runFinalizationInProgress[userId] = nil
 			if ok then
-				-- EndRunForPlayer returns only after mission finalization and its save attempts.
-				-- A second click can teleport only after that work has completed.
+				-- The API keeps finalization marked in progress until mission counters and
+				-- their save attempts finish, regardless of which system ended the run.
 				return
 			end
 			warn("[ReturnToLobby] EndRunForPlayer failed:", err)
@@ -77,8 +72,4 @@ remote.OnServerEvent:Connect(function(player)
 	end
 
 	teleportToLobby(player)
-end)
-
-Players.PlayerRemoving:Connect(function(player)
-	runFinalizationInProgress[player.UserId] = nil
 end)
