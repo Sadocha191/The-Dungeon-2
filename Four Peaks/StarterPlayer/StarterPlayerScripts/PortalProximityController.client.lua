@@ -4,11 +4,9 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
-local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
-	or ReplicatedStorage:FindFirstChild("ModuleScript")
-	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
-	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
-local PortalUIController = require(moduleFolder:WaitForChild("PortalUIController"))
+local playerGui = player:WaitForChild("PlayerGui")
+local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
+local requestPortalOpen = remoteEvents:WaitForChild("RequestPortalOpen")
 
 local OPEN_DISTANCE = 12
 local CLOSE_DISTANCE = 16
@@ -17,8 +15,6 @@ local UPDATE_INTERVAL = 0.1
 local portalPart = nil
 local wasInside = false
 local accumulator = 0
-
-PortalUIController.Start()
 
 local function resolvePortalPart()
 	if portalPart and portalPart:IsDescendantOf(Workspace) then
@@ -52,6 +48,14 @@ local function hideLegacyPrompt(part)
 	end
 end
 
+local function closePortalUi()
+	local gui = playerGui:FindFirstChild("PortalUI")
+	if gui and gui:IsA("ScreenGui") then
+		gui:SetAttribute("Modal", false)
+		gui.Enabled = false
+	end
+end
+
 local function getRootPart()
 	local character = player.Character
 	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
@@ -65,9 +69,9 @@ local function setInside(nextInside)
 
 	wasInside = nextInside
 	if nextInside then
-		PortalUIController.Open()
+		requestPortalOpen:FireServer()
 	else
-		PortalUIController.Close()
+		closePortalUi()
 	end
 end
 
