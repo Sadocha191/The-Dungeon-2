@@ -31,9 +31,15 @@ function InventoryIconResolver.new(deps)
 	end
 
 	local function cacheAsset(index, rawName, asset)
+		if typeof(rawName) ~= "string" or rawName == "" then
+			return
+		end
+		if not index.exact[rawName] then
+			index.exact[rawName] = asset
+		end
 		local key = normalizeKey(rawName)
-		if key ~= "" and not index[key] then
-			index[key] = asset
+		if key ~= "" and not index.normalized[key] then
+			index.normalized[key] = asset
 		end
 	end
 
@@ -74,7 +80,10 @@ function InventoryIconResolver.new(deps)
 			watchFolder(folderName, folder)
 		end
 
-		local index = {}
+		local index = {
+			exact = {},
+			normalized = {},
+		}
 		for _, object in ipairs(folder:GetDescendants()) do
 			local asset = readImageReference(object)
 			if asset then
@@ -101,9 +110,14 @@ function InventoryIconResolver.new(deps)
 			return nil
 		end
 		for _, raw in ipairs(candidates or {}) do
+			if typeof(raw) == "string" and raw ~= "" and index.exact[raw] then
+				return index.exact[raw]
+			end
+		end
+		for _, raw in ipairs(candidates or {}) do
 			local key = normalizeKey(raw)
-			if key ~= "" and index[key] then
-				return index[key]
+			if key ~= "" and index.normalized[key] then
+				return index.normalized[key]
 			end
 		end
 		return nil
