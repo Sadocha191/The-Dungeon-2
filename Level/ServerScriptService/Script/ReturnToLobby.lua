@@ -11,7 +11,8 @@ local TELEPORT_LOCK_TIMEOUT = 15
 local RunProgressApi = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunProgressApi"))
 
 local pendingReturns: {[number]: boolean} = {}
-local teleporting: {[number]: boolean} = {}
+local teleporting: {[number]: number} = {}
+local nextTeleportAttempt = 0
 
 local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 if not remotes then
@@ -42,27 +43,34 @@ local function fireTeleportStatus(player: Player, statusType: string, reason: st
 	})
 end
 
-local function releaseTeleportLock(player: Player)
-	teleporting[player.UserId] = nil
+local function releaseTeleportLock(player: Player, attemptToken: number?)
+	local userId = player.UserId
+	if attemptToken ~= nil and teleporting[userId] ~= attemptToken then
+		return
+	end
+	teleporting[userId] = nil
 end
 
-local function acquireTeleportLock(player: Player): boolean
+local function acquireTeleportLock(player: Player): number?
 	local userId = player.UserId
-	if teleporting[userId] then
-		return false
+	if teleporting[userId] ~= nil then
+		return nil
 	end
 
-	teleporting[userId] = true
+	nextTeleportAttempt += 1
+	local attemptToken = nextTeleportAttempt
+	teleporting[userId] = attemptToken
 	task.delay(TELEPORT_LOCK_TIMEOUT, function()
-		if teleporting[userId] and player.Parent == Players then
+		if teleporting[userId] == attemptToken then
 			teleporting[userId] = nil
 		end
 	end)
-	return true
+	return attemptToken
 end
 
 local function teleportToLobby(player: Player)
-	if not acquireTeleportLock(player) then
+	local attemptToken = acquireTeleportLock(player)
+	if not attemptToken then
 		return
 	end
 
@@ -70,7 +78,7 @@ local function teleportToLobby(player: Player)
 	fireTeleportStatus(player, "teleporting")
 	task.wait(0.18)
 	if player.Parent ~= Players then
-		releaseTeleportLock(player)
+		releaseTeleportLock(player, attemptToken)
 		return
 	end
 
@@ -78,7 +86,7 @@ local function teleportToLobby(player: Player)
 		TeleportService:TeleportAsync(LOBBY_PLACE_ID, { player }, options)
 	end)
 	if not ok then
-		releaseTeleportLock(player)
+		releaseTeleportLock(player, attemptToken)
 		warn("[ReturnToLobby] TeleportAsync failed:", err)
 		fireTeleportStatus(player, "failed", "teleport_failed")
 	end
@@ -115,7 +123,7 @@ local function queueReturnAfterFinalization(player: Player)
 end
 
 TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage, placeId)
-	if placeId ~= LOBBY_PLACE_ID or not teleporting[player.UserId] then
+	if placeId ~= LOBBY_PLACE_ID or teleporting[player.UserId] == nil then
 		return
 	end
 
