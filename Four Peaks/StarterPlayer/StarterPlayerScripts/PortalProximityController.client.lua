@@ -106,6 +106,11 @@ end
 
 local function setInside(nextInside)
 	if nextInside == wasInside then
+		if not nextInside then
+			-- Other legacy listeners can reopen PortalUI after the player has already
+			-- left. Keep enforcing the proximity contract while remaining out of range.
+			closePortalUi()
+		end
 		return
 	end
 
