@@ -73,6 +73,10 @@ local function ensureStringValue(folder, valueName, defaultValue)
 
 	local existing = folder:FindFirstChild(valueName)
 	if existing and not existing:IsA("StringValue") then
+		if existing:IsA("Model") then
+			return false
+		end
+
 		local nestedAsset = findNestedImageReference(existing)
 		if not nestedAsset then
 			return false
