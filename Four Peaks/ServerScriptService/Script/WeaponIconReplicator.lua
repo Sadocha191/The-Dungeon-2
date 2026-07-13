@@ -23,6 +23,34 @@ local function buildAssetReference(iconName)
 	return string.format("rbxgameasset://%s/%s", IMAGE_CATEGORY, tostring(iconName))
 end
 
+local function readImageReference(object)
+	if not object then
+		return nil
+	end
+	if object:IsA("StringValue") then
+		return object.Value ~= "" and object.Value or nil
+	elseif object:IsA("ImageLabel") or object:IsA("ImageButton") then
+		return object.Image ~= "" and object.Image or nil
+	elseif object:IsA("Decal") or object:IsA("Texture") then
+		return object.Texture ~= "" and object.Texture or nil
+	end
+	return nil
+end
+
+local function findNestedImageReference(root)
+	local direct = readImageReference(root)
+	if direct then
+		return direct
+	end
+	for _, descendant in ipairs(root:GetDescendants()) do
+		local asset = readImageReference(descendant)
+		if asset then
+			return asset
+		end
+	end
+	return nil
+end
+
 local function ensureFolder(folderName)
 	local folder = ReplicatedStorage:FindFirstChild(folderName)
 	if folder and folder:IsA("Folder") then
@@ -45,8 +73,18 @@ local function ensureStringValue(folder, valueName, defaultValue)
 
 	local existing = folder:FindFirstChild(valueName)
 	if existing and not existing:IsA("StringValue") then
-		warn(("[WeaponIconReplicator] %s.%s exists but is not a StringValue"):format(folder.Name, valueName))
-		return false
+		if existing:IsA("Model") then
+			return false
+		end
+
+		local nestedAsset = findNestedImageReference(existing)
+		if not nestedAsset then
+			return false
+		end
+
+		existing:Destroy()
+		existing = nil
+		defaultValue = nestedAsset
 	end
 
 	if not existing then
@@ -78,6 +116,10 @@ local function collectWeaponIconNames()
 	end
 
 	for _, def in ipairs(WeaponConfigs.GetAll()) do
+		push(def.id)
+		push(def.name)
+		push(def.weaponName)
+		push(def.displayName)
 		push(def.iconName)
 		push(def.categoryIconName)
 		for _, fallbackName in ipairs(def.iconFallbackNames or {}) do

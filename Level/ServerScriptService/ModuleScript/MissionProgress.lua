@@ -4,11 +4,56 @@
 -- Reset dzienny/tygodniowy (UTC) + kasowanie selection, aby Lobby wylosowało spójne 6/12.
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 local PlayerData = require(serverModules:WaitForChild("PlayerData"))
 local MissionState = require(serverModules:WaitForChild("MissionState"))
+
+local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+if not remotes then
+	remotes = Instance.new("Folder")
+	remotes.Name = "Remotes"
+	remotes.Parent = ReplicatedStorage
+end
+
+local dpsDamageEvent = remotes:FindFirstChild("DpsDamageEvent")
+if dpsDamageEvent and not dpsDamageEvent:IsA("RemoteEvent") then
+	dpsDamageEvent:Destroy()
+	dpsDamageEvent = nil
+end
+if not dpsDamageEvent then
+	dpsDamageEvent = Instance.new("RemoteEvent")
+	dpsDamageEvent.Name = "DpsDamageEvent"
+	dpsDamageEvent.Parent = remotes
+end
+
+local DPS_SEND_INTERVAL = 0.1
+local pendingDpsDamage = {}
+local dpsSendAccumulator = 0
+
+RunService.Heartbeat:Connect(function(dt)
+	dpsSendAccumulator += dt
+	if dpsSendAccumulator < DPS_SEND_INTERVAL then
+		return
+	end
+	dpsSendAccumulator = 0
+
+	for plr, amount in pairs(pendingDpsDamage) do
+		pendingDpsDamage[plr] = nil
+		if amount > 0 and plr.Parent == Players and plr:GetAttribute("RunEnded") ~= true then
+			dpsDamageEvent:FireClient(plr, {
+				amount = amount,
+			})
+		end
+	end
+end)
+
+Players.PlayerRemoving:Connect(function(plr)
+	pendingDpsDamage[plr] = nil
+end)
 
 local DailyMissionService = nil
 do
@@ -36,7 +81,6 @@ do
 		end
 	end
 end
-
 
 local function ensureState(plr: Player)
 	return MissionState.Ensure(plr)
@@ -72,6 +116,13 @@ function MissionProgress.Add(plr: Player, key: string, amount: number)
 
 	PlayerData.MarkDirty(plr)
 	queueDailyMissionSync(plr, key)
+
+	if EventProgress and typeof(EventProgress.AddFromMissionKey) == "function" then
+		local ok, err = pcall(EventProgress.AddFromMissionKey, plr, key, amount, "MissionProgress")
+		if not ok then
+			warn("[MissionProgress] Event progress update failed:", err)
+		end
+	end
 end
 
 function MissionProgress.SetMax(plr: Player, key: string, value: number)
@@ -91,12 +142,22 @@ end
 function MissionProgress.OnReward(plr: Player, xp: number, coins: number)
 	xp = math.floor(tonumber(xp) or 0)
 	coins = math.floor(tonumber(coins) or 0)
-	if xp > 0 then MissionProgress.Add(plr, "XP_EARNED", xp) end
+	if xp > 0 then
+		MissionProgress.Add(plr, "XP_EARNED", xp)
+		-- ProgressService calls OnReward after OnRunComplete has already flushed mission state.
+		-- Save this final counter update before the player can immediately teleport away.
+		PlayerData.Save(plr, false)
+	end
 end
 
 function MissionProgress.OnDamage(plr: Player, amount: number, isCrit: boolean)
 	amount = math.floor(tonumber(amount) or 0)
 	if amount <= 0 then return end
+
+	if plr and plr.Parent == Players and plr:GetAttribute("RunEnded") ~= true then
+		pendingDpsDamage[plr] = (pendingDpsDamage[plr] or 0) + amount
+	end
+
 	MissionProgress.Add(plr, "DAMAGE", amount)
 	if isCrit then
 		MissionProgress.Add(plr, "CRITS", 1)
@@ -123,13 +184,24 @@ end
 --  lowHpSeconds, maxNoDamageStreak, minHpRatio,
 --  bossNoHit20, bossClutch, burst90, burst120,
 --  noRerollWin, max1RerollWin, max1SkipWin, level10,
---  multikill30_5, multikill60_20, spells3, winStreak3
+--  multikill30_5, multikill60_20, spells3
 function MissionProgress.OnRunComplete(plr: Player, waves: number, seconds: number, diedThisRun: boolean, extraStats: any?)
 	waves = math.floor(tonumber(waves) or 0)
 	seconds = math.floor(tonumber(seconds) or 0)
 
 	MissionProgress.Add(plr, "RUNS", 1)
 	MissionProgress.Add(plr, "RUNS_WITH_WEAPON", 1)
+
+	local missionState = ensureState(plr)
+	if diedThisRun == false then
+		missionState.WeeklyWinStreak = math.max(0, math.floor(tonumber(missionState.WeeklyWinStreak) or 0)) + 1
+		if missionState.WeeklyWinStreak == 3 then
+			MissionProgress.Add(plr, "WIN_STREAK_3", 1)
+		end
+	else
+		missionState.WeeklyWinStreak = 0
+	end
+	PlayerData.MarkDirty(plr)
 
 	-- Tryb horde jest czasowy, ale utrzymujemy liczniki WAVE* pod stare questy:
 	-- 1 pseudo-fala = 30 sekund aktywnej gry.
@@ -142,9 +214,8 @@ function MissionProgress.OnRunComplete(plr: Player, waves: number, seconds: numb
 		MissionProgress.SetMax(plr, "WAVE_MAX", pseudoWaves)
 	end
 
-	if seconds > 0 then
-		MissionProgress.Add(plr, "SECONDS", seconds)
-	end
+	-- ProgressService reports active run time incrementally through SECONDS deltas.
+	-- Adding the full duration here again would double-count survival missions.
 
 	if diedThisRun == false then
 		MissionProgress.Add(plr, "NO_DEATH_RUNS", 1)
@@ -169,7 +240,6 @@ function MissionProgress.OnRunComplete(plr: Player, waves: number, seconds: numb
 		if extraStats.max1RerollWin then MissionProgress.Add(plr, "MAX1_REROLL_WINS", 1) end
 		if extraStats.max1SkipWin then MissionProgress.Add(plr, "MAX1_SKIP_WINS", 1) end
 		if extraStats.hp50plusWin then MissionProgress.Add(plr, "HP50PLUS_WINS", 1) end
-		if extraStats.winStreak3 then MissionProgress.Add(plr, "WIN_STREAK_3", 1) end
 	end
 
 	if diedThisRun == false then

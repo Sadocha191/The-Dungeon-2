@@ -6,6 +6,7 @@ local replicatedModules = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
 	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
 
+local CraftingConfig = require(replicatedModules:WaitForChild("CraftingConfig"))
 local DailyLoginRewardsConfig = require(replicatedModules:WaitForChild("DailyLoginRewardsConfig"))
 local PlayerData = require(moduleFolder:WaitForChild("PlayerData"))
 local CurrencyService = require(moduleFolder:WaitForChild("CurrencyService"))
@@ -102,6 +103,19 @@ local function getCraftingService()
 	return craftingService
 end
 
+local function validateMaterialBundle(entries)
+	for _, entry in ipairs(entries or {}) do
+		local materialId = tostring(entry.Id or "")
+		local materialAmount = math.max(0, math.floor(tonumber(entry.Amount) or 0))
+		if materialAmount > 0 then
+			if materialId == "" or not CraftingConfig.GetMaterialBucket(materialId) then
+				return false, "UnknownMaterial:" .. materialId
+			end
+		end
+	end
+	return true
+end
+
 function DailyLoginService.GetState(player)
 	local data = PlayerData.Get(player)
 	if typeof(data) ~= "table" then
@@ -180,15 +194,22 @@ local function grantReward(player, reward)
 			return false, "MaterialBackendUnavailable"
 		end
 
+		local valid, validationError = validateMaterialBundle(reward.Materials)
+		if not valid then
+			warn("[DailyLoginService] Material bundle validation failed. Claim was not advanced:", validationError)
+			return false, validationError
+		end
+
 		for _, entry in ipairs(reward.Materials or {}) do
 			local materialId = tostring(entry.Id or "")
 			local materialAmount = math.max(0, math.floor(tonumber(entry.Amount) or 0))
-			if materialId ~= "" and materialAmount > 0 then
+			if materialAmount > 0 then
 				local ok, err = service.AddMaterial(player, materialId, materialAmount, {
 					toastNote = "Daily Login",
 				})
 				if not ok then
-					warn("[DailyLoginService] Material reward failed:", materialId, err)
+					warn("[DailyLoginService] Material reward failed after validation:", materialId, err)
+					return false, err or "MaterialGrantFailed"
 				end
 			end
 		end

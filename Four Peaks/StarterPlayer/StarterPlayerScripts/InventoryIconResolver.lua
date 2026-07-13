@@ -7,6 +7,7 @@ function InventoryIconResolver.new(deps)
 	local MaterialDefinitions = deps.MaterialDefinitions
 	local imageFolderCache = {}
 	local imageIndexCache = {}
+	local imageFolderConnections = {}
 
 	local function readImageReference(object)
 		if not object then
@@ -22,6 +23,49 @@ function InventoryIconResolver.new(deps)
 		return nil
 	end
 
+	local function normalizeKey(value)
+		if typeof(value) ~= "string" then
+			return ""
+		end
+		return string.lower(value):gsub("[^%w]", "")
+	end
+
+	local function cacheAsset(index, rawName, asset)
+		if typeof(rawName) ~= "string" or rawName == "" then
+			return
+		end
+		if not index.exact[rawName] then
+			index.exact[rawName] = asset
+		end
+		local key = normalizeKey(rawName)
+		if key ~= "" and not index.normalized[key] then
+			index.normalized[key] = asset
+		end
+	end
+
+	local function disconnectFolderConnections(folderName)
+		local connections = imageFolderConnections[folderName]
+		if not connections then
+			return
+		end
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+		end
+		imageFolderConnections[folderName] = nil
+	end
+
+	local function watchFolder(folderName, folder)
+		disconnectFolderConnections(folderName)
+		imageFolderConnections[folderName] = {
+			folder.DescendantAdded:Connect(function()
+				imageIndexCache[folderName] = nil
+			end),
+			folder.DescendantRemoving:Connect(function()
+				imageIndexCache[folderName] = nil
+			end),
+		}
+	end
+
 	local function buildImageIndex(folderName)
 		local folder = ReplicatedStorage:FindFirstChild(folderName)
 		if not folder then
@@ -30,20 +74,32 @@ function InventoryIconResolver.new(deps)
 		if imageFolderCache[folderName] == folder and imageIndexCache[folderName] then
 			return imageIndexCache[folderName]
 		end
-		local index = {}
+
+		if imageFolderCache[folderName] ~= folder then
+			imageFolderCache[folderName] = folder
+			watchFolder(folderName, folder)
+		end
+
+		local index = {
+			exact = {},
+			normalized = {},
+		}
 		for _, object in ipairs(folder:GetDescendants()) do
 			local asset = readImageReference(object)
 			if asset then
-				local key = string.lower(object.Name)
-				index[key] = index[key] or asset
-				index[key:gsub("[%s_%-]", "")] = index[key:gsub("[%s_%-]", "")] or asset
+				cacheAsset(index, object.Name, asset)
+
+				local ancestor = object.Parent
+				while ancestor and ancestor ~= folder do
+					cacheAsset(index, ancestor.Name, asset)
+					ancestor = ancestor.Parent
+				end
 			end
 		end
 		local direct = readImageReference(folder)
 		if direct then
-			index[string.lower(folder.Name)] = direct
+			cacheAsset(index, folder.Name, direct)
 		end
-		imageFolderCache[folderName] = folder
 		imageIndexCache[folderName] = index
 		return index
 	end
@@ -54,32 +110,43 @@ function InventoryIconResolver.new(deps)
 			return nil
 		end
 		for _, raw in ipairs(candidates or {}) do
-			if typeof(raw) == "string" and raw ~= "" then
-				local key = string.lower(raw)
-				local asset = index[key] or index[key:gsub("[%s_%-]", "")]
-				if asset then
-					return asset
-				end
+			if typeof(raw) == "string" and raw ~= "" and index.exact[raw] then
+				return index.exact[raw]
+			end
+		end
+		for _, raw in ipairs(candidates or {}) do
+			local key = normalizeKey(raw)
+			if key ~= "" and index.normalized[key] then
+				return index.normalized[key]
 			end
 		end
 		return nil
+	end
+
+	local function appendCandidate(candidates, value)
+		if typeof(value) == "string" and value ~= "" then
+			table.insert(candidates, value)
+		end
 	end
 
 	local resolver = {}
 
 	function resolver.WeaponImage(entry)
 		local def = entry and entry.def or nil
-		local candidates = {
-			entry and entry.weaponId,
-			entry and entry.displayName,
-			def and def.iconName,
-			def and def.name,
-			def and def.id,
-			def and def.categoryIconName,
-		}
+		local candidates = {}
+		appendCandidate(candidates, entry and entry.weaponId)
+		appendCandidate(candidates, entry and entry.id)
+		appendCandidate(candidates, entry and entry.displayName)
+		appendCandidate(candidates, entry and entry.name)
+		appendCandidate(candidates, def and def.iconName)
+		appendCandidate(candidates, def and def.id)
+		appendCandidate(candidates, def and def.name)
+		appendCandidate(candidates, def and def.weaponName)
+		appendCandidate(candidates, def and def.displayName)
 		for _, fallback in ipairs((def and def.iconFallbackNames) or {}) do
-			table.insert(candidates, fallback)
+			appendCandidate(candidates, fallback)
 		end
+		appendCandidate(candidates, def and def.categoryIconName)
 		return resolveImage("WeaponIcons", candidates)
 	end
 
@@ -116,6 +183,7 @@ function InventoryIconResolver.new(deps)
 			return resolver.WeaponImage({
 				weaponId = sourceId,
 				displayName = entry.displayName,
+				name = entry.name,
 				def = WeaponConfigs.Get and WeaponConfigs.Get(sourceId),
 			})
 		elseif entry.category == "Materials" then
