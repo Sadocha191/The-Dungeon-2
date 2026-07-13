@@ -45,7 +45,6 @@ local function ensureStringValue(folder, valueName, defaultValue)
 
 	local existing = folder:FindFirstChild(valueName)
 	if existing and not existing:IsA("StringValue") then
-		warn(("[WeaponIconReplicator] %s.%s exists but is not a StringValue"):format(folder.Name, valueName))
 		return false
 	end
 
@@ -78,6 +77,10 @@ local function collectWeaponIconNames()
 	end
 
 	for _, def in ipairs(WeaponConfigs.GetAll()) do
+		push(def.id)
+		push(def.name)
+		push(def.weaponName)
+		push(def.displayName)
 		push(def.iconName)
 		push(def.categoryIconName)
 		for _, fallbackName in ipairs(def.iconFallbackNames or {}) do
