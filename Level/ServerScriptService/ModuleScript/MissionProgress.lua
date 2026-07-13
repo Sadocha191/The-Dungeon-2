@@ -142,9 +142,8 @@ function MissionProgress.OnRunComplete(plr: Player, waves: number, seconds: numb
 		MissionProgress.SetMax(plr, "WAVE_MAX", pseudoWaves)
 	end
 
-	if seconds > 0 then
-		MissionProgress.Add(plr, "SECONDS", seconds)
-	end
+	-- ProgressService reports active run time incrementally through SECONDS deltas.
+	-- Adding the full duration here again would double-count survival missions.
 
 	if diedThisRun == false then
 		MissionProgress.Add(plr, "NO_DEATH_RUNS", 1)
