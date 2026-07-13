@@ -88,10 +88,11 @@ local function teleportToLobby(player: Player)
 	local ok, err = pcall(function()
 		TeleportService:TeleportAsync(LOBBY_PLACE_ID, { player }, options)
 	end)
-	if not ok then
-		releaseTeleportLock(player, attemptToken)
+	if not ok and releaseTeleportLock(player, attemptToken) then
 		warn("[ReturnToLobby] TeleportAsync failed:", err)
-		fireTeleportStatus(player, "failed", "teleport_failed")
+		if player.Parent == Players then
+			fireTeleportStatus(player, "failed", "teleport_failed")
+		end
 	end
 end
 
