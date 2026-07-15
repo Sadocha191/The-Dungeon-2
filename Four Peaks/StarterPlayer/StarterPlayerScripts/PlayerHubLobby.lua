@@ -1,6 +1,6 @@
 -- LOCALSCRIPT: PlayerHudLobby.client.lua
 -- GDZIE: StarterPlayer/StarterPlayerScripts/PlayerHudLobby (LocalScript)
--- CO: HUD lobby z monetami + auto-hide gdy istnieje ScreenGui z atrybutem Modal=true i Enabled=true
+-- CO: HUD lobby z walutami + auto-hide gdy istnieje ScreenGui z atrybutem Modal=true i Enabled=true
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12,6 +12,9 @@ local pg = plr:WaitForChild("PlayerGui")
 
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local PlayerProgressEvent = remoteEvents:WaitForChild("PlayerProgressEvent")
+local NumberFormatter = require(
+	ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("NumberFormatter")
+)
 
 local gui = pg:WaitForChild("PlayerHudGui_Lobby")
 gui.ResetOnSpawn = false
@@ -19,7 +22,7 @@ gui.IgnoreGuiInset = false
 
 local coinsBox = gui:WaitForChild("coinsBox")
 coinsBox.Position = UDim2.fromOffset(18, 150)
-coinsBox.Size = UDim2.fromOffset(200, 36)
+coinsBox.Size = UDim2.fromOffset(280, 36)
 coinsBox.BackgroundColor3 = Color3.fromRGB(14, 14, 16)
 coinsBox.BackgroundTransparency = 0.12
 coinsBox.BorderSizePixel = 0
@@ -37,13 +40,18 @@ coinsText.TextSize = 14
 coinsText.TextXAlignment = Enum.TextXAlignment.Left
 coinsText.TextYAlignment = Enum.TextYAlignment.Center
 coinsText.TextColor3 = Color3.fromRGB(245, 245, 245)
-coinsText.Text = "Silver: 0"
+coinsText.Text = "Silver: 0  |  Souls: 0"
 coinsText.Parent = coinsBox
 
-local coins = 0
+local silver = 0
+local souls = 0
 
 local function render()
-	coinsText.Text = ("Silver: %d"):format(coins)
+	coinsText.Text = string.format(
+		"Silver: %s  |  Souls: %s",
+		NumberFormatter.Format(silver),
+		NumberFormatter.Format(souls)
+	)
 end
 
 local function applyCoreGuiState(hideModal: boolean)
@@ -60,7 +68,8 @@ PlayerProgressEvent.OnClientEvent:Connect(function(payload)
 		return
 	end
 
-	coins = tonumber(payload.silver) or tonumber(payload.coins) or coins
+	silver = tonumber(payload.silver) or tonumber(payload.coins) or silver
+	souls = tonumber(payload.souls) or souls
 	render()
 end)
 
@@ -94,4 +103,4 @@ end)
 
 applyCoreGuiState(false)
 render()
-print("[PlayerHudLobby] Ready (coins only, lobby backpack hidden)")
+print("[PlayerHudLobby] Ready (compact Silver/Souls, lobby backpack hidden)")
