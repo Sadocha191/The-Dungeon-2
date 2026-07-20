@@ -65,12 +65,13 @@ CreateReq.OnServerEvent:Connect(function(player: Player, className)
 	end
 
 	local ok, payload = ProfilesManager.CreateProfile(player, picked)
+	local resolvedClass = ok and payload and payload.Class or picked
 	local response = {
 		ok = ok,
 		error = (ok and nil or payload),
 		profile = ok and payload or nil,
 		race = (ok and payload and payload.Race) or nil,
-		rollPreview = ok and buildRollPreview(picked, payload and payload.Race) or nil,
+		rollPreview = ok and buildRollPreview(resolvedClass, payload and payload.Race) or nil,
 	}
 	if ok and payload and typeof(payload.Race) == "string" then
 		player:SetAttribute("Race", payload.Race)
