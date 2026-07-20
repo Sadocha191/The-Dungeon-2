@@ -1,17 +1,19 @@
 -- PlayerStateStore.lua
--- Persistent weapon-instance/profile state with safe loading, session ownership, and confirmed saves.
+-- Compatibility API for inventory/profile state embedded in GlobalPlayerProgress_v1.
+-- PlayerState_v2 is read only during one-time migration and remains as a rollback backup.
 
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
 
-local SaveScheduler = require(script.Parent:WaitForChild("SaveScheduler"))
+local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local ProfileLease = require(script.Parent:WaitForChild("ProfileLease"))
+local StateSchema = require(script.Parent:WaitForChild("PlayerStateSchema"))
 
-local DS = DataStoreService:GetDataStore("PlayerState_v2")
-local lease = ProfileLease.new(DS, {
-	name = "PlayerState_v2",
+local LEGACY_STORE = DataStoreService:GetDataStore("PlayerState_v2")
+local legacyLease = ProfileLease.new(LEGACY_STORE, {
+	name = "PlayerState_v2_migration",
 	schemaVersion = 2,
 	leaseSeconds = 180,
 	acquireTimeoutSeconds = 30,
@@ -23,232 +25,142 @@ local Store = {}
 local cache = {}
 local loadingByUserId = {}
 local loadErrors = {}
-local volatileByUserId = {}
-local releasingByUserId = {}
-local pendingReleases = {}
-local closing = false
 
-local OFFLINE_RELEASE_ATTEMPTS = 6
+local MIGRATION_VERSION = 1
 
-local function dsKey(userId: number): string
+local function legacyKey(userId: number): string
 	return "u:" .. tostring(userId)
 end
 
-local function deepCopy(value)
-	if typeof(value) ~= "table" then return value end
-	local copy = {}
-	for key, nested in pairs(value) do
-		copy[deepCopy(key)] = deepCopy(nested)
-	end
-	return copy
-end
-
-local function clampInt(value, minimum)
-	local number = math.floor(tonumber(value) or 0)
-	if minimum ~= nil and number < minimum then return minimum end
-	return number
+local function generateInstanceId(): string
+	return HttpService:GenerateGUID(false)
 end
 
 local function newWeaponInstance(weaponId: string, rarity: string?, level: number?, prefix: string?, rollStats: any?)
 	return {
-		instanceId = HttpService:GenerateGUID(false),
+		instanceId = generateInstanceId(),
 		weaponId = weaponId,
 		rarity = tostring(rarity or ""),
-		level = clampInt(level or 1, 1),
+		level = math.max(1, math.floor(tonumber(level) or 1)),
 		prefix = tostring(prefix or "Standard"),
-		rollStats = typeof(rollStats) == "table" and deepCopy(rollStats) or {},
+		rollStats = typeof(rollStats) == "table" and StateSchema.Clone(rollStats) or {},
 		createdAt = os.time(),
+		upgradeSilverSpent = 0,
+		upgradeMaterialsSpent = {},
 	}
-end
-
-local function ensureUniqueOwnedWeapons(instances)
-	local seen = {}
-	local out = {}
-	for _, instance in ipairs(instances or {}) do
-		local weaponId = instance and instance.weaponId
-		if typeof(weaponId) == "string" and weaponId ~= "" and not seen[weaponId] then
-			seen[weaponId] = true
-			table.insert(out, weaponId)
-		end
-	end
-	return out
-end
-
-local function defaultState()
-	return {
-		CreatedOnce = false,
-		Profile = nil,
-		StarterWeaponClaimed = false,
-		StarterWeaponName = nil,
-		OwnedWeapons = {},
-		FavoriteWeapons = {},
-		OwnedSpells = {},
-		SpellLoadout = {},
-		Codex = { Discovered = {}, Seen = {} },
-		WeaponInstances = {},
-		EquippedWeaponInstanceId = nil,
-		Missions = {
-			DailyKey = 0,
-			WeeklyKey = 0,
-			SelectedDaily = {},
-			SelectedWeekly = {},
-			ClaimCounts = {},
-			CountersDaily = {},
-			CountersWeekly = {},
-			WeeklyWeaponRuns = {},
-		},
-		Tutorial = { Active = true, Step = 1, Complete = false },
-	}
-end
-
-local function ensureSchema(raw)
-	local data = defaultState()
-	if typeof(raw) == "table" then
-		for key, value in pairs(raw) do data[key] = value end
-	end
-
-	if typeof(data.OwnedWeapons) ~= "table" then data.OwnedWeapons = {} end
-	if typeof(data.FavoriteWeapons) ~= "table" then data.FavoriteWeapons = {} end
-	if typeof(data.OwnedSpells) ~= "table" then data.OwnedSpells = {} end
-	if typeof(data.SpellLoadout) ~= "table" then data.SpellLoadout = {} end
-	if typeof(data.Codex) ~= "table" then data.Codex = { Discovered = {}, Seen = {} } end
-	if typeof(data.Codex.Discovered) ~= "table" then data.Codex.Discovered = {} end
-	if typeof(data.Codex.Seen) ~= "table" then data.Codex.Seen = {} end
-
-	data.CreatedOnce = data.CreatedOnce == true
-	data.StarterWeaponClaimed = data.StarterWeaponClaimed == true
-	if data.StarterWeaponName ~= nil then data.StarterWeaponName = tostring(data.StarterWeaponName) end
-	if typeof(data.WeaponInstances) ~= "table" then data.WeaponInstances = {} end
-	if typeof(data.EquippedWeaponInstanceId) ~= "string" then data.EquippedWeaponInstanceId = nil end
-
-	if typeof(data.Missions) ~= "table" then data.Missions = defaultState().Missions end
-	local missions = data.Missions
-	if typeof(missions.SelectedDaily) ~= "table" then missions.SelectedDaily = {} end
-	if typeof(missions.SelectedWeekly) ~= "table" then missions.SelectedWeekly = {} end
-	if typeof(missions.ClaimCounts) ~= "table" then missions.ClaimCounts = {} end
-	if typeof(missions.CountersDaily) ~= "table" then missions.CountersDaily = {} end
-	if typeof(missions.CountersWeekly) ~= "table" then missions.CountersWeekly = {} end
-	if typeof(missions.WeeklyWeaponRuns) ~= "table" then missions.WeeklyWeaponRuns = {} end
-	missions.DailyKey = tonumber(missions.DailyKey) or 0
-	missions.WeeklyKey = tonumber(missions.WeeklyKey) or 0
-
-	if typeof(data.Tutorial) ~= "table" then
-		data.Tutorial = defaultState().Tutorial
-	else
-		data.Tutorial.Active = data.Tutorial.Active ~= false
-		data.Tutorial.Step = math.max(1, math.floor(tonumber(data.Tutorial.Step) or 1))
-		data.Tutorial.Complete = data.Tutorial.Complete == true
-	end
-
-	if #data.WeaponInstances == 0 and #data.OwnedWeapons > 0 then
-		for _, weaponId in ipairs(data.OwnedWeapons) do
-			if typeof(weaponId) == "string" and weaponId ~= "" then
-				table.insert(data.WeaponInstances, newWeaponInstance(weaponId, "", 1, "Standard", {}))
-			end
-		end
-	end
-
-	local cleanInstances = {}
-	for _, instance in ipairs(data.WeaponInstances) do
-		if typeof(instance) == "table" then
-			instance.instanceId = typeof(instance.instanceId) == "string" and instance.instanceId ~= ""
-				and instance.instanceId or HttpService:GenerateGUID(false)
-			instance.weaponId = tostring(instance.weaponId or "")
-			instance.rarity = tostring(instance.rarity or "")
-			instance.level = math.max(1, math.floor(tonumber(instance.level) or 1))
-			instance.prefix = tostring(instance.prefix or "Standard")
-			if typeof(instance.rollStats) ~= "table" then instance.rollStats = {} end
-			instance.createdAt = tonumber(instance.createdAt) or os.time()
-			if instance.weaponId ~= "" then table.insert(cleanInstances, instance) end
-		end
-	end
-	data.WeaponInstances = cleanInstances
-	data.OwnedWeapons = ensureUniqueOwnedWeapons(data.WeaponInstances)
-
-	local equippedOk = false
-	if typeof(data.EquippedWeaponInstanceId) == "string" and data.EquippedWeaponInstanceId ~= "" then
-		for _, instance in ipairs(data.WeaponInstances) do
-			if instance.instanceId == data.EquippedWeaponInstanceId then equippedOk = true break end
-		end
-	end
-	if not equippedOk then
-		local selected = nil
-		if typeof(data.StarterWeaponName) == "string" and data.StarterWeaponName ~= "" then
-			for _, instance in ipairs(data.WeaponInstances) do
-				if instance.weaponId == data.StarterWeaponName then selected = instance.instanceId break end
-			end
-		end
-		if not selected and data.WeaponInstances[1] then selected = data.WeaponInstances[1].instanceId end
-		data.EquippedWeaponInstanceId = selected
-	end
-	return data
 end
 
 local function setReadyAttributes(player: Player, ready: boolean, reason: string?)
-	if player.Parent then
+	if player.Parent == Players then
 		player:SetAttribute("PlayerStateReady", ready)
 		player:SetAttribute("PlayerStateLoadError", reason)
 	end
 end
 
 local function failLoad(player: Player, reason)
-	local uid = player.UserId
-	local message = tostring(reason or "UnknownLoadFailure")
-	loadingByUserId[uid] = nil
-	loadErrors[uid] = message
+	local userId = player.UserId
+	local message = tostring(reason or "PlayerStateLoadFailed")
+	loadingByUserId[userId] = nil
+	loadErrors[userId] = message
 	setReadyAttributes(player, false, message)
+	warn(string.format("[PlayerStateStore] Failed to prepare embedded state for %s (%d): %s", player.Name, userId, message))
 
-	if RunService:IsStudio() then
-		local data = ensureSchema(defaultState())
-		cache[uid] = data
-		volatileByUserId[uid] = true
-		loadErrors[uid] = nil
-		setReadyAttributes(player, true, "VolatileStudioProfile")
-		warn("[PlayerStateStore] DataStore unavailable in Studio; using non-persistent state:", player.Name, message)
-		return data
+	if not RunService:IsStudio() and player.Parent == Players then
+		task.defer(function()
+			if player.Parent == Players then
+				player:Kick("Your inventory could not be loaded safely. Please rejoin in a moment.")
+			end
+		end)
 	end
+	return nil, message
+end
 
-	task.defer(function()
-		if player.Parent then
-			local kickMessage = message == "ProfileLocked"
-				and "Your inventory is still active on another server. Rejoin in a moment."
-				or "Your inventory could not be loaded safely. Please rejoin."
-			player:Kick(kickMessage)
+local function releaseLegacyLease(userId: number, snapshot)
+	if typeof(snapshot) ~= "table" then return end
+	task.spawn(function()
+		local ok, err = legacyLease:Release(legacyKey(userId), snapshot)
+		if not ok then
+			warn("[PlayerStateStore] Legacy migration lease release failed:", userId, err)
 		end
 	end)
-	return nil
+end
+
+local function migrateLegacyState(player: Player, profile)
+	local userId = player.UserId
+	local existing = typeof(profile.PlayerState) == "table" and profile.PlayerState or nil
+	local readOk, legacyOrError = legacyLease:Read(LEGACY_STORE, legacyKey(userId))
+	if not readOk then
+		if RunService:IsStudio() then
+			warn("[PlayerStateStore] Legacy store unavailable in Studio; using embedded/default state:", legacyOrError)
+			legacyOrError = nil
+		else
+			return nil, legacyOrError
+		end
+	end
+	if legacyOrError ~= nil and typeof(legacyOrError) ~= "table" then
+		return nil, "CorruptLegacyPlayerState"
+	end
+
+	local acquiredLegacy = nil
+	local migrationSeed = existing or StateSchema.Default()
+	if typeof(legacyOrError) == "table" then
+		local acquired, stateOrError = legacyLease:Acquire(legacyKey(userId), legacyOrError)
+		if not acquired then return nil, stateOrError end
+		acquiredLegacy = stateOrError
+		migrationSeed = stateOrError
+	end
+
+	local state = StateSchema.Sanitize(migrationSeed, generateInstanceId)
+	profile.PlayerState = state
+	profile.PlayerStateMigrationVersion = MIGRATION_VERSION
+	profile.PlayerStateMigratedAt = os.time()
+	profile.PlayerStateLegacyBackupAvailable = acquiredLegacy ~= nil
+	PlayerData.MarkDirty(player)
+
+	local saved, saveError = PlayerData.SaveBarrier(player, "player_state_migration")
+	if acquiredLegacy then releaseLegacyLease(userId, StateSchema.Sanitize(acquiredLegacy, generateInstanceId)) end
+	if not saved then return nil, saveError or "MigrationSaveFailed" end
+	return state
 end
 
 function Store.Load(player: Player)
-	local uid = player.UserId
-	if cache[uid] then return cache[uid] end
-	if loadErrors[uid] and not RunService:IsStudio() then return nil, loadErrors[uid] end
+	local userId = player.UserId
+	if cache[userId] then return cache[userId] end
+	if loadErrors[userId] and not RunService:IsStudio() then return nil, loadErrors[userId] end
 
-	while loadingByUserId[uid] do
+	while loadingByUserId[userId] do
 		task.wait(0.05)
-		if cache[uid] then return cache[uid] end
-		if loadErrors[uid] and not RunService:IsStudio() then return nil, loadErrors[uid] end
+		if cache[userId] then return cache[userId] end
+		if loadErrors[userId] and not RunService:IsStudio() then return nil, loadErrors[userId] end
 	end
-	loadingByUserId[uid] = true
+	loadingByUserId[userId] = true
 	setReadyAttributes(player, false, nil)
 
-	local readOk, currentOrError = lease:Read(DS, dsKey(uid))
-	if not readOk then return failLoad(player, currentOrError) end
-	local acquired, stateOrError = lease:Acquire(dsKey(uid), currentOrError or defaultState())
-	if not acquired then return failLoad(player, stateOrError) end
-
-	local data = ensureSchema(stateOrError)
-	if player.Parent ~= Players then
-		loadingByUserId[uid] = nil
-		lease:Release(dsKey(uid), data)
-		return nil, "PlayerLeftDuringLoad"
+	local profileOk, profileOrError = pcall(PlayerData.Get, player)
+	if not profileOk or typeof(profileOrError) ~= "table" then
+		return failLoad(player, profileOk and "GlobalProfileMissing" or profileOrError)
 	end
-	cache[uid] = data
-	loadErrors[uid] = nil
-	volatileByUserId[uid] = nil
-	loadingByUserId[uid] = nil
+	local profile = profileOrError
+
+	local state, stateError
+	if math.floor(tonumber(profile.PlayerStateMigrationVersion) or 0) >= MIGRATION_VERSION
+		and typeof(profile.PlayerState) == "table"
+	then
+		state = StateSchema.Sanitize(profile.PlayerState, generateInstanceId)
+		profile.PlayerState = state
+		PlayerData.MarkDirty(player)
+	else
+		state, stateError = migrateLegacyState(player, profile)
+	end
+
+	loadingByUserId[userId] = nil
+	if not state then return failLoad(player, stateError) end
+	if player.Parent ~= Players then return nil, "PlayerLeftDuringLoad" end
+
+	cache[userId] = state
+	loadErrors[userId] = nil
 	setReadyAttributes(player, true, nil)
-	return data
+	return state
 end
 
 function Store.Get(player: Player)
@@ -256,122 +168,76 @@ function Store.Get(player: Player)
 end
 
 function Store.IsReady(player: Player): boolean
-	return cache[player.UserId] ~= nil
+	return cache[player.UserId] ~= nil and loadErrors[player.UserId] == nil
 end
 
-function Store.MarkDirty(player: Player, reason: string?)
-	if cache[player.UserId] then SaveScheduler.MarkDirty(player, reason or "state") end
+function Store.GetLoadError(player: Player): string?
+	return loadErrors[player.UserId]
 end
 
-function Store:_RawSave(player: Player, reason: string)
-	local uid = player.UserId
-	if volatileByUserId[uid] then return true, "VolatileStudioProfile" end
-	local data = cache[uid]
-	if not data then return false, "ProfileMissing" end
-	local ok, persistedOrError = lease:Save(dsKey(uid), deepCopy(data))
-	if not ok then
-		warn("[PlayerStateStore] Save failed:", player.Name, reason, persistedOrError)
-		return false, persistedOrError
-	end
-	if typeof(persistedOrError) == "table" and typeof(persistedOrError._profileMeta) == "table" then
-		data._profileMeta = deepCopy(persistedOrError._profileMeta)
-	end
-	return true
+local function getState(player: Player)
+	local state = cache[player.UserId]
+	if state then return state end
+	local loaded, err = Store.Load(player)
+	if loaded then return loaded end
+	error(string.format("[PlayerStateStore] State unavailable for %s: %s", player.Name, tostring(err)), 2)
+end
+
+function Store.MarkDirty(player: Player, _reason: string?)
+	if cache[player.UserId] then PlayerData.MarkDirty(player) end
+end
+
+function Store:_RawSave(player: Player, reason: string?)
+	return PlayerData.Save(player, true, reason or "player_state_raw_save")
 end
 
 function Store.ForceSave(player: Player, reason: string?)
-	return SaveScheduler.ForceSave(player, reason or "force")
+	return PlayerData.SaveBarrier(player, reason or "player_state_force")
 end
 
 function Store.Flush(player: Player, reason: string?)
-	return SaveScheduler.Flush(player, reason or "flush")
+	return PlayerData.SaveBarrier(player, reason or "player_state_flush")
 end
 
 function Store.Save(player: Player, _force: boolean?)
-	return Store.ForceSave(player, "save")
+	return PlayerData.SaveBarrier(player, "player_state_save")
 end
 
 function Store.SaveBarrier(player: Player, reason: string?)
-	local deadline = os.clock() + 12
-	repeat
-		local ok, err = Store.ForceSave(player, reason or "barrier")
-		if ok then return true end
-		if err ~= "SaveInProgress" then return false, err end
-		task.wait(0.05)
-	until os.clock() >= deadline
-	return false, "SaveWaitTimeout"
-end
-
-local function queueOfflineRelease(userId: number, snapshot)
-	pendingReleases[userId] = snapshot
-	task.spawn(function()
-		for attempt = 1, OFFLINE_RELEASE_ATTEMPTS do
-			local current = pendingReleases[userId]
-			if not current then return end
-			local ok = lease:Release(dsKey(userId), current)
-			if ok then pendingReleases[userId] = nil return end
-			task.wait(math.min(attempt * 0.75, 4))
-		end
-		warn("[PlayerStateStore] Offline release exhausted retries for user", userId)
-	end)
+	return PlayerData.SaveBarrier(player, reason or "player_state_barrier")
 end
 
 function Store.Release(player: Player)
-	local uid = player.UserId
-	if releasingByUserId[uid] then return false, "ReleaseInProgress" end
-	releasingByUserId[uid] = true
-	local data = cache[uid]
-	if not data then
-		releasingByUserId[uid] = nil
-		SaveScheduler.Release(player, true)
-		return true
-	end
-
-	local ok, err = true, nil
-	if not volatileByUserId[uid] then
-		local snapshot = deepCopy(data)
-		ok, err = lease:Release(dsKey(uid), snapshot)
-		if not ok then
-			queueOfflineRelease(uid, snapshot)
-			warn("[PlayerStateStore] Release deferred after save failure:", player.Name, err)
-		end
-	end
-
-	cache[uid] = nil
-	loadingByUserId[uid] = nil
-	loadErrors[uid] = nil
-	volatileByUserId[uid] = nil
-	SaveScheduler.Release(player, true)
-	releasingByUserId[uid] = nil
-	return ok, err
+	local userId = player.UserId
+	cache[userId] = nil
+	loadingByUserId[userId] = nil
+	loadErrors[userId] = nil
+	return true
 end
 
 function Store.SetCreated(player: Player, profileLite: any)
-	local data = Store.Get(player) or Store.Load(player)
+	local data = getState(player)
 	data.CreatedOnce = true
-	data.Profile = profileLite
+	data.Profile = typeof(profileLite) == "table" and StateSchema.Clone(profileLite) or profileLite
 	Store.MarkDirty(player, "profile_created")
 end
 
 function Store.GetTutorialState(player: Player)
-	local data = Store.Get(player) or Store.Load(player)
-	return data.Tutorial
+	return getState(player).Tutorial
 end
 
 function Store.SetTutorialState(player: Player, payload)
-	local data = Store.Get(player) or Store.Load(player)
+	local data = getState(player)
 	data.Tutorial = data.Tutorial or { Active = true, Step = 1, Complete = false }
 	if payload.Active ~= nil then data.Tutorial.Active = payload.Active == true end
 	if payload.Step ~= nil then data.Tutorial.Step = math.max(1, math.floor(tonumber(payload.Step) or 1)) end
 	if payload.Complete ~= nil then data.Tutorial.Complete = payload.Complete == true end
-	if typeof(data.Profile) == "table" then
-		data.Profile.Tutorial = deepCopy(data.Tutorial)
-	end
+	if typeof(data.Profile) == "table" then data.Profile.Tutorial = StateSchema.Clone(data.Tutorial) end
 	Store.MarkDirty(player, "tutorial")
 end
 
 function Store.EnsureOwnedSpell(player: Player, spellId: string)
-	local data = Store.Get(player) or Store.Load(player)
+	local data = getState(player)
 	if typeof(spellId) ~= "string" or spellId == "" then return end
 	for _, current in ipairs(data.OwnedSpells) do if current == spellId then return end end
 	table.insert(data.OwnedSpells, spellId)
@@ -380,16 +246,15 @@ function Store.EnsureOwnedSpell(player: Player, spellId: string)
 end
 
 function Store.GetSpellLoadout(player: Player)
-	local data = Store.Get(player) or Store.Load(player)
 	local out = {}
-	for _, id in ipairs(data.SpellLoadout or {}) do
+	for _, id in ipairs(getState(player).SpellLoadout or {}) do
 		if typeof(id) == "string" and id ~= "" then table.insert(out, id) end
 	end
 	return out
 end
 
 function Store.SetSpellLoadout(player: Player, loadout)
-	local data = Store.Get(player) or Store.Load(player)
+	local data = getState(player)
 	local out, seen = {}, {}
 	for _, id in ipairs(loadout or {}) do
 		if typeof(id) == "string" and id ~= "" and not seen[id] then
@@ -403,19 +268,22 @@ function Store.SetSpellLoadout(player: Player, loadout)
 end
 
 function Store.SetStarterWeaponClaimed(player: Player, weaponName: string)
-	local data = Store.Get(player) or Store.Load(player)
+	local data = getState(player)
 	data.StarterWeaponClaimed = true
 	data.StarterWeaponName = weaponName
 	Store.MarkDirty(player, "starter_weapon")
 end
 
 function Store.SetEquippedWeaponName(player: Player, weaponName: string?)
-	local data = Store.Get(player) or Store.Load(player)
+	local data = getState(player)
 	if typeof(weaponName) == "string" and weaponName ~= "" then
 		data.StarterWeaponClaimed = true
 		data.StarterWeaponName = weaponName
 		for _, instance in ipairs(data.WeaponInstances) do
-			if instance.weaponId == weaponName then data.EquippedWeaponInstanceId = instance.instanceId break end
+			if instance.weaponId == weaponName then
+				data.EquippedWeaponInstanceId = instance.instanceId
+				break
+			end
 		end
 	else
 		data.StarterWeaponClaimed = false
@@ -426,11 +294,11 @@ function Store.SetEquippedWeaponName(player: Player, weaponName: string?)
 end
 
 function Store.ListWeaponInstances(player: Player)
-	return (Store.Get(player) or Store.Load(player)).WeaponInstances
+	return getState(player).WeaponInstances
 end
 
 function Store.GetWeaponInstance(player: Player, instanceId: string)
-	local data = Store.Get(player) or Store.Load(player)
+	local data = getState(player)
 	if typeof(instanceId) ~= "string" or instanceId == "" then return nil, nil end
 	for index, instance in ipairs(data.WeaponInstances) do
 		if instance.instanceId == instanceId then return instance, index end
@@ -439,24 +307,24 @@ function Store.GetWeaponInstance(player: Player, instanceId: string)
 end
 
 function Store.AddWeaponInstance(player: Player, weaponId: string, rarity: string?, level: number?, prefix: string?, rollStats: any?)
-	local data = Store.Get(player) or Store.Load(player)
+	local data = getState(player)
 	if typeof(weaponId) ~= "string" or weaponId == "" then return nil end
 	local instance = newWeaponInstance(weaponId, rarity, level, prefix, rollStats)
 	table.insert(data.WeaponInstances, instance)
-	data.OwnedWeapons = ensureUniqueOwnedWeapons(data.WeaponInstances)
+	data.OwnedWeapons = StateSchema.EnsureUniqueOwnedWeapons(data.WeaponInstances)
 	Store.MarkDirty(player, "weapon_add")
 	return instance
 end
 
 function Store.EnsureOwnedWeapon(player: Player, weaponId: string)
-	local data = Store.Get(player) or Store.Load(player)
+	local data = getState(player)
 	if typeof(weaponId) ~= "string" or weaponId == "" then return nil end
 	for _, instance in ipairs(data.WeaponInstances) do
 		if instance.weaponId == weaponId then return instance end
 	end
 	local created = newWeaponInstance(weaponId, "", 1, "Standard", {})
 	table.insert(data.WeaponInstances, created)
-	data.OwnedWeapons = ensureUniqueOwnedWeapons(data.WeaponInstances)
+	data.OwnedWeapons = StateSchema.EnsureUniqueOwnedWeapons(data.WeaponInstances)
 	if typeof(data.EquippedWeaponInstanceId) ~= "string" or data.EquippedWeaponInstanceId == "" then
 		data.EquippedWeaponInstanceId = created.instanceId
 	end
@@ -467,11 +335,11 @@ function Store.EnsureOwnedWeapon(player: Player, weaponId: string)
 end
 
 function Store.RemoveWeaponInstance(player: Player, instanceId: string)
-	local data = Store.Get(player) or Store.Load(player)
+	local data = getState(player)
 	local _, index = Store.GetWeaponInstance(player, instanceId)
 	if not index then return false end
 	table.remove(data.WeaponInstances, index)
-	data.OwnedWeapons = ensureUniqueOwnedWeapons(data.WeaponInstances)
+	data.OwnedWeapons = StateSchema.EnsureUniqueOwnedWeapons(data.WeaponInstances)
 	if data.EquippedWeaponInstanceId == instanceId then
 		data.EquippedWeaponInstanceId = data.WeaponInstances[1] and data.WeaponInstances[1].instanceId or nil
 	end
@@ -480,7 +348,7 @@ function Store.RemoveWeaponInstance(player: Player, instanceId: string)
 end
 
 function Store.SetEquippedWeaponInstance(player: Player, instanceId: string)
-	local data = Store.Get(player) or Store.Load(player)
+	local data = getState(player)
 	local instance = Store.GetWeaponInstance(player, instanceId)
 	if not instance then return false end
 	data.EquippedWeaponInstanceId = instance.instanceId
@@ -491,14 +359,14 @@ function Store.SetEquippedWeaponInstance(player: Player, instanceId: string)
 end
 
 function Store.GetEquippedWeaponInstance(player: Player)
-	local data = Store.Get(player) or Store.Load(player)
-	local id = data.EquippedWeaponInstanceId
-	if typeof(id) ~= "string" or id == "" then return nil end
-	return Store.GetWeaponInstance(player, id)
+	local data = getState(player)
+	local instanceId = data.EquippedWeaponInstanceId
+	if typeof(instanceId) ~= "string" or instanceId == "" then return nil end
+	return Store.GetWeaponInstance(player, instanceId)
 end
 
 function Store.SetFavoriteWeapon(player: Player, weaponId: string, isFavorite: boolean)
-	local data = Store.Get(player) or Store.Load(player)
+	local data = getState(player)
 	if typeof(weaponId) ~= "string" or weaponId == "" then return end
 	local out = {}
 	for _, current in ipairs(data.FavoriteWeapons or {}) do
@@ -510,65 +378,20 @@ function Store.SetFavoriteWeapon(player: Player, weaponId: string, isFavorite: b
 end
 
 function Store.GetMissionsState(player: Player)
-	local data = Store.Get(player) or Store.Load(player)
-	data.Missions = data.Missions or defaultState().Missions
+	local data = getState(player)
+	data.Missions = data.Missions or StateSchema.Default().Missions
 	return data.Missions
 end
-
-SaveScheduler.Bind(Store)
 
 Players.PlayerAdded:Connect(function(player)
 	task.spawn(function()
 		local ok, err = pcall(Store.Load, player)
-		if not ok then
-			warn("[PlayerStateStore] Unexpected load exception:", player.Name, err)
-			failLoad(player, err)
-		end
+		if not ok then failLoad(player, err) end
 	end)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
 	Store.Release(player)
-end)
-
-task.spawn(function()
-	while not closing do
-		task.wait(60)
-		for _, player in ipairs(Players:GetPlayers()) do
-			if cache[player.UserId] and not volatileByUserId[player.UserId] then
-				task.spawn(function()
-					if SaveScheduler.IsDirty(player) then
-						Store.Flush(player, "autosave")
-					else
-						local ok, err = lease:Renew(dsKey(player.UserId))
-						if not ok then
-							warn("[PlayerStateStore] Lease renewal failed:", player.Name, err)
-							if err == "SessionLost" and player.Parent == Players then
-								player:Kick("Your inventory session changed unexpectedly. Please rejoin.")
-							end
-						end
-					end
-				end)
-			end
-		end
-	end
-end)
-
-game:BindToClose(function()
-	closing = true
-	local remaining = 0
-	for _, player in ipairs(Players:GetPlayers()) do
-		remaining += 1
-		task.spawn(function()
-			Store.Release(player)
-			remaining -= 1
-		end)
-	end
-	local deadline = os.clock() + 25
-	while os.clock() < deadline do
-		if remaining <= 0 and next(pendingReleases) == nil then break end
-		task.wait(0.05)
-	end
 end)
 
 return Store
