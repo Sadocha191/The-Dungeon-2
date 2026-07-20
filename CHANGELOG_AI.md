@@ -11,11 +11,13 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 ## Archiwa
 
 - [`2026-07`](docs/changelog/CHANGELOG_AI_2026-07.md)
+- [`2026-07 — player data safety`](docs/changelog/CHANGELOG_AI_2026-07_PLAYER_DATA_SAFETY.md)
 - [`2026-06`](docs/changelog/CHANGELOG_AI_2026-06.md)
 - [`2026-05`](docs/changelog/CHANGELOG_AI_2026-05.md)
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-07-20** — PR #128 unified player profile, session leases and confirmed economy persistence
 - **2026-07-12** — Poziom PR #99 kierunek spawn NPC i orientacja Golem
 - **2026-07-12** — Poziom PR #97 chesty z ReplicatedStorage.Assets.Chest
 - **2026-07-12** — Poziom PR #96 blokowanie targetowania czarow przez sciany

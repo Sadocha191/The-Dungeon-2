@@ -1,5 +1,39 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-20 - PR #128 persistence safety audit and verification
+
+### Summary
+
+- Fixed legacy `coins -> silver` migration, same-server reconnect after failed lease release, fail-closed handling after terminal session loss, exact weapon instance-ID parity in the retained `PlayerState_v2` backup, and duplicate unified-profile writes before dungeon teleport.
+- Preserved DataStore names, key formats, public APIs, remotes, `TeleportData` fields and the legacy backup; no production record was read, written or deleted.
+
+### Files
+
+- Updated matching Four Peaks and Level `PlayerData.lua` and `PlayerProfileSchema.lua` modules.
+- Updated Four Peaks `PlayerStateStore.lua`.
+- Updated `docs/DATA_SAFETY_PHASE_1.md` and the dedicated player-data safety changelog.
+
+### Validation
+
+- 36 fake-store assertions passed for lease lifecycle/contention/retries/failures and legacy profile/weapon migration.
+- 12 reconnect-ordering assertions and 13 leave/shutdown failure assertions passed, including retained recovery state for a missing main record.
+- Synthetic upgraded profiles encoded to 312,946 bytes for 500 weapon instances and 3,119,948 bytes for 5,000; current content exposes 59 weapon definitions.
+- Four Peaks Play passed unified-profile, weapon equip, gacha, remote-class and volatile save probes.
+- Level Play reached `RunLoadingState.Phase = running` and `RunStarted = true`; persistence and return-teleport remote probes passed.
+- Temporary fake modules and Studio-only volatile guards were removed. Normalized repo/Studio source lengths and checksums match for all synchronized #128 scripts.
+- `git diff --check` passed; Four Peaks and Level persistence/schema/lease copies are identical.
+
+### Runtime cost and risks
+
+- The existing profile maintenance loop remains at 60-second cadence. No frame loop, per-object connection or `_G` dependency was added.
+- Normal sessions add no reconnect work. Only a reconnect following a failed release waits for the bounded release worker (up to 25 seconds) or fails closed.
+- Real staged migration, cross-place round trip and two-live-server contention remain deployment gates; production publish and old-server shutdown were outside this review.
+
+### Rollback
+
+- Before post-migration inventory mutations, revert the #128 persistence files and remove the added schema/lease modules.
+- After post-migration inventory mutations, first reverse-migrate embedded `PlayerState` into `PlayerState_v2`; a code-only revert can restore stale weapon data.
+
 ## 2026-07-20 - Level automatic Slime grounding (PR #129)
 
 ### Summary

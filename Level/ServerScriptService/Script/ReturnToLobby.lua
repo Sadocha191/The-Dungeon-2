@@ -1,4 +1,5 @@
 -- ReturnToLobby.server.lua
+-- Returns players only after run finalization and a confirmed persistent-profile save.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,12 +8,15 @@ local TeleportService = game:GetService("TeleportService")
 
 local LOBBY_PLACE_ID = 88516424167732
 local FINALIZATION_TIMEOUT = 30
-local TELEPORT_LOCK_TIMEOUT = 15
+local TELEPORT_LOCK_TIMEOUT = 25
 local ATTEMPT_TOKEN_ATTRIBUTE = "ReturnToLobbyAttemptToken"
-local RunProgressApi = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunProgressApi"))
 
-local pendingReturns: {[number]: boolean} = {}
-local teleporting: {[number]: number} = {}
+local moduleFolder = ServerScriptService:WaitForChild("ModuleScript")
+local RunProgressApi = require(moduleFolder:WaitForChild("RunProgressApi"))
+local PlayerData = require(moduleFolder:WaitForChild("PlayerData"))
+
+local pendingReturns = {}
+local teleporting = {}
 local nextTeleportAttempt = 0
 
 local remotes = ReplicatedStorage:FindFirstChild("Remotes")
@@ -40,28 +44,22 @@ local function fireTeleportStatus(player: Player, statusType: string, reason: st
 	teleportStatus:FireClient(player, {
 		type = statusType,
 		reason = reason,
-		message = "Teleporting...",
+		message = statusType == "saving" and "Saving progress..." or "Teleporting...",
 	})
 end
 
 local function releaseTeleportLock(player: Player, attemptToken: number?): boolean
 	local userId = player.UserId
-	if attemptToken ~= nil and teleporting[userId] ~= attemptToken then
-		return false
-	end
+	if attemptToken ~= nil and teleporting[userId] ~= attemptToken then return false end
 	teleporting[userId] = nil
 	return true
 end
 
 local function acquireTeleportLock(player: Player): number?
-	local userId = player.UserId
-	if teleporting[userId] ~= nil then
-		return nil
-	end
-
+	if teleporting[player.UserId] ~= nil then return nil end
 	nextTeleportAttempt += 1
 	local attemptToken = nextTeleportAttempt
-	teleporting[userId] = attemptToken
+	teleporting[player.UserId] = attemptToken
 	task.delay(TELEPORT_LOCK_TIMEOUT, function()
 		if releaseTeleportLock(player, attemptToken) and player.Parent == Players then
 			fireTeleportStatus(player, "failed", "teleport_timeout")
@@ -72,7 +70,14 @@ end
 
 local function teleportToLobby(player: Player)
 	local attemptToken = acquireTeleportLock(player)
-	if not attemptToken then
+	if not attemptToken then return end
+
+	fireTeleportStatus(player, "saving")
+	local saveOk, saveError = PlayerData.SaveBarrier(player, "return_to_lobby")
+	if not saveOk then
+		releaseTeleportLock(player, attemptToken)
+		warn("[ReturnToLobby] Save barrier blocked teleport:", player.Name, saveError)
+		if player.Parent == Players then fireTeleportStatus(player, "failed", "save_failed") end
 		return
 	end
 
@@ -85,22 +90,16 @@ local function teleportToLobby(player: Player)
 		return
 	end
 
-	local ok, err = pcall(function()
-		TeleportService:TeleportAsync(LOBBY_PLACE_ID, { player }, options)
-	end)
+	local ok, err = pcall(TeleportService.TeleportAsync, TeleportService, LOBBY_PLACE_ID, { player }, options)
 	if not ok and releaseTeleportLock(player, attemptToken) then
 		warn("[ReturnToLobby] TeleportAsync failed:", err)
-		if player.Parent == Players then
-			fireTeleportStatus(player, "failed", "teleport_failed")
-		end
+		if player.Parent == Players then fireTeleportStatus(player, "failed", "teleport_failed") end
 	end
 end
 
 local function queueReturnAfterFinalization(player: Player)
 	local userId = player.UserId
-	if pendingReturns[userId] then
-		return
-	end
+	if pendingReturns[userId] then return end
 	pendingReturns[userId] = true
 
 	task.spawn(function()
@@ -108,11 +107,8 @@ local function queueReturnAfterFinalization(player: Player)
 		while player.Parent == Players and RunProgressApi.IsEndRunFinalizing(player) and os.clock() < deadline do
 			task.wait(0.05)
 		end
-
 		pendingReturns[userId] = nil
-		if player.Parent ~= Players then
-			return
-		end
+		if player.Parent ~= Players then return end
 		if RunProgressApi.IsEndRunFinalizing(player) then
 			fireTeleportStatus(player, "failed", "run_finalization_timeout")
 			return
@@ -121,46 +117,29 @@ local function queueReturnAfterFinalization(player: Player)
 			fireTeleportStatus(player, "failed", "run_finalization_failed")
 			return
 		end
-
 		teleportToLobby(player)
 	end)
 end
 
 TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage, placeId, teleportOptions)
 	local attemptToken = teleportOptions and tonumber(teleportOptions:GetAttribute(ATTEMPT_TOKEN_ATTRIBUTE))
-	if placeId ~= LOBBY_PLACE_ID or attemptToken == nil or teleporting[player.UserId] ~= attemptToken then
-		return
-	end
-
+	if placeId ~= LOBBY_PLACE_ID or attemptToken == nil or teleporting[player.UserId] ~= attemptToken then return end
 	releaseTeleportLock(player, attemptToken)
 	warn("[ReturnToLobby] Teleport initialization failed:", teleportResult, errorMessage)
-	if player.Parent == Players then
-		fireTeleportStatus(player, "failed", "teleport_failed")
-	end
+	if player.Parent == Players then fireTeleportStatus(player, "failed", "teleport_failed") end
 end)
 
 remote.OnServerEvent:Connect(function(player)
-	if not player or player.Parent ~= Players then
-		return
-	end
-
+	if not player or player.Parent ~= Players then return end
 	if RunProgressApi.IsEndRunFinalizing(player) then
 		queueReturnAfterFinalization(player)
 		return
 	end
-
-	if player:GetAttribute("RunEnded") ~= true then
-		if RunProgressApi.IsConfigured("EndRunForPlayer") then
-			local ok, err = pcall(RunProgressApi.EndRunForPlayer, player, "Surrendered")
-			if ok then
-				-- Preserve the existing two-step flow: this request ends and banks the run;
-				-- the summary's later Return action performs the teleport.
-				return
-			end
-			warn("[ReturnToLobby] EndRunForPlayer failed:", err)
-		end
+	if player:GetAttribute("RunEnded") ~= true and RunProgressApi.IsConfigured("EndRunForPlayer") then
+		local ok, err = pcall(RunProgressApi.EndRunForPlayer, player, "Surrendered")
+		if ok then return end
+		warn("[ReturnToLobby] EndRunForPlayer failed:", err)
 	end
-
 	teleportToLobby(player)
 end)
 
