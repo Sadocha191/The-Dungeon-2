@@ -21,6 +21,9 @@ local function ensureFolder(name: string): Folder
 	if folder and folder:IsA("Folder") then
 		return folder
 	end
+	if folder then
+		folder:Destroy()
+	end
 
 	folder = Instance.new("Folder")
 	folder.Name = name
@@ -33,6 +36,9 @@ local function ensureRemoteEvent(parent: Instance, name: string): RemoteEvent
 	if remote and remote:IsA("RemoteEvent") then
 		return remote
 	end
+	if remote then
+		remote:Destroy()
+	end
 
 	remote = Instance.new("RemoteEvent")
 	remote.Name = name
@@ -44,6 +50,9 @@ local function ensureRemoteFunction(parent: Instance, name: string): RemoteFunct
 	local remote = parent:FindFirstChild(name)
 	if remote and remote:IsA("RemoteFunction") then
 		return remote
+	end
+	if remote then
+		remote:Destroy()
 	end
 
 	remote = Instance.new("RemoteFunction")
