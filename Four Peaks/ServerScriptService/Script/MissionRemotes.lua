@@ -7,7 +7,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local serverModules = ServerScriptService:WaitForChild("ModuleScript")
 
-local MissionService = require(serverModules:WaitForChild("MissionService"))
+local MissionService = require(serverModules:WaitForChild("MissionClaimService"))
 local CurrencyService = require(serverModules:WaitForChild("CurrencyService"))
 local PlayerData = require(serverModules:WaitForChild("PlayerData"))
 

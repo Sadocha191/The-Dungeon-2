@@ -545,6 +545,7 @@ local centerLayout = create("UIListLayout", {
 }, centerColumn)
 
 local tabBar = create("Frame", {
+	Name = "TabBar",
 	LayoutOrder = 1,
 	Size = UDim2.new(1, 0, 0, 42),
 	BackgroundTransparency = 1,
@@ -923,6 +924,20 @@ local confirmAccept = create("TextButton", {
 addCorner(confirmAccept, 9)
 
 local snapshot = {}
+local snapshotUpdatedEvent = create("BindableEvent", {
+	Name = "InventorySnapshotUpdated",
+}, panel)
+local currentSnapshotFunction = create("BindableFunction", {
+	Name = "GetCurrentInventorySnapshot",
+}, panel)
+local focusSpellSearchEvent = create("BindableEvent", {
+	Name = "FocusSpellSearch",
+}, panel)
+
+currentSnapshotFunction.OnInvoke = function()
+	return snapshot
+end
+
 local weaponEntries = {}
 local spellEntries = {}
 local materialEntries = {}
@@ -2023,6 +2038,7 @@ local function applySnapshot(payload)
 	refreshPlayerPanel()
 	refreshCharacterPreview()
 	rebuildGrid()
+	snapshotUpdatedEvent:Fire(snapshot)
 end
 
 loadSnapshot = function(silent)
@@ -2127,7 +2143,11 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 
 	if input.KeyCode == Enum.KeyCode.F and inventoryGui.Enabled then
-		searchBox:CaptureFocus()
+		if currentTab == "Spells" then
+			focusSpellSearchEvent:Fire()
+		else
+			searchBox:CaptureFocus()
+		end
 	end
 end)
 

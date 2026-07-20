@@ -1,19 +1,38 @@
 -- TutorialRemotes.server.lua
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local remoteFunctions = ReplicatedStorage:FindFirstChild("RemoteFunctions")
-if not remoteFunctions then
-	remoteFunctions = Instance.new("Folder")
-	remoteFunctions.Name = "RemoteFunctions"
-	remoteFunctions.Parent = ReplicatedStorage
+local function ensureFolder(parent: Instance, name: string): Folder
+	local folder = parent:FindFirstChild(name)
+	if folder and folder:IsA("Folder") then
+		return folder
+	end
+	if folder then
+		folder:Destroy()
+	end
+
+	folder = Instance.new("Folder")
+	folder.Name = name
+	folder.Parent = parent
+	return folder
 end
 
-local RF_GetTutorialState = remoteFunctions:FindFirstChild("RF_GetTutorialState")
-if not RF_GetTutorialState then
-	RF_GetTutorialState = Instance.new("RemoteFunction")
-	RF_GetTutorialState.Name = "RF_GetTutorialState"
-	RF_GetTutorialState.Parent = remoteFunctions
+local function ensureRemoteFunction(parent: Instance, name: string): RemoteFunction
+	local remote = parent:FindFirstChild(name)
+	if remote and remote:IsA("RemoteFunction") then
+		return remote
+	end
+	if remote then
+		remote:Destroy()
+	end
+
+	remote = Instance.new("RemoteFunction")
+	remote.Name = name
+	remote.Parent = parent
+	return remote
 end
+
+local remoteFunctions = ensureFolder(ReplicatedStorage, "RemoteFunctions")
+local RF_GetTutorialState = ensureRemoteFunction(remoteFunctions, "RF_GetTutorialState")
 
 local PlayerStateStore = require(game:GetService("ServerScriptService"):WaitForChild("ModuleScript"):WaitForChild("PlayerStateStore"))
 
