@@ -1,5 +1,35 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-20 - Level dry player spawn validation (PR #127)
+
+### Summary
+
+- Rejected Terrain raycast candidates whose material is `Water` for configured markers, `SpawnLocation` objects and random fallback player spawns.
+- Preserved the shared `WorldBounds` raycast, slope, clearance and fallback behavior; the new predicate is local to `RandomGroundSpawn`.
+
+### Files
+
+- Updated `Level/ServerScriptService/Script/RandomGroundSpawn.server.lua`.
+
+### Studio and validation
+
+- The repository and active Level Studio source match by normalized length 4386 and rolling checksum 463506401.
+- A 200-point raw Terrain sample found 29 water and 171 dry hits.
+- A separate 200-point validated sample rejected 40 water callbacks, accepted 160 dry hits and accepted zero water hits.
+- A zero-radius nearby lookup centered on an observed water point returned no candidate, confirming the configured/nearby path uses the same predicate.
+- The preceding Level Play smoke reached `RunStarted=true`; `git diff --check` passed and no conflict markers remain.
+
+### Not verified
+
+- A real multiplayer respawn and an authored `SpawnLocation` placed directly over water were not exercised.
+
+### Runtime cost, risks and rollback
+
+- No loop, connection, remote, persistent data, `TeleportData` field or shared `WorldBounds` behavior was added.
+- Cost is one material comparison per existing candidate raycast.
+- Maps containing only water within all configured search radii will fail closed and keep the existing warning path instead of spawning the player in water.
+- Revert PR #127 and restore the previous Studio source to accept water Terrain again; no data migration is required.
+
 ## 2026-07-20 - Level bounded loading and generation overlap (PR #126)
 
 ### Summary
