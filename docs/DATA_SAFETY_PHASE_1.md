@@ -17,7 +17,8 @@ Implemented:
 - one-time migration from `PlayerState_v2` before inventory systems become ready;
 - preservation of the old `PlayerState_v2` record as a rollback/recovery backup;
 - confirmed save barriers for blacksmith, inventory, gacha, currency conversion and cross-place teleports;
-- per-player serialization and server-side rate limits for high-value lobby mutations;
+- one shared per-player economy mutation lock across blacksmith, inventory and gacha;
+- server-side rate limits for high-value lobby mutations;
 - dirty-state retention, bounded release retries and parallel shutdown flushing;
 - Studio-only volatile fallback when DataStore access is unavailable.
 
@@ -73,12 +74,14 @@ A failed migration does not expose a default inventory in production and does no
 
 Crafting, upgrades, weapon sales and gacha now mutate one cached profile. Their cost and result are persisted in one `UpdateAsync` snapshot, so a successful record cannot contain only one side of the operation.
 
-High-value remote operations are serialized per player. After a successful mutation, the server confirms persistence before returning or broadcasting final success.
+High-value remote operations are serialized per player. Blacksmith, inventory and gacha share the `EconomyMutationBusy` player attribute, so an exploiter cannot sell through inventory while another craft, upgrade or roll is suspended on a DataStore save.
+
+After a successful mutation, the server confirms persistence before returning or broadcasting final success.
 
 If the save cannot be confirmed:
 
 - the profile remains dirty for release/shutdown retry;
-- further economy mutations are blocked for that server session;
+- `PersistenceBlocked` stops all further economy mutations for that server session;
 - production removes the player with a retry message;
 - the client cannot continue stacking unconfirmed operations.
 
@@ -135,7 +138,8 @@ Static validation performed:
 - preserved public store APIs, remote names and `TeleportData` fields;
 - account and inventory mutations now share one profile object;
 - `PlayerState_v2` has no normal post-migration writer;
-- blacksmith, inventory and gacha mutations have per-player locks and confirmed saves;
+- blacksmith, inventory and gacha mutations share one lock and confirmed saves;
+- fixed equipped-weapon sale handling by capturing the equipped ID before the state mutation;
 - no new `_G` dependency;
 - no new frame-based runtime loop;
 - unused `SaveScheduler` changes were removed from the diff.
