@@ -254,44 +254,55 @@ function ProfileLease:Renew(key: string)
 end
 
 function ProfileLease:Release(key: string, snapshot)
-	local saved, savedResult = self:Save(key, snapshot)
-	if not saved then
-		return false, savedResult
+	if typeof(snapshot) ~= "table" then
+		return false, "InvalidSnapshot"
 	end
 
 	local lastError = nil
 	for attempt = 1, self._updateAttempts do
 		local released = false
 		local lostSession = false
+		local missingProfile = false
 		local ok, result = pcall(function()
 			return self._store:UpdateAsync(key, function(current)
 				released = false
 				lostSession = false
+				missingProfile = false
 				if typeof(current) ~= "table" then
-					released = true
-					return current
+					missingProfile = true
+					return nil
 				end
 
-				local meta = normalizeMeta(current, self._schemaVersion)
-				if meta.sessionOwner ~= self._ownerId then
+				local currentMeta = normalizeMeta(current, self._schemaVersion)
+				if currentMeta.sessionOwner ~= self._ownerId then
 					lostSession = true
 					return nil
 				end
 
-				meta.lastSessionOwner = self._ownerId
-				meta.sessionOwner = nil
-				meta.leaseExpiresAt = 0
-				meta.updatedAt = os.time()
+				local nextProfile = deepCopy(snapshot)
+				local nextMeta = normalizeMeta(nextProfile, self._schemaVersion)
+				nextMeta.revision = math.max(
+					math.floor(tonumber(currentMeta.revision) or 0),
+					math.floor(tonumber(nextMeta.revision) or 0)
+				) + 1
+				nextMeta.lastSessionOwner = self._ownerId
+				nextMeta.sessionOwner = nil
+				nextMeta.leaseExpiresAt = 0
+				nextMeta.lastPlaceId = game.PlaceId
+				nextMeta.updatedAt = os.time()
 				released = true
-				return current
+				return nextProfile
 			end)
 		end)
 
-		if ok and released then
+		if ok and released and typeof(result) == "table" then
 			return true, result
 		end
 		if lostSession then
 			return false, "SessionLost"
+		end
+		if missingProfile then
+			return false, "ProfileMissing"
 		end
 		lastError = result
 		if attempt < self._updateAttempts then
