@@ -27,6 +27,7 @@ PlayerData._revision = {}
 PlayerData._volatile = {}
 PlayerData._loadErrors = {}
 PlayerData._loading = {}
+PlayerData._pendingReleases = {}
 
 local SAVE_WAIT_TIMEOUT_SECONDS = 12
 local RELEASE_SAVE_ATTEMPTS = 3
@@ -231,10 +232,16 @@ function PlayerData.SaveBarrier(player: Player, reason: string?)
 end
 
 local function retryOfflineRelease(userId: number, snapshot)
+	PlayerData._pendingReleases[userId] = snapshot
 	task.spawn(function()
 		for attempt = 1, RELEASE_SAVE_ATTEMPTS do
-			local ok, err = lease:Release(keyFor(userId), snapshot)
-			if ok then return end
+			local pending = PlayerData._pendingReleases[userId]
+			if not pending then return end
+			local ok, err = lease:Release(keyFor(userId), pending)
+			if ok then
+				PlayerData._pendingReleases[userId] = nil
+				return
+			end
 			warn(string.format("[PlayerData] Offline release retry %d failed for %d: %s", attempt, userId, tostring(err)))
 			if attempt < RELEASE_SAVE_ATTEMPTS then task.wait(attempt) end
 		end
@@ -430,7 +437,10 @@ game:BindToClose(function()
 		end)
 	end
 	local deadline = os.clock() + SHUTDOWN_TIMEOUT_SECONDS
-	while remaining > 0 and os.clock() < deadline do task.wait(0.05) end
+	while os.clock() < deadline do
+		if remaining <= 0 and next(PlayerData._pendingReleases) == nil then break end
+		task.wait(0.05)
+	end
 end)
 
 return PlayerData
