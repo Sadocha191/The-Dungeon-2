@@ -1,30 +1,35 @@
 -- RunReadyGate.server.lua (Level1)
--- Keeps players on one loading screen until base assets are preloaded, the run world
--- is generated, and the client confirms streamed textures/lighting are ready.
+-- Keeps players on one loading screen until the run world is generated and
+-- every connected client confirms its spawn area is ready.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
+
 local function ensureRemoteEvent(name: string): RemoteEvent
-	local ev = remotes:FindFirstChild(name)
-	if ev and ev:IsA("RemoteEvent") then
-		return ev
-	end
-	if ev then
-		ev:Destroy()
+	local event = remotes:FindFirstChild(name)
+
+	if event and event:IsA("RemoteEvent") then
+		return event
 	end
 
-	ev = Instance.new("RemoteEvent")
-	ev.Name = name
-	ev.Parent = remotes
-	return ev
+	if event then
+		event:Destroy()
+	end
+
+	event = Instance.new("RemoteEvent")
+	event.Name = name
+	event.Parent = remotes
+
+	return event
 end
 
 local ClientReady = ensureRemoteEvent("ClientReady")
 local ClientWorldLoaded = ensureRemoteEvent("ClientWorldLoaded")
 
 local RunStarted = ReplicatedStorage:FindFirstChild("RunStarted")
+
 if not RunStarted then
 	RunStarted = Instance.new("BoolValue")
 	RunStarted.Name = "RunStarted"
@@ -33,6 +38,7 @@ if not RunStarted then
 end
 
 local RunLoadingState = ReplicatedStorage:FindFirstChild("RunLoadingState")
+
 if not RunLoadingState then
 	RunLoadingState = Instance.new("Folder")
 	RunLoadingState.Name = "RunLoadingState"
@@ -49,6 +55,7 @@ local worldPrepared = false
 
 local function setLoadingState(phase: string, counts: {[string]: number}?)
 	RunLoadingState:SetAttribute("Phase", phase)
+
 	if counts then
 		RunLoadingState:SetAttribute("ChestsCount", math.max(0, math.floor(tonumber(counts.chests) or 0)))
 		RunLoadingState:SetAttribute("ShrinesCount", math.max(0, math.floor(tonumber(counts.shrines) or 0)))
@@ -58,6 +65,7 @@ local function setLoadingState(phase: string, counts: {[string]: number}?)
 end
 
 RunLoadingState:SetAttribute("Generation", bootstrapGeneration)
+RunLoadingState:SetAttribute("PrepareDurationMs", 0)
 setLoadingState("waiting", {
 	chests = 0,
 	shrines = 0,
@@ -65,66 +73,117 @@ setLoadingState("waiting", {
 	monuments = 0,
 })
 
-local function freeze(plr: Player, state: boolean)
-	local char = plr.Character
-	if not char then
+local function freeze(player: Player, state: boolean)
+	local character = player.Character
+
+	if not character then
 		return
 	end
 
-	local hum = char:FindFirstChildOfClass("Humanoid")
-	local hrp = char:FindFirstChild("HumanoidRootPart")
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
 
 	if state then
-		local snapshot = frozenState[plr]
+		local snapshot = frozenState[player]
+
 		if not snapshot then
 			snapshot = {
-				walkSpeed = hum and hum.WalkSpeed or 16,
-				jumpPower = hum and hum.JumpPower or 50,
-				anchored = hrp and hrp.Anchored or false,
+				walkSpeed = humanoid and humanoid.WalkSpeed or 16,
+				jumpPower = humanoid and humanoid.JumpPower or 50,
+				anchored = root and root.Anchored or false,
 			}
-			frozenState[plr] = snapshot
+			frozenState[player] = snapshot
 		end
 
-		if hum then
-			hum.WalkSpeed = 0
-			hum.JumpPower = 0
+		if humanoid then
+			humanoid.WalkSpeed = 0
+			humanoid.JumpPower = 0
 		end
-		if hrp then
-			hrp.Anchored = true
+
+		if root then
+			root.Anchored = true
 		end
+
 		return
 	end
 
-	local snapshot = frozenState[plr]
-	if hum then
-		hum.WalkSpeed = snapshot and snapshot.walkSpeed or 16
-		hum.JumpPower = snapshot and snapshot.jumpPower or 50
+	local snapshot = frozenState[player]
+
+	if humanoid then
+		humanoid.WalkSpeed = snapshot and snapshot.walkSpeed or 16
+		humanoid.JumpPower = snapshot and snapshot.jumpPower or 50
 	end
-	if hrp then
-		hrp.Anchored = snapshot and snapshot.anchored or false
+
+	if root then
+		root.Anchored = snapshot and snapshot.anchored or false
 	end
-	frozenState[plr] = nil
+
+	frozenState[player] = nil
 end
 
 local function allPlayersReady(stateTable: {[Player]: boolean}): boolean
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if stateTable[plr] ~= true then
+	for _, player in ipairs(Players:GetPlayers()) do
+		if stateTable[player] ~= true then
 			return false
 		end
 	end
+
 	return true
 end
 
-local function waitForGlobalFunction(name: string, timeoutSec: number)
-	local deadline = os.clock() + math.max(0.1, timeoutSec)
-	while os.clock() <= deadline do
-		local fn = _G[name]
-		if type(fn) == "function" then
-			return fn
+local function anyPlayerReady(stateTable: {[Player]: boolean}): boolean
+	for _, player in ipairs(Players:GetPlayers()) do
+		if stateTable[player] == true then
+			return true
 		end
+	end
+
+	return false
+end
+
+local function waitForGlobalFunctions(names: {string}, timeoutSec: number): {[string]: any}
+	local functions = {}
+	local deadline = os.clock() + math.max(0.1, timeoutSec)
+
+	while os.clock() <= deadline do
+		local missing = false
+
+		for _, name in ipairs(names) do
+			if functions[name] == nil then
+				local candidate = _G[name]
+
+				if type(candidate) == "function" then
+					functions[name] = candidate
+				else
+					missing = true
+				end
+			end
+		end
+
+		if not missing then
+			break
+		end
+
 		task.wait(0.1)
 	end
-	return nil
+
+	return functions
+end
+
+local function callPrepareFunction(name: string, callback)
+	if type(callback) ~= "function" then
+		warn(string.format("[RunReadyGate] %s unavailable during bootstrap", name))
+		return nil
+	end
+
+	local ok, result = pcall(callback)
+
+	if not ok then
+		warn(string.format("[RunReadyGate] %s failed during bootstrap: %s", name, tostring(result)))
+		return nil
+	end
+
+	return result
 end
 
 local function prepareRunWorld()
@@ -135,29 +194,25 @@ local function prepareRunWorld()
 		monuments = 0,
 	}
 
-	local prepareChests = waitForGlobalFunction("PrepareRunChests", 8)
-	if prepareChests then
-		counts.chests = math.max(0, math.floor(tonumber(prepareChests()) or 0))
-	else
-		warn("[RunReadyGate] PrepareRunChests unavailable during bootstrap")
-	end
+	-- Resolve all bootstrap callbacks against one shared timeout. The previous
+	-- sequential waits could consume up to 24 seconds when callbacks were late.
+	local prepareFunctions = waitForGlobalFunctions({
+		"PrepareRunChests",
+		"PrepareRunShrines",
+		"PrepareRunStructures",
+	}, 8)
 
-	local prepareShrines = waitForGlobalFunction("PrepareRunShrines", 8)
-	if prepareShrines then
-		counts.shrines = math.max(0, math.floor(tonumber(prepareShrines()) or 0))
-	else
-		warn("[RunReadyGate] PrepareRunShrines unavailable during bootstrap")
-	end
+	local chestCount = callPrepareFunction("PrepareRunChests", prepareFunctions.PrepareRunChests)
+	counts.chests = math.max(0, math.floor(tonumber(chestCount) or 0))
 
-	local prepareStructures = waitForGlobalFunction("PrepareRunStructures", 8)
-	if prepareStructures then
-		local structureCounts = prepareStructures()
-		if typeof(structureCounts) == "table" then
-			counts.statues = math.max(0, math.floor(tonumber(structureCounts.statues) or 0))
-			counts.monuments = math.max(0, math.floor(tonumber(structureCounts.monuments) or 0))
-		end
-	else
-		warn("[RunReadyGate] PrepareRunStructures unavailable during bootstrap")
+	local shrineCount = callPrepareFunction("PrepareRunShrines", prepareFunctions.PrepareRunShrines)
+	counts.shrines = math.max(0, math.floor(tonumber(shrineCount) or 0))
+
+	local structureCounts = callPrepareFunction("PrepareRunStructures", prepareFunctions.PrepareRunStructures)
+
+	if typeof(structureCounts) == "table" then
+		counts.statues = math.max(0, math.floor(tonumber(structureCounts.statues) or 0))
+		counts.monuments = math.max(0, math.floor(tonumber(structureCounts.monuments) or 0))
 	end
 
 	return counts
@@ -167,17 +222,20 @@ local function tryStart()
 	if RunStarted.Value or not worldPrepared then
 		return
 	end
+
 	if #Players:GetPlayers() == 0 then
 		return
 	end
+
 	if not allPlayersReady(worldReady) then
 		return
 	end
 
 	setLoadingState("running")
 	RunStarted.Value = true
-	for _, plr in ipairs(Players:GetPlayers()) do
-		freeze(plr, false)
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		freeze(player, false)
 	end
 end
 
@@ -185,10 +243,14 @@ local function tryPrepareWorld()
 	if RunStarted.Value or worldPrepared or bootstrapInProgress then
 		return
 	end
+
 	if #Players:GetPlayers() == 0 then
 		return
 	end
-	if not allPlayersReady(initialReady) then
+
+	-- World preparation is server-global. Start after the first client is ready
+	-- instead of waiting for the slowest client before doing any server work.
+	if not anyPlayerReady(initialReady) then
 		return
 	end
 
@@ -202,59 +264,79 @@ local function tryPrepareWorld()
 		monuments = 0,
 	})
 
-	local counts = prepareRunWorld()
-	worldPrepared = true
-	bootstrapInProgress = false
-	setLoadingState("prepared", counts)
-	tryStart()
+	-- Keep the remote handler responsive while the world generation work runs.
+	task.spawn(function()
+		local startedAt = os.clock()
+		local counts = prepareRunWorld()
+		local durationMs = math.floor(((os.clock() - startedAt) * 1000) + 0.5)
+
+		RunLoadingState:SetAttribute("PrepareDurationMs", durationMs)
+		worldPrepared = true
+		bootstrapInProgress = false
+		setLoadingState("prepared", counts)
+
+		print(string.format(
+			"[RunReadyGate] Prepared world in %.2fs (chests=%d shrines=%d statues=%d monuments=%d)",
+			durationMs / 1000,
+			counts.chests,
+			counts.shrines,
+			counts.statues,
+			counts.monuments
+		))
+
+		tryStart()
+	end)
 end
 
-Players.PlayerAdded:Connect(function(plr)
-	initialReady[plr] = RunStarted.Value
-	worldReady[plr] = RunStarted.Value
+Players.PlayerAdded:Connect(function(player)
+	initialReady[player] = RunStarted.Value
+	worldReady[player] = RunStarted.Value
 
-	plr.CharacterAdded:Connect(function()
+	player.CharacterAdded:Connect(function()
 		if not RunStarted.Value then
-			freeze(plr, true)
+			freeze(player, true)
 		end
 	end)
 
-	if plr.Character and not RunStarted.Value then
-		task.defer(freeze, plr, true)
+	if player.Character and not RunStarted.Value then
+		task.defer(freeze, player, true)
 	end
 end)
 
-Players.PlayerRemoving:Connect(function(plr)
-	initialReady[plr] = nil
-	worldReady[plr] = nil
-	frozenState[plr] = nil
+Players.PlayerRemoving:Connect(function(player)
+	initialReady[player] = nil
+	worldReady[player] = nil
+	frozenState[player] = nil
+
 	task.defer(function()
 		tryPrepareWorld()
 		tryStart()
 	end)
 end)
 
-ClientReady.OnServerEvent:Connect(function(plr)
-	initialReady[plr] = true
+ClientReady.OnServerEvent:Connect(function(player)
+	initialReady[player] = true
 	tryPrepareWorld()
 end)
 
-ClientWorldLoaded.OnServerEvent:Connect(function(plr, generation: number?)
+ClientWorldLoaded.OnServerEvent:Connect(function(player, generation: number?)
 	if not worldPrepared then
 		return
 	end
+
 	if tonumber(generation) ~= bootstrapGeneration then
 		return
 	end
 
-	worldReady[plr] = true
+	worldReady[player] = true
 	tryStart()
 end)
 
-for _, plr in ipairs(Players:GetPlayers()) do
-	initialReady[plr] = RunStarted.Value
-	worldReady[plr] = RunStarted.Value
-	if plr.Character and not RunStarted.Value then
-		task.defer(freeze, plr, true)
+for _, player in ipairs(Players:GetPlayers()) do
+	initialReady[player] = RunStarted.Value
+	worldReady[player] = RunStarted.Value
+
+	if player.Character and not RunStarted.Value then
+		task.defer(freeze, player, true)
 	end
 end
