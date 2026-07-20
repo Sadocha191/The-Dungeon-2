@@ -1,101 +1,96 @@
 -- SaveScheduler.lua
--- Jeden scheduler zapisów dla całej gry: batch + debounce.
--- Użycie:
---   local SaveScheduler = require(...SaveScheduler)
---   SaveScheduler.Bind(store)  -- store musi mieć :_RawSave(player, reason)
---   SaveScheduler.MarkDirty(player, "reason")
---   SaveScheduler.ForceSave(player, "reason")
---   SaveScheduler.Flush(player, "reason")
+-- Debounces PlayerStateStore writes without clearing dirty state before DataStore confirms success.
 
 local Players = game:GetService("Players")
 
 local SaveScheduler = {}
 
--- TUNING:
-local MIN_INTERVAL = 25       -- minimalnie co ile sekund zapis (anti-spam)
-local MAX_INTERVAL = 75       -- maksymalnie co ile sekund wymuś zapis jeśli brudne
+local MIN_INTERVAL = 25
+local MAX_INTERVAL = 75
 local JITTER_MIN = 1
 local JITTER_MAX = 4
 
 local boundStore = nil
-
-local stateByUserId: {[number]: {
-	dirty: boolean,
-	lastSaveAt: number,
-	lastDirtyAt: number,
-	taskActive: boolean,
-	reason: string?
-}} = {}
+local stateByUserId = {}
 
 local function now(): number
 	return os.clock()
 end
 
 local function getState(userId: number)
-	local st = stateByUserId[userId]
-	if not st then
-		st = {
+	local state = stateByUserId[userId]
+	if not state then
+		state = {
 			dirty = false,
+			version = 0,
 			lastSaveAt = 0,
 			lastDirtyAt = 0,
 			taskActive = false,
+			saving = false,
 			reason = nil,
 		}
-		stateByUserId[userId] = st
+		stateByUserId[userId] = state
 	end
-	return st
+	return state
 end
 
 function SaveScheduler.Bind(store)
 	boundStore = store
 end
 
+local function attemptSave(player: Player, state, reason: string)
+	if state.saving then
+		return false, "SaveInProgress"
+	end
+	if not (boundStore and boundStore._RawSave) then
+		return false, "StoreNotBound"
+	end
+
+	local version = state.version
+	state.saving = true
+	local ok, err = boundStore:_RawSave(player, reason)
+	state.saving = false
+	state.lastSaveAt = now()
+
+	if ok then
+		if state.version == version then
+			state.dirty = false
+		end
+		return true
+	end
+
+	state.dirty = true
+	state.reason = "retry:" .. tostring(reason)
+	return false, err
+end
+
 local function schedule(userId: number)
-	local st = getState(userId)
-	if st.taskActive then return end
-	st.taskActive = true
+	local state = getState(userId)
+	if state.taskActive then return end
+	state.taskActive = true
 
 	task.spawn(function()
 		while true do
 			task.wait(0.25)
-
-			local plr = Players:GetPlayerByUserId(userId)
-			if not plr then
-				-- gracz wyszedł, scheduler kończy
-				st.taskActive = false
+			local player = Players:GetPlayerByUserId(userId)
+			if not player then
+				state.taskActive = false
+				return
+			end
+			if not state.dirty then
+				state.taskActive = false
 				return
 			end
 
-			if not st.dirty then
-				st.taskActive = false
-				return
-			end
-
-			local t = now()
-			local sinceSave = t - st.lastSaveAt
-			local sinceDirty = t - st.lastDirtyAt
-
-			local shouldSave =
-				(sinceSave >= MIN_INTERVAL) or
-				(sinceDirty >= MAX_INTERVAL)
-
-			if shouldSave then
-				if boundStore and boundStore._RawSave then
-					local reason = st.reason or "dirty"
-					st.reason = nil
-					st.lastSaveAt = now()
-
-					-- mały jitter żeby nie walić wielu graczy w tym samym ticku
-					task.wait(math.random(JITTER_MIN, JITTER_MAX) * 0.1)
-
-					if st.dirty then
-						st.dirty = false
-						boundStore:_RawSave(plr, reason)
-					end
-				else
-					-- brak store -> nie rób nic, ale wyłącz task żeby nie mielić
-					st.taskActive = false
-					return
+			local currentTime = now()
+			local shouldSave = (currentTime - state.lastSaveAt >= MIN_INTERVAL)
+				or (currentTime - state.lastDirtyAt >= MAX_INTERVAL)
+			if shouldSave and not state.saving then
+				task.wait(math.random(JITTER_MIN, JITTER_MAX) * 0.1)
+				if state.dirty and player.Parent == Players then
+					local reason = state.reason or "dirty"
+					state.reason = nil
+					attemptSave(player, state, reason)
 				end
 			end
 		end
@@ -103,49 +98,39 @@ local function schedule(userId: number)
 end
 
 function SaveScheduler.MarkDirty(player: Player, reason: string?)
-	local st = getState(player.UserId)
-	st.dirty = true
-	st.lastDirtyAt = now()
-	if reason then st.reason = reason end
+	local state = getState(player.UserId)
+	state.dirty = true
+	state.version += 1
+	state.lastDirtyAt = now()
+	if reason then state.reason = reason end
 	schedule(player.UserId)
 end
 
 function SaveScheduler.ForceSave(player: Player, reason: string?)
-	local st = getState(player.UserId)
-	st.dirty = false
-	st.reason = nil
-	st.lastSaveAt = now()
-
-	if boundStore and boundStore._RawSave then
-		boundStore:_RawSave(player, reason or "force")
-	end
+	local state = getState(player.UserId)
+	return attemptSave(player, state, reason or "force")
 end
 
 function SaveScheduler.Flush(player: Player, reason: string?)
-	local st = stateByUserId[player.UserId]
-	if not st or not st.dirty then
-		return
+	local state = getState(player.UserId)
+	if not state.dirty then
+		return true
 	end
-
-	local saveReason = reason or st.reason or "flush"
-	st.dirty = false
-	st.reason = nil
-	st.lastSaveAt = now()
-
-	if boundStore and boundStore._RawSave then
-		boundStore:_RawSave(player, saveReason)
-	end
+	return attemptSave(player, state, reason or state.reason or "flush")
 end
 
-function SaveScheduler.Release(player: Player)
+function SaveScheduler.IsDirty(player: Player): boolean
+	local state = stateByUserId[player.UserId]
+	return state ~= nil and state.dirty == true
+end
+
+function SaveScheduler.Release(player: Player, force: boolean?)
+	local state = stateByUserId[player.UserId]
+	if not state then return true end
+	if state.saving then return false, "SaveInProgress" end
+	if state.dirty and force ~= true then return false, "DirtyState" end
 	stateByUserId[player.UserId] = nil
+	return true
 end
-
-Players.PlayerRemoving:Connect(function(player)
-	-- Store lifecycle robi flush; cleanup odkładamy, żeby nie wyczyścić dirty przed nim.
-	task.defer(function()
-		SaveScheduler.Release(player)
-	end)
-end)
 
 return SaveScheduler
