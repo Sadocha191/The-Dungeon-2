@@ -28,12 +28,17 @@ local ATTRACT_SPEED_MIN = 22
 local GLOBAL_MAGNET_SPEED = 180
 local ORB_SETTLE_SPEED = 42
 local ORB_SETTLE_EPSILON = 0.05
+local GROUND_RAY_RETRY_INTERVAL = 0.15
 
 local ORB_SIZE = Vector3.new(1, 1, 1)
 local ORB_IDLE_BOB = 0.28
 local ORB_IDLE_BOB_SPEED = 4.8
 local ORB_IDLE_WOBBLE = 0.12
 local ORB_ANIMATION_DISTANCE = 95
+local ORB_ANIMATION_DISTANCE_SQ = ORB_ANIMATION_DISTANCE * ORB_ANIMATION_DISTANCE
+local ORB_NEAR_ANIMATION_DISTANCE_SQ = 45 * 45
+local ORB_IDLE_UPDATE_INTERVAL_NEAR = 1 / 30
+local ORB_IDLE_UPDATE_INTERVAL_FAR = 1 / 15
 local ORB_BASE_TRANSPARENCY = 0.16
 local ORB_TRAIL_LIGHT_EMISSION = 0.35
 local ORB_SPARKLE_LIGHT_EMISSION = 0.4
@@ -42,6 +47,10 @@ local GLOBAL_MAGNET_ATTR = "DropGlobalMagnetExpiresAt"
 local GROUND_RAY_PARAMS = RaycastParams.new()
 GROUND_RAY_PARAMS.FilterType = Enum.RaycastFilterType.Exclude
 GROUND_RAY_PARAMS.IgnoreWater = false
+
+local framePlayerStates = {}
+local framePlayerStateByUserId = {}
+local groundIgnore = {}
 
 local ORB_LIGHT_BRIGHTNESS = {
 	xp = 0.7,
@@ -78,52 +87,91 @@ local function getServerTimeNow(): number
 end
 
 local function getPickupRangeMult(plr: Player): number
-	local bonus = plr and plr:GetAttribute("ShrinePickupRangeBonus")
+	local bonus = plr:GetAttribute("ShrinePickupRangeBonus")
 	if typeof(bonus) ~= "number" then
 		return 1
 	end
 	return math.max(0.1, 1 + bonus)
 end
 
-local function raycastGroundedPosition(pos: Vector3): Vector3?
-	local ignore = { dropsRoot }
+local function rebuildFramePlayerCache(now: number)
+	table.clear(framePlayerStates)
+	table.clear(framePlayerStateByUserId)
+	table.clear(groundIgnore)
 
+	table.insert(groundIgnore, dropsRoot)
 	local enemiesFolder = workspace:FindFirstChild("Enemies")
 	if enemiesFolder then
-		table.insert(ignore, enemiesFolder)
+		table.insert(groundIgnore, enemiesFolder)
 	end
 
 	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr.Character then
-			table.insert(ignore, plr.Character)
+		local character = plr.Character
+		if character then
+			table.insert(groundIgnore, character)
+		end
+
+		if plr:GetAttribute("RunEnded") ~= true and character then
+			local root = character:FindFirstChild("HumanoidRootPart")
+			local humanoid = character:FindFirstChildOfClass("Humanoid")
+			if root and root:IsA("BasePart") and humanoid and humanoid.Health > 0 then
+				local state = {
+					player = plr,
+					root = root,
+					humanoid = humanoid,
+					position = root.Position,
+					walkSpeed = humanoid.WalkSpeed,
+					pickupMult = getPickupRangeMult(plr),
+					magnetActive = (tonumber(plr:GetAttribute(GLOBAL_MAGNET_ATTR)) or 0) > now,
+				}
+				table.insert(framePlayerStates, state)
+				framePlayerStateByUserId[plr.UserId] = state
+			end
 		end
 	end
 
-	GROUND_RAY_PARAMS.FilterDescendantsInstances = ignore
-
-	local result = workspace:Raycast(pos + Vector3.new(0, 10, 0), Vector3.new(0, -120, 0), GROUND_RAY_PARAMS)
-	if result then
-		local grounded = result.Position + result.Normal * (ORB_SIZE.Y * 0.5)
-		return Vector3.new(grounded.X, grounded.Y, grounded.Z)
-	end
-
-	return nil
+	GROUND_RAY_PARAMS.FilterDescendantsInstances = groundIgnore
 end
 
-local function settleDropToGround(entry, dt: number)
-	local grounded = raycastGroundedPosition(entry.corePos)
-	if not grounded then
+local function raycastGroundY(pos: Vector3): number?
+	local result = workspace:Raycast(pos + Vector3.new(0, 10, 0), Vector3.new(0, -120, 0), GROUND_RAY_PARAMS)
+	if not result then
+		return nil
+	end
+	return (result.Position + result.Normal * (ORB_SIZE.Y * 0.5)).Y
+end
+
+local function resetGrounding(entry)
+	entry.grounded = false
+	entry.groundY = nil
+	entry.nextGroundRayAt = 0
+end
+
+local function settleDropToGround(entry, dt: number, now: number)
+	if entry.grounded then
 		return
 	end
 
-	local target = Vector3.new(entry.corePos.X, grounded.Y, entry.corePos.Z)
+	if entry.groundY == nil and now >= (entry.nextGroundRayAt or 0) then
+		entry.groundY = raycastGroundY(entry.corePos)
+		entry.nextGroundRayAt = now + GROUND_RAY_RETRY_INTERVAL
+	end
+
+	local groundY = entry.groundY
+	if groundY == nil then
+		return
+	end
+
+	local target = Vector3.new(entry.corePos.X, groundY, entry.corePos.Z)
 	local delta = target - entry.corePos
-	if delta.Magnitude <= ORB_SETTLE_EPSILON then
+	local distance = delta.Magnitude
+	if distance <= ORB_SETTLE_EPSILON then
 		entry.corePos = target
+		entry.grounded = true
 		return
 	end
 
-	local step = math.min(delta.Magnitude, ORB_SETTLE_SPEED * math.max(0, dt))
+	local step = math.min(distance, ORB_SETTLE_SPEED * math.max(0, dt))
 	if step > 0 then
 		entry.corePos += delta.Unit * step
 	end
@@ -193,9 +241,26 @@ local function createDropSparkles(part: BasePart, color: Color3)
 end
 
 local function setSparklesEnabled(entry, enabled: boolean)
-	if entry.sparkles then
-		entry.sparkles.Enabled = enabled
+	if not entry.sparkles or entry.sparklesEnabled == enabled then
+		return
 	end
+	entry.sparklesEnabled = enabled
+	entry.sparkles.Enabled = enabled
+end
+
+local function setTrailEnabled(entry, enabled: boolean, lifetime: number?)
+	if not entry.trail then
+		return
+	end
+	if lifetime and entry.trailLifetime ~= lifetime then
+		entry.trailLifetime = lifetime
+		entry.trail.Lifetime = lifetime
+	end
+	if entry.trailEnabled == enabled then
+		return
+	end
+	entry.trailEnabled = enabled
+	entry.trail.Enabled = enabled
 end
 
 local function destroyVisual(entry)
@@ -207,6 +272,9 @@ local function destroyVisual(entry)
 	entry.trail = nil
 	entry.sparkles = nil
 	entry.visualKind = nil
+	entry.sparklesEnabled = nil
+	entry.trailEnabled = nil
+	entry.trailLifetime = nil
 end
 
 local function ensureVisual(entry)
@@ -242,6 +310,9 @@ local function ensureVisual(entry)
 	entry.light = light
 	entry.trail = createDropTrail(part, color)
 	entry.sparkles = createDropSparkles(part, color)
+	entry.sparklesEnabled = true
+	entry.trailEnabled = false
+	entry.trailLifetime = entry.trail.Lifetime
 	entry.baseLightBrightness = light.Brightness
 	entry.baseLightRange = light.Range
 	entry.visualKind = entry.kind
@@ -257,57 +328,33 @@ local function cleanupEntry(id: string)
 	active[id] = nil
 end
 
-local function getAliveCharacterInfo(plr: Player)
-	if plr:GetAttribute("RunEnded") == true then
-		return nil, nil
-	end
+local function findTargetState(pos: Vector3, kind: string)
+	local nearestState = nil
+	local nearestDistSq = math.huge
+	local magnetState = nil
+	local magnetDistSq = math.huge
+	local supportsMagnet = kind == "xp" or kind == "coins" or kind == "souls"
 
-	local char = plr.Character
-	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if hrp and hum and hum.Health > 0 then
-		return hrp, hum
-	end
-	return nil, nil
-end
-
-local function nearestAlivePlayer(pos: Vector3): (Player?, number)
-	local bestPlr, bestDist = nil, math.huge
-	for _, plr in ipairs(Players:GetPlayers()) do
-		local hrp = getAliveCharacterInfo(plr)
-		if hrp then
-			local dist = (hrp.Position - pos).Magnitude
-			if dist < bestDist then
-				bestDist = dist
-				bestPlr = plr
-			end
+	for _, state in ipairs(framePlayerStates) do
+		local offset = state.position - pos
+		local distSq = offset:Dot(offset)
+		if distSq < nearestDistSq then
+			nearestDistSq = distSq
+			nearestState = state
 		end
-	end
-	return bestPlr, bestDist
-end
-
-local function getGlobalMagnetTarget(pos: Vector3, kind: string): (Player?, number)
-	if kind ~= "xp" and kind ~= "coins" and kind ~= "souls" then
-		return nil, math.huge
-	end
-
-	local now = getServerTimeNow()
-	local bestPlr, bestDist = nil, math.huge
-	for _, plr in ipairs(Players:GetPlayers()) do
-		local expiresAt = tonumber(plr:GetAttribute(GLOBAL_MAGNET_ATTR)) or 0
-		if expiresAt > now then
-			local hrp = getAliveCharacterInfo(plr)
-			if hrp then
-				local dist = (hrp.Position - pos).Magnitude
-				if dist < bestDist then
-					bestDist = dist
-					bestPlr = plr
-				end
-			end
+		if supportsMagnet and state.magnetActive and distSq < magnetDistSq then
+			magnetDistSq = distSq
+			magnetState = state
 		end
 	end
 
-	return bestPlr, bestDist
+	if magnetState then
+		return magnetState, math.sqrt(magnetDistSq), true
+	end
+	if nearestState then
+		return nearestState, math.sqrt(nearestDistSq), false
+	end
+	return nil, math.huge, false
 end
 
 local function setStaticIdleVisual(entry)
@@ -334,16 +381,18 @@ local function updateIdleVisual(entry, now: number)
 		return
 	end
 
-	local bob = math.sin(((now - (entry.spawnAt or now)) * ORB_IDLE_BOB_SPEED) + (entry.phase or 0)) * ORB_IDLE_BOB
-	local wobble = math.sin(((now - (entry.spawnAt or now)) * 2.4) + (entry.phase or 0)) * ORB_IDLE_WOBBLE
-	local spin = (entry.spinBase or 0) + ((now - (entry.spawnAt or now)) * (entry.spinSpeed or 0))
+	local elapsed = now - (entry.spawnAt or now)
+	local phase = entry.phase or 0
+	local bob = math.sin((elapsed * ORB_IDLE_BOB_SPEED) + phase) * ORB_IDLE_BOB
+	local wobble = math.sin((elapsed * 2.4) + phase) * ORB_IDLE_WOBBLE
+	local spin = (entry.spinBase or 0) + (elapsed * (entry.spinSpeed or 0))
 	entry.staticVisual = false
 	entry.part.Size = ORB_SIZE
 	entry.part.Transparency = ORB_BASE_TRANSPARENCY
 	entry.part.CFrame = CFrame.new(entry.corePos + Vector3.new(0, bob, 0)) * CFrame.Angles(wobble * 0.35, spin, -wobble * 0.35)
 	if entry.light then
-		entry.light.Brightness = entry.baseLightBrightness + (math.sin(((now - (entry.spawnAt or now)) * 5) + (entry.phase or 0)) * 0.1)
-		entry.light.Range = entry.baseLightRange + (math.cos(((now - (entry.spawnAt or now)) * 3.2) + (entry.phase or 0)) * 0.08)
+		entry.light.Brightness = entry.baseLightBrightness + (math.sin((elapsed * 5) + phase) * 0.1)
+		entry.light.Range = entry.baseLightRange + (math.cos((elapsed * 3.2) + phase) * 0.08)
 	end
 end
 
@@ -353,12 +402,9 @@ local function updateCollectingVisual(entry, now: number)
 		return
 	end
 
-	local targetPlayer = collect.playerUserId and Players:GetPlayerByUserId(collect.playerUserId) or nil
-	if targetPlayer then
-		local targetRoot, targetHum = getAliveCharacterInfo(targetPlayer)
-		if targetRoot and targetHum then
-			collect.lastTarget = targetRoot.Position + Vector3.new(0, 1.8, 0)
-		end
+	local targetState = collect.playerUserId and framePlayerStateByUserId[collect.playerUserId] or nil
+	if targetState then
+		collect.lastTarget = targetState.position + Vector3.new(0, 1.8, 0)
 	end
 
 	local alpha = math.clamp((now - (collect.startedAt or now)) / math.max(0.05, collect.duration or 0.24), 0, 1)
@@ -380,10 +426,7 @@ local function updateCollectingVisual(entry, now: number)
 	if entry.light then
 		entry.light.Brightness = entry.baseLightBrightness + ((1 - alpha) * 0.65)
 	end
-	if entry.trail then
-		entry.trail.Enabled = true
-		entry.trail.Lifetime = 0.18
-	end
+	setTrailEnabled(entry, true, 0.18)
 	setSparklesEnabled(entry, false)
 
 	if alpha >= 1 then
@@ -411,13 +454,19 @@ local function applySnapshot(item)
 	entry.kind = tostring(item.kind or entry.kind or "xp")
 	entry.amount = math.max(1, math.floor(tonumber(item.amount) or entry.amount or 1))
 	if typeof(item.pos) == "Vector3" then
+		local moved = entry.corePos == nil or (item.pos - entry.corePos).Magnitude > ORB_SETTLE_EPSILON
 		entry.corePos = item.pos
+		if moved then
+			resetGrounding(entry)
+		end
 	end
+	entry.corePos = entry.corePos or Vector3.zero
 	entry.spawnAt = tonumber(item.spawnAt) or entry.spawnAt or getServerTimeNow()
 	entry.phase = tonumber(item.phase) or entry.phase or 0
 	entry.spinBase = tonumber(item.spinBase) or entry.spinBase or 0
 	entry.spinSpeed = tonumber(item.spinSpeed) or entry.spinSpeed or 0
 	entry.staticVisual = false
+	entry.nextIdleVisualAt = 0
 
 	if typeof(item.collecting) == "table" then
 		entry.collecting = {
@@ -481,8 +530,12 @@ dropVisualEvent.OnClientEvent:Connect(function(payload)
 end)
 
 RunService.RenderStepped:Connect(function(dt)
+	debug.profilebegin("DropPresentation.Frame")
+
 	local now = getServerTimeNow()
-	local localRoot = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
+	rebuildFramePlayerCache(now)
+	local localState = framePlayerStateByUserId[localPlayer.UserId]
+	local localPosition = localState and localState.position or nil
 
 	for id, entry in pairs(active) do
 		ensureVisual(entry)
@@ -496,59 +549,66 @@ RunService.RenderStepped:Connect(function(dt)
 			continue
 		end
 
-		local plr, dist = getGlobalMagnetTarget(entry.corePos, entry.kind)
-		local usingGlobalMagnet = plr ~= nil
-		if not plr then
-			plr, dist = nearestAlivePlayer(entry.corePos)
-		end
-
+		local targetState, distance, usingGlobalMagnet = findTargetState(entry.corePos, entry.kind)
 		local shouldSettle = true
-		if plr then
-			local hrp, hum = getAliveCharacterInfo(plr)
-			if hrp and hum then
-				local pickupMult = getPickupRangeMult(plr)
-				local pickupDist = PICKUP_DIST * pickupMult
-				local attractRadius = ATTRACT_RADIUS * pickupMult
-				if dist <= pickupDist then
-					shouldSettle = false
-				elseif usingGlobalMagnet or dist <= attractRadius then
-					shouldSettle = false
-					local target = hrp.Position + Vector3.new(0, 1.6, 0)
-					local toTarget = target - entry.corePos
-					local toTargetDist = toTarget.Magnitude
-					if toTargetDist > 0 then
-						local walkSpeed = hum.WalkSpeed or 16
-						local attractSpeed
-						if usingGlobalMagnet then
-							attractSpeed = math.max(GLOBAL_MAGNET_SPEED, walkSpeed * 6)
-						else
-							attractSpeed = math.max(ATTRACT_SPEED_MIN, walkSpeed * ATTRACT_SPEED_MULT + ATTRACT_SPEED_BONUS)
-						end
-						local step = math.min(toTargetDist, attractSpeed * dt)
-						entry.corePos += toTarget.Unit * step
+		local movingToPlayer = false
+		if targetState then
+			local pickupDist = PICKUP_DIST * targetState.pickupMult
+			local attractRadius = ATTRACT_RADIUS * targetState.pickupMult
+			if distance <= pickupDist then
+				shouldSettle = false
+			elseif usingGlobalMagnet or distance <= attractRadius then
+				shouldSettle = false
+				movingToPlayer = true
+				local target = targetState.position + Vector3.new(0, 1.6, 0)
+				local toTarget = target - entry.corePos
+				local toTargetDist = toTarget.Magnitude
+				if toTargetDist > 0 then
+					local attractSpeed
+					if usingGlobalMagnet then
+						attractSpeed = math.max(GLOBAL_MAGNET_SPEED, targetState.walkSpeed * 6)
+					else
+						attractSpeed = math.max(
+							ATTRACT_SPEED_MIN,
+							targetState.walkSpeed * ATTRACT_SPEED_MULT + ATTRACT_SPEED_BONUS
+						)
 					end
+					local step = math.min(toTargetDist, attractSpeed * dt)
+					entry.corePos += toTarget.Unit * step
+					resetGrounding(entry)
 				end
 			end
 		end
+
 		if shouldSettle then
-			settleDropToGround(entry, dt)
+			settleDropToGround(entry, dt, now)
 		end
 
-		local shouldAnimateIdle = localRoot and (localRoot.Position - entry.corePos).Magnitude <= ORB_ANIMATION_DISTANCE
+		local distanceToLocalSq = math.huge
+		if localPosition then
+			local localOffset = localPosition - entry.corePos
+			distanceToLocalSq = localOffset:Dot(localOffset)
+		end
+		local shouldAnimateIdle = distanceToLocalSq <= ORB_ANIMATION_DISTANCE_SQ
 		if shouldAnimateIdle then
 			setSparklesEnabled(entry, true)
-			if entry.trail then
-				entry.trail.Enabled = false
+			setTrailEnabled(entry, false)
+
+			local interval = distanceToLocalSq <= ORB_NEAR_ANIMATION_DISTANCE_SQ
+				and ORB_IDLE_UPDATE_INTERVAL_NEAR
+				or ORB_IDLE_UPDATE_INTERVAL_FAR
+			if movingToPlayer or not entry.grounded or now >= (entry.nextIdleVisualAt or 0) then
+				entry.nextIdleVisualAt = now + interval
+				updateIdleVisual(entry, now)
 			end
-			updateIdleVisual(entry, now)
 		else
 			setSparklesEnabled(entry, false)
-			if entry.trail then
-				entry.trail.Enabled = false
-			end
+			setTrailEnabled(entry, false)
 			setStaticIdleVisual(entry)
 		end
 	end
+
+	debug.profileend()
 end)
 
 requestSync()
