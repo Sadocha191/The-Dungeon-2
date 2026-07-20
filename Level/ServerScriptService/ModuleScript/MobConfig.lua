@@ -14,7 +14,6 @@ MobConfig.Mobs = {
 		xp = 5,
 		coins = 1,
 		visualScale = 1,
-		groundOffset = 2.55,
 	},
 
 	Zombie = {

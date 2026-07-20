@@ -1,5 +1,35 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-20 - Level automatic Slime grounding (PR #129)
+
+### Summary
+
+- Removed the Slime-only `groundOffset = 2.55` override from `MobConfig` so the shared NPC grounding calculation uses the authored live model bounds.
+- Kept Slime stats, navigation profile, facing, visual scale, spawn clearance and every other mob configuration unchanged.
+
+### Files
+
+- Updated `Level/ServerScriptService/ModuleScript/MobConfig.lua`.
+
+### Studio and validation
+
+- The repository and active Level Studio `MobConfig` source match by normalized length 2507 and rolling checksum 59054158.
+- The live Slime template computes an automatic root offset of 1.07566 studs; the removed override was 2.55, a 1.47434-stud upward difference.
+- Level Play reached `RunStarted=true`; across 52 naturally spawned Slime models, every root was 1.12566 studs above Terrain (automatic offset plus the existing 0.05-stud spawn clearance) and no model carried `NpcGroundOffset`.
+- A direct `NpcService.Register` probe recorded the same 1.07566 automatic offset and was despawned after inspection.
+- `git diff --check` passed and no conflict markers remain.
+
+### Not verified
+
+- The full range of Slime animation poses was not reviewed frame-by-frame at multiple camera angles.
+
+### Runtime cost, risks and rollback
+
+- No loop, connection, remote, data format or gameplay stat was added or changed.
+- The fix reuses the existing O(parts) grounding calculation once during spawn registration and removes a special-case tuning value.
+- Future Slime asset-bound changes will now affect grounding automatically, matching other standard ground enemies.
+- Revert PR #129 and restore `groundOffset = 2.55` in Studio to recover the old explicit root height; no migration is required.
+
 ## 2026-07-20 - Level dry player spawn validation (PR #127)
 
 ### Summary
