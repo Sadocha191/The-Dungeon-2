@@ -13,6 +13,11 @@
 - Added server rate limits and confirmed save barriers before final success for craft, upgrade, sale, equip, favorites, spell loadout, gacha and WeaponPoints conversion.
 - Added confirmed save barriers before lobby/dungeon teleports.
 - Fixed inventory selling of the currently equipped weapon by preserving the pre-sale equipped instance ID.
+- Removed a duplicate dungeon-teleport save barrier that wrote the same unified profile twice per player.
+- Fixed legacy `coins` migration so a missing raw `silver` field cannot be masked by the schema default.
+- Serialized a failed offline release with a same-server reconnect so a stale snapshot cannot overwrite the new session.
+- Blocked the cached profile after ownership-checked save/renew reports `SessionLost` or `ProfileMissing`.
+- Kept the released `PlayerState_v2` backup aligned with the exact migrated weapon instance IDs.
 
 ### Persistent compatibility
 
@@ -32,7 +37,7 @@ New persisted fields include `_profileMeta`, `PlayerState`, `PlayerStateMigratio
 - One global-profile maintenance loop remains at 60-second cadence.
 - No frame-based loop was added.
 - Migrated accounts stop performing normal writes to `PlayerState_v2`.
-- High-value mutations intentionally perform one immediate confirmed unified-profile save.
+- High-value mutations intentionally perform one immediate confirmed unified-profile save; dungeon teleport also performs one barrier per player.
 - First migration adds a bounded legacy read, lease acquisition, unified save and legacy lease release.
 
 ### Validation performed
@@ -43,18 +48,19 @@ New persisted fields include `_profileMeta`, `PlayerState`, `PlayerStateMigratio
 - Confirmed active weapon/economy state has one canonical profile object after migration.
 - Confirmed `PlayerState_v2` is only used by migration code in the changed runtime.
 - Confirmed high-value lobby services share one cross-service mutation attribute.
+- Ran 36 in-memory Studio assertions for lease acquire/save/release, contention, expiry takeover, callback replay, retry recovery, corrupt/missing records, legacy and upgraded weapon migration, unknown-field retention, `coins -> silver`, migration markers and loadout compatibility.
+- Ran 12 in-memory assertions for same-server reconnect ordering: pending release always settles before reads/acquire, transient or missing-record failure blocks the reconnect, recovery snapshots are retained, and terminal stale ownership is cleared safely.
+- Ran 13 in-memory assertions for leave/shutdown failure behavior: one initial release plus three bounded retries, retained snapshot after exhaustion, worker cleanup and settlement before reconnect.
+- Measured a deliberately oversized upgraded inventory profile: 500 instances encoded to 312,946 bytes and 5,000 to 3,119,948 bytes; the current weapon catalog contains 59 entries.
+- Four Peaks Play loaded the changed persistence, inventory, blacksmith, gacha and portal services; verified the embedded state is the same profile object, weapon add/equip, a banner roll, remote classes and a confirmed volatile save.
+- Level Play loaded the matching persistence modules, completed the loading gate with phase `running` and `RunStarted=true`, and verified return-teleport remotes plus a confirmed volatile save.
+- Studio smoke tests used temporary Studio-only volatile guards and fake stores. The guards and harness objects were removed; normalized repository and Studio checksums match for every synchronized #128 script.
 
 ### Not verified
 
-Roblox Studio/MCP was unavailable in this environment. The PR still requires:
-
-- Four Peaks and Level compile/Play tests;
-- real legacy inventory migration;
-- reconnect persistence after craft, upgrade, sale and gacha;
-- cross-place teleport round trip;
-- two-server lease contention;
-- DataStore failure and shutdown tests;
-- maximum profile-size test.
+- No real DataStore record was read or written during this review.
+- A staging-account migration, persistence across a real reconnect, cross-place teleport round trip and two live-server lease contention still require a non-production staging universe.
+- Production publish, old-server shutdown and production-data inspection were intentionally not performed.
 
 ### Deployment risk
 

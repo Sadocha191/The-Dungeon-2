@@ -118,7 +118,8 @@ local function migrateLegacyState(player: Player, profile)
 	PlayerData.MarkDirty(player)
 
 	local saved, saveError = PlayerData.SaveBarrier(player, "player_state_migration")
-	if acquiredLegacy then releaseLegacyLease(userId, StateSchema.Sanitize(acquiredLegacy, generateInstanceId)) end
+	-- Keep the rollback backup aligned with the exact instance IDs embedded in the main profile.
+	if acquiredLegacy then releaseLegacyLease(userId, StateSchema.Clone(state)) end
 	if not saved then return nil, saveError or "MigrationSaveFailed" end
 	return state
 end

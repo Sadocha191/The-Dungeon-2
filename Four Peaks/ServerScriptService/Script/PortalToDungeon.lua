@@ -1,5 +1,5 @@
 -- PortalToDungeon.server.lua
--- Builds per-player teleport data and blocks the teleport unless both persistent stores confirm a save.
+-- Builds per-player teleport data and blocks the teleport unless the unified profile confirms a save.
 
 local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -253,9 +253,8 @@ local function persistGroup(group)
 	for _, player in ipairs(group) do
 		task.spawn(function()
 			local dataOk, dataErr = PlayerData.SaveBarrier(player, "dungeon_teleport")
-			local stateOk, stateErr = PlayerStateStore.SaveBarrier(player, "dungeon_teleport")
-			if not dataOk or not stateOk then
-				failures[player.UserId] = tostring(dataErr or stateErr or "save_failed")
+			if not dataOk then
+				failures[player.UserId] = tostring(dataErr or "save_failed")
 			end
 			remaining -= 1
 		end)

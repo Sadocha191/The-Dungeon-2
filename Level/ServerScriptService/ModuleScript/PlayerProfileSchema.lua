@@ -305,7 +305,9 @@ function Schema.Sanitize(raw)
 		for key, value in pairs(raw) do data[key] = value end
 	end
 
-	if data.silver == nil and data.coins ~= nil then data.silver = tonumber(data.coins) or 0 end
+	if typeof(raw) == "table" and raw.silver == nil and raw.coins ~= nil then
+		data.silver = tonumber(raw.coins) or 0
+	end
 	data.coins = nil
 	data.level = math.max(1, clampInt(data.level, 1))
 	data.xp = clampInt(data.xp)

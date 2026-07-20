@@ -132,7 +132,7 @@ A rolling deployment without closing old servers is unsafe because the previous 
 
 ## Validation checklist
 
-Static validation performed:
+Static and safe Studio validation performed:
 
 - preserved DataStore names and key formats;
 - preserved public store APIs, remote names and `TeleportData` fields;
@@ -143,17 +143,19 @@ Static validation performed:
 - no new `_G` dependency;
 - no new frame-based runtime loop;
 - unused `SaveScheduler` changes were removed from the diff.
+- fake-store lease, retry, contention, corruption and failure tests passed;
+- legacy and upgraded weapon migration, unknown-field preservation and `coins -> silver` migration tests passed;
+- failed leave/shutdown release and same-server reconnect ordering tests passed, including fail-closed retention of a snapshot when the main record is missing;
+- Four Peaks and Level Play smokes passed with Studio-only volatile guards that were removed after testing;
+- a synthetic 500-instance upgraded profile encoded to 312,946 bytes (5,000 instances: 3,119,948 bytes).
 
-Still required in Roblox Studio/staging:
+Still required in a non-production staging universe:
 
-- Luau compile and Play tests in Four Peaks and Level;
-- migration of a real legacy inventory with crafted/upgraded weapons;
-- craft, multi-step upgrade, equipped-weapon sale and gacha persistence across reconnect;
+- migration of an actual staged legacy inventory with crafted/upgraded weapons;
+- craft, multi-step upgrade, equipped-weapon sale and gacha persistence across a real reconnect;
 - real lobby -> dungeon -> lobby round trip;
-- two-server session contention;
-- simulated DataStore failure during migration and immediately after a mutation;
-- shutdown while a save is failing;
-- profile-size test with the maximum supported weapon inventory.
+- two live-server session contention;
+- staged DataStore failure during migration and immediately after a mutation.
 
 ## Remaining audit work
 
