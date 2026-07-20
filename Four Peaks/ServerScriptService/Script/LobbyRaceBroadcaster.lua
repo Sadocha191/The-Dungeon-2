@@ -18,6 +18,10 @@ local ROLL_DURATION = 4.0
 local function ensureRemote(name: string): RemoteEvent
 	local ev = remoteEvents:FindFirstChild(name)
 	if ev and ev:IsA("RemoteEvent") then return ev end
+	if ev then
+		ev:Destroy()
+	end
+
 	ev = Instance.new("RemoteEvent")
 	ev.Name = name
 	ev.Parent = remoteEvents
