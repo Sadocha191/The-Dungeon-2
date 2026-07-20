@@ -38,7 +38,7 @@ Robloxowy kod jest zorganizowany wokół drzewa instancji gry, nie wokół jedne
 | `BindableEvent` | Lokalny event w tym samym środowisku | Używany np. lokalnie w UI pause/menu. |
 | `Attribute` | Dynamiczna właściwość instancji | Gracz i modele NPC dostają atrybuty typu `Race`, `RunMode`, `Spell_*`, `IsElite`, `MobType`. |
 | `CollectionService` tag | Runtime tag/marker | Projekt używa tagów jako lekkiego oznaczania obiektów. |
-| `DataStoreService` | Zewnętrzna trwała baza key-value Roblox | `PlayerData`, `PlayerStateStore`, `GuildService` zapisują progres gracza/gildii. |
+| `DataStoreService` | Zewnętrzna trwała baza key-value Roblox | `PlayerData` zapisuje zunifikowany profil gracza, a `GuildService` osobne rekordy gildii. |
 | `TeleportService` | Przejście między place'ami | Lobby wysyła gracza/party do dungeonu, dungeon odsyła do lobby. |
 
 Ważna konsekwencja: wiele plików jest "punktem wejścia", bo Roblox odpala je automatycznie. Pliki `Server.lua` i `Client.lua` w tym repo tylko wypisują `Hello world` i nie są centralnym composition rootem.
@@ -167,8 +167,8 @@ Najważniejsze foldery dungeonu:
 
 | Plik | Odpowiedzialność | Główne zależności |
 |---|---|---|
-| `Four Peaks/ServerScriptService/Script/Modules/PlayerData.lua` | Trwały progres konta w `GlobalPlayerProgress_v1`; legacy fallback `GlobalProfile_v4`. | `DataStoreService`. |
-| `Four Peaks/ServerScriptService/Script/Modules/PlayerStateStore.lua` | Drugi, bardziej szczegółowy store gracza `PlayerState_v2`; weapon instances, tutorial, missions. | `SaveScheduler`. |
+| `Four Peaks/ServerScriptService/ModuleScript/PlayerData.lua` | Właściciel zunifikowanego profilu `GlobalPlayerProgress_v1`, session lease, autosave i save barriers. | `ProfileLease`, `PlayerProfileSchema`, `DataStoreService`. |
+| `Four Peaks/ServerScriptService/ModuleScript/PlayerStateStore.lua` | Compatibility API dla `PlayerState` osadzonego w profilu; jednorazowo migruje i zachowuje backup `PlayerState_v2`. | `PlayerData`, `PlayerStateSchema`, `ProfileLease`. |
 | `Four Peaks/ServerScriptService/Script/Modules/ProfilesManager.lua` | Tworzenie profilu, race/class/stats, reroll. | `Races`, `Items`, `PlayerStateStore`. |
 | `Four Peaks/ServerScriptService/Script/Modules/CurrencyService.lua` | Dodawanie/pobieranie walut persistent. | `PlayerData`. |
 | `Four Peaks/ServerScriptService/Script/Modules/CraftingService.lua` | Recipe discovery, crafting, materiały, mining snapshots, upgrade/sell. | `PlayerData`, `PlayerStateStore`, `CurrencyService`, `PickupToastService`, `CraftingConfig`, `WeaponConfigs`. |
@@ -185,7 +185,7 @@ Najważniejsze foldery dungeonu:
 
 | Plik | Odpowiedzialność | Główne zależności |
 |---|---|---|
-| `Level/ServerScriptService/Script/Modules/PlayerData.lua` | Odczyt/zapis persistent progresu w runie. | `DataStoreService`. |
+| `Level/ServerScriptService/ModuleScript/PlayerData.lua` | Ten sam schemat i lease zunifikowanego profilu co w Four Peaks. | `ProfileLease`, `PlayerProfileSchema`, `DataStoreService`. |
 | `Level/ServerScriptService/Script/Modules/NpcService.lua` | Serwerowa symulacja NPC, damage, death callbacks, batch replication. | `WorldBounds`, `NpcShared`, `MissionProgress`. |
 | `Level/ServerScriptService/Script/Modules/WeaponService.lua` | Loadout i dane broni gracza w runie. | `PlayerData`, `WeaponConfigs`. |
 | `Level/ServerScriptService/Script/Modules/MissionProgress.lua` | Zliczanie postępu misji w runie, integracja daily/event. | `PlayerData`, `MissionState`, opcjonalnie `DailyMissionService`, `EventProgress`. |
@@ -412,16 +412,16 @@ Dodatkowo dungeon ma remotes tworzone/umieszczone poza standardowym `ReplicatedS
 
 ## 8. Dane gracza i stan persistent
 
-Projekt ma dwie główne warstwy trwałego stanu gracza.
+Projekt ma jeden kanoniczny rekord trwałego stanu gracza. `PlayerData` jest jego właścicielem w obu place'ach, a `PlayerStateStore` pozostaje lobby compatibility API operującym na tabeli osadzonej w tym samym rekordzie.
 
 ### `GlobalPlayerProgress_v1` - `PlayerData`
 
-W lobby plik `Four Peaks/ServerScriptService/Script/Modules/PlayerData.lua` zapisuje/pobiera progres konta w DataStore:
+Pliki `Four Peaks/ServerScriptService/ModuleScript/PlayerData.lua` i `Level/ServerScriptService/ModuleScript/PlayerData.lua` są utrzymywane jako identyczne kopie. Używają także identycznych `PlayerProfileSchema.lua` i `ProfileLease.lua`:
 
 - główny store: `GlobalPlayerProgress_v1`,
 - legacy fallback: `GlobalProfile_v4`.
 
-W dungeonie istnieje osobny plik `Level/ServerScriptService/Script/Modules/PlayerData.lua`, który korzysta z tej samej nazwy głównego DataStore i legacy fallbacku, ale jego domyślny kształt jest starszy/węższy niż lobby.
+Ładowanie jest fail-closed. Udany odczyt jest wymagany przed `Acquire`; zapis, renew i release przechodzą przez ownership-checked `UpdateAsync`. Profil posiada `_profileMeta` z właścicielem sesji, terminem lease i rewizją. Stała pętla maintenance działa co 60 sekund: zapisuje dirty profile albo odnawia lease.
 
 Uproszczony kształt danych persistent:
 
@@ -429,7 +429,7 @@ Uproszczony kształt danych persistent:
 {
     level = 1,
     xp = 0,
-    nextXp = 100,
+    nextXp = 120,
 
     silver = 0,
     souls = 0,
@@ -466,19 +466,33 @@ Uproszczony kształt danych persistent:
     DailyLogin = {},
     Events = {},
     Guild = {},
+
+    PlayerState = {
+        WeaponInstances = {},
+        EquippedWeaponInstanceId = nil,
+        FavoriteWeapons = {},
+        Tutorial = {},
+        Missions = {},
+        -- compatibility profile/lobby fields
+    },
+    PlayerStateMigrationVersion = 1,
 }
 ```
 
-Nie wszystkie pola są inicjalizowane tak samo w `Four Peaks` i `Level`. Kod zwykle działa na zasadzie merge/defaultów, więc zapisane już dane mogą mieć pola, których lokalny default w danym miejscu nie pokazuje.
+Schemat zachowuje nieznane pola dla kompatybilności wprzód, sanituje znane wartości i mapuje stare `coins` do `silver`, gdy surowy rekord nie ma pola `silver`.
 
-### `PlayerState_v2` - `PlayerStateStore`
+### Embedded `PlayerState` - `PlayerStateStore`
 
-`Four Peaks/ServerScriptService/Script/Modules/PlayerStateStore.lua` używa osobnego DataStore:
+`Four Peaks/ServerScriptService/ModuleScript/PlayerStateStore.lua` nie jest już niezależnym writerem. Jego publiczne API nadal obsługuje weapon instances, equip, favorites, tutorial, profil lobby, spelle/loadout i stan misji, ale mutacje zmieniają `GlobalPlayerProgress_v1.PlayerState` i oznaczają ten sam profil jako dirty.
+
+Przy pierwszym wejściu konta bez `PlayerStateMigrationVersion >= 1` moduł czyta legacy backup:
 
 - store: `PlayerState_v2`,
 - klucz: `u:<userId>`.
 
-Ten moduł jest komentarzowo i architektonicznie traktowany jako "jedyny writer" bardziej szczegółowego state'u lobby. Obsługuje:
+Migracja pobiera tymczasowy lease legacy, sanituje stan, zachowuje istniejące instance IDs, level, prefix, rarity, `rollStats`, upgrade/crafting koszty, equip i favorites, a następnie wymaga udanego `PlayerData.SaveBarrier`. `PlayerState_v2` nie jest kasowany i pozostaje backupem awaryjnym; po migracji nie ma normalnego writera runtime.
+
+Uproszczony embedded state:
 
 ```lua
 {
@@ -501,37 +515,41 @@ Ten moduł jest komentarzowo i architektonicznie traktowany jako "jedyny writer"
     FavoriteWeapons = {},
     OwnedSpells = {},
 
-    WeaponInstances = {
-        -- instanceId -> weapon instance
-    },
+    WeaponInstances = {},
     EquippedWeaponInstanceId = nil,
 
     Missions = {
-        dailyKey = nil,
-        weeklyKey = nil,
-        counters = {},
-        claimed = {},
-        weeklyWeaponRuns = {},
+        DailyKey = 0,
+        WeeklyKey = 0,
+        ClaimCounts = {},
+        CountersDaily = {},
+        CountersWeekly = {},
+        WeeklyWeaponRuns = {},
     },
 
     Tutorial = {
-        Active = false,
-        Step = 0,
+        Active = true,
+        Step = 1,
         Complete = false,
     },
 }
 ```
 
-Ten store jest ładowany na `PlayerAdded`, zapisywany przez `SaveScheduler`, flushowany przy wyjściu gracza i shutdownie serwera.
+### Zasady zapisu i awarii
 
-### Relacja między store'ami
+- Operacje koszt-nagroda w blacksmith, inventory i gacha mutują jeden obiekt profilu, są serializowane per gracz i potwierdzane jednym save barrier.
+- Teleport lobby -> dungeon i dungeon -> lobby jest blokowany, gdy zapis wspólnego profilu nie zostanie potwierdzony.
+- `SessionLost` blokuje cache i dalsze mutacje; stary snapshot nie może zapisać się nad nowym właścicielem.
+- `ProfileMissing` pozostaje fail-closed i zachowuje pending release snapshot do recovery zamiast tworzyć dane domyślne.
+- Nieudany release przy wyjściu ma trzy bounded retry. Szybki reconnect musi najpierw zakończyć pending release albo sam zostaje zablokowany.
+- W Studio fallback volatile jest dozwolony po błędzie store/lease, ale testy migracji należy wykonywać na fake store lub w kontrolowanym staging universe.
 
-Najprostsze mentalne rozróżnienie:
+### Granice kompatybilności i rollback
 
-- `PlayerData` = progres konta, waluty, crafting resources, eventy, rekordy poziomów.
-- `PlayerStateStore` = stan lobby/profilu, weapon instances, tutorial, dokładniejszy ekwipunek i niektóre misje.
-
-Miejsce niejasne: misje istnieją w obu modelach danych. Lobby `MissionService` pracuje z `PlayerStateStore.GetMissionsState`, a dungeon `MissionState`/`MissionProgress` zapisują postęp w `PlayerData`. To może być celowy split albo drift historyczny. Przed zmianami w misjach trzeba sprawdzić pełny przepływ claim/update między runem i lobby.
+- Nie zmieniaj nazw `GlobalPlayerProgress_v1`, `GlobalProfile_v4`, `PlayerState_v2` ani formatu klucza bez migracji.
+- Poprzedni kod ignoruje nowe pola głównego profilu, ale stary runtime zapisujący `PlayerState_v2` nie zna lease nowej architektury. Rollout wymaga równoczesnych wersji Four Peaks/Level i zamknięcia starych serwerów.
+- Po post-migration inventory mutations code-only rollback jest niebezpieczny: przed powrotem do starego kodu trzeba reverse-migrować aktualny embedded `PlayerState` do `PlayerState_v2`.
+- Lobby i dungeon nadal mają różne serwisy misji, ale ich dane są polami jednego profilu; przed zmianą resetów/claimów trzeba testować pełny cykl lobby -> dungeon -> lobby.
 
 ### Atrybuty runtime gracza
 
@@ -554,7 +572,7 @@ Projekt intensywnie używa `player:SetAttribute(...)`. Ważne przykłady:
 ### 9.1 Start w lobby
 
 1. Gracz dołącza do `Four Peaks`.
-2. `PlayerStateStore` i `PlayerData` ładują persistent state.
+2. `PlayerData` ładuje i przejmuje lease profilu, a `PlayerStateStore` przygotowuje embedded state lub wykonuje jednorazową migrację legacy.
 3. `CharacterCreation.lua`/`ProfilesManager.lua` sprawdzają, czy gracz ma profil.
 4. Jeśli nie, NPC/remote otwiera `CharacterCreationUI`.
 5. Po utworzeniu profilu ustawiane są m.in. rasa, statystyki i profil w `PlayerStateStore`.
@@ -662,11 +680,12 @@ Run kończy się przez:
 - ręczny powrót przez pause menu,
 - teleport/return flow.
 
-`ProgressService.lua` buduje summary i zapisuje progres. `ReturnToLobby.lua` tworzy rootowy `ReplicatedStorage.ReturnToLobby` i po żądaniu klienta:
+`ProgressService.lua` buduje summary i finalizuje progres przez `RunProgressApi`. `ReturnToLobby.lua` tworzy rootowy `ReplicatedStorage.ReturnToLobby` i po żądaniu klienta:
 
-1. jeśli run nie był oznaczony jako zakończony, próbuje wywołać `_G.EndRunForPlayer`,
-2. wysyła `TeleportStatus`,
-3. teleportuje gracza do lobby place przez `TeleportService`.
+1. jeśli run wymaga zakończenia, wywołuje jawne `RunProgressApi.EndRunForPlayer`,
+2. czeka na koniec finalizacji i odrzuca timeout/błąd,
+3. wymaga udanego `PlayerData.SaveBarrier`,
+4. wysyła `TeleportStatus` i teleportuje gracza do lobby przez `TeleportService`.
 
 ## 10. Kluczowe przepływy gameplayowe
 
@@ -677,14 +696,15 @@ Run kończy się przez:
 3. `BlacksmithService.lua` waliduje akcję.
 4. `CraftingService.lua` sprawdza recipes/materials/costy.
 5. `WeaponCatalog.lua` normalizuje/tworzy weapon instance.
-6. `PlayerStateStore.lua` zapisuje owned/equipped weapon.
-7. `BlacksmithSync` i/lub `InventorySync` odświeża UI.
-8. `PickupToastService` może wysłać toast.
+6. `PlayerStateStore.lua` mutuje owned/equipped weapon w embedded state wspólnego profilu.
+7. Serwer potwierdza całą operację jednym `PlayerData.SaveBarrier`.
+8. `BlacksmithSync` i/lub `InventorySync` odświeża UI.
+9. `PickupToastService` może wysłać toast.
 
 ### Start runu z wybraną bronią
 
 1. Gracz equipuje broń w lobby.
-2. `PlayerStateStore` trzyma `EquippedWeaponInstanceId` i weapon instances.
+2. `PlayerStateStore` udostępnia `EquippedWeaponInstanceId` i weapon instances z embedded `PlayerState`.
 3. `PortalToDungeon` bierze aktualną broń/loadout.
 4. `TeleportData` przenosi `StarterWeaponName`/`StarterWeaponEntry`.
 5. `ReceiveTeleportLoadout` w dungeonie zapisuje/ustawia loadout gracza.
@@ -747,7 +767,7 @@ Typowy runowy update:
 3. `DailyMissionService` i/lub `EventProgress` synchronizują stan.
 4. Po powrocie lobby `MissionRemotes` pozwala UI pobrać i claimować nagrody.
 
-Miejsce do ostrożności: store i reset-key misji są rozdzielone między `PlayerData` i `PlayerStateStore`, więc zmiany w misjach trzeba testować przez cały cykl lobby -> dungeon -> lobby.
+Miejsce do ostrożności: lobby i dungeon używają różnych compatibility API/pól misji wewnątrz jednego profilu, więc zmiany w misjach trzeba testować przez cały cykl lobby -> dungeon -> lobby.
 
 ## 11. UI i logika kliencka
 
@@ -1007,11 +1027,11 @@ Jeśli chcesz zrozumieć projekt od zera, najlepsza kolejność to:
 3. `docs/ARCHITECTURE_PERFORMANCE.md`  
    Zasady odpowiedzialności systemów, pętli runtime i wydajności.
 
-4. `Four Peaks/ServerScriptService/Script/Modules/PlayerData.lua`  
-   Persistent progres konta.
+4. `Four Peaks/ServerScriptService/ModuleScript/PlayerData.lua`, `PlayerProfileSchema.lua` i `ProfileLease.lua`
+   Właściciel zunifikowanego profilu, schema i session ownership.
 
-5. `Four Peaks/ServerScriptService/Script/Modules/PlayerStateStore.lua`  
-   Szczegółowy stan lobby, weapon instances, tutorial, missions.
+5. `Four Peaks/ServerScriptService/ModuleScript/PlayerStateStore.lua` i `PlayerStateSchema.lua`
+   Compatibility API embedded state, weapon instances, tutorial, missions i migracja legacy.
 
 6. `Four Peaks/ServerScriptService/Script/Modules/ProfilesManager.lua`  
    Tworzenie profilu/rasy.
@@ -1086,16 +1106,17 @@ Po stronie dungeonu:
 
 Głównie:
 
-- `Four Peaks/ServerScriptService/Script/Modules/PlayerData.lua`,
-- `Four Peaks/ServerScriptService/Script/Modules/PlayerStateStore.lua`,
-- `Level/ServerScriptService/Script/Modules/PlayerData.lua`.
+- `Four Peaks/ServerScriptService/ModuleScript/PlayerData.lua`,
+- `Four Peaks/ServerScriptService/ModuleScript/PlayerStateStore.lua` (compatibility API nad embedded state),
+- `Level/ServerScriptService/ModuleScript/PlayerData.lua`.
 
 ### Co jest najbardziej ryzykowne do zmiany?
 
 - Nazwy RemoteEvent/RemoteFunction.
 - Kształt `TeleportData`.
 - Kształt persistent data.
-- Misje i ich split `PlayerData`/`PlayerStateStore`.
+- Lease, migracja embedded `PlayerState` i kompatybilność backupu `PlayerState_v2`.
+- Misje i ich compatibility API `PlayerData`/`PlayerStateStore`.
 - `WaveController` i `NpcService`.
 - `PauseState`, modal UI i chest reward flow.
 - Przenoszenie skryptów w drzewie Studio.

@@ -12,6 +12,7 @@
 - Updated matching Four Peaks and Level `PlayerData.lua` and `PlayerProfileSchema.lua` modules.
 - Updated Four Peaks `PlayerStateStore.lua`.
 - Updated `docs/DATA_SAFETY_PHASE_1.md` and the dedicated player-data safety changelog.
+- Updated `docs/PROJECT_CODE_GUIDE.md` to describe the unified profile, embedded `PlayerState`, session lease, migration, failure and rollback contract.
 
 ### Validation
 
