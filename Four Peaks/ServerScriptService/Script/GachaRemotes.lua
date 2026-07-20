@@ -51,30 +51,32 @@ local RollBanner = ensureFunction("RollBanner")
 local ConvertWeaponPoints = ensureFunction("ConvertWeaponPoints")
 
 local REQUEST_COOLDOWN_SECONDS = 0.35
+local ECONOMY_BUSY_ATTRIBUTE = "EconomyMutationBusy"
 local activeEconomyRequest = {}
 local lastEconomyRequest = {}
-local persistenceBlocked = {}
 
 local function canStartEconomyRequest(player: Player): (boolean, string?)
 	local userId = player.UserId
-	if persistenceBlocked[userId] then return false, "PersistenceUnavailable" end
-	if activeEconomyRequest[userId] then return false, "Busy" end
+	if player:GetAttribute("PersistenceBlocked") == true then return false, "PersistenceUnavailable" end
+	if activeEconomyRequest[userId] or player:GetAttribute(ECONOMY_BUSY_ATTRIBUTE) == true then
+		return false, "Busy"
+	end
 	local current = os.clock()
 	if current - (lastEconomyRequest[userId] or 0) < REQUEST_COOLDOWN_SECONDS then
 		return false, "RateLimited"
 	end
 	lastEconomyRequest[userId] = current
 	activeEconomyRequest[userId] = true
+	player:SetAttribute(ECONOMY_BUSY_ATTRIBUTE, true)
 	return true
 end
 
 local function finishEconomyRequest(player: Player)
 	activeEconomyRequest[player.UserId] = nil
+	if player.Parent == Players then player:SetAttribute(ECONOMY_BUSY_ATTRIBUTE, nil) end
 end
 
 local function blockAfterSaveFailure(player: Player, reason)
-	local userId = player.UserId
-	persistenceBlocked[userId] = true
 	player:SetAttribute("PersistenceBlocked", true)
 	warn("[GachaRemotes] Confirmed save failed; blocking further economy requests:", player.Name, reason)
 	if not RunService:IsStudio() then
@@ -149,7 +151,6 @@ Players.PlayerRemoving:Connect(function(player)
 	local userId = player.UserId
 	activeEconomyRequest[userId] = nil
 	lastEconomyRequest[userId] = nil
-	persistenceBlocked[userId] = nil
 end)
 
-print("[GachaRemotes] Ready (confirmed persistence)")
+print("[GachaRemotes] Ready (shared economy lock + confirmed persistence)")
