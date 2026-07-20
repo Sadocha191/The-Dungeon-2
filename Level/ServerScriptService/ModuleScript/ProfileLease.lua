@@ -97,7 +97,7 @@ function ProfileLease:Acquire(key: string, seedProfile)
 					blockedOwner = nil
 					if current ~= nil and typeof(current) ~= "table" then
 						corrupt = true
-						return current
+						return nil
 					end
 
 					local profile = current or deepCopy(seedProfile)
@@ -112,7 +112,7 @@ function ProfileLease:Acquire(key: string, seedProfile)
 
 					if owner and owner ~= self._ownerId and expiresAt > now then
 						blockedOwner = owner
-						return current
+						return nil
 					end
 
 					meta.sessionOwner = self._ownerId
@@ -170,13 +170,13 @@ function ProfileLease:Save(key: string, snapshot)
 				missingProfile = false
 				if typeof(current) ~= "table" then
 					missingProfile = true
-					return current
+					return nil
 				end
 
 				local currentMeta = normalizeMeta(current, self._schemaVersion)
 				if currentMeta.sessionOwner ~= self._ownerId then
 					lostSession = true
-					return current
+					return nil
 				end
 
 				local nextProfile = deepCopy(snapshot)
@@ -228,12 +228,12 @@ function ProfileLease:Renew(key: string)
 				missingProfile = false
 				if typeof(current) ~= "table" then
 					missingProfile = true
-					return current
+					return nil
 				end
 				local meta = normalizeMeta(current, self._schemaVersion)
 				if meta.sessionOwner ~= self._ownerId then
 					lostSession = true
-					return current
+					return nil
 				end
 				local now = os.time()
 				meta.leaseExpiresAt = now + self._leaseSeconds
@@ -275,7 +275,7 @@ function ProfileLease:Release(key: string, snapshot)
 				local meta = normalizeMeta(current, self._schemaVersion)
 				if meta.sessionOwner ~= self._ownerId then
 					lostSession = true
-					return current
+					return nil
 				end
 
 				meta.lastSessionOwner = self._ownerId
