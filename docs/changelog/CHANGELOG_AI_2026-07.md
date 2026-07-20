@@ -1,5 +1,41 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-20 - Four Peaks spell inventory reference layout (PR #124)
+
+### Summary
+
+- Added a spell-specific inventory view while preserving the existing inventory shell, server remotes and snapshot payload.
+- Fixed the review blockers before merge: `TabBar` now has a stable layout contract, `InventoryController` remains the only owner of remote snapshot refreshes, and the `F` shortcut is routed to the active spell search box.
+- The spell view consumes the controller-owned snapshot through client-local `BindableEvent`/`BindableFunction` objects and no longer registers a second `InventorySync` listener or invokes `RF_GetInventorySnapshot`.
+
+### Files
+
+- Added `Four Peaks/StarterPlayer/StarterPlayerScripts/InventorySpellTabReference.client.lua`.
+- Updated `Four Peaks/StarterPlayer/StarterPlayerScripts/InventoryController.lua`.
+
+### Validation
+
+- `git diff --check` passed and no conflict markers remain.
+- The repository files match the sources already synchronized in the active Four Peaks Studio place.
+- Four Peaks Play booted `InventoryController` and the new LocalScript without a script error; the spell view root and all three bridge objects were created.
+- Static search confirms the new LocalScript has no `InventorySync` listener and no `RF_GetInventorySnapshot` call.
+
+### Not verified
+
+- The current headless Studio interaction could not reliably activate the Spell Loadout button, so desktop/mobile visual spacing and the live `F` focus transition were not re-exercised in this pass.
+- No inventory mutation was sent to the server during the smoke test.
+
+### Runtime cost and risks
+
+- No `Heartbeat`, `Stepped`, `RenderStepped` or recurring polling loop was added.
+- Rendering is event-driven and linear in spell, combination and element-summary rows.
+- `InventoryController` is already a large UI coordinator; this change adds only the local bridge required to preserve one snapshot/input owner, while the independent presentation remains in its own LocalScript.
+- The view depends on the explicit `RemakePanel`, `ContentColumn`, `DetailsColumn` and `TabBar` names.
+
+### Rollback
+
+- Revert PR #124, remove `InventorySpellTabReference.client.lua` from Studio and restore the previous `InventoryController.lua`; no persistent data or remote migration is required.
+
 ## 2026-07-13 - Level authoritative drop synchronization optimization (PR #118)
 
 ### Summary
