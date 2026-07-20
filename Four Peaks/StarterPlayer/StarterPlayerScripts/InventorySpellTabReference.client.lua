@@ -45,10 +45,19 @@ local entriesBuilder = EntryBuilder.new({ SpellDefs = SpellDefs, WeaponConfigs =
 local icons = IconResolver.new({ ReplicatedStorage = ReplicatedStorage, WeaponConfigs = {} })
 
 local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents", 10)
-local remoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions", 10)
 local inventoryAction = remoteEvents and remoteEvents:WaitForChild("InventoryAction", 10)
-local inventorySync = remoteEvents and remoteEvents:FindFirstChild("InventorySync")
-local getSnapshot = remoteFunctions and remoteFunctions:WaitForChild("RF_GetInventorySnapshot", 10)
+local snapshotUpdatedEvent = panel:WaitForChild("InventorySnapshotUpdated", 10)
+local currentSnapshotFunction = panel:WaitForChild("GetCurrentInventorySnapshot", 10)
+local focusSpellSearchEvent = panel:WaitForChild("FocusSpellSearch", 10)
+
+if not (
+	snapshotUpdatedEvent and snapshotUpdatedEvent:IsA("BindableEvent")
+	and currentSnapshotFunction and currentSnapshotFunction:IsA("BindableFunction")
+	and focusSpellSearchEvent and focusSpellSearchEvent:IsA("BindableEvent")
+) then
+	warn("[InventorySpellTabReference] Inventory state bridge is incomplete")
+	return
+end
 
 local C = {
 	bg = Color3.fromRGB(7, 8, 13), panel = Color3.fromRGB(12, 15, 23),
@@ -432,9 +441,13 @@ local function updateBounds()
 	local width=grid.AbsoluteSize.X; if width>10 then local columns=width>=650 and 5 or (width>=510 and 4 or (width>=370 and 3 or 2)); local gap=7; gridLayout.CellSize=UDim2.fromOffset(math.max(90,math.floor((width-gap*(columns-1)-4)/columns)),144) end
 end
 
-loadSnapshot=function()
-	if not getSnapshot then toast("Inventory snapshot is unavailable.",C.red); return false end
-	local ok,snapshot=pcall(function() return getSnapshot:InvokeServer() end); if not ok or typeof(snapshot)~="table" then toast("Could not load spell inventory.",C.red); return false end
+loadSnapshot=function(snapshot)
+	if snapshot == nil then
+		local ok, currentSnapshot = pcall(function() return currentSnapshotFunction:Invoke() end)
+		if not ok or typeof(currentSnapshot) ~= "table" then toast("Could not load spell inventory.",C.red); return false end
+		snapshot = currentSnapshot
+	end
+	if typeof(snapshot) ~= "table" then return false end
 	state.snapshot=snapshot; state.entries=entriesBuilder.BuildSpellEntries((snapshot.spells and snapshot.spells.entries) or {},snapshot.spells)
 	if not selected() then local first; for _,entry in ipairs(state.entries) do if entry.equipped then first=entry; break end end; first=first or state.entries[1]; state.selectedId=first and first.id end
 	renderAll(); return true
@@ -466,5 +479,10 @@ for _,button in ipairs(tabButtons) do local accent=button:FindFirstChild("Accent
 inventoryGui:GetPropertyChangedSignal("Enabled"):Connect(syncVisible)
 for _,object in ipairs({panel,center,detailsColumn,tabBar}) do object:GetPropertyChangedSignal("AbsolutePosition"):Connect(updateBounds); object:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateBounds) end
 grid:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateBounds)
-if inventorySync and inventorySync:IsA("RemoteEvent") then inventorySync.OnClientEvent:Connect(function() if root.Visible then refresh(0.05) end end) end
+snapshotUpdatedEvent.Event:Connect(function(snapshot)
+	if root.Visible then loadSnapshot(snapshot) end
+end)
+focusSpellSearchEvent.Event:Connect(function()
+	if root.Visible then search:CaptureFocus() end
+end)
 syncVisible()
