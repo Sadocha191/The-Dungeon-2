@@ -92,6 +92,9 @@ function ProfileLease:Acquire(key: string, seedProfile)
 
 			local ok, result = pcall(function()
 				return self._store:UpdateAsync(key, function(current)
+					applied = false
+					corrupt = false
+					blockedOwner = nil
 					if current ~= nil and typeof(current) ~= "table" then
 						corrupt = true
 						return current
@@ -162,6 +165,9 @@ function ProfileLease:Save(key: string, snapshot)
 
 		local ok, result = pcall(function()
 			return self._store:UpdateAsync(key, function(current)
+				applied = false
+				lostSession = false
+				missingProfile = false
 				if typeof(current) ~= "table" then
 					missingProfile = true
 					return current
@@ -217,6 +223,9 @@ function ProfileLease:Renew(key: string)
 		local missingProfile = false
 		local ok, result = pcall(function()
 			return self._store:UpdateAsync(key, function(current)
+				renewed = false
+				lostSession = false
+				missingProfile = false
 				if typeof(current) ~= "table" then
 					missingProfile = true
 					return current
@@ -256,6 +265,8 @@ function ProfileLease:Release(key: string, snapshot)
 		local lostSession = false
 		local ok, result = pcall(function()
 			return self._store:UpdateAsync(key, function(current)
+				released = false
+				lostSession = false
 				if typeof(current) ~= "table" then
 					released = true
 					return current
