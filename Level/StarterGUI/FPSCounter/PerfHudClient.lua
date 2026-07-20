@@ -10,7 +10,8 @@ local frame = gui:WaitForChild("Frame")
 local fpsLabel = frame:WaitForChild("FPS")
 local fpsTextLabel = frame:WaitForChild("FPSText")
 local TOGGLE_KEY = Enum.KeyCode.F3
-local MAX_FRAME_SAMPLES = 2400
+local UPDATE_INTERVAL = 1
+local MAX_FRAME_SAMPLES = 600
 
 frame.AnchorPoint = Vector2.new(1, 0)
 frame.Position = UDim2.new(1, -14, 0, 14)
@@ -28,6 +29,12 @@ local function styleLabel(label: TextLabel, size: UDim2, position: UDim2, font: 
 	label.TextSize = textSize
 	label.TextColor3 = color
 	label.TextXAlignment = alignment
+end
+
+local function setTextIfChanged(label: TextLabel, text: string)
+	if label.Text ~= text then
+		label.Text = text
+	end
 end
 
 styleLabel(fpsTextLabel, UDim2.new(0, 110, 0, 18), UDim2.fromOffset(12, 10), Enum.Font.Gotham, 12, Color3.fromRGB(142, 154, 171), Enum.TextXAlignment.Left)
@@ -86,6 +93,14 @@ local frameSamples = table.create(MAX_FRAME_SAMPLES)
 local frameSampleCount = 0
 local frameSampleCursor = 1
 
+local function resetSamplingWindow()
+	sampleTime = 0
+	sampleFrames = 0
+	frameSampleCount = 0
+	frameSampleCursor = 1
+	table.clear(frameSamples)
+end
+
 local function countNpcModels(): number
 	local folder = workspace:FindFirstChild("Enemies")
 	if not folder then
@@ -127,14 +142,25 @@ local function computeLowFps(lowFraction: number): number
 	return fpsFromDt(total / worstCount)
 end
 
+local wasEnabled = gui.Enabled
 RunService.RenderStepped:Connect(function(dt)
-	pushFrameSample(dt)
-	sampleTime += dt
-	sampleFrames += 1
-	if sampleTime < 0.25 then
+	local enabled = gui.Enabled
+	if enabled ~= wasEnabled then
+		wasEnabled = enabled
+		resetSamplingWindow()
+	end
+	if not enabled then
 		return
 	end
 
+	pushFrameSample(dt)
+	sampleTime += dt
+	sampleFrames += 1
+	if sampleTime < UPDATE_INTERVAL then
+		return
+	end
+
+	debug.profilebegin("PerfHudClient.Update")
 	local averageDt = sampleTime / math.max(1, sampleFrames)
 	local fps = fpsFromDt(averageDt)
 	local frameTimeMs = averageDt * 1000
@@ -148,11 +174,12 @@ RunService.RenderStepped:Connect(function(dt)
 	sampleTime = 0
 	sampleFrames = 0
 
-	fpsLabel.Text = tostring(fps)
-	frameTimeValue.Text = string.format("%.1f ms", frameTimeMs)
-	lowOneValue.Text = tostring(computeLowFps(0.01))
-	lowZeroPointZeroOneValue.Text = tostring(computeLowFps(0.0001))
-	npcValue.Text = tostring(npcCount)
-	peakNpcValue.Text = tostring(peakNpcCount)
-	memoryValue.Text = string.format("%.0f MB", memoryMb)
+	setTextIfChanged(fpsLabel, tostring(fps))
+	setTextIfChanged(frameTimeValue, string.format("%.1f ms", frameTimeMs))
+	setTextIfChanged(lowOneValue, tostring(computeLowFps(0.01)))
+	setTextIfChanged(lowZeroPointZeroOneValue, tostring(computeLowFps(0.0001)))
+	setTextIfChanged(npcValue, tostring(npcCount))
+	setTextIfChanged(peakNpcValue, tostring(peakNpcCount))
+	setTextIfChanged(memoryValue, string.format("%.0f MB", memoryMb))
+	debug.profileend()
 end)
