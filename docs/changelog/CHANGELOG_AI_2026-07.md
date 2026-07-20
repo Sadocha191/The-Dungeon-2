@@ -1,5 +1,46 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-20 - Poziom ReactiveGrass removal and diagnostics HUD optimization (PR #132)
+
+### Summary
+
+- Squash-merged PR #132 into `main` as `8143c0dacbcd26c57c42a1b509d8170a4a22ec5b`.
+- Deleted the live, repo-untracked `StarterPlayer.StarterPlayerScripts.ReactiveGrassClient` LocalScript from the active Level/Poziom place (PlaceId `113361902471683`); no other active copy existed.
+- Preserved `Workspace.ReactiveGrass` and all grass models, MeshParts, bones, textures and map decoration, leaving the grass visible and static.
+- Synchronized the two FPSCounter LocalScripts from the merged repository revision to Studio with normalized source parity.
+
+### Files
+
+- Updated `Level/StarterGUI/FPSCounter/PerfHudClient.lua`.
+- Updated `Level/StarterGUI/FPSCounter/FPSCounterClient.lua`.
+- Added `docs/changelog/CHANGELOG_AI_2026-07_REACTIVE_GRASS_REMOVAL.md`.
+- Updated `CHANGELOG_AI.md` and this monthly changelog with the completed live validation.
+
+### Studio and validation
+
+- Roblox MCP exposed the sole connected target as `Level`; `game.PlaceId` was `113361902471683`, matching the project Level/Poziom mapping. No Four Peaks Studio instance was connected or modified.
+- A full DataModel search after deletion found no `ReactiveGrassClient` scripts and no active source references to `ReactiveGrass`, `GrassBone`, `RenderFidelity` or `WorldToViewportPoint`.
+- `Workspace.ReactiveGrass` remained present with 195,755 descendants, including 13,118 MeshParts and 13,118 bones; Play screenshots confirmed the grass remained visible.
+- A 12.00-second Play sample in the grass area found zero `Transform` changes across all 13,118 grass bones, confirming the grass remained static and did not react to the player.
+- F3 opened and closed the diagnostics HUD. While hidden, all seven displayed values remained unchanged across 2.25 seconds. While visible, changing values emitted at most roughly one text change per second; stable values emitted none.
+- The visible-HUD profiler buffer contained one `PerfHudClient.Update` timer and two instances across 2.019 seconds (about 0.99 Hz). The hidden-HUD buffer contained zero instances.
+- Both MicroProfiler captures ran for at least 12 seconds with a 256-frame rolling buffer. Hidden HUD: median 9.179 ms, p95 13.756 ms, p99 14.591 ms, worst 17.341 ms at frame 13399 / absolute frame 1937099. Visible HUD: median 9.387 ms, p95 13.634 ms, p99 14.902 ms, worst 16.642 ms at frame 14991 / absolute frame 1944700.
+- Neither capture contained a ReactiveGrass timer. The visible capture contained zero frames at or above 20 ms and zero at or above 25 ms, so the previously reported regular 0.2-second, 20–25 ms ReactiveGrass spikes were absent.
+- Output contained no new PR-related error or warning and no `Script_ReactiveGrassClient` or `RenderFidelity` error. The existing unrelated `ServerScriptService.Hybrid Terrain Hex Generator:16` `CreateToolbar` error remained.
+
+### Runtime loops and cost
+
+- Removed the ReactiveGrass per-client `PreRender` connection and its 0.20-second active-grass scan without replacement.
+- Removed the duplicate `FPSCounterClient` `RenderStepped` FPS loop.
+- Retained one `PerfHudClient` `RenderStepped` connection. It returns before sampling while hidden and performs the detailed update at a one-second interval while visible; text assignments are conditional on actual value changes.
+- No remote, persistent data, gameplay balance, NPC, pathfinding, drop, movement, map asset, Four Peaks or `_G` change was made.
+
+### Before-data limitation, risks and rollback
+
+- The before result comes from the approved PR's published-client capture: ReactiveGrass scanned roughly every 0.2 seconds and individual scan frames cost about 20–25 ms. The raw pre-change capture was not present in this Studio session, so a directly comparable pre-change p95 and worst-frame ID could not be recomputed.
+- Studio reports the target DataModel name as `Level`, while project/user-facing instructions call it `Poziom`; PlaceId `113361902471683` was used to disambiguate the target.
+- To roll back repository code, revert the PR #132 squash commit and this validation commit. To roll back Studio during the current session, undo to the `Before PR 132 Studio sync` waypoint; otherwise restore `StarterPlayer.StarterPlayerScripts.ReactiveGrassClient` from the previous place version and restore the previous two FPSCounter sources. Restoring ReactiveGrass also restores its known periodic scan cost.
+
 ## 2026-07-20 - PR #128 persistence safety audit and verification
 
 ### Summary
