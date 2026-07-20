@@ -1,5 +1,5 @@
 -- RandomGroundSpawn.server.lua
--- Spawns the player at a random point on Terrain only.
+-- Spawns the player at a random point on dry Terrain only.
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -75,6 +75,10 @@ local function buildOverlapIgnore(character)
 	return ignore
 end
 
+local function isDrySpawnSurface(_pos: Vector3, hit: RaycastResult): boolean
+	return hit.Material ~= Enum.Material.Water
+end
+
 local function resolveTerrainSpawn(pos: Vector3, character: Model)
 	return WorldBounds.FindNearbyTerrainPoint(pos, {
 		heightOffset = SAFE_Y_OFFSET,
@@ -85,6 +89,7 @@ local function resolveTerrainSpawn(pos: Vector3, character: Model)
 		samplesPerRing = 10,
 		searchRadii = { 0, 6, 12, 18 },
 		maxSlopeDeg = 35,
+		isValid = isDrySpawnSurface,
 	})
 end
 
@@ -100,6 +105,7 @@ local function pickRandomGroundPoint(character: Model)
 		maxSlopeDeg = 35,
 		fallbackMin = Vector2.new(-180, -180),
 		fallbackMax = Vector2.new(180, 180),
+		isValid = isDrySpawnSurface,
 	})
 end
 
@@ -145,7 +151,7 @@ local function spawnCharacterRandomly(_player, character)
 		return
 	end
 
-	warn("[RandomGroundSpawn] Failed to find random Terrain point")
+	warn("[RandomGroundSpawn] Failed to find random dry Terrain point")
 end
 
 Players.PlayerAdded:Connect(function(player)

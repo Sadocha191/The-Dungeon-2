@@ -1,5 +1,110 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-20 - Level dry player spawn validation (PR #127)
+
+### Summary
+
+- Rejected Terrain raycast candidates whose material is `Water` for configured markers, `SpawnLocation` objects and random fallback player spawns.
+- Preserved the shared `WorldBounds` raycast, slope, clearance and fallback behavior; the new predicate is local to `RandomGroundSpawn`.
+
+### Files
+
+- Updated `Level/ServerScriptService/Script/RandomGroundSpawn.server.lua`.
+
+### Studio and validation
+
+- The repository and active Level Studio source match by normalized length 4386 and rolling checksum 463506401.
+- A 200-point raw Terrain sample found 29 water and 171 dry hits.
+- A separate 200-point validated sample rejected 40 water callbacks, accepted 160 dry hits and accepted zero water hits.
+- A zero-radius nearby lookup centered on an observed water point returned no candidate, confirming the configured/nearby path uses the same predicate.
+- The preceding Level Play smoke reached `RunStarted=true`; `git diff --check` passed and no conflict markers remain.
+
+### Not verified
+
+- A real multiplayer respawn and an authored `SpawnLocation` placed directly over water were not exercised.
+
+### Runtime cost, risks and rollback
+
+- No loop, connection, remote, persistent data, `TeleportData` field or shared `WorldBounds` behavior was added.
+- Cost is one material comparison per existing candidate raycast.
+- Maps containing only water within all configured search radii will fail closed and keep the existing warning path instead of spawning the player in water.
+- Revert PR #127 and restore the previous Studio source to accept water Terrain again; no data migration is required.
+
+## 2026-07-20 - Level bounded loading and generation overlap (PR #126)
+
+### Summary
+
+- Started server world preparation after the first ready client while preserving the requirement that every connected client acknowledges the accepted generation before the run starts.
+- Removed full-Workspace preloading and exact replicated-object count waits; shared assets, spawn streaming and immediately visible UI/lighting now have separate bounded stages.
+- Fixed review and Play blockers: `ClientWorldLoaded` cannot be discarded before the server reaches `prepared`, and a stuck `PreloadAsync`/`RequestStreamAroundAsync` worker is cancelled at its stage deadline instead of freezing the loading overlay.
+
+### Files
+
+- Updated `Level/ServerScriptService/Script/RunReadyGate.server.lua`.
+- Updated `Level/StarterPlayer/StarterPlayerScripts/LocalScript/LoadingClient.client.lua`.
+
+### Studio and validation
+
+- The repository `LoadingClient` and active Level Studio source match by normalized length 7646 and rolling checksum 1769584928.
+- Level Play prepared 478 chests, 14 shrines, 6 statues and 3 monuments in 0.89 seconds.
+- The intentionally problematic shared and interface preloads reached their budgets, logged controlled timeout warnings, were cancelled without an error and did not block the flow.
+- The loading gate completed in 10.28 seconds with generation 1, `RunStarted=true`, phase `running` and the overlay released at 100%.
+- `git diff --check` passed and no conflict markers remain.
+
+### Not verified
+
+- Lobby-to-Level teleport, a real two-client run, late join and a deliberately forced server preparation longer than 15 seconds were not exercised in this pass.
+- The performance comparison is based on loading diagnostics and the observed removed deadlock, not a MicroProfiler capture.
+
+### Runtime loops, cost and cleanup
+
+- The client timeout helper polls at 20 Hz with one worker at a time and hard budgets of 6 seconds for shared assets, 4 seconds for UI/lighting and 3 seconds for initial streaming; a timed-out worker is cancelled.
+- Existing client phase/character waits remain bounded at 20 Hz; request-queue drain is 10 Hz for at most 1.25 seconds.
+- After local preparation, the client checks the server phase at 10 Hz until `prepared/running`; the LocalScript lifecycle ends this wait when the player session ends.
+- Server preparation uses one guarded startup `task.spawn`, runs once per server generation and has no per-object Heartbeat/Stepped/RenderStepped work.
+
+### Risks and rollback
+
+- Assets that exceed a preload budget may finish through normal Roblox streaming and can appear later, but cannot deadlock run start.
+- If server preparation genuinely never reaches `prepared`, the overlay intentionally remains instead of entering an incomplete world.
+- Revert PR #126 and restore the previous two Studio sources to recover the old serial loading behavior; no data, remote names or `TeleportData` migration is involved.
+
+## 2026-07-20 - Four Peaks spell inventory reference layout (PR #124)
+
+### Summary
+
+- Added a spell-specific inventory view while preserving the existing inventory shell, server remotes and snapshot payload.
+- Fixed the review blockers before merge: `TabBar` now has a stable layout contract, `InventoryController` remains the only owner of remote snapshot refreshes, and the `F` shortcut is routed to the active spell search box.
+- The spell view consumes the controller-owned snapshot through client-local `BindableEvent`/`BindableFunction` objects and no longer registers a second `InventorySync` listener or invokes `RF_GetInventorySnapshot`.
+
+### Files
+
+- Added `Four Peaks/StarterPlayer/StarterPlayerScripts/InventorySpellTabReference.client.lua`.
+- Updated `Four Peaks/StarterPlayer/StarterPlayerScripts/InventoryController.lua`.
+
+### Validation
+
+- `git diff --check` passed and no conflict markers remain.
+- The repository files match the sources already synchronized in the active Four Peaks Studio place.
+- Four Peaks Play booted `InventoryController` and the new LocalScript without a script error; the spell view root and all three bridge objects were created.
+- Static search confirms the new LocalScript has no `InventorySync` listener and no `RF_GetInventorySnapshot` call.
+
+### Not verified
+
+- The current headless Studio interaction could not reliably activate the Spell Loadout button, so desktop/mobile visual spacing and the live `F` focus transition were not re-exercised in this pass.
+- No inventory mutation was sent to the server during the smoke test.
+
+### Runtime cost and risks
+
+- No `Heartbeat`, `Stepped`, `RenderStepped` or recurring polling loop was added.
+- Rendering is event-driven and linear in spell, combination and element-summary rows.
+- `InventoryController` is already a large UI coordinator; this change adds only the local bridge required to preserve one snapshot/input owner, while the independent presentation remains in its own LocalScript.
+- The view depends on the explicit `RemakePanel`, `ContentColumn`, `DetailsColumn` and `TabBar` names.
+
+### Rollback
+
+- Revert PR #124, remove `InventorySpellTabReference.client.lua` from Studio and restore the previous `InventoryController.lua`; no persistent data or remote migration is required.
+
 ## 2026-07-13 - Level authoritative drop synchronization optimization (PR #118)
 
 ### Summary
