@@ -36,9 +36,9 @@ local blacksmithPromptConnection: RBXScriptConnection? = nil
 local promptEnsureScheduled = false
 
 local ACTION_COOLDOWN_SECONDS = 0.15
+local ECONOMY_BUSY_ATTRIBUTE = "EconomyMutationBusy"
 local activeAction = {}
 local lastAction = {}
-local persistenceBlocked = {}
 
 local function tutorialComplete(player: Player): boolean
 	return player:GetAttribute("TutorialComplete") == true
@@ -177,22 +177,22 @@ end
 
 local function beginMutation(player: Player): (boolean, string?)
 	local userId = player.UserId
-	if persistenceBlocked[userId] then return false, "PersistenceUnavailable" end
-	if activeAction[userId] then return false, "Busy" end
+	if player:GetAttribute("PersistenceBlocked") == true then return false, "PersistenceUnavailable" end
+	if activeAction[userId] or player:GetAttribute(ECONOMY_BUSY_ATTRIBUTE) == true then return false, "Busy" end
 	local current = os.clock()
 	if current - (lastAction[userId] or 0) < ACTION_COOLDOWN_SECONDS then return false, "RateLimited" end
 	lastAction[userId] = current
 	activeAction[userId] = true
+	player:SetAttribute(ECONOMY_BUSY_ATTRIBUTE, true)
 	return true
 end
 
 local function finishMutation(player: Player)
 	activeAction[player.UserId] = nil
+	if player.Parent == Players then player:SetAttribute(ECONOMY_BUSY_ATTRIBUTE, nil) end
 end
 
 local function blockAfterSaveFailure(player: Player, reason)
-	local userId = player.UserId
-	persistenceBlocked[userId] = true
 	player:SetAttribute("PersistenceBlocked", true)
 	warn("[BlacksmithService] Confirmed save failed; blocking further blacksmith actions:", player.Name, reason)
 	if not RunService:IsStudio() then
@@ -315,7 +315,6 @@ Players.PlayerRemoving:Connect(function(player)
 	local userId = player.UserId
 	activeAction[userId] = nil
 	lastAction[userId] = nil
-	persistenceBlocked[userId] = nil
 end)
 
-print("[BlacksmithService] Ready (single-profile confirmed persistence)")
+print("[BlacksmithService] Ready (shared economy lock + confirmed persistence)")
