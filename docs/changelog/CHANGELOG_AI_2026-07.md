@@ -1,5 +1,44 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-20 - Level bounded loading and generation overlap (PR #126)
+
+### Summary
+
+- Started server world preparation after the first ready client while preserving the requirement that every connected client acknowledges the accepted generation before the run starts.
+- Removed full-Workspace preloading and exact replicated-object count waits; shared assets, spawn streaming and immediately visible UI/lighting now have separate bounded stages.
+- Fixed review and Play blockers: `ClientWorldLoaded` cannot be discarded before the server reaches `prepared`, and a stuck `PreloadAsync`/`RequestStreamAroundAsync` worker is cancelled at its stage deadline instead of freezing the loading overlay.
+
+### Files
+
+- Updated `Level/ServerScriptService/Script/RunReadyGate.server.lua`.
+- Updated `Level/StarterPlayer/StarterPlayerScripts/LocalScript/LoadingClient.client.lua`.
+
+### Studio and validation
+
+- The repository `LoadingClient` and active Level Studio source match by normalized length 7646 and rolling checksum 1769584928.
+- Level Play prepared 478 chests, 14 shrines, 6 statues and 3 monuments in 0.89 seconds.
+- The intentionally problematic shared and interface preloads reached their budgets, logged controlled timeout warnings, were cancelled without an error and did not block the flow.
+- The loading gate completed in 10.28 seconds with generation 1, `RunStarted=true`, phase `running` and the overlay released at 100%.
+- `git diff --check` passed and no conflict markers remain.
+
+### Not verified
+
+- Lobby-to-Level teleport, a real two-client run, late join and a deliberately forced server preparation longer than 15 seconds were not exercised in this pass.
+- The performance comparison is based on loading diagnostics and the observed removed deadlock, not a MicroProfiler capture.
+
+### Runtime loops, cost and cleanup
+
+- The client timeout helper polls at 20 Hz with one worker at a time and hard budgets of 6 seconds for shared assets, 4 seconds for UI/lighting and 3 seconds for initial streaming; a timed-out worker is cancelled.
+- Existing client phase/character waits remain bounded at 20 Hz; request-queue drain is 10 Hz for at most 1.25 seconds.
+- After local preparation, the client checks the server phase at 10 Hz until `prepared/running`; the LocalScript lifecycle ends this wait when the player session ends.
+- Server preparation uses one guarded startup `task.spawn`, runs once per server generation and has no per-object Heartbeat/Stepped/RenderStepped work.
+
+### Risks and rollback
+
+- Assets that exceed a preload budget may finish through normal Roblox streaming and can appear later, but cannot deadlock run start.
+- If server preparation genuinely never reaches `prepared`, the overlay intentionally remains instead of entering an incomplete world.
+- Revert PR #126 and restore the previous two Studio sources to recover the old serial loading behavior; no data, remote names or `TeleportData` migration is involved.
+
 ## 2026-07-20 - Four Peaks spell inventory reference layout (PR #124)
 
 ### Summary

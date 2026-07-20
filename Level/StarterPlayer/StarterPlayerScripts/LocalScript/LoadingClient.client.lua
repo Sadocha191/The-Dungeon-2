@@ -77,10 +77,42 @@ local function collectFinalPreloadInstances()
 	return instances
 end
 
-local function preloadInstances(instances, startProgress: number, endProgress: number, message: string)
+local function runYieldingWithTimeout(timeoutSec: number, callback): (boolean, any, boolean)
+	local completed = false
+	local callOk = false
+	local callResult = nil
+	local worker = task.spawn(function()
+		callOk, callResult = pcall(callback)
+		completed = true
+	end)
+	local deadline = os.clock() + math.max(0.05, timeoutSec)
+
+	while not completed and os.clock() <= deadline do
+		task.wait(0.05)
+	end
+
+	if not completed then
+		local cancelOk, cancelError = pcall(task.cancel, worker)
+		if not cancelOk then
+			warn("[LoadingClient] Could not cancel timed-out loading worker:", cancelError)
+		end
+		return false, "Timeout", true
+	end
+
+	return callOk, callResult, false
+end
+
+local function preloadInstances(
+	instances,
+	startProgress: number,
+	endProgress: number,
+	message: string,
+	maxDurationSec: number
+)
 	local total = math.max(#instances, 1)
 	local chunkSize = 120
 	local loaded = 0
+	local deadline = os.clock() + math.max(0.05, maxDurationSec)
 
 	if #instances == 0 then
 		updateOverlay(endProgress, message)
@@ -94,12 +126,21 @@ local function preloadInstances(instances, startProgress: number, endProgress: n
 			table.insert(chunk, instances[j])
 		end
 
-		local ok, err = pcall(function()
+		local remaining = deadline - os.clock()
+		if remaining <= 0 then
+			warn(string.format("[LoadingClient] %s preload budget exhausted", message))
+			break
+		end
+
+		local ok, err, timedOut = runYieldingWithTimeout(remaining, function()
 			ContentProvider:PreloadAsync(chunk)
 		end)
 
 		if not ok then
-			warn("[LoadingClient] PreloadAsync error:", err)
+			warn(string.format("[LoadingClient] %s preload %s:", message, timedOut and "timed out" or "failed"), err)
+			if timedOut then
+				break
+			end
 		end
 
 		loaded += #chunk
@@ -156,12 +197,12 @@ local function requestInitialStream()
 		return
 	end
 
-	local ok, err = pcall(function()
+	local ok, err, timedOut = runYieldingWithTimeout(3, function()
 		Workspace:RequestStreamAroundAsync(root.Position)
 	end)
 
 	if not ok then
-		warn("[LoadingClient] RequestStreamAroundAsync error:", err)
+		warn("[LoadingClient] RequestStreamAroundAsync", timedOut and "timed out:" or "failed:", err)
 	end
 end
 
@@ -182,7 +223,7 @@ end
 ClientReady:FireServer()
 
 updateOverlay(0.04, "Preparing shared assets")
-preloadInstances(collectSharedPreloadInstances(), 0.04, 0.38, "Preparing shared assets")
+preloadInstances(collectSharedPreloadInstances(), 0.04, 0.38, "Preparing shared assets", 6)
 
 updateOverlay(0.42, "Waiting for level generation")
 local prepared = waitForPhase(15)
@@ -191,16 +232,11 @@ if not prepared then
 	warn("[LoadingClient] Timed out while waiting for world preparation; continuing")
 end
 
-local generation = math.max(
-	0,
-	math.floor(tonumber(RunLoadingState:GetAttribute("Generation")) or 0)
-)
-
 updateOverlay(0.58, "Streaming spawn area")
 requestInitialStream()
 
 updateOverlay(0.76, "Preparing interface")
-preloadInstances(collectFinalPreloadInstances(), 0.76, 0.95, "Preparing interface")
+preloadInstances(collectFinalPreloadInstances(), 0.76, 0.95, "Preparing interface", 4)
 
 updateOverlay(0.98, "Finalizing level")
 
@@ -208,6 +244,22 @@ updateOverlay(0.98, "Finalizing level")
 -- may never reach zero on a large map. Keep this as a short best-effort wait.
 waitForRequestQueue(1.25, 8)
 task.wait(0.05)
+
+-- A slow server preparation may outlive the optimistic wait above. Do not send
+-- the one generation-scoped readiness signal until the server can accept it.
+while true do
+	local phase = tostring(RunLoadingState:GetAttribute("Phase") or "")
+	if phase == "prepared" or phase == "running" then
+		break
+	end
+	updateOverlay(0.98, "Waiting for level generation")
+	task.wait(0.1)
+end
+
+local generation = math.max(
+	0,
+	math.floor(tonumber(RunLoadingState:GetAttribute("Generation")) or 0)
+)
 
 ClientWorldLoaded:FireServer(generation)
 
