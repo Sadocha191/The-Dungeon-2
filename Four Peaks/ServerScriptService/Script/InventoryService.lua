@@ -59,9 +59,9 @@ local InventoryAction = ensureRemote("InventoryAction")
 local InventorySync = ensureRemote("InventorySync")
 
 local ACTION_COOLDOWN_SECONDS = 0.35
+local ECONOMY_BUSY_ATTRIBUTE = "EconomyMutationBusy"
 local activeMutation = {}
 local lastMutation = {}
-local persistenceBlocked = {}
 
 local WeaponTemplates = ServerStorage:WaitForChild("WeaponTemplates", 10)
 if not WeaponTemplates then
@@ -70,24 +70,22 @@ end
 
 local function beginMutation(player: Player): (boolean, string?)
 	local userId = player.UserId
-	if persistenceBlocked[userId] then return false, "PersistenceUnavailable" end
-	if activeMutation[userId] then return false, "Busy" end
+	if player:GetAttribute("PersistenceBlocked") == true then return false, "PersistenceUnavailable" end
+	if activeMutation[userId] or player:GetAttribute(ECONOMY_BUSY_ATTRIBUTE) == true then return false, "Busy" end
 	local current = os.clock()
-	if current - (lastMutation[userId] or 0) < ACTION_COOLDOWN_SECONDS then
-		return false, "RateLimited"
-	end
+	if current - (lastMutation[userId] or 0) < ACTION_COOLDOWN_SECONDS then return false, "RateLimited" end
 	lastMutation[userId] = current
 	activeMutation[userId] = true
+	player:SetAttribute(ECONOMY_BUSY_ATTRIBUTE, true)
 	return true
 end
 
 local function finishMutation(player: Player)
 	activeMutation[player.UserId] = nil
+	if player.Parent == Players then player:SetAttribute(ECONOMY_BUSY_ATTRIBUTE, nil) end
 end
 
 local function blockAfterSaveFailure(player: Player, reason)
-	local userId = player.UserId
-	persistenceBlocked[userId] = true
 	player:SetAttribute("PersistenceBlocked", true)
 	warn("[InventoryService] Confirmed save failed; blocking further inventory mutations:", player.Name, reason)
 	if not RunService:IsStudio() then
@@ -426,7 +424,6 @@ Players.PlayerRemoving:Connect(function(player)
 	local userId = player.UserId
 	activeMutation[userId] = nil
 	lastMutation[userId] = nil
-	persistenceBlocked[userId] = nil
 end)
 
-print("[InventoryService] Ready (single-profile confirmed persistence)")
+print("[InventoryService] Ready (shared economy lock + confirmed persistence)")
