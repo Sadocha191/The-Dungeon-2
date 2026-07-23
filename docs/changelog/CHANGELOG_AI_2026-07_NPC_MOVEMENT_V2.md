@@ -17,6 +17,7 @@
 - Legacy and V2 do not run in parallel for one NPC.
 - The existing single `NpcService` Heartbeat scheduler remains authoritative; no per-NPC Heartbeat connection was added.
 - GroundWalker, GroundRunner, HeavyWalker and Flying use compatibility routes through the proven current navigation modules until dedicated V2 implementations replace them.
+- The dispatcher preserves the original Flying clamp rule: an additional altitude clamp is only applied when an external impulse is present.
 
 ## Main files
 
@@ -25,15 +26,15 @@
 - Added `NpcSurfaceNavigation.lua`.
 - Added `NpcCombatBehaviorService.lua`.
 - Added `LeapExplodeBehavior.lua`.
-- Updated `NpcNavigationConfig.lua`, `NpcService.lua`, `NpcReplication.lua` and `NpcPresentation.client.lua`.
+- Updated `NpcNavigationConfig.lua`, `NpcService.lua`, `NpcReplication.lua`, `WaveController.lua` and `NpcPresentation.client.lua`.
 - Added `docs/NPC_MOVEMENT_SYSTEMS.md` with setup, rollback and Studio validation instructions.
 
 ## Validation completed outside Studio
 
 - Deterministic integration patches asserted every expected source replacement.
-- `git diff --check` passed during both large-file integration steps.
+- `git diff --check` passed during the large-file integration steps.
 - Temporary patch scripts and GitHub workflows removed themselves after use.
-- Branch diff was reviewed for preservation of the central scheduler and Legacy default.
+- Branch diff was reviewed for preservation of the central scheduler, Legacy default and existing flight semantics.
 
 ## Remaining deployment gates
 
