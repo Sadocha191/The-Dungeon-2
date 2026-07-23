@@ -45,12 +45,20 @@ function NpcMovementSystemController.Step(
 	)
 end
 
-function NpcMovementSystemController.ConstrainPosition(npc: any, nextPosition: Vector3, now: number): Vector3
+function NpcMovementSystemController.ConstrainPosition(
+	npc: any,
+	nextPosition: Vector3,
+	now: number,
+	impulseMove: Vector3?
+): Vector3
 	if isSurfaceCrawler(npc) then
 		return NpcSurfaceNavigation.ConstrainPosition(npc, nextPosition, now)
 	end
 	if npc.movementMode == "Flying" then
-		return NpcFlightNavigation.ClampPosition(npc, nextPosition)
+		if typeof(impulseMove) == "Vector3" and impulseMove.Magnitude > 0.01 then
+			return NpcFlightNavigation.ClampPosition(npc, nextPosition)
+		end
+		return nextPosition
 	end
 	return NpcGroundNavigation.ConstrainPosition(npc, nextPosition, now)
 end
