@@ -500,7 +500,7 @@ local function updateNpc(
 
 	local impulseMove = NpcMovementSystemController.ProjectImpulse(npc, npc.impulse) * dt
 	local nextPos = npc.position + baseMove + impulseMove
-	nextPos = NpcMovementSystemController.ConstrainPosition(npc, nextPos, now)
+	nextPos = NpcMovementSystemController.ConstrainPosition(npc, nextPos, now, impulseMove)
 
 	local newVelocity = Vector3.zero
 	if dt > 1e-4 then

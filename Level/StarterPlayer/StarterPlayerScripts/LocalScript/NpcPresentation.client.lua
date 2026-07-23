@@ -862,10 +862,12 @@ RunService.RenderStepped:Connect(function(dt)
 		end
 
 		entry.renderPos = entry.renderPos and entry.renderPos:Lerp(goalPos, math.clamp(dt * 12, 0, 1)) or goalPos
-		entry.renderSurfaceNormal = surfaceUp(
-			entry.renderSurfaceNormal and entry.renderSurfaceNormal:Lerp(entry.surfaceNormal, math.clamp(dt * 12, 0, 1))
-				or entry.surfaceNormal
-		)
+		if entry.movementMode == "Surface" then
+			entry.renderSurfaceNormal = surfaceUp(
+				entry.renderSurfaceNormal and entry.renderSurfaceNormal:Lerp(entry.surfaceNormal, math.clamp(dt * 12, 0, 1))
+					or entry.surfaceNormal
+			)
+		end
 		entry.renderDir = entry.renderDir and entry.renderDir:Lerp(goalDir, math.clamp(dt * 14, 0, 1)) or goalDir
 		entry.renderDir = movementDir(entry.renderDir, entry.movementMode, entry.renderSurfaceNormal)
 
