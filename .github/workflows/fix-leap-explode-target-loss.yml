@@ -1,0 +1,31 @@
+name: Fix leap explode target loss
+
+on:
+  push:
+    branches:
+      - feat/switchable-npc-movement-v2
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/switchable-npc-movement-v2
+          fetch-depth: 0
+      - run: python tools/fix_leap_explode_target_loss.py
+      - run: |
+          git diff --check
+          grep -q 'NpcCombatBehaviorService.Step(npc, targetInfo' Level/ServerScriptService/ModuleScript/NpcService.lua
+      - run: |
+          rm -f tools/fix_leap_explode_target_loss.py
+          rm -f .github/workflows/fix-leap-explode-target-loss.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Keep active NPC combat behavior running without a target"
+          git push origin HEAD:feat/switchable-npc-movement-v2
