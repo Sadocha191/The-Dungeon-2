@@ -409,13 +409,6 @@ local function updateNpc(
 	npc.aiLookTarget = nil
 
 	local targetInfo = NpcTargeting.FindNearestTarget(npc, alivePlayers, now)
-	if not targetInfo then
-		npc.velocity = Vector3.zero
-		setState(npc, STATE.Idle)
-		writeStateAttributes(npc)
-		return
-	end
-
 	if NpcCombatBehaviorService.Step(npc, targetInfo, dt, now, {
 		kill = function(context)
 			killNpc(npc, context)
@@ -424,6 +417,13 @@ local function updateNpc(
 		if not npc.dead then
 			writeStateAttributes(npc)
 		end
+		return
+	end
+
+	if not targetInfo then
+		npc.velocity = Vector3.zero
+		setState(npc, STATE.Idle)
+		writeStateAttributes(npc)
 		return
 	end
 
