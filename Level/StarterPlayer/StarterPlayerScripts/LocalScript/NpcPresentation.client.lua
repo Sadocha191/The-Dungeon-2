@@ -79,7 +79,24 @@ local function flatSpeed(v: Vector3?): number
 	return math.sqrt((v.X * v.X) + (v.Z * v.Z))
 end
 
-local function movementDir(v: Vector3?, movementMode: string?): Vector3
+local function surfaceUp(v: Vector3?): Vector3
+	if typeof(v) == "Vector3" and v.Magnitude > 1e-4 then
+		return v.Unit
+	end
+	return Vector3.yAxis
+end
+
+local function movementDir(v: Vector3?, movementMode: string?, surfaceNormal: Vector3?): Vector3
+	if movementMode == "Surface" then
+		local up = surfaceUp(surfaceNormal)
+		local source = typeof(v) == "Vector3" and v or Vector3.new(0, 0, -1)
+		local tangent = source - up * source:Dot(up)
+		if tangent.Magnitude <= 1e-4 then
+			local fallback = math.abs(up:Dot(Vector3.zAxis)) < 0.95 and Vector3.zAxis or Vector3.xAxis
+			tangent = fallback - up * fallback:Dot(up)
+		end
+		return tangent.Unit
+	end
 	if movementMode ~= "Flying" then
 		return flatDir(v)
 	end
@@ -90,7 +107,7 @@ local function movementDir(v: Vector3?, movementMode: string?): Vector3
 end
 
 local function movementSpeed(v: Vector3?, movementMode: string?): number
-	if movementMode == "Flying" and typeof(v) == "Vector3" then
+	if (movementMode == "Flying" or movementMode == "Surface") and typeof(v) == "Vector3" then
 		return v.Magnitude
 	end
 	return flatSpeed(v)
@@ -629,6 +646,11 @@ local function ensureEntry(id: string)
 		velocity = Vector3.zero,
 		movementMode = "Ground",
 		movementProfile = "GroundSmall",
+		movementSystem = "Legacy",
+		movementBehavior = "GroundWalker",
+		combatBehavior = nil,
+		surfaceNormal = Vector3.yAxis,
+		renderSurfaceNormal = Vector3.yAxis,
 		hp = 0,
 		maxHp = 1,
 		dead = false,
@@ -713,6 +735,21 @@ batchEvent.OnClientEvent:Connect(function(payload)
 			if typeof(item.movementProfile) == "string" then
 				entry.movementProfile = item.movementProfile
 			end
+			if typeof(item.movementSystem) == "string" then
+				entry.movementSystem = item.movementSystem
+			end
+			if typeof(item.movementBehavior) == "string" then
+				entry.movementBehavior = item.movementBehavior
+			end
+			if typeof(item.combatBehavior) == "string" then
+				entry.combatBehavior = item.combatBehavior
+			end
+			if typeof(item.surfaceNormal) == "Vector3" then
+				entry.surfaceNormal = surfaceUp(item.surfaceNormal)
+				if fullSnapshot or not entry.renderSurfaceNormal then
+					entry.renderSurfaceNormal = entry.surfaceNormal
+				end
+			end
 			if seen then
 				seen[id] = true
 			end
@@ -734,7 +771,7 @@ batchEvent.OnClientEvent:Connect(function(payload)
 				end
 			end
 			if typeof(item.dir) == "Vector3" then
-				entry.targetDir = movementDir(item.dir, entry.movementMode)
+				entry.targetDir = movementDir(item.dir, entry.movementMode, entry.surfaceNormal)
 				if fullSnapshot or not entry.renderDir then
 					entry.renderDir = entry.targetDir
 				end
@@ -819,20 +856,27 @@ RunService.RenderStepped:Connect(function(dt)
 		if typeof(entry.velocity) == "Vector3" and not entry.dead then
 			goalPos += entry.velocity * 0.05
 		end
-		local goalDir = movementDir(entry.targetDir or entry.velocity, entry.movementMode)
+		local goalDir = movementDir(entry.targetDir or entry.velocity, entry.movementMode, entry.surfaceNormal)
 		if typeof(entry.velocity) == "Vector3" and entry.velocity.Magnitude > 0.2 then
-			goalDir = movementDir(entry.velocity, entry.movementMode)
+			goalDir = movementDir(entry.velocity, entry.movementMode, entry.surfaceNormal)
 		end
 
 		entry.renderPos = entry.renderPos and entry.renderPos:Lerp(goalPos, math.clamp(dt * 12, 0, 1)) or goalPos
+		entry.renderSurfaceNormal = surfaceUp(
+			entry.renderSurfaceNormal and entry.renderSurfaceNormal:Lerp(entry.surfaceNormal, math.clamp(dt * 12, 0, 1))
+				or entry.surfaceNormal
+		)
 		entry.renderDir = entry.renderDir and entry.renderDir:Lerp(goalDir, math.clamp(dt * 14, 0, 1)) or goalDir
-		entry.renderDir = movementDir(entry.renderDir, entry.movementMode)
+		entry.renderDir = movementDir(entry.renderDir, entry.movementMode, entry.renderSurfaceNormal)
 
 		updateAnimationMotion(entry, dt, now)
 		refreshRigBinding(entry)
 		local displayPos = entry.renderPos + getSpawnRiseOffset(entry, now)
-		local up = math.abs(entry.renderDir:Dot(Vector3.yAxis)) > 0.98 and Vector3.xAxis or Vector3.yAxis
-		local rootFrame = CFrame.lookAt(displayPos, displayPos + entry.renderDir, up)
+		local up = entry.movementMode == "Surface"
+			and surfaceUp(entry.renderSurfaceNormal)
+			or (math.abs(entry.renderDir:Dot(Vector3.yAxis)) > 0.98 and Vector3.xAxis or Vector3.yAxis)
+		local forward = movementDir(entry.renderDir, entry.movementMode, up)
+		local rootFrame = CFrame.lookAt(displayPos, displayPos + forward, up)
 		if isProceduralVisualModel(model) then
 			rootFrame = rootFrame * buildProceduralPose(entry, now)
 		end
