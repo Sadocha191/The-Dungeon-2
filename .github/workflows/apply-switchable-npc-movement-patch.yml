@@ -1,0 +1,51 @@
+name: Apply switchable NPC movement patch
+
+on:
+  push:
+    branches:
+      - feat/switchable-npc-movement-v2
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/switchable-npc-movement-v2
+          fetch-depth: 0
+
+      - name: Apply deterministic integration patch
+        run: python tools/apply_switchable_npc_movement_patch.py
+
+      - name: Validate patch
+        run: |
+          git diff --check
+          python - <<'PY'
+          from pathlib import Path
+
+          service = Path('Level/ServerScriptService/ModuleScript/NpcService.lua').read_text(encoding='utf-8')
+          client = Path('Level/StarterPlayer/StarterPlayerScripts/LocalScript/NpcPresentation.client.lua').read_text(encoding='utf-8')
+
+          assert 'NpcMovementSystemController.Step(' in service
+          assert 'NpcCombatBehaviorService.Step(' in service
+          assert 'movementSystem = movementSystem' in service
+          assert 'NpcMovementSystemController.BeginTick' in service
+          assert 'movementMode == "Surface"' in client
+          assert 'entry.renderSurfaceNormal' in client
+          assert 'surfaceUp(entry.renderSurfaceNormal)' in client
+          PY
+
+      - name: Commit integrated files and remove temporary tooling
+        run: |
+          rm -f tools/apply_switchable_npc_movement_patch.py
+          rm -f .github/workflows/apply-switchable-npc-movement-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Integrate switchable NPC movement systems"
+          git push origin HEAD:feat/switchable-npc-movement-v2
