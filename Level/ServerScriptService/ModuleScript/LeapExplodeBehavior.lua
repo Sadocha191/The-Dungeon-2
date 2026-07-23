@@ -44,6 +44,7 @@ local function getState(npc: any): {[string]: any}
 		leapEndsAt = 0,
 		leapStart = nil,
 		leapTarget = nil,
+		lastTargetPosition = nil,
 		detonated = false,
 	}
 	npc.combatBehaviorState = state
@@ -124,17 +125,22 @@ end
 
 function LeapExplodeBehavior.Step(
 	npc: any,
-	targetInfo: any,
+	targetInfo: any?,
 	dt: number,
 	now: number,
 	callbacks: {[string]: any}?
 ): boolean
 	local state = getState(npc)
-	local targetPosition = targetInfo.hrp.Position
+	local liveTargetPosition = nil
+	if targetInfo and targetInfo.hrp and targetInfo.hrp.Parent then
+		liveTargetPosition = targetInfo.hrp.Position
+		state.lastTargetPosition = liveTargetPosition
+	end
+	local targetPosition = liveTargetPosition or state.leapTarget or state.lastTargetPosition
 	local triggerRange = math.max(1, numberAttribute(npc.model, "LeapExplodeTriggerRange", 16))
 
 	if state.phase == "Chase" then
-		if (targetPosition - npc.position).Magnitude > triggerRange then
+		if not liveTargetPosition or (liveTargetPosition - npc.position).Magnitude > triggerRange then
 			return false
 		end
 		state.phase = "Arm"
@@ -153,7 +159,9 @@ function LeapExplodeBehavior.Step(
 
 	if state.phase == "Arm" then
 		npc.velocity = Vector3.zero
-		npc.look = flatUnit(targetPosition - npc.position, npc.look)
+		if targetPosition then
+			npc.look = flatUnit(targetPosition - npc.position, npc.look)
+		end
 		NpcLifecycle.SetState(npc, "Attacking")
 		if now >= state.phaseEndsAt then
 			local leapDuration = math.max(0.12, numberAttribute(npc.model, "LeapExplodeLeapTime", 0.5))
@@ -161,7 +169,7 @@ function LeapExplodeBehavior.Step(
 			state.leapStartedAt = now
 			state.leapEndsAt = now + leapDuration
 			state.leapStart = npc.position
-			state.leapTarget = resolveLeapTarget(npc, targetPosition)
+			state.leapTarget = resolveLeapTarget(npc, targetPosition or npc.position)
 			metrics.leaps += 1
 		end
 		return true
@@ -169,7 +177,7 @@ function LeapExplodeBehavior.Step(
 
 	if state.phase == "Leap" then
 		local startPosition = state.leapStart or npc.position
-		local endPosition = state.leapTarget or targetPosition
+		local endPosition = state.leapTarget or state.lastTargetPosition or npc.position
 		local duration = math.max(0.01, state.leapEndsAt - state.leapStartedAt)
 		local alpha = math.clamp((now - state.leapStartedAt) / duration, 0, 1)
 		local arcHeight = math.max(0, numberAttribute(npc.model, "LeapExplodeArcHeight", 8))
