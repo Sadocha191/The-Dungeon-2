@@ -81,7 +81,13 @@ local function buildSnapshot(npc: any)
 		despawned = false,
 		movementMode = npc.movementMode,
 		movementProfile = npc.movementProfile,
+		movementSystem = npc.movementSystem,
+		movementBehavior = npc.movementBehavior,
+		combatBehavior = npc.combatBehavior,
 	}
+	if typeof(npc.surfaceNormal) == "Vector3" then
+		snapshot.surfaceNormal = unitDirection(npc.surfaceNormal, Vector3.yAxis)
+	end
 	if typeof(npc.spawnSurfacePosition) == "Vector3" then
 		snapshot.spawnSurfacePos = npc.spawnSurfacePosition
 		snapshot.spawnEmergeDepth = npc.spawnEmergeDepth
