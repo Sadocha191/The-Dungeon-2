@@ -383,6 +383,7 @@ local function updateNpc(
 		npc.impulse = Vector3.zero
 		npc.attackUntil = 0
 		npc.nextAttackAt = math.max(npc.nextAttackAt, now + 0.1)
+		NpcCombatBehaviorService.Pause(npc, dt)
 		setState(npc, STATE.Idle)
 		writeStateAttributes(npc)
 		return

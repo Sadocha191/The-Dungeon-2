@@ -197,6 +197,17 @@ function LeapExplodeBehavior.Step(
 	return false
 end
 
+function LeapExplodeBehavior.Pause(npc: any, dt: number)
+	local state = npc.combatBehaviorState
+	if not state or state.kind ~= "LeapExplode" or state.phase == "Chase" then
+		return
+	end
+	local pausedFor = math.max(0, tonumber(dt) or 0)
+	state.phaseEndsAt += pausedFor
+	state.leapStartedAt += pausedFor
+	state.leapEndsAt += pausedFor
+end
+
 function LeapExplodeBehavior.Cleanup(npc: any)
 	npc.combatBehaviorState = nil
 end

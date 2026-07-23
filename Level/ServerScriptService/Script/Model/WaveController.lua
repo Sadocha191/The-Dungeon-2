@@ -844,6 +844,9 @@ local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, i
 	setOptionalMobAttribute(mob, "NpcFacingYawDegrees", stats.facingYawDegrees)
 	setOptionalMobAttribute(mob, "MovementProfile", stats.movementProfile)
 	setOptionalMobAttribute(mob, "MovementMode", stats.movementMode)
+	setOptionalMobAttribute(mob, "MovementSystem", stats.movementSystem)
+	setOptionalMobAttribute(mob, "MovementBehavior", stats.movementBehavior)
+	setOptionalMobAttribute(mob, "CombatBehavior", stats.combatBehavior)
 	setOptionalMobAttribute(mob, "CanFly", stats.canFly)
 	setOptionalMobAttribute(mob, "NpcGroundOffset", stats.groundOffset)
 	setOptionalMobAttribute(mob, "EnemyMeleeIgnoreVerticalValidation", stats.meleeIgnoreVerticalValidation)
@@ -863,6 +866,9 @@ local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, i
         isRanged = stats.isRanged == true,
 		movementProfile = stats.movementProfile,
 		movementMode = stats.movementMode,
+		movementSystem = stats.movementSystem,
+		movementBehavior = stats.movementBehavior,
+		combatBehavior = stats.combatBehavior,
 		canFly = stats.canFly,
 		groundOffset = stats.groundOffset,
         despawnDelay = 3,
@@ -937,6 +943,9 @@ local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vecto
         isRanged = cfg.isRanged == true,
 		movementProfile = cfg.movementProfile,
 		movementMode = cfg.movementMode,
+		movementSystem = cfg.movementSystem,
+		movementBehavior = cfg.movementBehavior,
+		combatBehavior = cfg.combatBehavior,
 		canFly = cfg.canFly,
 		groundOffset = cfg.groundOffset,
 		meleeIgnoreVerticalValidation = cfg.meleeIgnoreVerticalValidation,
