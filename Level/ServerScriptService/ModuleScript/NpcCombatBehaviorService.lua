@@ -6,26 +6,37 @@ local BEHAVIORS = {
 	LeapExplode = LeapExplodeBehavior,
 }
 
+local function resolveBehavior(npc: any): any
+	local behaviorName = npc.combatBehavior
+	if type(behaviorName) ~= "string" or behaviorName == "" then
+		return nil
+	end
+	return BEHAVIORS[behaviorName]
+end
+
 function NpcCombatBehaviorService.Step(
 	npc: any,
-	targetInfo: any,
+	targetInfo: any?,
 	dt: number,
 	now: number,
 	callbacks: {[string]: any}?
 ): boolean
-	local behaviorName = npc.combatBehavior
-	if type(behaviorName) ~= "string" or behaviorName == "" then
-		return false
-	end
-	local behavior = BEHAVIORS[behaviorName]
+	local behavior = resolveBehavior(npc)
 	if not behavior then
 		return false
 	end
 	return behavior.Step(npc, targetInfo, dt, now, callbacks) == true
 end
 
+function NpcCombatBehaviorService.Pause(npc: any, dt: number)
+	local behavior = resolveBehavior(npc)
+	if behavior and type(behavior.Pause) == "function" then
+		behavior.Pause(npc, dt)
+	end
+end
+
 function NpcCombatBehaviorService.Cleanup(npc: any)
-	local behavior = BEHAVIORS[npc.combatBehavior]
+	local behavior = resolveBehavior(npc)
 	if behavior and type(behavior.Cleanup) == "function" then
 		behavior.Cleanup(npc)
 	else
