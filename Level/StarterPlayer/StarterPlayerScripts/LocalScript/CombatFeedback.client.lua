@@ -18,6 +18,24 @@ local GOBLIN_TYPE = "Goblin"
 local GOBLIN_TILT_DURATION = 0.38
 local GOBLIN_TILT_DEGREES = 28
 local GOBLIN_TILT_BIND_NAME = "GoblinForwardAttackTilt"
+local GOBLIN_EXPLOSION_EMIT_COUNTS = {
+	Default = 6,
+	Boom = 2,
+	Center = 4,
+	Fire = 12,
+	Fire2 = 12,
+	Fire3 = 12,
+	Fire4 = 12,
+	Fire5 = 12,
+	Smoke = 8,
+	Smoke2 = 8,
+	Smoke3 = 8,
+	Spark1 = 10,
+	Spark2 = 10,
+	Spark3 = 10,
+	Star = 3,
+	Wind = 4,
+}
 
 local goblins = {}
 
@@ -27,44 +45,6 @@ local function resolveAnimationTemplate(name)
 	return animations and animations:FindFirstChild(name) or nil
 end
 
-local function resolveRoot(model)
-	local root = model:FindFirstChild("RootPart") or model:FindFirstChild("HumanoidRootPart")
-	if root and root:IsA("BasePart") then
-		return root
-	end
-	return model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
-end
-
-local function resolveRootJoint(entry)
-	if entry.rootJoint and entry.rootJoint.Parent then
-		return entry.rootJoint
-	end
-
-	local model = entry.model
-	if not model or not model.Parent then
-		return nil
-	end
-
-	local root = resolveRoot(model)
-	local namedFallback = nil
-	for _, descendant in ipairs(model:GetDescendants()) do
-		if descendant:IsA("Motor6D") then
-			if root and (descendant.Part0 == root or descendant.Part1 == root) then
-				entry.rootJoint = descendant
-				return descendant
-			end
-
-			local lowerName = string.lower(descendant.Name)
-			if not namedFallback and (lowerName == "root" or lowerName == "rootjoint" or string.find(lowerName, "root", 1, true)) then
-				namedFallback = descendant
-			end
-		end
-	end
-
-	entry.rootJoint = namedFallback
-	return namedFallback
-end
-
 local function cframesApproximatelyEqual(first, second)
 	local delta = first:ToObjectSpace(second)
 	local _, angle = delta:ToAxisAngle()
@@ -72,19 +52,24 @@ local function cframesApproximatelyEqual(first, second)
 end
 
 local function removeAppliedTilt(entry)
-	local joint = entry.rootJoint
-	if not joint or not joint.Parent or not entry.lastTilt or not entry.lastTransformAfter then
+	local model = entry.model
+	if not model or not model.Parent or not entry.lastTilt or not entry.lastPivotAfter then
 		entry.lastTilt = nil
-		entry.lastTransformAfter = nil
+		entry.lastPivotAfter = nil
 		return
 	end
 
-	local current = joint.Transform
-	if cframesApproximatelyEqual(current, entry.lastTransformAfter) then
-		joint.Transform = current * entry.lastTilt:Inverse()
+	local ok, currentPivot = pcall(function()
+		return model:GetPivot()
+	end)
+	if ok and cframesApproximatelyEqual(currentPivot, entry.lastPivotAfter) then
+		pcall(function()
+			model:PivotTo(currentPivot * entry.lastTilt:Inverse())
+		end)
 	end
+
 	entry.lastTilt = nil
-	entry.lastTransformAfter = nil
+	entry.lastPivotAfter = nil
 end
 
 local function cleanupGoblin(id)
@@ -111,9 +96,11 @@ local function playGoblinExplosion(entry, position)
 		end
 	end
 
-	VfxTemplatePlayer.Play(template, CFrame.new(position), {
+	local visualPosition = position + Vector3.new(0, 0.75 * math.clamp(scale, 1, 2), 0)
+	VfxTemplatePlayer.Play(template, CFrame.new(visualPosition), {
 		emissionDuration = 0.2,
 		cleanupDelay = 3.5 * math.clamp(scale, 1, 2),
+		emitCounts = GOBLIN_EXPLOSION_EMIT_COUNTS,
 	})
 end
 
@@ -203,28 +190,37 @@ RunService:BindToRenderStep(GOBLIN_TILT_BIND_NAME, Enum.RenderPriority.Last.Valu
 			continue
 		end
 
-		local joint = resolveRootJoint(entry)
-		local shouldTilt = joint
-			and not entry.dead
+		local shouldTilt = not entry.dead
 			and entry.state == NpcShared.States.Attacking
 		if not shouldTilt then
 			removeAppliedTilt(entry)
 			continue
 		end
 
+		local ok, baseline = pcall(function()
+			return model:GetPivot()
+		end)
+		if not ok then
+			continue
+		end
+
+		if entry.lastTilt and entry.lastPivotAfter and cframesApproximatelyEqual(baseline, entry.lastPivotAfter) then
+			baseline = baseline * entry.lastTilt:Inverse()
+		end
+
 		local elapsed = math.max(0, now - (entry.stateChangedAt or now))
 		local alpha = math.clamp(elapsed / GOBLIN_TILT_DURATION, 0, 1)
 		local tiltWeight = math.sin(alpha * math.pi)
 		local tilt = CFrame.Angles(math.rad(-GOBLIN_TILT_DEGREES * tiltWeight), 0, 0)
+		local tiltedPivot = baseline * tilt
 
-		local baseline = joint.Transform
-		if entry.lastTilt and entry.lastTransformAfter and cframesApproximatelyEqual(baseline, entry.lastTransformAfter) then
-			baseline = baseline * entry.lastTilt:Inverse()
+		local pivoted = pcall(function()
+			model:PivotTo(tiltedPivot)
+		end)
+		if pivoted then
+			entry.lastTilt = tilt
+			entry.lastPivotAfter = tiltedPivot
 		end
-
-		joint.Transform = baseline * tilt
-		entry.lastTilt = tilt
-		entry.lastTransformAfter = joint.Transform
 	end
 end)
 
