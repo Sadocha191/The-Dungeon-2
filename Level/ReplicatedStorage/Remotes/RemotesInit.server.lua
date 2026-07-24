@@ -24,8 +24,9 @@ ensureRemoteEvent("PartyLevelUp")        -- server -> all clients
 ensureRemoteEvent("PartyUpgradePicked")  -- client -> server (wybrano upgrade)
 ensureRemoteEvent("PartyXPUpdate")       -- server -> all clients (xp/level update opcjonalnie)
 
--- Floating damage numbers
+-- Floating damage numbers and player hit feedback
 ensureRemoteEvent("DamageIndicatorEvent")  -- server -> all clients (pos, amount, crit)
+ensureRemoteEvent("PlayerHitVFXEvent")      -- server -> damaged client (amount, sourcePosition)
 ensureRemoteEvent("PickupIndicatorEvent")  -- server -> client (kind, amount)
 ensureRemoteEvent("PickupToastEvent")      -- server -> client (bottom-left item toasts)
 ensureRemoteEvent("DropVisualEvent")       -- server -> all clients (drop spawn/update/remove sync)
