@@ -99,6 +99,10 @@ local MovementConfig = {
 	MinSlideCooldown = 0.45,
 	SlideLookFallbackMinSpeed = 2.5,
 	SlideCameraDrop = 1.15,
+
+	SlideAnimationId = "rbxassetid://78771843103599",
+	SlideAnimationFadeTime = 0.1,
+	SlideAnimationSpeed = 1,
 }
 
 return table.freeze(MovementConfig)
