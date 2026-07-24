@@ -139,6 +139,7 @@ NpcNavigationConfig.Profiles = {
 		ForwardTransitionProbe = 1.75,
 		EdgeTransitionProbe = 2.5,
 		AllowUntaggedCrawlable = false,
+		TerrainFloorNormalMinDot = 0.65,
 	},
 }
 

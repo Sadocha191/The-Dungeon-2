@@ -1,5 +1,4 @@
 local CollectionService = game:GetService("CollectionService")
-local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
 local NpcSurfaceNavigation = {}
@@ -7,6 +6,13 @@ local NpcSurfaceNavigation = {}
 local DEFAULT_NORMAL = Vector3.yAxis
 local DEFAULT_LOOK = Vector3.new(0, 0, -1)
 local EPSILON = 1e-4
+
+local crawlParams = RaycastParams.new()
+crawlParams.FilterType = Enum.RaycastFilterType.Exclude
+crawlParams.IgnoreWater = false
+crawlParams.RespectCanCollide = false
+
+local crawlExclusions = {}
 
 local metrics = {
 	raycastCount = 0,
@@ -39,30 +45,19 @@ local function findTaggedAncestor(instance: Instance, tag: string): boolean
 	return false
 end
 
-local function isCrawlable(npc: any, instance: Instance): boolean
-	if instance:IsA("Terrain") then
-		return true
-	end
+local function isCrawlable(npc: any, instance: Instance, normal: Vector3): boolean
 	if findTaggedAncestor(instance, "NpcCrawlable") or findTaggedAncestor(instance, "NpcWalkable") then
 		return true
 	end
-	return npc.navigationProfile.AllowUntaggedCrawlable == true
-end
-
-local function buildRaycastParams(npc: any): RaycastParams
-	local exclusions = { npc.model }
-	for _, player in ipairs(Players:GetPlayers()) do
-		if player.Character then
-			table.insert(exclusions, player.Character)
-		end
+	if instance:IsA("Terrain") then
+		local minFloorDot = math.clamp(
+			tonumber(npc.navigationProfile.TerrainFloorNormalMinDot) or 0.65,
+			0,
+			1
+		)
+		return normal:Dot(Vector3.yAxis) >= minFloorDot
 	end
-
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = exclusions
-	params.IgnoreWater = false
-	params.RespectCanCollide = false
-	return params
+	return npc.navigationProfile.AllowUntaggedCrawlable == true
 end
 
 local function castCrawlable(npc: any, origin: Vector3, direction: Vector3): RaycastResult?
@@ -70,8 +65,8 @@ local function castCrawlable(npc: any, origin: Vector3, direction: Vector3): Ray
 		return nil
 	end
 	metrics.raycastCount += 1
-	local result = Workspace:Raycast(origin, direction, buildRaycastParams(npc))
-	if result and isCrawlable(npc, result.Instance) then
+	local result = Workspace:Raycast(origin, direction, crawlParams)
+	if result and isCrawlable(npc, result.Instance, result.Normal) then
 		return result
 	end
 	return nil
@@ -194,14 +189,13 @@ local function tryOuterCorner(
 	local profile = npc.navigationProfile
 	local offset = getSurfaceOffset(npc)
 	local edgeProbe = math.max(0.5, tonumber(profile.EdgeTransitionProbe) or 2.5)
-	local diagonal = safeUnit(direction - currentNormal, -currentNormal)
 	local origins = {
 		candidate + currentNormal * (offset + edgeProbe * 0.25),
-		candidate + direction * edgeProbe + currentNormal * offset,
+		candidate + direction * (edgeProbe * 0.5) - currentNormal * (offset + edgeProbe * 0.5),
 	}
 	local directions = {
-		diagonal * (offset + edgeProbe * 2.5),
-		-currentNormal * (offset + edgeProbe * 2.5),
+		safeUnit(-direction - currentNormal * 0.35, -direction) * (offset + edgeProbe * 2.5),
+		-direction * (offset + edgeProbe * 2.5),
 	}
 
 	for _, origin in ipairs(origins) do
@@ -209,7 +203,11 @@ local function tryOuterCorner(
 			local result = castCrawlable(npc, origin, probeDirection)
 			if result then
 				local nextNormal = safeUnit(result.Normal, currentNormal)
-				if math.abs(nextNormal:Dot(currentNormal)) < 0.985 then
+				local isAdjacent = (result.Position - candidate).Magnitude <= offset + edgeProbe * 3
+				local facesTravelDirection = nextNormal:Dot(direction) >= 0.2
+				if isAdjacent
+					and facesTravelDirection
+					and math.abs(nextNormal:Dot(currentNormal)) < 0.985 then
 					metrics.outerCornerTransitions += 1
 					return result.Position + nextNormal * offset, nextNormal, result
 				end
@@ -238,8 +236,21 @@ local function commitSurface(
 	npc.surfaceNormal = normal
 end
 
-function NpcSurfaceNavigation.BeginTick(_alivePlayers: {any})
-	-- Surface movement has no per-NPC connections or asynchronous path jobs.
+function NpcSurfaceNavigation.BeginTick(alivePlayers: {any})
+	table.clear(crawlExclusions)
+	for _, folderName in ipairs({ "Enemies", "Mobs", "Drops", "SpellVFX" }) do
+		local instance = Workspace:FindFirstChild(folderName)
+		if instance then
+			table.insert(crawlExclusions, instance)
+		end
+	end
+	for _, info in ipairs(alivePlayers) do
+		local character = info.player and info.player.Character
+		if character then
+			table.insert(crawlExclusions, character)
+		end
+	end
+	crawlParams.FilterDescendantsInstances = crawlExclusions
 end
 
 function NpcSurfaceNavigation.Step(

@@ -102,11 +102,6 @@ local function collectKnownTags(model: Model, definitions: {[string]: any}, pref
 end
 
 local function resolveSystem(model: Model, config: {[string]: any}, defaultSystem: string): (string, boolean)
-	local explicit = SYSTEM_ALIASES[normalized(config.movementSystem)]
-	if explicit then
-		return explicit, true
-	end
-
 	local tags, unknown = collectKnownTags(model, NpcMovementSystemResolver.SystemTags, "NpcMovementSystem_")
 	if #unknown > 0 then
 		warnOnce(model, "unknown movement-system tag(s): " .. table.concat(unknown, ", ") .. "; using Legacy")
@@ -116,6 +111,12 @@ local function resolveSystem(model: Model, config: {[string]: any}, defaultSyste
 		warnOnce(model, "multiple movement-system tags: " .. table.concat(tags, ", ") .. "; using Legacy")
 		return "Legacy", false
 	end
+
+	local explicit = SYSTEM_ALIASES[normalized(config.movementSystem)]
+	if explicit then
+		return explicit, true
+	end
+
 	if #tags == 1 then
 		return NpcMovementSystemResolver.SystemTags[tags[1]], true
 	end
@@ -183,6 +184,10 @@ function NpcMovementSystemResolver.Resolve(model: Model, config: {[string]: any}
 	local system, systemValid = resolveSystem(model, config, defaultSystem or "Legacy")
 	local movementTag, movementDescriptor, movementValid = resolveMovement(model, config)
 	local combatTag, combatBehavior, combatValid = resolveCombat(model, config)
+	if system == "MovementV2" and movementValid and not movementDescriptor then
+		warnOnce(model, "MovementV2 requires exactly one recognized movement behavior; using Legacy")
+		movementValid = false
+	end
 
 	return {
 		System = system,

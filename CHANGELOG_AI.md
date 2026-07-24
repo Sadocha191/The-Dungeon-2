@@ -17,6 +17,7 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-07-24** — Poziom PR #133 integracja i testy switchable NPC MovementV2
 - **2026-07-20** — Poziom PR #132 usunięcie ReactiveGrassClient i ograniczenie kosztu HUD-u diagnostycznego
 - **2026-07-20** — PR #128 unified player profile, session leases and confirmed economy persistence
 - **2026-07-12** — Poziom PR #99 kierunek spawn NPC i orientacja Golem

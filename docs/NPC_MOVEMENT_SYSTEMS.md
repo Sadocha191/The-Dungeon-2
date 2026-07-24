@@ -23,11 +23,12 @@ Optional system tags:
 
 Resolution order:
 
-1. explicit registration config (`movementSystem`),
-2. one system tag on the NPC model,
-3. `MovementSystem` attribute,
-4. `NpcNavigationConfig.ActiveSystem`,
-5. fail-safe `Legacy`.
+1. reject unknown or conflicting `NpcMovementSystem_*` tags,
+2. explicit registration config (`movementSystem`),
+3. one system tag on the NPC model,
+4. `MovementSystem` attribute,
+5. `NpcNavigationConfig.ActiveSystem`,
+6. fail-safe `Legacy`.
 
 Unknown or conflicting system tags fail closed to `Legacy`. The selection affects future spawns only.
 
@@ -47,6 +48,17 @@ Movement behavior is not selected by NPC name. A new model can reuse an existing
 
 Models with no movement tag keep their existing `movementProfile`, `movementMode`, `CanFly`, or `MobConfig` registration values. Unknown or multiple `NpcMove_*` tags produce a warning and fail closed to Legacy behavior.
 
+Active `Level` template assignments:
+
+| Templates | System | Movement | Combat |
+| --- | --- | --- | --- |
+| Slime | `MovementV2` | `SurfaceCrawler` | none |
+| Goblin | `MovementV2` | `GroundRunner` | `LeapExplode` |
+| Demon, Harp, LandShark, Skeleton, Warewolf, Zombie | `Legacy` | `GroundWalker` | none |
+| Grzyb, Ent, Golem, Knight | `Legacy` | `HeavyWalker` | none |
+
+The active place has no production flying template. Do not add a synthetic `NpcMove_Flying` assignment only to satisfy a test matrix.
+
 ## Surface crawler
 
 `NpcMove_SurfaceCrawler` only activates the new crawler when its resolved system is `MovementV2`. In Legacy it deliberately falls back to `GroundSmall`.
@@ -62,11 +74,11 @@ The crawler:
 
 Crawlable geometry must be one of:
 
-- Roblox Terrain,
 - an instance or ancestor tagged `NpcCrawlable`,
-- an instance or ancestor tagged `NpcWalkable`.
+- an instance or ancestor tagged `NpcWalkable`,
+- an untagged Roblox Terrain face whose upward normal meets `TerrainFloorNormalMinDot` (`0.65` by default).
 
-Untagged parts are rejected by default. `NpcSurfaceOffset` can be set on a model to tune its distance from the surface.
+The Terrain exception is floor compatibility, not permission to crawl the whole map. Untagged steep Terrain faces, walls, ceilings and Parts are rejected by default; tag only intended crawler geometry. `NpcSurfaceOffset` can be set on a model to tune its distance from the surface.
 
 ## Combat behavior tags
 
@@ -110,6 +122,8 @@ Recommended initial setup:
 | Goblin | optional/global | `NpcMove_GroundRunner` | `NpcCombat_LeapExplode` |
 | Bat | optional/global | `NpcMove_Flying` | none |
 | Ent / Golem | optional/global | `NpcMove_HeavyWalker` | none |
+
+The active `Level` Slime template uses `NpcSurfaceOffset = 1`.
 
 ## Studio validation checklist
 

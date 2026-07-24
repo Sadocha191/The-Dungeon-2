@@ -1,3 +1,4 @@
+local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
@@ -105,6 +106,7 @@ local function createExplosionVisual(origin: Vector3)
 	explosion.BlastPressure = 0
 	explosion.DestroyJointRadiusPercent = 0
 	explosion.Parent = Workspace
+	Debris:AddItem(explosion, 1)
 end
 
 local function detonate(npc: any, state: {[string]: any}, callbacks: {[string]: any}?)
@@ -112,15 +114,25 @@ local function detonate(npc: any, state: {[string]: any}, callbacks: {[string]: 
 		return
 	end
 	state.detonated = true
+	state.phase = "Detonate"
 	metrics.detonations += 1
 	local origin = npc.position
 	damagePlayers(npc, origin)
 	createExplosionVisual(origin)
 	if callbacks and type(callbacks.kill) == "function" then
-		callbacks.kill({ cause = "LeapExplode", position = origin })
+		callbacks.kill({
+			cause = "LeapExplode",
+			position = origin,
+			suppressRewards = true,
+		})
 	else
-		NpcLifecycle.Kill(npc, { cause = "LeapExplode", position = origin })
+		NpcLifecycle.Kill(npc, {
+			cause = "LeapExplode",
+			position = origin,
+			suppressRewards = true,
+		})
 	end
+	state.phase = "Dead"
 end
 
 function LeapExplodeBehavior.Step(
