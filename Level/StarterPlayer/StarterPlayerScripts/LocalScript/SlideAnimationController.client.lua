@@ -14,6 +14,12 @@ if not moduleFolder then
 end
 
 local MovementConfig = require(moduleFolder:WaitForChild("MovementConfig"))
+local slideActiveAttribute = MovementConfig.SlideActiveAttribute
+
+if type(slideActiveAttribute) ~= "string" or slideActiveAttribute == "" then
+	warn("[SlideAnimation] Slide state attribute is not configured.")
+	return
+end
 
 local humanoidConnection: RBXScriptConnection? = nil
 local deathConnection: RBXScriptConnection? = nil
@@ -78,8 +84,7 @@ local function playSlideAnimation(humanoid: Humanoid)
 end
 
 local function updateSlideAnimation(humanoid: Humanoid)
-	local configuredDrop = math.max(0.1, tonumber(MovementConfig.SlideCameraDrop) or 1.15)
-	local isSliding = humanoid.Health > 0 and humanoid.CameraOffset.Y <= -(configuredDrop * 0.5)
+	local isSliding = humanoid.Health > 0 and humanoid:GetAttribute(slideActiveAttribute) == true
 
 	if isSliding then
 		playSlideAnimation(humanoid)
@@ -108,7 +113,7 @@ local function bindCharacter(character: Model)
 		return
 	end
 
-	humanoidConnection = humanoid:GetPropertyChangedSignal("CameraOffset"):Connect(function()
+	humanoidConnection = humanoid:GetAttributeChangedSignal(slideActiveAttribute):Connect(function()
 		updateSlideAnimation(humanoid)
 	end)
 	deathConnection = humanoid.Died:Connect(stopSlideAnimation)

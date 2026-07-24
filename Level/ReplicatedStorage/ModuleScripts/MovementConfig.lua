@@ -100,6 +100,7 @@ local MovementConfig = {
 	SlideLookFallbackMinSpeed = 2.5,
 	SlideCameraDrop = 1.15,
 
+	SlideActiveAttribute = "MovementSlideActive",
 	SlideAnimationId = "rbxassetid://78771843103599",
 	SlideAnimationFadeTime = 0.1,
 	SlideAnimationSpeed = 1,
