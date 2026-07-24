@@ -6,6 +6,7 @@ local VfxTemplatePlayer = {}
 
 local DEFAULT_EMISSION_DURATION = 0.18
 local DEFAULT_CLEANUP_DELAY = 3
+local DEFAULT_BURST_COUNT = 6
 local CAMERA_BIND_NAME = "VfxTemplatePlayerCameraImpulse"
 local MAX_CAMERA_IMPULSES = 8
 
@@ -52,20 +53,24 @@ local function setCollisionDefaults(part)
 	part.Massless = true
 end
 
+local function weldPartToAnchor(part, anchorTo)
+	part.Anchored = false
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Name = "VfxAnchorWeld"
+	weld.Part0 = anchorTo
+	weld.Part1 = part
+	weld.Parent = part
+end
+
 local function placeClone(clone, worldCFrame, anchorTo)
 	if clone:IsA("BasePart") then
 		setCollisionDefaults(clone)
 		clone.CFrame = worldCFrame
 
 		if anchorTo and anchorTo:IsA("BasePart") then
-			clone.Anchored = false
 			clone.CFrame = anchorTo.CFrame
-
-			local weld = Instance.new("WeldConstraint")
-			weld.Name = "VfxAnchorWeld"
-			weld.Part0 = anchorTo
-			weld.Part1 = clone
-			weld.Parent = clone
+			weldPartToAnchor(clone, anchorTo)
 		else
 			clone.Anchored = true
 		end
@@ -73,17 +78,31 @@ local function placeClone(clone, worldCFrame, anchorTo)
 	end
 
 	if clone:IsA("Model") then
+		clone:PivotTo(worldCFrame)
 		for _, descendant in ipairs(clone:GetDescendants()) do
 			if descendant:IsA("BasePart") then
 				setCollisionDefaults(descendant)
-				descendant.Anchored = true
+				if anchorTo and anchorTo:IsA("BasePart") then
+					weldPartToAnchor(descendant, anchorTo)
+				else
+					descendant.Anchored = true
+				end
 			end
 		end
-		clone:PivotTo(worldCFrame)
 	end
 end
 
-local function resolveEmitCount(emitter, emissionDuration)
+local function resolveEmitCount(emitter, emissionDuration, emitCounts)
+	if typeof(emitCounts) == "table" then
+		local explicit = emitCounts[emitter.Name]
+		if typeof(explicit) ~= "number" then
+			explicit = emitCounts.Default
+		end
+		if typeof(explicit) == "number" and explicit > 0 then
+			return math.clamp(math.floor(explicit + 0.5), 1, 200)
+		end
+	end
+
 	local configured = readNumber(emitter, {
 		"EmitCount",
 		"Emit",
@@ -91,30 +110,41 @@ local function resolveEmitCount(emitter, emissionDuration)
 		"BurstCount",
 	}, nil)
 	if configured and configured > 0 then
-		return math.max(1, math.floor(configured + 0.5))
+		return math.clamp(math.floor(configured + 0.5), 1, 200)
 	end
 
 	if emitter.Rate > 0 then
 		return math.clamp(math.floor((emitter.Rate * emissionDuration) + 0.5), 1, 120)
 	end
-	return 1
+	return DEFAULT_BURST_COUNT
 end
 
-local function startVisualObjects(clone, emissionDuration)
+local function visitVisualObjects(root, callback)
+	callback(root)
+	for _, descendant in ipairs(root:GetDescendants()) do
+		callback(descendant)
+	end
+end
+
+local function startVisualObjects(clone, emissionDuration, emitCounts)
 	local longestLifetime = emissionDuration
 	local longestSound = 0
 
-	for _, descendant in ipairs(clone:GetDescendants()) do
+	visitVisualObjects(clone, function(descendant)
 		if descendant:IsA("ParticleEmitter") then
 			longestLifetime = math.max(longestLifetime, emissionDuration + descendant.Lifetime.Max)
-			if descendant.Enabled then
+
+			local wasEnabled = descendant.Enabled
+			descendant.Enabled = false
+			descendant:Emit(resolveEmitCount(descendant, emissionDuration, emitCounts))
+
+			if wasEnabled and descendant.Rate > 0 then
+				descendant.Enabled = true
 				task.delay(emissionDuration, function()
 					if descendant.Parent then
 						descendant.Enabled = false
 					end
 				end)
-			else
-				descendant:Emit(resolveEmitCount(descendant, emissionDuration))
 			end
 		elseif descendant:IsA("Trail") or descendant:IsA("Beam") then
 			descendant.Enabled = true
@@ -127,7 +157,7 @@ local function startVisualObjects(clone, emissionDuration)
 			descendant:Play()
 			longestSound = math.max(longestSound, descendant.TimeLength)
 		end
-	end
+	end)
 
 	return math.max(longestLifetime + 0.25, longestSound + 0.25)
 end
@@ -243,11 +273,11 @@ function VfxTemplatePlayer.Play(template, worldCFrame, options)
 
 	local emissionDuration = math.max(0.01, tonumber(options.emissionDuration)
 		or readNumber(template, { "EmissionDuration", "Duration" }, DEFAULT_EMISSION_DURATION))
-	local visualLifetime = startVisualObjects(clone, emissionDuration)
+	local visualLifetime = startVisualObjects(clone, emissionDuration, options.emitCounts)
 	local cleanupDelay = math.max(0.1, tonumber(options.cleanupDelay) or visualLifetime or DEFAULT_CLEANUP_DELAY)
 
 	if options.playCamera == true then
-		local cameraData = template:FindFirstChild("CameraData", true)
+		local cameraData = clone:FindFirstChild("CameraData", true)
 		VfxTemplatePlayer.PlayCamera(cameraData, options.cameraFallback)
 	end
 
