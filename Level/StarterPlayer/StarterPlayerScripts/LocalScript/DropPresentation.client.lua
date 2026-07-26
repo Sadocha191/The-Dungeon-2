@@ -114,13 +114,15 @@ local function rebuildFramePlayerCache(now: number)
 			local root = character:FindFirstChild("HumanoidRootPart")
 			local humanoid = character:FindFirstChildOfClass("Humanoid")
 			if root and root:IsA("BasePart") and humanoid and humanoid.Health > 0 then
+				local walkSpeed = humanoid.WalkSpeed
+				local velocity = root.AssemblyLinearVelocity
 				local state = {
 					player = plr,
 					root = root,
 					humanoid = humanoid,
 					position = root.Position,
-					walkSpeed = humanoid.WalkSpeed,
-					velocity = root.AssemblyLinearVelocity,
+					attractSpeed = DropAttractionConfig.GetSpeed(walkSpeed, velocity, false),
+					globalAttractSpeed = DropAttractionConfig.GetSpeed(walkSpeed, velocity, true),
 					pickupMult = getPickupRangeMult(plr),
 					magnetActive = (tonumber(plr:GetAttribute(GLOBAL_MAGNET_ATTR)) or 0) > now,
 				}
@@ -564,11 +566,9 @@ RunService.RenderStepped:Connect(function(dt)
 				local toTarget = target - entry.corePos
 				local toTargetDist = toTarget.Magnitude
 				if toTargetDist > 0 then
-					local attractSpeed = DropAttractionConfig.GetSpeed(
-						targetState.walkSpeed,
-						targetState.velocity,
-						usingGlobalMagnet
-					)
+					local attractSpeed = usingGlobalMagnet
+						and targetState.globalAttractSpeed
+						or targetState.attractSpeed
 					local step = math.min(toTargetDist, attractSpeed * dt)
 					entry.corePos += toTarget.Unit * step
 					resetGrounding(entry)

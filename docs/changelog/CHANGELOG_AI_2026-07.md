@@ -7,7 +7,7 @@
 - Made drop attraction fast enough to overtake sprint, slide, downhill, and momentum movement by adding a 40 stud/s margin over the target player's actual horizontal `AssemblyLinearVelocity`.
 - Added `DropAttractionConfig` as the single owner of attraction-speed tuning and calculation.
 - Required the same shared calculation from the authoritative server `Heartbeat` and client `RenderStepped` presentation so rendered orbs no longer trail the authoritative position because of a slower client-only formula.
-- Cached normal and global-magnet attraction speeds once per alive player snapshot, avoiding redundant velocity reads and magnitude calculations for every attracted drop.
+- Cached normal and global-magnet attraction speeds once per alive player snapshot on both server and client, avoiding redundant velocity reads and magnitude calculations for every attracted drop.
 - Preserved pickup radii, global magnet behavior, collection animation, and server-authoritative reward ownership.
 
 ### Files
@@ -24,6 +24,7 @@
 - Exact shared-config cases passed in Edit: stationary `40`, 24 stud/s sprint `64`, 80 stud/s slide `120`, pure vertical velocity `40`, normal global magnet `180`, and 200 stud/s global-magnet target `240`.
 - Level Play compiled both runtime owners and the client confirmed it required the shared config and returned the same slide/global-magnet values.
 - Injected 300 non-authoritative presentation-only drops outside pickup range; the client rendered all 300 and returned to its 32 pre-existing visuals after one batched removal payload.
+- A final source-contract probe found exactly two `GetSpeed` calls and one velocity read in the per-player cache, with zero per-drop reads of the cached movement inputs. A separate 300-drop in-range payload rendered all 300 visuals and removed all 300 cleanly.
 - No drop-service or drop-presentation error appeared. The existing unrelated terrain-generator toolbar error and loading preload timeouts remained.
 - `git diff --check` passed in final validation.
 
@@ -31,7 +32,7 @@
 
 - The existing single server `Heartbeat` remains the authoritative owner for all active drops; no per-drop connection was added.
 - The existing single client `RenderStepped` remains the presentation owner for all active visuals; no per-drop connection was added.
-- Server player snapshots compute both shared attraction speeds once per alive player per frame; each attracted drop selects one cached number. The client snapshot continues to cache the same movement inputs once per frame for presentation.
+- Server and client player snapshots each compute both shared attraction speeds once per alive player per frame; every attracted drop then selects one cached number.
 - No remote, persistent-data field, teleport field, reward owner, or new `_G` dependency was added.
 
 ### Not verified
