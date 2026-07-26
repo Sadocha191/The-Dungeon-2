@@ -256,8 +256,21 @@ function WorldBounds.RaycastTerrainAtXZ(x: number, z: number, options)
 		return nil
 	end
 
+	-- Dry ground is the safe default for gameplay spawns. Water must stay in the
+	-- ray so it can reject the sample instead of silently selecting the seabed.
+	local allowWater = options.allowWater == true
+	local ignoreWater = allowWater and options.ignoreWater == true
 	local origin = Vector3.new(x, originY, z)
-	return WorldBounds.RaycastTerrain(origin, Vector3.new(0, -distance, 0), options.raycastIgnoreInstances, options.ignoreWater)
+	local hit = WorldBounds.RaycastTerrain(
+		origin,
+		Vector3.new(0, -distance, 0),
+		options.raycastIgnoreInstances,
+		ignoreWater
+	)
+	if hit and not allowWater and hit.Material == Enum.Material.Water then
+		return nil
+	end
+	return hit
 end
 
 function WorldBounds.IsAreaClear(pos: Vector3, radius: number, height: number?, ignoreInstances: { Instance }?)
