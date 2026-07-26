@@ -23,19 +23,21 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import textwrap
           import traceback
 
+          error_path = Path('.github/patch-error.txt')
+          error_path.unlink(missing_ok=True)
           try:
               source = Path('.github/workflows/apply-npc-obstacle-traversal.yml').read_text(encoding='utf-8')
               marker = "          python3 - <<'PY'\n"
               start = source.index(marker) + len(marker)
               end = source.index("\n          PY\n", start)
-              script = textwrap.dedent(source[start:end])
+              lines = source[start:end].splitlines()
+              script = "\n".join(line[10:] if line.startswith("          ") else line for line in lines)
               exec(compile(script, 'apply_npc_obstacle_traversal.py', 'exec'), {})
               Path('.github/workflows/apply-npc-traversal-pr.yml').unlink(missing_ok=True)
           except Exception:
-              Path('.github/patch-error.txt').write_text(traceback.format_exc(), encoding='utf-8')
+              error_path.write_text(traceback.format_exc(), encoding='utf-8')
           PY
 
           if test -f .github/patch-error.txt; then
