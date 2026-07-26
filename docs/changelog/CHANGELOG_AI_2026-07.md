@@ -1,5 +1,50 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-26 - Four Peaks and Level mission pool rebalance (PR #143)
+
+### Summary
+
+- Replaced the 30-daily / 15-weekly mission pools with 12 focused daily and 10 focused weekly definitions.
+- Kept selection counts at 6 daily and 3 weekly.
+- Tuned daily goals toward roughly one normal run and weekly goals toward a few runs, removing objectives that rewarded taking damage, low health, no-hit play, reroll/skip restrictions, win streaks, and extreme multikills.
+- Reduced weekly rewards with the lower requirements to limit economy inflation.
+- Kept the complete configuration byte-identical between Four Peaks and Level.
+
+### Files
+
+- Updated `Four Peaks/ReplicatedStorage/ModuleScripts/MissionConfigs.lua`.
+- Updated `Level/ReplicatedStorage/ModuleScripts/MissionConfigs.lua`.
+- Updated this monthly changelog.
+
+### Studio and validation
+
+- Synchronized and required `MissionConfigs` in both active Studio places.
+- Both places returned 12 unique daily and 10 unique weekly definitions with valid positive `Counter` targets, rewards, types, and unique IDs/groups.
+- The two repository files share blob `22c82f5c947efd6aaab39a6284e2426166745cff`; normalized source length is 6,260 bytes with checksums `1646592241` / `13883299`.
+- Four Peaks Play returned 6 daily and 3 weekly missions through `RF_GetMissions`, with unique IDs and valid goal payloads.
+- Level Play returned 6 unique daily missions through `GetDailyMissions`.
+- All selected goal keys were audited against existing mission progress/service counters.
+- Neither Play session produced a mission-config or mission-service error. Existing unrelated Four Peaks `BlacksmithUI` and Level terrain-generator/preload warnings remained.
+- `git diff --check` passed in final validation.
+
+### Runtime loops and cost
+
+- No loop, event connection, remote, DataStore schema, teleport field, claim flow, progress owner, or `_G` dependency changed.
+- Pool selection remains a seeded O(P) shuffle at daily/weekly reset or invalidation, with smaller P values (12 daily and 10 weekly instead of 30 and 15).
+- Existing selection invalidation repicks stored rotations with removed mission IDs and marks the existing mission state dirty through its established owner.
+
+### Not verified
+
+- Real goal progression, completing and claiming rewards, cross-place return, rejoin persistence, and multiplayer were not exercised because those paths mutate player progress/economy.
+- Final thresholds were not compared with production telemetry; silver earned, elite count, and total damage remain the primary tuning risks.
+- Studio screenshot and pointer-input tools timed out, so the mission UI was validated through remote payloads rather than physical interaction.
+
+### Risks and rollback
+
+- Thresholds are balance assumptions until production telemetry confirms typical run output.
+- Reduced pool variety increases how often the same mission can recur across rotations even though IDs/groups are unique within the pool.
+- Rollback by reverting PR #143 and restoring the previous `MissionConfigs` source in both places. Stored selections containing the new-only IDs will be repicked by the existing invalidation path; no DataStore migration is required.
+
 ## 2026-07-24 - Poziom slide animation integration (PR #134)
 
 ### Summary
