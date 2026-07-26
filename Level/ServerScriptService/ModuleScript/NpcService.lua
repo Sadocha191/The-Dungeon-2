@@ -380,6 +380,7 @@ local function updateNpc(
 		writeStateAttributes(npc)
 		return
 	end
+	NpcGroundNavigation.SetPaused(npc, npc.freezeEnd > now, now)
 
 	if shouldDistanceDespawn(npc, alivePlayers) then
 		despawnNpcRecord(npc)
@@ -995,6 +996,7 @@ local targetingAccumulator = 1 / NpcNavigationConfig.Scheduler.TargetingHz
 local formationAccumulator = 1 / NpcNavigationConfig.Scheduler.FormationHz
 local cachedAlivePlayers = {}
 local cachedEngagementSlots = {}
+local lastNavigationPauseState = false
 
 RunService.Heartbeat:Connect(function(dt)
 	local now = os.clock()
@@ -1027,6 +1029,13 @@ RunService.Heartbeat:Connect(function(dt)
 	if movementAccumulator >= movementInterval then
 		local movementDt = math.min(movementAccumulator, movementInterval * 2)
 		movementAccumulator %= movementInterval
+		local navigationPaused = pauseState.Value
+		if navigationPaused ~= lastNavigationPauseState then
+			for _, npc in NpcRegistry.Pairs() do
+				NpcGroundNavigation.SetPaused(npc, navigationPaused, now)
+			end
+			lastNavigationPauseState = navigationPaused
+		end
 		NpcGroundNavigation.BeginTick(cachedAlivePlayers)
 		NpcFlightNavigation.BeginTick(cachedAlivePlayers)
 		NpcGroundNavigation.StepScheduler(now)

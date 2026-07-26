@@ -763,6 +763,25 @@ function NpcGroundNavigation.StepScheduler(now: number)
 	end
 end
 
+function NpcGroundNavigation.SetPaused(npc, paused: boolean, now: number)
+	local nav = npc.navigation
+	local traversal = nav and nav.traversal
+	if not traversal then
+		return
+	end
+	if paused then
+		traversal.pausedAt = traversal.pausedAt or now
+		return
+	end
+	if not traversal.pausedAt then
+		return
+	end
+	local pausedDuration = math.max(0, now - traversal.pausedAt)
+	traversal.startedAt += pausedDuration
+	traversal.endsAt += pausedDuration
+	traversal.pausedAt = nil
+end
+
 function NpcGroundNavigation.Invalidate(npc, reason: string?)
 	local nav = npc.navigation
 	if nav then
@@ -840,6 +859,7 @@ function NpcGroundNavigation.GetDebug(npc): {[string]: any}?
 			source = nav.traversal.source,
 			landingPosition = nav.traversal.landingPosition,
 			complete = nav.traversal.complete,
+			paused = nav.traversal.pausedAt ~= nil,
 		} or nil,
 	}
 end

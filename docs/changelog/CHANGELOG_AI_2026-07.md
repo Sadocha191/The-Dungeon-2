@@ -7,6 +7,7 @@
 - Added persistent kinematic `Hop` traversal for `GroundSmall` NPCs across valid `Jump` transitions and low local obstacles such as chests, fallen logs and small decorative collision.
 - Added a separate `Stride` traversal for `GroundLarge` NPCs, with a larger ordinary step, validated long stride, higher terrain-rise tolerance and no classic jump behavior.
 - Prevented the final ground constraint from deleting the airborne Y component while a traversal is active.
+- Suspended the active traversal clock during `PauseState` and freeze, shifting both traversal timestamps on resume so an NPC continues from its current arc position instead of jumping to the landing position.
 - Kept tall walls, forbidden surfaces, missing landing surfaces and excessive rises/drops blocked so pathfinding can route around them.
 
 ### Files
@@ -14,6 +15,7 @@
 - Updated `Level/ServerScriptService/ModuleScript/NpcNavigationConfig.lua`.
 - Updated `Level/ServerScriptService/ModuleScript/NpcGroundSurface.lua`.
 - Updated `Level/ServerScriptService/ModuleScript/NpcGroundNavigation.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/NpcService.lua`.
 - Updated `docs/NPC_NAVIGATION.md`, `CHANGELOG_AI.md` and this monthly changelog.
 
 ### Runtime cost and cleanup
@@ -21,18 +23,25 @@
 - No new `Heartbeat`, `Stepped`, `RenderStepped`, remote, persistent-data field or `_G` dependency was added.
 - Traversal runs inside the existing centralized 12 Hz NPC movement scheduler.
 - Normal clear movement keeps the existing probe cost. Extra landing probes and at most three traversal `Blockcast` calls occur only when a jump waypoint or blocked local step attempts a hop/stride.
+- Pause transitions reuse the centralized movement tick and visit the NPC registry once only when the global pause value changes. Freeze suspension is an O(1) check inside the existing per-NPC update.
 - Traversal state is stored on the existing per-NPC navigation record and cleared on landing or NPC cleanup.
 
 ### Validation
 
-- Patch application assertions and `git diff --check` run in the branch workflow.
-- Static review verifies that `NpcGroundNavigation.Step` keeps its public return shape and `NpcService` requires no scheduler/signature change.
-- Roblox Studio/MCP was unavailable in this session, so live Play validation, animation appearance and tuning under a large horde remain required before merge/publish.
+- Active Studio: `Level`, PlaceId `113361902471683`. Exact source parity passed for `NpcNavigationConfig` (`4745` bytes), `NpcGroundSurface` (`21310`), `NpcGroundNavigation` (`28350`) and `NpcService` (`32525`).
+- An isolated clock test paused a traversal at `100.10`, resumed it at `105.10`, and verified `startedAt=105.00`, `endsAt=105.42`, an unchanged step position and idempotent repeated pause/resume calls.
+- A live registered `GroundSmall` NPC paused in mid-hop for 1.5 s with zero position delta. It resumed by `2.069` studs rather than teleporting to its landing and then completed normally.
+- Freeze also suspended the arc with zero movement and an active pause marker. Slow completed the current traversal without an invalid position. A strong lateral impulse stayed inside the validated corridor. Death and explicit despawn both cleared the navigation record, while a target change completed the current traversal and then adopted the new target.
+- Separate physical validation cases passed for a `GroundSmall` chest hop, fallen-log hop, small-rock hop, `GroundLarge` stride, uneven `1.5`-stud terrain rise and a `0.75`-stud stair step.
+- Tall walls returned `traversal_blocked`; a traversal beyond maximum width returned `traversal_too_far`; a missing landing footprint returned `missing_landing_surface`; a real temporary Terrain water landing returned `water_forbidden`; a modifier-protected surface returned `surface_forbidden`; and a physical `45`-degree wedge returned `slope_too_steep`.
+- A transient 250-NPC Play stress test ran 72 movement ticks over 6 s: average movement tick `0.917 ms`, observed global maximum `8.323 ms`, `3032` raycasts (`505.3/s`), `806` blockcasts including `18` traversal blockcasts, `6` traversal starts, `6` completions and `0` failures. All temporary NPCs, parts, tags and Terrain water were removed or discarded with the Play session.
+- The console contained no NPC navigation error. The unrelated pre-existing `Hybrid Terrain Hex Generator:16` plugin-context error and bounded loading preload timeouts remained.
 
 ### Risks and rollback
 
 - Hop/stride tuning is intentionally conservative but may require per-map adjustment for unusually wide chest/log meshes or very uneven proxy geometry.
 - A collidable decorative object taller than the configured obstacle limit remains a real blocker and must be routed around or have its collision/proxy corrected.
+- The reported maximum movement tick is the maximum since the Play session began rather than an interval-reset maximum; the average is isolated to the 72-tick stress window.
 - Roll back by reverting this PR. No data migration, remote rollback or client rollback is required.
 
 ## 2026-07-24 - Poziom slide animation integration (PR #134)
