@@ -39,6 +39,7 @@ local PICKUP_DIST = 2.5
 local ATTRACT_SPEED_MULT = 1.15
 local ATTRACT_SPEED_BONUS = 4
 local ATTRACT_SPEED_MIN = 22
+local ATTRACT_SPEED_CATCHUP_BONUS = 40
 local GLOBAL_MAGNET_SPEED = 180
 local PICKUP_ANIM_DURATION = 0.24
 local ORB_SPAWN_HEIGHT = 2.5
@@ -351,9 +352,12 @@ RunService.Heartbeat:Connect(function(dt)
 			local toTargetDist = toTarget.Magnitude
 			if toTargetDist > 0 then
 				local walkSpeed = snapshot.humanoid.WalkSpeed or 16
+				local rootVelocity = snapshot.hrp.AssemblyLinearVelocity
+				local horizontalSpeed = Vector3.new(rootVelocity.X, 0, rootVelocity.Z).Magnitude
+				local catchupSpeed = horizontalSpeed + ATTRACT_SPEED_CATCHUP_BONUS
 				local attractSpeed = usingGlobalMagnet
-					and math.max(GLOBAL_MAGNET_SPEED, walkSpeed * 6)
-					or math.max(ATTRACT_SPEED_MIN, walkSpeed * ATTRACT_SPEED_MULT + ATTRACT_SPEED_BONUS)
+					and math.max(GLOBAL_MAGNET_SPEED, walkSpeed * 6, catchupSpeed)
+					or math.max(ATTRACT_SPEED_MIN, walkSpeed * ATTRACT_SPEED_MULT + ATTRACT_SPEED_BONUS, catchupSpeed)
 				local step = math.min(toTargetDist, attractSpeed * math.max(0, dt))
 				meta.corePos += toTarget.Unit * step
 				meta.needsGroundSettle = true
