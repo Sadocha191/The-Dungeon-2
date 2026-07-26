@@ -7,6 +7,9 @@ local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local RunProgressApi = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunProgressApi"))
+local DropAttractionConfig = require(
+	ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("DropAttractionConfig")
+)
 
 local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 if not remotes then
@@ -36,11 +39,6 @@ local lastDropSyncRequestAt = {}
 
 local ATTRACT_RADIUS = 8
 local PICKUP_DIST = 2.5
-local ATTRACT_SPEED_MULT = 1.15
-local ATTRACT_SPEED_BONUS = 4
-local ATTRACT_SPEED_MIN = 22
-local ATTRACT_SPEED_CATCHUP_BONUS = 40
-local GLOBAL_MAGNET_SPEED = 180
 local PICKUP_ANIM_DURATION = 0.24
 local ORB_SPAWN_HEIGHT = 2.5
 local ORB_HALF_HEIGHT = 0.5
@@ -351,13 +349,11 @@ RunService.Heartbeat:Connect(function(dt)
 			local toTarget = target - meta.corePos
 			local toTargetDist = toTarget.Magnitude
 			if toTargetDist > 0 then
-				local walkSpeed = snapshot.humanoid.WalkSpeed or 16
-				local rootVelocity = snapshot.hrp.AssemblyLinearVelocity
-				local horizontalSpeed = Vector3.new(rootVelocity.X, 0, rootVelocity.Z).Magnitude
-				local catchupSpeed = horizontalSpeed + ATTRACT_SPEED_CATCHUP_BONUS
-				local attractSpeed = usingGlobalMagnet
-					and math.max(GLOBAL_MAGNET_SPEED, walkSpeed * 6, catchupSpeed)
-					or math.max(ATTRACT_SPEED_MIN, walkSpeed * ATTRACT_SPEED_MULT + ATTRACT_SPEED_BONUS, catchupSpeed)
+				local attractSpeed = DropAttractionConfig.GetSpeed(
+					snapshot.humanoid.WalkSpeed,
+					snapshot.hrp.AssemblyLinearVelocity,
+					usingGlobalMagnet
+				)
 				local step = math.min(toTargetDist, attractSpeed * math.max(0, dt))
 				meta.corePos += toTarget.Unit * step
 				meta.needsGroundSettle = true

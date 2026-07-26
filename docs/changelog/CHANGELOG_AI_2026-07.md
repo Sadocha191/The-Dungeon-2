@@ -1,5 +1,51 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-26 - Level velocity-aware drop attraction (PR #137)
+
+### Summary
+
+- Made drop attraction fast enough to overtake sprint, slide, downhill, and momentum movement by adding a 40 stud/s margin over the target player's actual horizontal `AssemblyLinearVelocity`.
+- Added `DropAttractionConfig` as the single owner of attraction-speed tuning and calculation.
+- Required the same shared calculation from the authoritative server `Heartbeat` and client `RenderStepped` presentation so rendered orbs no longer trail the authoritative position because of a slower client-only formula.
+- Preserved pickup radii, global magnet behavior, collection animation, and server-authoritative reward ownership.
+
+### Files
+
+- Added `Level/ReplicatedStorage/ModuleScripts/DropAttractionConfig.lua`.
+- Updated `Level/ServerScriptService/Script/DropService.lua`.
+- Updated `Level/StarterPlayer/StarterPlayerScripts/LocalScript/DropPresentation.client.lua`.
+- Updated this monthly changelog.
+
+### Studio and validation
+
+- Active Studio: `Level`.
+- Created/synchronized the shared config module and synchronized both runtime owners before Play.
+- Exact shared-config cases passed in Edit: stationary `40`, 24 stud/s sprint `64`, 80 stud/s slide `120`, pure vertical velocity `40`, normal global magnet `180`, and 200 stud/s global-magnet target `240`.
+- Level Play compiled both runtime owners and the client confirmed it required the shared config and returned the same slide/global-magnet values.
+- Injected 300 non-authoritative presentation-only drops outside pickup range; the client rendered all 300 and returned to its 32 pre-existing visuals after one batched removal payload.
+- No drop-service or drop-presentation error appeared. The existing unrelated terrain-generator toolbar error and loading preload timeouts remained.
+- `git diff --check` passed in final validation.
+
+### Runtime loops and cost
+
+- The existing single server `Heartbeat` remains the authoritative owner for all active drops; no per-drop connection was added.
+- The existing single client `RenderStepped` remains the presentation owner for all active visuals; no per-drop connection was added.
+- Each actively attracted drop now performs one shared O(1) horizontal-speed magnitude and maximum calculation on both server and client.
+- Player snapshots still cache root, Humanoid, position, and movement values once per frame. The client snapshot adds one cached velocity value.
+- No remote, persistent-data field, teleport field, reward owner, or new `_G` dependency was added.
+
+### Not verified
+
+- Physical sprint/slide/downhill inputs and the complete pickup/grant animation could not be automated because Studio screenshot/input tools timed out.
+- The server's private active-drop table could not be inspected from the MCP command environment; authoritative behavior was validated through the shared module contract and clean runtime compilation.
+- Multiplayer latency and a sustained 300-drop server-authoritative stress run were not measured.
+
+### Risks and rollback
+
+- Attraction now has a minimum effective catch-up speed of 40 stud/s even for a stationary target, intentionally making ordinary nearby pickups faster than before.
+- Extremely high replicated player velocity increases attraction speed without an explicit cap so the orb retains the promised 40 stud/s closing margin; server collection and rewards remain authoritative.
+- Rollback by reverting PR #137, deleting `DropAttractionConfig` from Level Studio, and restoring both previous runtime sources. No data or remote rollback is required.
+
 ## 2026-07-24 - Poziom slide animation integration (PR #134)
 
 ### Summary
