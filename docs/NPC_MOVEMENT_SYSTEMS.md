@@ -88,16 +88,15 @@ Combat behavior is separate from movement. Supported tag:
 
 This enables the server-authoritative Goblin sequence:
 
-`Chase -> Arm -> Leap -> Detonate -> Dead`
+`Chase -> Leap -> Detonate -> Dead`
 
-The behavior continues an armed/leaping sequence even if the original target disappears, damages each eligible player at most once per detonation, performs line-of-sight validation, creates a non-physical explosion visual, and then kills and deregisters the NPC through the existing lifecycle.
+The Goblin starts the leap during the same shared movement tick in which it reaches trigger range, without a stationary aiming phase. The detonation damages each eligible player and living NPC at most once, performs line-of-sight validation, and then kills and deregisters the Goblin through the existing lifecycle. The behavior does not create a scripted Roblox `Explosion`; authored client VFX can react to the replicated death instead.
 
 Optional model attributes:
 
 | Attribute | Default |
 | --- | ---: |
 | `LeapExplodeTriggerRange` | `16` |
-| `LeapExplodeArmTime` | `0.45` |
 | `LeapExplodeLeapTime` | `0.5` |
 | `LeapExplodeArcHeight` | `8` |
 | `LeapExplodeRadius` | `10` |
@@ -133,7 +132,7 @@ Before enabling V2 globally:
 - test Slime on floor, wall, inner corner, outer corner, and ceiling,
 - tag only intended map geometry as crawlable,
 - test Bat pursuit toward players above and below it,
-- confirm Goblin telegraphs, leaps, detonates once, and cleans up,
+- confirm Goblin enters its leap directly from the chase, damages nearby players and NPCs once, detonates once, and cleans up,
 - test pause, freeze, slow, impulse, death, despawn, and full client sync,
 - stress-test at least 100 NPCs and review `NpcService.GetNavigationMetrics()`,
 - confirm no per-NPC connections or navigation state leaks remain after despawn.
