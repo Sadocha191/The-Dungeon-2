@@ -484,6 +484,16 @@ local function stepTraversal(npc, nav, now: number, dt: number): (Vector3, strin
 	)
 end
 
+function NpcGroundNavigation.IsTraversing(npc): boolean
+	local nav = npc.navigation
+	return nav ~= nil and nav.traversal ~= nil
+end
+
+function NpcGroundNavigation.StepTraversal(npc, now: number, dt: number): (Vector3, string)
+	local nav = getNavigation(npc)
+	return stepTraversal(npc, nav, now, dt)
+end
+
 function NpcGroundNavigation.BeginTick(alivePlayers: {any})
 	NpcGroundSurface.BeginTick(alivePlayers)
 end

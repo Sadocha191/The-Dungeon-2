@@ -387,6 +387,33 @@ local function updateNpc(
 		return
 	end
 
+	if npc.movementMode == "Ground"
+		and npc.freezeEnd <= now
+		and NpcGroundNavigation.IsTraversing(npc)
+	then
+		local traversalMove = NpcGroundNavigation.StepTraversal(npc, now, dt)
+		local nextPos = NpcGroundNavigation.ConstrainPosition(npc, npc.position + traversalMove, now)
+		local newVelocity = Vector3.zero
+		if dt > 1e-4 then
+			newVelocity = (nextPos - npc.position) / dt
+		end
+		if now < npc.aiLockUntil and npc.aiLookTarget then
+			local lookDelta = npc.aiLookTarget - nextPos
+			npc.look = safeUnit(flat(lookDelta), npc.look)
+		elseif traversalMove.Magnitude > 0.05 then
+			npc.look = safeUnit(traversalMove, npc.look)
+		end
+		npc.position = nextPos
+		npc.velocity = newVelocity
+		npc.impulse *= math.max(0, 1 - (dt * 7))
+		if npc.impulse.Magnitude < 0.15 then
+			npc.impulse = Vector3.zero
+		end
+		setState(npc, now < npc.aiLockUntil and STATE.Attacking or STATE.Chasing)
+		writeStateAttributes(npc)
+		return
+	end
+
 	if now < npc.aiLockUntil then
 		npc.velocity = Vector3.zero
 		if npc.aiLookTarget then

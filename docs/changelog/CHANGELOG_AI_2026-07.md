@@ -8,6 +8,7 @@
 - Added a separate `Stride` traversal for `GroundLarge` NPCs, with a larger ordinary step, validated long stride, higher terrain-rise tolerance and no classic jump behavior.
 - Prevented the final ground constraint from deleting the airborne Y component while a traversal is active.
 - Suspended the active traversal clock during `PauseState` and freeze, shifting both traversal timestamps on resume so an NPC continues from its current arc position instead of jumping to the landing position.
+- Advanced an active traversal before target, attack-range and AI-lock branches, so combat cannot leave an NPC suspended on an unchanged arc sample.
 - Kept tall walls, forbidden surfaces, missing landing surfaces and excessive rises/drops blocked so pathfinding can route around them.
 - Started authored `Jump` traversal toward the marked waypoint itself, canceled active traversal on external `SetPosition`, and validated six body sweeps along the same sinusoidal curve used at runtime.
 
@@ -23,6 +24,7 @@
 
 - No new `Heartbeat`, `Stepped`, `RenderStepped`, remote, persistent-data field or `_G` dependency was added.
 - Traversal runs inside the existing centralized 12 Hz NPC movement scheduler.
+- An active traversal advances once per existing movement tick and returns before the ordinary chase/attack branch, so it cannot be stepped twice in one tick.
 - Normal clear movement keeps the existing probe cost. Extra landing probes and six bounded traversal `Blockcast` calls occur only when a jump waypoint or blocked local step attempts a hop/stride.
 - Pause transitions reuse the centralized movement tick and visit the NPC registry once only when the global pause value changes. Freeze suspension is an O(1) check inside the existing per-NPC update.
 - Traversal state is stored on the existing per-NPC navigation record and cleared on landing or NPC cleanup.
@@ -34,6 +36,7 @@
 - A live registered `GroundSmall` NPC paused in mid-hop for 1.5 s with zero position delta. It resumed by `2.069` studs rather than teleporting to its landing and then completed normally.
 - Freeze also suspended the arc with zero movement and an active pause marker. Slow completed the current traversal without an invalid position. A strong lateral impulse stayed inside the validated corridor. Death and explicit despawn both cleared the navigation record, while a target change completed the current traversal and then adopted the new target.
 - A controlled three-waypoint route marked waypoint 2 as `Jump`; traversal began immediately toward waypoint 2 (`landingX = markedX = 27006`) instead of waiting at the ledge and targeting waypoint 3.
+- A live registered NPC with a 1-second ability lock advanced a synthetic active hop by exactly 6 studs, retained `Attacking`, and cleared the traversal within 0.6 seconds while the AI lock was still active, proving the early combat return no longer stalls the arc or changes the ability presentation state.
 - Public `Invalidate(..., "external_set_position")` cleared the active traversal, route and pending request while advancing the generation, preventing a stale arc from overwriting an ability destination.
 - Separate physical validation cases passed for a `GroundSmall` chest hop, fallen-log hop, small-rock hop, `GroundLarge` stride, uneven `1.5`-stud terrain rise and a `0.75`-stud stair step.
 - The final curved-corridor validator kept a low chest clear and rejected a narrow obstacle intersecting the first-quarter body arc as `traversal_blocked`; this is the region the previous up-horizontal-down corridor did not represent.
