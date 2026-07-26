@@ -12,6 +12,7 @@
 - Restricted water recovery activation to active/recent slides, so unrelated zero-speed swimming locks remain owned by their original movement ability.
 - Scheduled camera impulses one render priority after the existing `OrbitCam` owner so desktop camera writes cannot overwrite hit shake in the same frame.
 - Allowed confirmed lethal player hits to play feedback after health replication reaches zero, and made both lifetime recovery connections explicit teardown owners.
+- Made `CombatFeedback` own and disconnect both remote subscriptions on teardown, preventing stale closures from duplicating hit/death effects after script recreation.
 
 ### Files
 
@@ -38,12 +39,14 @@
 - Review regressions cover both sides of the recovery gate: recent slide plus `Swimming` restores movement, while zero-speed `Swimming` without a slide marker leaves the lock unchanged. Camera priority is `Camera + 2`, after `OrbitCam` at `Camera + 1`.
 - With the current character at replicated `Health = 0`, the lethal guard was absent, the current root remained valid, and the authored player-hit path created `PlayerHitVFXRuntime`.
 - Destroying `SlideWaterRecovery`, reloading the character, marking the new Humanoid as sliding/swimming and waiting 0.2 seconds left `WalkSpeed = 0`; neither the old `CharacterAdded` closure nor its Heartbeat rebound after teardown.
+- Destroying `CombatFeedback` and then sending both hit and dead-Goblin packets produced zero `PlayerHitVFXRuntime` and zero `ExplosionRuntime` instances, proving both old remote callbacks were disconnected.
 - No console error or warning referenced the five changed runtime owners or `PlayerHitVFXEvent`. Existing unrelated terrain-generator, preload, and disabled error-reporting warnings remained.
 - `git diff --check` passed in final validation.
 
 ### Runtime loops and cleanup
 
 - `CombatFeedback` keeps one client render-step binding, but its per-frame loop now visits only active attackers. Idle/dead/despawned Goblins are removed from that set event-driven from NPC batches; tilt is restored on transition and cleanup.
+- `CombatFeedback` disconnects its `NpcBatchEvent` and `PlayerHitVFXEvent` subscriptions before clearing tracked Goblins on script teardown.
 - `VfxTemplatePlayer` lazily adds one client camera render-step binding after the first impulse. It returns immediately when empty and caps simultaneous impulses at eight.
 - `SlideWaterRecovery` adds one client `Heartbeat` with O(1) state checks plus character/Humanoid lifecycle connections.
 - `SlideWaterRecovery` disconnects its lifetime `Heartbeat`, `CharacterAdded`, and dynamic Humanoid connections on script teardown; deferred character binds also stop once teardown starts.

@@ -39,6 +39,8 @@ local GOBLIN_EXPLOSION_EMIT_COUNTS = {
 
 local goblins = {}
 local attackingGoblins = {}
+local npcBatchConnection = nil
+local playerHitVfxConnection = nil
 
 local function resolveAnimationTemplate(name)
 	local assets = ReplicatedStorage:FindFirstChild("Assets")
@@ -106,7 +108,7 @@ local function playGoblinExplosion(entry, position)
 	})
 end
 
-npcBatchEvent.OnClientEvent:Connect(function(payload)
+npcBatchConnection = npcBatchEvent.OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" or typeof(payload.items) ~= "table" then
 		return
 	end
@@ -237,7 +239,7 @@ RunService:BindToRenderStep(GOBLIN_TILT_BIND_NAME, Enum.RenderPriority.Last.Valu
 	end
 end)
 
-playerHitVfxEvent.OnClientEvent:Connect(function(payload)
+playerHitVfxConnection = playerHitVfxEvent.OnClientEvent:Connect(function(payload)
 	local character = localPlayer.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -266,6 +268,14 @@ playerHitVfxEvent.OnClientEvent:Connect(function(payload)
 end)
 
 script.Destroying:Connect(function()
+	if npcBatchConnection then
+		npcBatchConnection:Disconnect()
+		npcBatchConnection = nil
+	end
+	if playerHitVfxConnection then
+		playerHitVfxConnection:Disconnect()
+		playerHitVfxConnection = nil
+	end
 	RunService:UnbindFromRenderStep(GOBLIN_TILT_BIND_NAME)
 	for id in pairs(goblins) do
 		cleanupGoblin(id)
