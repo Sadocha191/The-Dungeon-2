@@ -9,6 +9,7 @@
 - Tuned daily goals toward roughly one normal run and weekly goals toward a few runs, removing objectives that rewarded taking damage, low health, no-hit play, reroll/skip restrictions, win streaks, and extreme multikills.
 - Reduced weekly rewards with the lower requirements to limit economy inflation.
 - Kept the complete configuration byte-identical between Four Peaks and Level.
+- Labeled `COINS_EARNED` objectives as Run Gold rather than silver, matching the raw dungeon counter before the separate end-of-run silver conversion.
 
 ### Files
 
