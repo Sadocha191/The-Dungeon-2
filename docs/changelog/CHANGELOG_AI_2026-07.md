@@ -1,5 +1,40 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-26 - Poziom NPC obstacle traversal
+
+### Summary
+
+- Added persistent kinematic `Hop` traversal for `GroundSmall` NPCs across valid `Jump` transitions and low local obstacles such as chests, fallen logs and small decorative collision.
+- Added a separate `Stride` traversal for `GroundLarge` NPCs, with a larger ordinary step, validated long stride, higher terrain-rise tolerance and no classic jump behavior.
+- Prevented the final ground constraint from deleting the airborne Y component while a traversal is active.
+- Kept tall walls, forbidden surfaces, missing landing surfaces and excessive rises/drops blocked so pathfinding can route around them.
+
+### Files
+
+- Updated `Level/ServerScriptService/ModuleScript/NpcNavigationConfig.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/NpcGroundSurface.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/NpcGroundNavigation.lua`.
+- Updated `docs/NPC_NAVIGATION.md`, `CHANGELOG_AI.md` and this monthly changelog.
+
+### Runtime cost and cleanup
+
+- No new `Heartbeat`, `Stepped`, `RenderStepped`, remote, persistent-data field or `_G` dependency was added.
+- Traversal runs inside the existing centralized 12 Hz NPC movement scheduler.
+- Normal clear movement keeps the existing probe cost. Extra landing probes and at most two traversal `Blockcast` calls occur only when a jump waypoint or blocked local step attempts a hop/stride.
+- Traversal state is stored on the existing per-NPC navigation record and cleared on landing or NPC cleanup.
+
+### Validation
+
+- Patch application assertions and `git diff --check` run in the branch workflow.
+- Static review verifies that `NpcGroundNavigation.Step` keeps its public return shape and `NpcService` requires no scheduler/signature change.
+- Roblox Studio/MCP was unavailable in this session, so live Play validation, animation appearance and tuning under a large horde remain required before merge/publish.
+
+### Risks and rollback
+
+- Hop/stride tuning is intentionally conservative but may require per-map adjustment for unusually wide chest/log meshes or very uneven proxy geometry.
+- A collidable decorative object taller than the configured obstacle limit remains a real blocker and must be routed around or have its collision/proxy corrected.
+- Roll back by reverting this PR. No data migration, remote rollback or client rollback is required.
+
 ## 2026-07-24 - Poziom slide animation integration (PR #134)
 
 ### Summary

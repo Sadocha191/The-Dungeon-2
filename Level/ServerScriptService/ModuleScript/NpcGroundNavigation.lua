@@ -29,6 +29,9 @@ local metrics = {
 	pathCacheHits = 0,
 	stalePathResults = 0,
 	stateTransitions = 0,
+	traversalStarts = 0,
+	traversalCompletions = 0,
+	traversalFailures = 0,
 }
 
 local function flat(v: Vector3): Vector3
@@ -103,6 +106,8 @@ local function getNavigation(npc)
 		goalSurfacePosition = nil,
 		nextGoalLayerCheckAt = 0,
 		nextRepathAt = 0,
+		nextTraversalAt = 0,
+		traversal = nil,
 		pathExpiresAt = 0,
 		lastProgressAt = now,
 		lastProgressPosition = npc.position,
@@ -330,6 +335,154 @@ local function finishStep(nav, move: Vector3, reason: string, expectedDistance: 
 	return move, nav.status
 end
 
+
+local function isJumpWaypoint(waypoint): boolean
+	return waypoint
+		and (waypoint.Label == "Jump" or waypoint.Action == Enum.PathWaypointAction.Jump)
+		or false
+end
+
+local function partTopY(part: BasePart): number
+	local half = part.Size * 0.5
+	local highest = -math.huge
+	for _, x in ipairs({ -half.X, half.X }) do
+		for _, y in ipairs({ -half.Y, half.Y }) do
+			for _, z in ipairs({ -half.Z, half.Z }) do
+				highest = math.max(highest, part.CFrame:PointToWorldSpace(Vector3.new(x, y, z)).Y)
+			end
+		end
+	end
+	return highest
+end
+
+local function projectedHalfExtent(part: BasePart, direction: Vector3): number
+	local horizontal = flat(direction)
+	if horizontal.Magnitude <= 0.01 then
+		return 0
+	end
+	local unit = horizontal.Unit
+	local half = part.Size * 0.5
+	return math.abs(flat(part.CFrame.RightVector):Dot(unit)) * half.X
+		+ math.abs(flat(part.CFrame.UpVector):Dot(unit)) * half.Y
+		+ math.abs(flat(part.CFrame.LookVector):Dot(unit)) * half.Z
+end
+
+local function traversalFallbackTarget(npc, nav, moveTarget: Vector3, stepResult, profile): Vector3?
+	local reason = stepResult and stepResult.reason
+	local allowed = reason == "body_obstacle" or reason == "step_too_high"
+	if profile.TraversalKind == "Stride" and reason == "surface_layer_mismatch" then
+		allowed = true
+	end
+	if not allowed then
+		return nil
+	end
+
+	local direction = flat(moveTarget - npc.position)
+	if direction.Magnitude <= 0.05 then
+		return nil
+	end
+	direction = direction.Unit
+	local maxDistance = math.max(0, tonumber(profile.TraversalMaxDistance) or 0)
+	if maxDistance <= 0 then
+		return nil
+	end
+
+	local distance = math.max(profile.AgentRadius * 1.5, profile.DirectSampleSpacing * 1.75)
+	local hit = stepResult and stepResult.hit
+	local obstacle = hit and hit.Instance
+	if obstacle and obstacle:IsA("BasePart") then
+		local startSurfaceY = nav.lastSafeSurfaceY or (npc.position.Y - npc.groundOffset)
+		if partTopY(obstacle) - startSurfaceY > (profile.TraversalMaxObstacleTop or 0) + 0.05 then
+			return nil
+		end
+		local centerDistance = flat(obstacle.Position - npc.position):Dot(direction)
+		local farEdgeDistance = centerDistance + projectedHalfExtent(obstacle, direction)
+		distance = math.max(distance, farEdgeDistance + profile.AgentRadius + 0.5)
+	end
+
+	distance = math.clamp(distance, math.max(1, profile.AgentRadius * 1.1), maxDistance)
+	return npc.position + direction * distance
+end
+
+local function tryStartTraversal(
+	npc,
+	nav,
+	targetPosition: Vector3,
+	profile,
+	now: number,
+	source: string,
+	hit: RaycastResult?
+): boolean
+	if not profile.TraversalKind or now < (nav.nextTraversalAt or 0) then
+		return false
+	end
+	if hit and hit.Instance and hit.Instance:IsA("BasePart") then
+		local startSurfaceY = nav.lastSafeSurfaceY or (npc.position.Y - npc.groundOffset)
+		if partTopY(hit.Instance) - startSurfaceY > (profile.TraversalMaxObstacleTop or 0) + 0.05 then
+			metrics.traversalFailures += 1
+			return false
+		end
+	end
+
+	local result = NpcGroundSurface.ValidateTraversal(npc, targetPosition, profile, {
+		maxDistance = profile.TraversalMaxDistance,
+		maxRise = profile.TraversalMaxRise,
+		maxDrop = profile.TraversalMaxDrop,
+		arcHeight = profile.TraversalArcHeight,
+	})
+	nav.lastStepCheck = result
+	local endSample = result.surfaceSamples and result.surfaceSamples[2] or nil
+	nav.debugGroundProbe = endSample and endSample.position or nil
+	if not result.clear or not result.position then
+		metrics.traversalFailures += 1
+		return false
+	end
+
+	if source ~= "path_jump" then
+		nav.waypoints = nil
+	end
+	local duration = math.max(0.1, tonumber(profile.TraversalDuration) or 0.4)
+	nav.traversal = {
+		kind = profile.TraversalKind,
+		source = source,
+		startPosition = npc.position,
+		landingPosition = result.position,
+		startedAt = now,
+		endsAt = now + duration,
+		duration = duration,
+		arcHeight = math.max(0, tonumber(profile.TraversalArcHeight) or 0),
+		stepPosition = npc.position,
+		complete = false,
+	}
+	nav.nextTraversalAt = now + math.max(0, tonumber(profile.TraversalCooldown) or 0)
+	nav.blockedSince = nil
+	nav.stepFailureCount = 0
+	metrics.traversalStarts += 1
+	setStatus(nav, profile.TraversalKind == "Stride" and "Striding" or "Hopping")
+	return true
+end
+
+local function stepTraversal(npc, nav, now: number, dt: number): (Vector3, string)
+	local traversal = nav.traversal
+	if not traversal then
+		return finishStep(nav, Vector3.zero, "missing_traversal", 0)
+	end
+	local sampleTime = math.min(traversal.endsAt, now + math.max(0, dt))
+	local alpha = math.clamp((sampleTime - traversal.startedAt) / traversal.duration, 0, 1)
+	local basePosition = traversal.startPosition:Lerp(traversal.landingPosition, alpha)
+	local arcOffset = math.sin(math.pi * alpha) * traversal.arcHeight
+	local nextPosition = basePosition + Vector3.yAxis * arcOffset
+	traversal.stepPosition = nextPosition
+	traversal.complete = alpha >= 1
+	local expectedDistance = (nextPosition - npc.position).Magnitude
+	return finishStep(
+		nav,
+		nextPosition - npc.position,
+		string.lower(traversal.kind) .. ":" .. traversal.source,
+		expectedDistance
+	)
+end
+
 function NpcGroundNavigation.BeginTick(alivePlayers: {any})
 	NpcGroundSurface.BeginTick(alivePlayers)
 end
@@ -387,6 +540,9 @@ function NpcGroundNavigation.Step(
 ): (Vector3, string)
 	local profile = npc.navigationProfile
 	local nav = getNavigation(npc)
+	if nav.traversal then
+		return stepTraversal(npc, nav, now, dt)
+	end
 	local goalHorizontalSector = horizontalSectorKey(goalPosition)
 	local goalMoved = nav.pathGoalPosition
 		and flat(goalPosition - nav.pathGoalPosition).Magnitude >= profile.PathGoalMoveDistance
@@ -412,15 +568,14 @@ function NpcGroundNavigation.Step(
 
 	local moveTarget = desiredPosition
 	local specialTransition = false
+	local jumpTransition = false
 	if nav.waypoints then
 		local waypoint = nav.waypoints[nav.waypointIndex]
 		if waypoint then
 			moveTarget = waypoint.Position + Vector3.new(0, npc.groundOffset, 0)
-			specialTransition = waypoint.Label == "Jump"
-				or waypoint.Label == "Climb"
-				or waypoint.Label == "Drop"
-				or waypoint.Action == Enum.PathWaypointAction.Jump
+			local transitionWaypoint = nav.waypoints[math.max(1, nav.waypointIndex - 1)]
 			if (moveTarget - npc.position).Magnitude <= math.max(1.5, profile.AgentRadius * 0.7) then
+				transitionWaypoint = waypoint
 				nav.waypointIndex += 1
 				waypoint = nav.waypoints[nav.waypointIndex]
 				if waypoint then
@@ -428,8 +583,13 @@ function NpcGroundNavigation.Step(
 				else
 					nav.waypoints = nil
 					moveTarget = desiredPosition
+					transitionWaypoint = nil
 				end
 			end
+			jumpTransition = isJumpWaypoint(transitionWaypoint)
+			specialTransition = transitionWaypoint
+				and (transitionWaypoint.Label == "Climb" or transitionWaypoint.Label == "Drop")
+				or false
 		else
 			nav.waypoints = nil
 		end
@@ -473,6 +633,16 @@ function NpcGroundNavigation.Step(
 		end
 	end
 
+	if jumpTransition then
+		if tryStartTraversal(npc, nav, moveTarget, profile, now, "path_jump", nil) then
+			return stepTraversal(npc, nav, now, dt)
+		end
+		invalidateRoute(npc, nav, "jump_transition_blocked")
+		queuePath(npc, goalPosition, profile, now, "jump_transition_blocked")
+		setStatus(nav, nav.pathPending and "WaitingPath" or "Blocked")
+		return finishStep(nav, Vector3.zero, "jump_transition_blocked", 0)
+	end
+
 	local toTarget = specialTransition and (moveTarget - npc.position) or flat(moveTarget - npc.position)
 	if toTarget.Magnitude <= 0.05 or speed <= 0 then
 		return finishStep(nav, Vector3.zero, "no_move_requested", 0)
@@ -501,6 +671,11 @@ function NpcGroundNavigation.Step(
 	nav.debugGroundProbe = endSample and endSample.position or nil
 
 	if not stepResult.clear or not stepResult.position then
+		local traversalTarget = traversalFallbackTarget(npc, nav, moveTarget, stepResult, profile)
+		if traversalTarget
+			and tryStartTraversal(npc, nav, traversalTarget, profile, now, "local_obstacle", stepResult.hit) then
+			return stepTraversal(npc, nav, now, dt)
+		end
 		metrics.stepValidationFailures += 1
 		nav.stepFailureCount += 1
 		nav.blockedSince = nav.blockedSince or now
@@ -531,6 +706,23 @@ end
 
 function NpcGroundNavigation.ConstrainPosition(npc, candidate: Vector3, now: number): Vector3
 	local nav = getNavigation(npc)
+	local traversal = nav.traversal
+	if traversal then
+		local position = traversal.stepPosition or candidate
+		if traversal.complete then
+			position = traversal.landingPosition
+			nav.traversal = nil
+			nav.lastSafeSurfaceY = position.Y - npc.groundOffset
+			nav.lastSafePosition = position
+			nav.blockedSince = nil
+			nav.stepFailureCount = 0
+			markProgress(npc, nav, position, npc.navigationProfile, now)
+			metrics.traversalCompletions += 1
+			nav.lastMoveReason = string.lower(traversal.kind) .. "_complete"
+			setStatus(nav, nav.waypoints and "Path" or "Direct")
+		end
+		return position
+	end
 	if nav.lastSafePosition and (candidate - nav.lastSafePosition).Magnitude <= 0.01 then
 		return candidate
 	end
@@ -579,6 +771,9 @@ end
 
 function NpcGroundNavigation.Cleanup(npc)
 	NpcGroundNavigation.Invalidate(npc, "cleanup")
+	if npc.navigation then
+		npc.navigation.traversal = nil
+	end
 	npc.navigation = nil
 	npc.unreachableSince = nil
 end
@@ -639,6 +834,12 @@ function NpcGroundNavigation.GetDebug(npc): {[string]: any}?
 		groundProbe = nav.debugGroundProbe,
 		zeroMoveTicksWithTarget = nav.zeroMoveTicksWithTarget,
 		consecutiveZeroMoveTicks = nav.consecutiveZeroMoveTicks,
+		traversal = nav.traversal and {
+			kind = nav.traversal.kind,
+			source = nav.traversal.source,
+			landingPosition = nav.traversal.landingPosition,
+			complete = nav.traversal.complete,
+		} or nil,
 	}
 end
 

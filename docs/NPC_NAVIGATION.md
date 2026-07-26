@@ -6,11 +6,17 @@ System zachowuje kinematyczną symulację serwera i interpolację klientową. `N
 
 Profile są zdefiniowane w `ServerScriptService.ModuleScript.NpcNavigationConfig`:
 
-- `GroundSmall` — domyślny profil istniejących mobów; agent o promieniu 1,75 i wysokości 6 studów.
-- `GroundLarge` — większy korytarz, mniejszy limit nachylenia i zakaz automatycznych skoków/wspinania. Obecnie używany przez Grzyba, Golema, Knighta i Enta.
+- `GroundSmall` — domyślny profil istniejących mobów; agent o promieniu 1,75 i wysokości 6 studów. Może wykonać niski, kinematyczny hop przez waypoint `Jump` albo nad zwalidowaną niską przeszkodą.
+- `GroundLarge` — większy korytarz, krok do 4,5 studa i zwalidowany `Stride` do 6 studów w górę / 8 w dół. Nie używa klasycznego skoku. Obecnie używany przez Grzyba, Golema, Knighta i Enta.
 - `Flying` — ruch 3D, promień kolizyjny 2,5, preferowana wysokość 14 i minimalny prześwit 7 studów.
 
 Profil można wskazać w konfiguracji moba przez `movementProfile`, przez `movementMode`, `canFly` albo atrybut modelu `CanFly`. Brak konfiguracji zawsze daje profil naziemny. Nie ustawiaj `CanFly` tylko dlatego, że nazwa lub wygląd moba sugeruje latanie.
+
+## Przechodzenie nad przeszkodami
+
+Próba hopu albo dużego kroku uruchamia się tylko po zablokowanym lokalnym kroku lub na przejściu `Jump`. System najpierw sprawdza wysokość przeszkody, dystans, dozwolony wznios/opad, pełny footprint lądowania oraz podniesiony korytarz korpusu. Skrzynie, niskie pnie i małe kamienie mogą zostać przekroczone, ale wysoka ściana, stromy klif, woda/lawa albo brak bezpiecznej powierzchni nadal wymuszają zatrzymanie i repath.
+
+Przejście jest stanem w istniejącym schedulerze ruchu 12 Hz. Nie powstaje osobny `Heartbeat`, task ani fizyczny `Humanoid` dla NPC. Podczas aktywnego przejścia `ConstrainPosition` zwraca wyliczoną pozycję łuku zamiast ponownie przyklejać Y do ziemi; po lądowaniu wykonuje normalny snap do zwalidowanej powierzchni.
 
 ## Powierzchnie i proxy mapy
 

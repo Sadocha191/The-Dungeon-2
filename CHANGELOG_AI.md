@@ -17,6 +17,7 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-07-26** — Poziom niski hop małych NPC i duży krok `GroundLarge` nad zwalidowanymi przeszkodami
 - **2026-07-24** — Poziom PR #134 slide animation integration and Studio validation
 - **2026-07-20** — Poziom PR #132 usunięcie ReactiveGrassClient i ograniczenie kosztu HUD-u diagnostycznego
 - **2026-07-20** — PR #128 unified player profile, session leases and confirmed economy persistence

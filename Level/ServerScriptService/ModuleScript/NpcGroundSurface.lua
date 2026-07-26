@@ -24,6 +24,8 @@ local surfaceCache = {}
 local metrics = {
 	raycastCount = 0,
 	blockcastCount = 0,
+	traversalBlockcastCount = 0,
+	traversalFailures = 0,
 	surfaceCacheHits = 0,
 	falseSlopeObstacleHits = 0,
 	groundProbeMisses = 0,
@@ -408,6 +410,126 @@ function NpcGroundSurface.ValidateStep(npc, candidate: Vector3, profile, expecte
 		startSurfaceY = startSample.position.Y,
 		endSurfaceY = centerSample.position.Y,
 		deltaY = centerSample.position.Y - startSample.position.Y,
+		slopeDegrees = centerSample.slopeDegrees,
+	}
+end
+
+
+local function traversalCast(startCenter: Vector3, endCenter: Vector3, size: Vector3): RaycastResult?
+	local direction = endCenter - startCenter
+	if direction.Magnitude <= 0.05 then
+		return nil
+	end
+	metrics.blockcastCount += 1
+	metrics.traversalBlockcastCount += 1
+	return workspace:Blockcast(CFrame.new(startCenter), size, direction, corridorParams)
+end
+
+function NpcGroundSurface.ValidateTraversal(npc, landingCandidate: Vector3, profile, options)
+	options = options or {}
+	local maxDistance = math.max(0, tonumber(options.maxDistance) or profile.TraversalMaxDistance or 0)
+	local maxRise = math.max(0, tonumber(options.maxRise) or profile.TraversalMaxRise or profile.MaxStepUp)
+	local maxDrop = math.max(0, tonumber(options.maxDrop) or profile.TraversalMaxDrop or profile.MaxDrop)
+	local arcHeight = math.max(0, tonumber(options.arcHeight) or profile.TraversalArcHeight or 0)
+	local horizontal = flat(landingCandidate - npc.position)
+	if horizontal.Magnitude <= 0.05 then
+		metrics.traversalFailures += 1
+		return failedResult("traversal_too_short", {}, 1)
+	end
+	if maxDistance <= 0 or horizontal.Magnitude > maxDistance + 0.05 then
+		metrics.traversalFailures += 1
+		return failedResult("traversal_too_far", {}, 1)
+	end
+
+	local currentSurfaceY = npc.position.Y - npc.groundOffset
+	local startSample = NpcGroundSurface.SamplePrecise(npc.position, currentSurfaceY, profile)
+	if not startSample then
+		metrics.traversalFailures += 1
+		return failedResult("missing_surface", {}, 1)
+	end
+	local startReason = NpcGroundSurface.GetFailureReason(startSample, profile)
+	if startReason then
+		metrics.traversalFailures += 1
+		return failedResult(startReason, { startSample }, 1)
+	end
+
+	local expectedLandingY = landingCandidate.Y - npc.groundOffset
+	local centerSample = NpcGroundSurface.SamplePrecise(landingCandidate, expectedLandingY, profile)
+	local samples = { startSample }
+	if not centerSample then
+		metrics.traversalFailures += 1
+		return failedResult("missing_landing_surface", samples, 2)
+	end
+	table.insert(samples, centerSample)
+	local centerReason = NpcGroundSurface.GetFailureReason(centerSample, profile)
+	if centerReason then
+		metrics.traversalFailures += 1
+		return failedResult(centerReason, samples, 2)
+	end
+
+	local moveDirection = horizontal.Unit
+	local right = Vector3.new(-moveDirection.Z, 0, moveDirection.X)
+	local probes = {
+		landingCandidate + moveDirection * math.max(0.5, profile.AgentRadius * profile.FrontProbeScale),
+		landingCandidate + right * profile.AgentRadius * profile.WidthProbeScale,
+		landingCandidate - right * profile.AgentRadius * profile.WidthProbeScale,
+	}
+	for _, probePosition in ipairs(probes) do
+		local sample = NpcGroundSurface.SamplePrecise(probePosition, centerSample.position.Y, profile)
+		if not sample then
+			metrics.traversalFailures += 1
+			return failedResult("missing_landing_surface", samples, #samples + 1)
+		end
+		table.insert(samples, sample)
+		local reason = NpcGroundSurface.GetFailureReason(sample, profile)
+		if reason then
+			metrics.traversalFailures += 1
+			return failedResult(reason, samples, #samples)
+		end
+		if not widthLayerClear(centerSample, sample, profile) then
+			metrics.traversalFailures += 1
+			return failedResult("landing_layer_mismatch", samples, #samples)
+		end
+	end
+
+	local deltaY = centerSample.position.Y - startSample.position.Y
+	if deltaY > maxRise + 0.05 then
+		metrics.traversalFailures += 1
+		return failedResult("traversal_rise_too_high", samples, 2)
+	end
+	if deltaY < -maxDrop - 0.05 then
+		metrics.traversalFailures += 1
+		return failedResult("traversal_drop_too_far", samples, 2)
+	end
+
+	local skin = profile.GroundSkin
+	local size = Vector3.new(
+		math.max(0.5, (profile.AgentRadius * 2) - (skin * 2)),
+		math.max(1, profile.AgentHeight - (skin * 2)),
+		math.max(0.5, (profile.AgentRadius * 2) - (skin * 2))
+	)
+	local startCenter = bodyCenter(startSample, profile)
+	local clearanceSurfaceY = math.max(startSample.position.Y, centerSample.position.Y) + arcHeight
+	local clearanceCenterY = clearanceSurfaceY + (profile.AgentHeight * 0.5)
+	local liftedStart = Vector3.new(startCenter.X, clearanceCenterY, startCenter.Z)
+	local liftedEnd = Vector3.new(centerSample.position.X, clearanceCenterY, centerSample.position.Z)
+	local hit = traversalCast(startCenter, liftedStart, size)
+	if not hit then
+		hit = traversalCast(liftedStart, liftedEnd, size)
+	end
+	if hit then
+		metrics.traversalFailures += 1
+		return failedResult("traversal_blocked", samples, 2, hit)
+	end
+
+	return {
+		clear = true,
+		reason = "traversal_clear",
+		position = Vector3.new(landingCandidate.X, centerSample.position.Y + npc.groundOffset, landingCandidate.Z),
+		surfaceSamples = samples,
+		startSurfaceY = startSample.position.Y,
+		endSurfaceY = centerSample.position.Y,
+		deltaY = deltaY,
 		slopeDegrees = centerSample.slopeDegrees,
 	}
 end
