@@ -160,7 +160,7 @@ local function applyResponsiveLayout()
 	end
 
 	local size = presentationRoot.AbsoluteSize
-	local wide = size.X >= 1050
+	local wide = size.X >= 1050 and size.Y >= 480
 	local compact = not wide and size.Y < 430
 	local actionFrame = boundActionFrame
 	local rarity = rarityText

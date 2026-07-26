@@ -9,6 +9,7 @@
 - Reused the existing server-selected payload and claim controls; reward rolling, granting, pause state, and remotes are unchanged.
 - Removed the large `Run Stats` panel shown during pause and chest opening while preserving the compact collected-item icon grid during active runs.
 - Added a compact layout for short landscape viewports so the reward header, card, and claim controls remain inside a 568 x 320 viewport.
+- Made the wide side-card layout require at least 480 px of height, so short desktop windows such as 1200 x 400 use the bounded compact layout instead.
 
 ### Files
 
@@ -23,7 +24,7 @@
 - Verified the presentation controller does not send reward requests or mutate reward data.
 - Verified the rewritten run HUD only listens for inventory snapshots and `RunStarted` visibility.
 - Synchronized the touched client sources to active Level Studio before Play validation.
-- Programmatically exercised the compact layout at 568 x 320 and the regular phone/desktop layout thresholds; the compact reward card bounds remain inside the presentation root with a gap above the action frame.
+- Programmatically exercised the compact layout at 568 x 320 and 1200 x 400 plus the regular desktop threshold; the reward card and action controls remain inside the presentation root with a positive gap.
 - `git diff --check` passed in final validation.
 
 ### Runtime loops and cleanup
