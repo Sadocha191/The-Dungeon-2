@@ -1,5 +1,47 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-26 - Level dry-ground world spawn contract (PR #138)
+
+### Summary
+
+- Changed `WorldBounds.RaycastTerrainAtXZ` so gameplay spawns reject Roblox Terrain water by default.
+- Kept water in the default raycast so a water surface rejects the complete sample instead of allowing the seabed beneath it.
+- Added the explicit `allowWater = true` opt-in; callers that intentionally need the seabed may combine it with `ignoreWater = true`.
+- The shared contract applies to existing random/nearby terrain-point consumers, including chests, reward chests, shrines, statues, monuments, the run portal, bosses, enemies, and random player spawn.
+
+### Files
+
+- Updated `Level/ServerScriptService/ModuleScript/WorldBounds.lua`.
+- Updated this monthly changelog.
+
+### Studio and validation
+
+- Active Studio: `Level`.
+- Synchronized `ServerScriptService.ModuleScript.WorldBounds` from the branch before Play validation.
+- In Play, created a temporary isolated Terrain stack outside the map with water over rock. The default `RaycastTerrainAtXZ` returned `nil`, `allowWater = true` returned `Water`, and `allowWater = true, ignoreWater = true` returned the `Rock` seabed.
+- The temporary Terrain region was cleared immediately in the same server test and did not persist after Play stopped.
+- Level startup completed world preparation with 358 chests, 16 shrines, 6 statues, and 3 monuments and produced no `WorldBounds` error.
+- The existing unrelated `Hybrid Terrain Hex Generator:16` toolbar error and bounded loading preload timeouts remained.
+- Repository searches covered every current `WorldBounds` terrain-point call site.
+- `git diff --check` passed in final validation.
+
+### Runtime loops and cost
+
+- No loop, scheduler, connection, remote, persistent-data field, teleport field, or `_G` dependency was added.
+- Each affected terrain sample still performs one bounded terrain raycast. The new default path adds one boolean option normalization and, for a hit, one material comparison.
+- Existing bounded retry counts in `FindRandomTerrainPoint` and `FindNearbyTerrainPoint` are unchanged.
+
+### Not verified
+
+- Studio screenshot and pointer-input tools timed out in this MCP session, so a visual survey of every natural water edge and every spawn category was not performed.
+- Multiplayer and a complete production-length run were not exercised.
+
+### Risks and rollback
+
+- Callers that intentionally expected a water surface must now opt in with `allowWater = true`; repository search found no such explicit gameplay requirement among current consumers.
+- Maps with too little dry terrain may exhaust their existing bounded candidate retries more often, returning the same existing `nil` failure path instead of spawning in water.
+- Rollback by reverting PR #138 and restoring the previous Level `WorldBounds` source. No data migration, remote, or server-state rollback is required.
+
 ## 2026-07-24 - Poziom slide animation integration (PR #134)
 
 ### Summary
