@@ -1,4 +1,6 @@
+local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local NpcLifecycle = require(script.Parent:WaitForChild("NpcLifecycle"))
@@ -46,6 +48,7 @@ local metrics = {
 	damageHits = 0,
 	npcDamageHits = 0,
 	lineOfSightRaycasts = 0,
+	legacyVisualFallbacks = 0,
 }
 
 local function numberAttribute(model: Model, name: string, fallback: number): number
@@ -184,6 +187,24 @@ local function damageNpcs(npc: any, origin: Vector3, radius: number, damage: num
 	end
 end
 
+local function hasAuthoredExplosionPresenter(): boolean
+	local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
+		or ReplicatedStorage:FindFirstChild("ModuleScript")
+	return moduleFolder ~= nil and moduleFolder:FindFirstChild("VfxTemplatePlayer") ~= nil
+end
+
+local function createLegacyExplosionFallback(origin: Vector3)
+	local explosion = Instance.new("Explosion")
+	explosion.Name = "NpcLeapExplodeFallback"
+	explosion.Position = origin
+	explosion.BlastRadius = 0
+	explosion.BlastPressure = 0
+	explosion.DestroyJointRadiusPercent = 0
+	explosion.Parent = Workspace
+	Debris:AddItem(explosion, 1)
+	metrics.legacyVisualFallbacks += 1
+end
+
 local function beginLeap(npc: any, state: {[string]: any}, targetPosition: Vector3, dt: number, now: number)
 	local leapDuration = math.max(0.12, numberAttribute(npc.model, "LeapExplodeLeapTime", 0.5))
 	local firstStep = math.clamp(math.max(0, tonumber(dt) or 0), 0, leapDuration * 0.5)
@@ -208,6 +229,9 @@ local function detonate(npc: any, state: {[string]: any}, callbacks: {[string]: 
 	local radius, damage = getExplosionStats(npc)
 	damagePlayers(npc, origin, radius, damage)
 	damageNpcs(npc, origin, radius, damage)
+	if not hasAuthoredExplosionPresenter() then
+		createLegacyExplosionFallback(origin)
+	end
 	if callbacks and type(callbacks.kill) == "function" then
 		callbacks.kill({
 			cause = "LeapExplode",
