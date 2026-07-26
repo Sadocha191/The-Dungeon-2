@@ -24,6 +24,7 @@ local RARITY_ATK_PER_LEVEL = {
 
 local function add(def)
 	def.rarityColor = def.rarityColor or RARITY_COLORS[def.rarity]
+	def.element = def.element or "Physical"
 	def.combat = def.combat or {}
 	if def.combat.atkPerLevel == nil then
 		local scaling = RARITY_ATK_PER_LEVEL[def.rarity] or 0.08
@@ -38,6 +39,7 @@ add({
 	id = "Knight's Oath",
 	name = "Knight's Oath",
 	weaponType = "Sword",
+	element = "Physical",
 	rarity = "Common",
 	maxLevel = 20,
 	baseDamage = 11,
@@ -68,6 +70,7 @@ add({
 	id = "Excalion, Blade of Kings",
 	name = "Excalion, Blade of Kings",
 	weaponType = "Sword",
+	element = "Light",
 	rarity = "Legendary",
 	maxLevel = 80,
 	baseDamage = 15,
@@ -105,6 +108,7 @@ add({
 	id = "Reaper's Crescent",
 	name = "Reaper's Crescent",
 	weaponType = "Scythe",
+	element = "Void",
 	rarity = "Epic",
 	maxLevel = 60,
 	baseDamage = 17,
@@ -141,6 +145,7 @@ add({
 	id = "Harvest of the End",
 	name = "Harvest of the End",
 	weaponType = "Scythe",
+	element = "Void",
 	rarity = "Legendary",
 	maxLevel = 80,
 	baseDamage = 20,
@@ -181,6 +186,7 @@ add({
 	id = "Warden's Halberd",
 	name = "Warden's Halberd",
 	weaponType = "Halberd",
+	element = "Earth",
 	rarity = "Rare",
 	maxLevel = 40,
 	baseDamage = 15,
@@ -212,6 +218,7 @@ add({
 	id = "Dragonspear Halberd",
 	name = "Dragonspear Halberd",
 	weaponType = "Halberd",
+	element = "Fire",
 	rarity = "Epic",
 	maxLevel = 60,
 	baseDamage = 18,
@@ -246,6 +253,7 @@ add({
 	id = "Hunter's Longbow",
 	name = "Hunter's Longbow",
 	weaponType = "Bow",
+	element = "Air",
 	rarity = "Common",
 	maxLevel = 20,
 	baseDamage = 11,
@@ -275,6 +283,7 @@ add({
 	id = "Stormwind Recurve",
 	name = "Stormwind Recurve",
 	weaponType = "Bow",
+	element = "Air",
 	rarity = "Epic",
 	maxLevel = 60,
 	baseDamage = 13,
@@ -310,6 +319,7 @@ add({
 	id = "Apprentice Arcstaff",
 	name = "Apprentice Arcstaff",
 	weaponType = "Staff",
+	element = "Electricity",
 	rarity = "Rare",
 	maxLevel = 40,
 	baseDamage = 10,
@@ -345,6 +355,7 @@ add({
 	id = "Archmage's Worldstaff",
 	name = "Archmage's Worldstaff",
 	weaponType = "Staff",
+	element = "Fire",
 	rarity = "Mythical",
 	maxLevel = 100,
 	baseDamage = 13,
@@ -383,6 +394,7 @@ add({
 	id = "Blackpowder Flintlock",
 	name = "Blackpowder Flintlock",
 	weaponType = "Pistol",
+	element = "Physical",
 	rarity = "Rare",
 	maxLevel = 40,
 	baseDamage = 14,
@@ -416,6 +428,7 @@ add({
 	id = "Kingslayer Handcannon",
 	name = "Kingslayer Handcannon",
 	weaponType = "Pistol",
+	element = "Physical",
 	rarity = "Legendary",
 	maxLevel = 80,
 	baseDamage = 18,

@@ -1,22 +1,28 @@
 -- DamageIndicators.client.lua (StarterPlayerScripts)
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local damageIndicatorEvent = remotes:WaitForChild("DamageIndicatorEvent")
 
-local BATCH_WINDOW = 0.05
+local BATCH_HZ = 20
+local BATCH_WINDOW = 1 / BATCH_HZ
 local LIFETIME = 1.05
 local MAX_ACTIVE = 36
 local MAX_POOL = 24
 local MAX_PENDING = 128
 
+local localPlayer = Players.LocalPlayer
 local random = Random.new()
 local activeCount = 0
 local pool = {}
+local activeIndicators = {}
 local pending = {}
 local pendingCount = 0
+local flushAccumulator = 0
 
 local ELEMENTS = {
 	Physical = {
@@ -244,6 +250,8 @@ local function releaseIndicator(indicator)
 	end
 	indicator.inUse = false
 	indicator.generation += 1
+	indicator.releaseAt = nil
+	activeIndicators[indicator] = nil
 	cancelTweens(indicator)
 	indicator.part.Parent = nil
 	activeCount = math.max(0, activeCount - 1)
@@ -261,6 +269,7 @@ local function acquireIndicator()
 	local indicator = table.remove(pool) or createIndicator()
 	indicator.inUse = true
 	indicator.generation += 1
+	activeIndicators[indicator] = true
 	activeCount += 1
 	cancelTweens(indicator)
 	return indicator
@@ -285,7 +294,6 @@ local function popText(worldPos, amount, crit, primaryElement, secondaryElement,
 
 	local primaryStyle = ELEMENTS[primaryElement]
 	local secondaryStyle = secondaryElement and ELEMENTS[secondaryElement] or primaryStyle
-	local generation = indicator.generation
 	local lane = ((primaryStyle.order - 1) % 5) - 2
 	local startJitter = Vector3.new((lane * 0.16) + random:NextNumber(-0.14, 0.14), random:NextNumber(-0.05, 0.18), random:NextNumber(-0.18, 0.18))
 	local travel = Vector3.new((lane * 0.23) + random:NextNumber(-0.42, 0.42), random:NextNumber(1.65, 2.15), random:NextNumber(-0.45, 0.45))
@@ -333,12 +341,7 @@ local function popText(worldPos, amount, crit, primaryElement, secondaryElement,
 	for _, tween in ipairs(indicator.tweens) do
 		tween:Play()
 	end
-
-	task.delay(LIFETIME + 0.06, function()
-		if indicator.inUse and indicator.generation == generation then
-			releaseIndicator(indicator)
-		end
-	end)
+	indicator.releaseAt = os.clock() + LIFETIME + 0.06
 end
 
 local function fallbackTargetKey(pos)
@@ -399,25 +402,10 @@ local function queueIndicator(payload)
 		crit = crit,
 		primaryElement = primaryElement,
 		secondaryElement = secondaryElement,
+		flushAt = os.clock() + BATCH_WINDOW,
 	}
 	pending[key] = bucket
 	pendingCount += 1
-
-	task.delay(BATCH_WINDOW, function()
-		if pending[key] ~= bucket then
-			return
-		end
-		pending[key] = nil
-		pendingCount = math.max(0, pendingCount - 1)
-		popText(
-			bucket.pos,
-			bucket.amount,
-			bucket.crit,
-			bucket.primaryElement,
-			bucket.secondaryElement,
-			bucket.hits
-		)
-	end)
 end
 
 damageIndicatorEvent.OnClientEvent:Connect(function(payload)
@@ -425,4 +413,44 @@ damageIndicatorEvent.OnClientEvent:Connect(function(payload)
 		return
 	end
 	queueIndicator(payload)
+end)
+
+local function clearPending()
+	table.clear(pending)
+	pendingCount = 0
+end
+
+RunService.Heartbeat:Connect(function(dt)
+	flushAccumulator += dt
+	if flushAccumulator < BATCH_WINDOW then
+		return
+	end
+	flushAccumulator %= BATCH_WINDOW
+
+	local now = os.clock()
+	local runEnded = localPlayer:GetAttribute("RunEnded") == true
+	if runEnded then
+		clearPending()
+	else
+		for key, bucket in pairs(pending) do
+			if bucket.flushAt <= now then
+				pending[key] = nil
+				pendingCount = math.max(0, pendingCount - 1)
+				popText(
+					bucket.pos,
+					bucket.amount,
+					bucket.crit,
+					bucket.primaryElement,
+					bucket.secondaryElement,
+					bucket.hits
+				)
+			end
+		end
+	end
+
+	for indicator in pairs(activeIndicators) do
+		if runEnded or (indicator.releaseAt and indicator.releaseAt <= now) then
+			releaseIndicator(indicator)
+		end
+	end
 end)

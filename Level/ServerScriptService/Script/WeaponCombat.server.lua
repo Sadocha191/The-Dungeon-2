@@ -41,21 +41,6 @@ local AOE_RADIUS_BY_TYPE = {
 	Halberd = 6.5,
 }
 
-local WEAPON_ELEMENT_OVERRIDES = {
-	["Knight's Oath"] = "Physical",
-	["Excalion, Blade of Kings"] = "Light",
-	["Reaper's Crescent"] = "Void",
-	["Harvest of the End"] = "Void",
-	["Warden's Halberd"] = "Earth",
-	["Dragonspear Halberd"] = "Fire",
-	["Hunter's Longbow"] = "Air",
-	["Stormwind Recurve"] = "Air",
-	["Apprentice Arcstaff"] = "Electricity",
-	["Archmage's Worldstaff"] = "Fire",
-	["Blackpowder Flintlock"] = "Physical",
-	["Kingslayer Handcannon"] = "Physical",
-}
-
 local ELEMENT_ALIASES = {
 	Electric = "Electricity",
 	Lightning = "Electricity",
@@ -100,77 +85,9 @@ local function normalizeElement(value): string
 	return "Physical"
 end
 
-local function inferElementFromName(name: string): string
-	local lower = string.lower(name)
-	if lower:find("ember", 1, true)
-		or lower:find("fire", 1, true)
-		or lower:find("inferno", 1, true)
-		or lower:find("flame", 1, true)
-		or lower:find("dragon", 1, true)
-	then
-		return "Fire"
-	end
-	if lower:find("frost", 1, true)
-		or lower:find("glacier", 1, true)
-		or lower:find("water", 1, true)
-		or lower:find("tide", 1, true)
-	then
-		return "Water"
-	end
-	if lower:find("storm", 1, true)
-		or lower:find("wind", 1, true)
-		or lower:find("feather", 1, true)
-		or lower:find("gale", 1, true)
-	then
-		return "Air"
-	end
-	if lower:find("earth", 1, true)
-		or lower:find("grove", 1, true)
-		or lower:find("forest", 1, true)
-		or lower:find("moss", 1, true)
-		or lower:find("verdant", 1, true)
-		or lower:find("nature", 1, true)
-		or lower:find("thorn", 1, true)
-		or lower:find("ironwood", 1, true)
-		or lower:find("rust", 1, true)
-	then
-		return "Earth"
-	end
-	if lower:find("void", 1, true)
-		or lower:find("shadow", 1, true)
-		or lower:find("eclipse", 1, true)
-		or lower:find("night", 1, true)
-	then
-		return "Void"
-	end
-	if lower:find("sun", 1, true)
-		or lower:find("solar", 1, true)
-		or lower:find("dawn", 1, true)
-		or lower:find("gold", 1, true)
-		or lower:find("royal", 1, true)
-		or lower:find("angel", 1, true)
-	then
-		return "Light"
-	end
-	if lower:find("arc", 1, true)
-		or lower:find("volt", 1, true)
-		or lower:find("thunder", 1, true)
-		or lower:find("lightning", 1, true)
-	then
-		return "Electricity"
-	end
-	return "Physical"
-end
-
 local function resolveWeaponElement(entry): string
 	local def = getWeaponDef(entry)
-	local explicit = entry and (entry.element or entry.Element) or nil
-	if explicit == nil and def then
-		explicit = def.element
-	end
-
-	local weaponId = tostring(entry and (entry.id or entry.Id) or "")
-	return normalizeElement(explicit or WEAPON_ELEMENT_OVERRIDES[weaponId] or inferElementFromName(weaponId))
+	return normalizeElement(def and def.element)
 end
 
 local function resolveWeaponType(entry)

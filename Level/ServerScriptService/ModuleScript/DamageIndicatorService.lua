@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local function findServerModule(name: string): ModuleScript?
@@ -25,8 +26,10 @@ local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local damageIndicatorEvent = remotes:WaitForChild("DamageIndicatorEvent")
 assert(damageIndicatorEvent:IsA("RemoteEvent"), "[DamageIndicatorService] DamageIndicatorEvent must be a RemoteEvent")
 
-local BATCH_WINDOW = 0.05
+local BATCH_HZ = 20
+local BATCH_WINDOW = 1 / BATCH_HZ
 local MAX_PENDING_BATCHES_PER_PLAYER = 128
+local MAX_EMITTED_BATCHES_PER_PLAYER_PER_FLUSH = 36
 
 local ELEMENT_ALIASES = {
 	Electric = "Electricity",
@@ -52,6 +55,7 @@ local VALID_ELEMENTS = {
 local DamageIndicatorService = {}
 local pendingByPlayer = {}
 local pendingCountByPlayer = {}
+local flushAccumulator = 0
 
 local function isActivePlayer(value: any): boolean
 	return typeof(value) == "Instance" and value:IsA("Player") and value.Parent == Players
@@ -107,6 +111,54 @@ local function buildBatchKey(payload): string
 	}, "|")
 end
 
+local function clearPendingForPlayer(player: Player)
+	pendingByPlayer[player] = nil
+	pendingCountByPlayer[player] = nil
+end
+
+local function emitBucket(sourcePlayer: Player, bucket)
+	damageIndicatorEvent:FireClient(sourcePlayer, {
+		pos = bucket.pos,
+		amount = math.max(1, math.floor(bucket.amount + 0.5)),
+		hits = bucket.hits,
+		crit = bucket.crit,
+		element = bucket.element,
+		secondaryElement = bucket.secondaryElement,
+		targetId = bucket.targetId,
+		kind = bucket.kind,
+		sourceId = bucket.sourceId,
+		batched = true,
+	})
+end
+
+local function flushPending(now: number)
+	for sourcePlayer, playerBuckets in pairs(pendingByPlayer) do
+		if not isActivePlayer(sourcePlayer) or sourcePlayer:GetAttribute("RunEnded") == true then
+			clearPendingForPlayer(sourcePlayer)
+			continue
+		end
+
+		local emitted = 0
+		local remaining = pendingCountByPlayer[sourcePlayer] or 0
+		for key, bucket in pairs(playerBuckets) do
+			if bucket.flushAt <= now then
+				playerBuckets[key] = nil
+				remaining = math.max(0, remaining - 1)
+				if emitted < MAX_EMITTED_BATCHES_PER_PLAYER_PER_FLUSH then
+					emitted += 1
+					emitBucket(sourcePlayer, bucket)
+				end
+			end
+		end
+
+		if remaining <= 0 or next(playerBuckets) == nil then
+			clearPendingForPlayer(sourcePlayer)
+		else
+			pendingCountByPlayer[sourcePlayer] = remaining
+		end
+	end
+end
+
 local function queueIndicator(sourcePlayer: Player, payload)
 	local playerBuckets = pendingByPlayer[sourcePlayer]
 	if not playerBuckets then
@@ -136,42 +188,10 @@ local function queueIndicator(sourcePlayer: Player, payload)
 		targetId = payload.targetId,
 		kind = payload.kind,
 		sourceId = payload.sourceId,
+		flushAt = os.clock() + BATCH_WINDOW,
 	}
 	playerBuckets[key] = bucket
 	pendingCountByPlayer[sourcePlayer] = (pendingCountByPlayer[sourcePlayer] or 0) + 1
-
-	task.delay(BATCH_WINDOW, function()
-		local currentBuckets = pendingByPlayer[sourcePlayer]
-		if not currentBuckets or currentBuckets[key] ~= bucket then
-			return
-		end
-
-		currentBuckets[key] = nil
-		pendingCountByPlayer[sourcePlayer] = math.max(
-			0,
-			(pendingCountByPlayer[sourcePlayer] or 1) - 1
-		)
-		if next(currentBuckets) == nil then
-			pendingByPlayer[sourcePlayer] = nil
-			pendingCountByPlayer[sourcePlayer] = nil
-		end
-		if not isActivePlayer(sourcePlayer) then
-			return
-		end
-
-		damageIndicatorEvent:FireClient(sourcePlayer, {
-			pos = bucket.pos,
-			amount = math.max(1, math.floor(bucket.amount + 0.5)),
-			hits = bucket.hits,
-			crit = bucket.crit,
-			element = bucket.element,
-			secondaryElement = bucket.secondaryElement,
-			targetId = bucket.targetId,
-			kind = bucket.kind,
-			sourceId = bucket.sourceId,
-			batched = true,
-		})
-	end)
 end
 
 function DamageIndicatorService.ApplyDamage(target: any, amount: number, meta: {[string]: any}?): number
@@ -190,6 +210,9 @@ function DamageIndicatorService.ApplyDamage(target: any, amount: number, meta: {
 		return applied
 	end
 	if not isActivePlayer(sourcePlayer) then
+		return applied
+	end
+	if sourcePlayer:GetAttribute("RunEnded") == true then
 		return applied
 	end
 
@@ -216,9 +239,17 @@ function DamageIndicatorService.ApplyDamage(target: any, amount: number, meta: {
 	return applied
 end
 
+RunService.Heartbeat:Connect(function(dt)
+	flushAccumulator += dt
+	if flushAccumulator < BATCH_WINDOW then
+		return
+	end
+	flushAccumulator %= BATCH_WINDOW
+	flushPending(os.clock())
+end)
+
 Players.PlayerRemoving:Connect(function(player)
-	pendingByPlayer[player] = nil
-	pendingCountByPlayer[player] = nil
+	clearPendingForPlayer(player)
 end)
 
 return DamageIndicatorService

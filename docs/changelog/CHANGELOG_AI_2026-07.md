@@ -8,10 +8,13 @@
 - Added a presentation facade over `NpcService.ApplyDamage`; `NpcService` remains the authoritative damage owner while weapon and spell hits supply element metadata.
 - Batches rapid hits per target/element/crit/kind for 50 ms while keeping different elements separate.
 - Preserved legacy `DamageIndicatorEvent` payloads by treating missing/unknown elements as Physical and batching them client-side.
+- Replaced per-bucket delayed tasks with one bounded 20 Hz server flush and one bounded 20 Hz client flush/lifetime scheduler.
+- Moved all current weapon elements into canonical `WeaponConfigs` metadata and removed name inference and the duplicate manual override table from combat.
 
 ### Files
 
 - Added `Level/ServerScriptService/ModuleScript/DamageIndicatorService.lua`.
+- Updated `Level/ReplicatedStorage/ModuleScripts/WeaponConfigs.lua`.
 - Updated `Level/ServerScriptService/Script/SpellService.lua`.
 - Updated `Level/ServerScriptService/Script/WeaponCombat.server.lua`.
 - Updated `Level/StarterPlayer/StarterPlayerScripts/LocalScript/DamageIndicators.lua`.
@@ -20,35 +23,41 @@
 ### Studio and validation
 
 - Active Studio: `Level`.
-- Created/synchronized `DamageIndicatorService` and synchronized all three existing runtime sources.
+- Created/synchronized `DamageIndicatorService` and synchronized all four existing runtime sources.
+- Exact source parity passed for `WeaponConfigs` (`9858` bytes), `DamageIndicatorService` (`7052`), `SpellService` (`18293`), `WeaponCombat` (`9945`) and `DamageIndicators` (`12646`).
 - Level Play loaded `DamageIndicatorService`, `SpellService`, `WeaponCombat`, and `DamageIndicators` without a related error.
 - Five real 2-damage facade calls against one temporary registered NPC produced one client payload: amount `10`, hits `5`, `batched = true`, element `Electricity`; the temporary NPC was despawned after the test.
 - Five compatible legacy Water payloads produced one `10 | WATER x5` indicator.
 - Two Fire and two Water legacy hits against the same target remained separate as `6 | FIRE x2` and `8 | WATER x2`.
 - A batched critical payload rendered `321! | FIRE x7` with the CRIT tag.
 - A burst of 60 already-batched events created exactly the configured maximum of 36 active indicators, which returned to zero after their 1.05-second lifetime.
+- Pool instrumentation confirmed maximum active `36`, final active `0`, retained pool `24`, and `36` bounded releases with no per-indicator delayed task.
+- Twenty hidden Fire DoT ticks applied `20` authoritative damage and emitted zero matching indicator payloads.
+- A run-end test applied damage, set `RunEnded = true` before the flush and emitted zero matching payloads, confirming pending cleanup.
+- All 12 current weapon definitions returned their explicit canonical element. Missing/invalid config metadata falls back to Physical without inspecting the weapon name or loadout copy.
+- A transient 500-NPC server stress test applied 500 authoritative hits. Registration took `86.90 ms`, queueing all facade calls took `8.62 ms`, the server capped pending unique buckets at 128 and emitted only 36 client payloads in the flush; all 500 temporary NPCs were despawned.
 - `git diff --check` passed in final validation.
 
 ### Runtime loops, bounds, and cleanup
 
-- No `Heartbeat`, `Stepped`, `RenderStepped`, or per-indicator connection was added.
-- New server/client batching uses 50 ms delayed flushes, bounded at 128 pending unique batches per player on the server and 128 legacy batches on the client. Overflow drops only presentation; authoritative damage is already applied.
+- One server `Heartbeat` and one local-client `Heartbeat` are added. Both accumulate time and do real work at 20 Hz (one 50 ms batching window); there is no loop or delayed task per target, element, NPC or indicator.
+- Server batching is bounded at 128 pending unique batches per player and emits at most 36 batches per player per flush. Client legacy batching is bounded at 128. Overflow drops only presentation; authoritative damage is already applied.
 - The client allows at most 36 active indicators and retains at most 24 inactive instances in its pool; excess active presentation is skipped and excess released instances are destroyed.
-- Each active indicator owns four bounded tweens and one delayed lifetime release guarded by an in-use generation token.
-- Server pending state is removed after flush and on `PlayerRemoving`.
+- Each active indicator owns four bounded tweens. The shared 20 Hz client scheduler owns all lifetime releases; no indicator creates a task or connection.
+- Server pending state is removed after flush, when `RunEnded` is true, and on `PlayerRemoving`. The client clears pending and active visuals when `RunEnded` is true.
 - No remote name, persistent-data field, teleport field, NPC damage calculation, or new `_G` dependency changed.
 
 ### Not verified
 
 - Studio screenshot and input tools timed out, so final visual legibility across phone/tablet/ultrawide layouts was validated structurally rather than by pixel inspection.
 - Natural weapon swings and spells were not manually aimed through every element; their metadata call sites and the shared facade were exercised programmatically.
-- Multiplayer network latency and a long combat session with 500 NPC were not profiled.
+- Only one Studio client was available, so true simultaneous multi-player isolation and network latency remain unverified. The server stores buckets independently by `Player` and the per-player bounds were inspected, but this does not replace a multi-client test.
 
 ### Risks and rollback
 
 - Presentation batches intentionally merge hits sharing target, element, secondary element, crit state, and kind within 50 ms; source IDs are retained but are not part of the batch key.
-- When more than 128 unique batches are queued per player within one window or more than 36 indicators are active, additional visuals are skipped while damage remains authoritative.
-- Element inference for weapon definitions without explicit metadata uses a documented name heuristic and falls back to Physical.
+- When more than 128 unique batches are queued per player within one window, more than 36 batches are due in one flush, or more than 36 indicators are active, additional visuals are skipped while damage remains authoritative.
+- Future weapons must declare `element` in `WeaponConfigs`; absent or invalid metadata intentionally displays as Physical.
 - Rollback by reverting PR #139, deleting `DamageIndicatorService` from Level Studio, and restoring the previous spell, weapon, and client indicator sources. No data migration or server-state rollback is required.
 
 ## 2026-07-24 - Poziom slide animation integration (PR #134)
