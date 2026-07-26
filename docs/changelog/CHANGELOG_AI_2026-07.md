@@ -1,5 +1,49 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-26 - Level chest reward presentation and run HUD cleanup (PR #141)
+
+### Summary
+
+- Added a responsive presentation layer to the authored Level chest-opening animation.
+- The final reward shows rarity, source, item name, description, exact stat changes, and stack limit.
+- Reused the existing server-selected payload and claim controls; reward rolling, granting, pause state, and remotes are unchanged.
+- Removed the large `Run Stats` panel shown during pause and chest opening while preserving the compact collected-item icon grid during active runs.
+- Added a compact layout for short landscape viewports so the reward header, card, and claim controls remain inside a 568 x 320 viewport.
+
+### Files
+
+- Added `Level/StarterPlayer/StarterPlayerScripts/LocalScript/ChestRewardPresentation.client.lua`.
+- Updated `Level/StarterPlayer/StarterPlayerScripts/LocalScript/RunStatsHud.client.lua`.
+- Updated `Level/StarterGUI/ChestOpening/MANIFEST.md`.
+- Updated this monthly changelog and removed the non-standard one-off changelog.
+
+### Studio and validation
+
+- Reviewed the complete chest payload contract from `ChestItemService`: item and fallback rewards include display names, descriptions, and formatted modifier lines.
+- Verified the presentation controller does not send reward requests or mutate reward data.
+- Verified the rewritten run HUD only listens for inventory snapshots and `RunStarted` visibility.
+- Synchronized the touched client sources to active Level Studio before Play validation.
+- Programmatically exercised the compact layout at 568 x 320 and the regular phone/desktop layout thresholds; the compact reward card bounds remain inside the presentation root with a gap above the action frame.
+- `git diff --check` passed in final validation.
+
+### Runtime loops and cleanup
+
+- No `Heartbeat`, `Stepped`, `RenderStepped`, polling loop, remote, persistent-data field, teleport field, or `_G` dependency was added.
+- One `AbsoluteSize` signal recalculates O(1) layout properties only when the presentation viewport changes.
+- The dynamic action-frame visibility connection is disconnected before rebinding and when the presentation closes or its GUI is removed.
+- The controller's existing bounded `task.spawn` waits for the authored action frame and is invalidated by a session identifier.
+
+### Not verified
+
+- Studio screenshot and pointer-input tools timed out in this MCP session, so final pixel quality and physical mouse/touch claim interaction were not verified.
+- Device Emulator screenshots remain unavailable; compact bounds were validated programmatically instead.
+- A production reward was not claimed because that would mutate run state.
+
+### Risks and rollback
+
+- Extremely long localized reward text may require additional truncation or scrolling beyond the tested payload contract.
+- Rollback by reverting PR #141 and restoring the previous Level client sources. No DataStore, remote, teleport, server gameplay, or migration rollback is required.
+
 ## 2026-07-24 - Poziom slide animation integration (PR #134)
 
 ### Summary

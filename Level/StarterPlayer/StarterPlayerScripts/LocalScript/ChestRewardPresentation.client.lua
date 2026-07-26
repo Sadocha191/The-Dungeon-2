@@ -161,7 +161,15 @@ local function applyResponsiveLayout()
 
 	local size = presentationRoot.AbsoluteSize
 	local wide = size.X >= 1050
+	local compact = not wide and size.Y < 430
 	local actionFrame = boundActionFrame
+	local rarity = rarityText
+	local source = sourceText
+	local title = titleText
+	local description = descriptionText
+	local modifierHeader = detailsCard:FindFirstChild("ModifierHeader")
+	local list = modifiersList
+	local stack = stackText
 
 	if wide then
 		detailsCard.AnchorPoint = Vector2.new(1, 0.5)
@@ -175,14 +183,84 @@ local function applyResponsiveLayout()
 		end
 	else
 		local width = math.max(300, math.min(560, size.X - 28))
+		local cardHeight = compact and math.clamp(size.Y - 90, 200, 262) or 262
+		local cardBottomOffset = compact and 80 or 112
 		detailsCard.AnchorPoint = Vector2.new(0.5, 1)
-		detailsCard.Position = UDim2.new(0.5, 0, 1, -112)
-		detailsCard.Size = UDim2.fromOffset(width, 262)
+		detailsCard.Position = UDim2.new(0.5, 0, 1, -cardBottomOffset)
+		detailsCard.Size = UDim2.fromOffset(width, cardHeight)
 
 		if actionFrame then
 			actionFrame.AnchorPoint = Vector2.new(0.5, 1)
-			actionFrame.Position = UDim2.new(0.5, 0, 1, -24)
-			actionFrame.Size = UDim2.fromOffset(width, 72)
+			actionFrame.Position = UDim2.new(0.5, 0, 1, compact and -12 or -24)
+			actionFrame.Size = UDim2.fromOffset(width, compact and 60 or 72)
+		end
+	end
+
+	if compact then
+		rarity.Position = UDim2.fromOffset(18, 10)
+		rarity.Size = UDim2.fromOffset(110, 20)
+		rarity.TextSize = 10
+		source.Position = UDim2.fromOffset(140, 10)
+		source.Size = UDim2.new(1, -158, 0, 20)
+		source.TextSize = 10
+		title.Position = UDim2.fromOffset(18, 36)
+		title.Size = UDim2.new(1, -36, 0, 32)
+		title.TextSize = 20
+		description.Position = UDim2.fromOffset(18, 70)
+		description.Size = UDim2.new(1, -36, 0, 38)
+		description.TextSize = 11
+		modifierHeader.Position = UDim2.fromOffset(18, 112)
+		modifierHeader.Size = UDim2.new(1, -36, 0, 16)
+		list.Position = UDim2.fromOffset(18, 130)
+		list.Size = UDim2.new(1, -36, 1, -158)
+		stack.Position = UDim2.new(1, -18, 1, -6)
+		stack.Size = UDim2.new(0.55, 0, 0, 14)
+
+		if actionFrame then
+			local button = actionFrame:FindFirstChild("TakeRewardAction")
+			local status = actionFrame:FindFirstChild("Status")
+			if button and button:IsA("TextButton") then
+				button.Size = UDim2.new(1, 0, 0, 40)
+				button.TextSize = 14
+			end
+			if status and status:IsA("TextLabel") then
+				status.Position = UDim2.fromOffset(4, 42)
+				status.Size = UDim2.new(1, -8, 0, 14)
+				status.TextSize = 9
+			end
+		end
+	else
+		rarity.Position = UDim2.fromOffset(24, 18)
+		rarity.Size = UDim2.fromOffset(122, 24)
+		rarity.TextSize = 11
+		source.Position = UDim2.fromOffset(158, 19)
+		source.Size = UDim2.new(1, -180, 0, 22)
+		source.TextSize = 11
+		title.Position = UDim2.fromOffset(24, 54)
+		title.Size = UDim2.new(1, -48, 0, 42)
+		title.TextSize = 26
+		description.Position = UDim2.fromOffset(24, 100)
+		description.Size = UDim2.new(1, -48, 0, 56)
+		description.TextSize = 14
+		modifierHeader.Position = UDim2.fromOffset(24, 164)
+		modifierHeader.Size = UDim2.new(1, -48, 0, 20)
+		list.Position = UDim2.fromOffset(24, 190)
+		list.Size = UDim2.new(1, -48, 1, -226)
+		stack.Position = UDim2.new(1, -24, 1, -12)
+		stack.Size = UDim2.new(0.5, 0, 0, 18)
+
+		if actionFrame then
+			local button = actionFrame:FindFirstChild("TakeRewardAction")
+			local status = actionFrame:FindFirstChild("Status")
+			if button and button:IsA("TextButton") then
+				button.Size = UDim2.new(1, 0, 0, 46)
+				button.TextSize = 16
+			end
+			if status and status:IsA("TextLabel") then
+				status.Position = UDim2.fromOffset(4, 50)
+				status.Size = UDim2.new(1, -8, 0, 18)
+				status.TextSize = 11
+			end
 		end
 	end
 end
