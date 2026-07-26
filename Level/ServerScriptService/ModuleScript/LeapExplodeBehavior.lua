@@ -8,6 +8,9 @@ local NpcMelee = require(script.Parent:WaitForChild("NpcMelee"))
 local NpcMovement = require(script.Parent:WaitForChild("NpcMovement"))
 
 local LeapExplodeBehavior = {}
+local NPC_OCCLUSION_BUCKET_COUNT = 48
+local NPC_OCCLUSION_CANDIDATES_PER_BUCKET = 8
+local TWO_PI = math.pi * 2
 
 -- NpcService loads this behavior while it is initializing, so resolve the public
 -- damage API only when a detonation actually happens.
@@ -151,22 +154,58 @@ local function damagePlayers(npc: any, origin: Vector3, radius: number, damage: 
 	end
 end
 
-local function isOccludedByNpcBody(origin: Vector3, target, targets): boolean
+local function normalizedHorizontalAngle(delta: Vector3): number
+	local angle = math.atan2(delta.Z, delta.X)
+	return angle < 0 and angle + TWO_PI or angle
+end
+
+local function angularDistance(first: number, second: number): number
+	local delta = math.abs(first - second)
+	return math.min(delta, TWO_PI - delta)
+end
+
+local function angleBucketIndex(angle: number): number
+	return math.clamp(
+		math.floor((angle / TWO_PI) * NPC_OCCLUSION_BUCKET_COUNT) + 1,
+		1,
+		NPC_OCCLUSION_BUCKET_COUNT
+	)
+end
+
+local function addNpcBodyToOcclusionBuckets(origin: Vector3, target, buckets)
+	local delta = target.position - origin
+	local horizontalDistance = Vector2.new(delta.X, delta.Z).Magnitude
+	local angularRadius = horizontalDistance <= target.bodyRadius
+		and math.pi
+		or math.asin(math.clamp(target.bodyRadius / horizontalDistance, 0, 1))
+	local centerAngle = normalizedHorizontalAngle(delta)
+	local bucketWidth = TWO_PI / NPC_OCCLUSION_BUCKET_COUNT
+
+	for index = 1, NPC_OCCLUSION_BUCKET_COUNT do
+		local bucket = buckets[index]
+		if #bucket < NPC_OCCLUSION_CANDIDATES_PER_BUCKET then
+			local bucketCenter = (index - 0.5) * bucketWidth
+			if angularDistance(centerAngle, bucketCenter) <= angularRadius + bucketWidth * 0.5 then
+				table.insert(bucket, target)
+			end
+		end
+	end
+end
+
+local function isOccludedByNpcBody(origin: Vector3, target, candidates): boolean
 	local segment = target.position - origin
 	local segmentLengthSq = segment:Dot(segment)
 	if segmentLengthSq <= 1e-4 then
 		return false
 	end
 
-	for _, blocker in ipairs(targets) do
-		if blocker ~= target and blocker.distanceSq < target.distanceSq then
-			metrics.npcOcclusionTests += 1
-			local alpha = (blocker.position - origin):Dot(segment) / segmentLengthSq
-			if alpha > 0 and alpha < 1 then
-				local closestPoint = origin + segment * alpha
-				if (blocker.position - closestPoint).Magnitude <= blocker.bodyRadius then
-					return true
-				end
+	for _, blocker in ipairs(candidates) do
+		metrics.npcOcclusionTests += 1
+		local alpha = (blocker.position - origin):Dot(segment) / segmentLengthSq
+		if alpha > 0 and alpha < 1 then
+			local closestPoint = origin + segment * alpha
+			if (blocker.position - closestPoint).Magnitude <= blocker.bodyRadius then
+				return true
 			end
 		end
 	end
@@ -202,8 +241,18 @@ local function damageNpcs(npc: any, origin: Vector3, radius: number, damage: num
 		end
 	end
 
+	table.sort(targets, function(first, second)
+		return first.distanceSq < second.distanceSq
+	end)
+	local occlusionBuckets = table.create(NPC_OCCLUSION_BUCKET_COUNT)
+	for index = 1, NPC_OCCLUSION_BUCKET_COUNT do
+		occlusionBuckets[index] = {}
+	end
+
 	for _, target in ipairs(targets) do
-		if not isOccludedByNpcBody(origin, target, targets)
+		local targetAngle = normalizedHorizontalAngle(target.position - origin)
+		local candidates = occlusionBuckets[angleBucketIndex(targetAngle)]
+		if not isOccludedByNpcBody(origin, target, candidates)
 			and hasLineOfSight(
 				npc,
 				target.model,
@@ -222,6 +271,7 @@ local function damageNpcs(npc: any, origin: Vector3, radius: number, damage: num
 				metrics.npcDamageHits += 1
 			end
 		end
+		addNpcBodyToOcclusionBuckets(origin, target, occlusionBuckets)
 	end
 end
 

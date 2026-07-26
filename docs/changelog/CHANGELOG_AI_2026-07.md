@@ -25,6 +25,7 @@
 - Three nearby production Goblins produced three detonations, three player hits, three one-shot death callbacks and three authored client `ExplosionRuntime` instances, with no scripted `Explosion` instance or duplicate authored effect.
 - A dependency-presence regression test produced exactly one zero-damage legacy presenter when `VfxTemplatePlayer` was hidden and zero legacy presenters when it was restored.
 - A collinear near/far registered-NPC regression with both roots `CanQuery = false` damaged the nearer NPC once and left the farther NPC undamaged behind its body.
+- A 500-target bucket stress completed one detonation scan in `6.453 ms` and performed `624` exact occlusion tests, below the hard cap of `4,000` (`500 * 8`).
 - Despawning a production Goblin during a two-second active leap produced one leap, zero detonations and zero death callbacks. In the combined PR #135 integration, truthful `Dead` versus `Despawned` tombstone state yielded one authored VFX for a real detonation and zero for lifecycle despawn.
 - The active production Goblin template retains `NpcMovementSystem_V2`, `NpcMove_GroundRunner` and `NpcCombat_LeapExplode`.
 
@@ -33,7 +34,7 @@
 - No `Heartbeat`, `Stepped`, `RenderStepped`, connection, remote, persistent-data field or `_G` dependency was added.
 - Leap execution remains inside the existing shared `NpcService` movement scheduler at `12 Hz`.
 - Each detonation performs one bounded player pass plus the existing radius query over registered NPCs; LOS raycasts run only for eligible targets inside the configured blast radius.
-- NPC-body occlusion precomputes one target snapshot, then checks only nearer target pairs inside the same blast radius. Its worst case is O(K²) for K registered NPCs inside one detonation radius, without a persistent loop or allocation per pair.
+- NPC-body occlusion sorts one target snapshot, then uses 48 fixed angular buckets retaining at most eight nearer candidates each. Its worst case is O(K log K + 48K), with at most eight exact segment/body tests per target and no persistent loop or allocation per pair.
 - The legacy visual availability check is one pair of direct folder lookups per detonation, not a runtime scan or loop.
 - Behavior cleanup clears the captured leap state. Death and NPC friendly-fire remain routed through the existing lifecycle and `NpcService` owners.
 
