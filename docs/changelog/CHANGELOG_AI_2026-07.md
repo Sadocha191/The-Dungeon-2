@@ -13,6 +13,7 @@
 - Scheduled camera impulses one render priority after the existing `OrbitCam` owner so desktop camera writes cannot overwrite hit shake in the same frame.
 - Allowed confirmed lethal player hits to play feedback after health replication reaches zero, and made both lifetime recovery connections explicit teardown owners.
 - Made `CombatFeedback` own and disconnect both remote subscriptions on teardown, preventing stale closures from duplicating hit/death effects after script recreation.
+- Added a character-bind generation guard so a delayed pre-respawn Humanoid wait cannot replace the current recovery owner or attach stale connections.
 
 ### Files
 
@@ -40,6 +41,7 @@
 - With the current character at replicated `Health = 0`, the lethal guard was absent, the current root remained valid, and the authored player-hit path created `PlayerHitVFXRuntime`.
 - Destroying `SlideWaterRecovery`, reloading the character, marking the new Humanoid as sliding/swimming and waiting 0.2 seconds left `WalkSpeed = 0`; neither the old `CharacterAdded` closure nor its Heartbeat rebound after teardown.
 - Destroying `CombatFeedback` and then sending both hit and dead-Goblin packets produced zero `PlayerHitVFXRuntime` and zero `ExplosionRuntime` instances, proving both old remote callbacks were disconnected.
+- A controlled rapid-respawn bind completed the newer Humanoid first and the delayed older wait second; only the newer generation was accepted, and the stale bind created no connection owner.
 - No console error or warning referenced the five changed runtime owners or `PlayerHitVFXEvent`. Existing unrelated terrain-generator, preload, and disabled error-reporting warnings remained.
 - `git diff --check` passed in final validation.
 
@@ -50,6 +52,7 @@
 - `VfxTemplatePlayer` lazily adds one client camera render-step binding after the first impulse. It returns immediately when empty and caps simultaneous impulses at eight.
 - `SlideWaterRecovery` adds one client `Heartbeat` with O(1) state checks plus character/Humanoid lifecycle connections.
 - `SlideWaterRecovery` disconnects its lifetime `Heartbeat`, `CharacterAdded`, and dynamic Humanoid connections on script teardown; deferred character binds also stop once teardown starts.
+- Each character bind advances one O(1) generation token; the post-yield check also requires the same `player.Character`, so late pre-respawn coroutines return before mutating state.
 - VFX clones use Debris cleanup; delayed emitter/trail/beam callbacks check parent existence.
 - No server frame loop, new `_G` dependency, persistent-data field, teleport field, or gameplay damage value was added.
 

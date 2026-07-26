@@ -23,6 +23,7 @@ local lastSlideActiveAt = -math.huge
 local destroyed = false
 local characterAddedConnection = nil
 local heartbeatConnection = nil
+local bindGeneration = 0
 
 local function disconnectCharacterConnections()
 	for index = #characterConnections, 1, -1 do
@@ -80,13 +81,20 @@ local function bindCharacter(character)
 	if destroyed then
 		return
 	end
+	bindGeneration += 1
+	local generation = bindGeneration
 	disconnectCharacterConnections()
 	currentHumanoid = nil
 	recoveryUntil = -math.huge
 	lastSlideActiveAt = -math.huge
 
 	local humanoid = character:WaitForChild("Humanoid", 5)
-	if destroyed or not humanoid or not humanoid:IsA("Humanoid") then
+	if destroyed
+		or generation ~= bindGeneration
+		or character ~= player.Character
+		or not humanoid
+		or not humanoid:IsA("Humanoid")
+	then
 		return
 	end
 	currentHumanoid = humanoid
@@ -135,6 +143,7 @@ end)
 
 script.Destroying:Connect(function()
 	destroyed = true
+	bindGeneration += 1
 	if characterAddedConnection then
 		characterAddedConnection:Disconnect()
 		characterAddedConnection = nil
