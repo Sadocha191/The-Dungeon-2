@@ -1,0 +1,77 @@
+name: Refine NPC traversal patch
+
+on:
+  pull_request:
+    types: [synchronize]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  refine:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Apply review fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file_path = Path(path)
+              text = file_path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{path}: expected one match, found {count}")
+              file_path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          surface = Path("Level/ServerScriptService/ModuleScript/NpcGroundSurface.lua")
+          surface_text = surface.read_text(encoding="utf-8")
+          count = surface_text.count("traversalFailures")
+          if count < 2:
+              raise RuntimeError(f"NpcGroundSurface: expected traversalFailures metrics, found {count}")
+          surface.write_text(
+              surface_text.replace("traversalFailures", "traversalValidationFailures"),
+              encoding="utf-8",
+          )
+
+          navigation_path = "Level/ServerScriptService/ModuleScript/NpcGroundNavigation.lua"
+          replace_once(
+              navigation_path,
+              '''\tlocal allowed = reason == "body_obstacle" or reason == "step_too_high"\n\tif profile.TraversalKind == "Stride" and reason == "surface_layer_mismatch" then\n\t\tallowed = true\n\tend''',
+              '''\tlocal allowed = reason == "body_obstacle" or reason == "step_too_high"''',
+          )
+          replace_once(
+              navigation_path,
+              '''\tlocal distance = math.max(profile.AgentRadius * 1.5, profile.DirectSampleSpacing * 1.75)\n\tlocal hit = stepResult and stepResult.hit\n\tlocal obstacle = hit and hit.Instance\n\tif obstacle and obstacle:IsA("BasePart") then\n\t\tlocal startSurfaceY = nav.lastSafeSurfaceY or (npc.position.Y - npc.groundOffset)\n\t\tif partTopY(obstacle) - startSurfaceY > (profile.TraversalMaxObstacleTop or 0) + 0.05 then\n\t\t\treturn nil\n\t\tend\n\t\tlocal centerDistance = flat(obstacle.Position - npc.position):Dot(direction)\n\t\tlocal farEdgeDistance = centerDistance + projectedHalfExtent(obstacle, direction)\n\t\tdistance = math.max(distance, farEdgeDistance + profile.AgentRadius + 0.5)\n\tend\n\n\tdistance = math.clamp(distance, math.max(1, profile.AgentRadius * 1.1), maxDistance)''',
+              '''\tlocal minimumDistance = math.max(profile.AgentRadius * 1.5, profile.DirectSampleSpacing * 1.75)\n\tlocal distance = minimumDistance\n\tlocal hit = stepResult and stepResult.hit\n\tlocal obstacle = hit and hit.Instance\n\tif obstacle and obstacle:IsA("BasePart") then\n\t\tlocal startSurfaceY = nav.lastSafeSurfaceY or (npc.position.Y - npc.groundOffset)\n\t\tif partTopY(obstacle) - startSurfaceY > (profile.TraversalMaxObstacleTop or 0) + 0.05 then\n\t\t\treturn nil\n\t\tend\n\t\tlocal centerDistance = flat(obstacle.Position - npc.position):Dot(direction)\n\t\tlocal farEdgeDistance = centerDistance + projectedHalfExtent(obstacle, direction)\n\t\tlocal requiredDistance = farEdgeDistance + profile.AgentRadius + 0.5\n\t\tif requiredDistance > maxDistance + 0.05 then\n\t\t\treturn nil\n\t\tend\n\t\tdistance = math.max(distance, requiredDistance)\n\tend\n\n\tdistance = math.max(distance, math.max(1, profile.AgentRadius * 1.1))''',
+          )
+          replace_once(
+              navigation_path,
+              '''\tif not profile.TraversalKind or now < (nav.nextTraversalAt or 0) then\n\t\treturn false\n\tend''',
+              '''\tif not profile.TraversalKind then\n\t\treturn false\n\tend\n\tif source ~= "path_jump" and now < (nav.nextTraversalAt or 0) then\n\t\treturn false\n\tend''',
+          )
+
+          Path(".github/workflows/refine-npc-traversal.yml").unlink()
+          PY
+
+          git diff --check
+          grep -q 'traversalValidationFailures' Level/ServerScriptService/ModuleScript/NpcGroundSurface.lua
+          ! grep -q 'surface_layer_mismatch.*allowed' Level/ServerScriptService/ModuleScript/NpcGroundNavigation.lua
+          grep -q 'requiredDistance > maxDistance' Level/ServerScriptService/ModuleScript/NpcGroundNavigation.lua
+
+      - name: Commit review fixes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Tighten NPC traversal validation"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
