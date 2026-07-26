@@ -1550,6 +1550,8 @@ local function endRunForPlayer(plr: Player, reason: string)
 
 		local bossSpawnAt = tonumber(r.bossSpawnRunSeconds)
 		local bossSpawned = bossSpawnAt ~= nil and bossSpawnAt >= 0
+		local finishedRunForMissions = reason == "Victory"
+			or (reason == "Defeated" and seconds >= 60)
 		local extra = {
 			coinsGained = coinsGained,
 			runCoinsEarned = runCoinsEarned,
@@ -1574,6 +1576,7 @@ local function endRunForPlayer(plr: Player, reason: string)
 			spells3 = spellsCount >= 3,
 			hp50plusWin = (not diedThisRun) and (r.minHpRatio or 1) >= 0.50,
 			winStreak3 = (r.winStreak or 0) >= 3,
+			finishedRun = finishedRunForMissions,
 		}
 
 		pcall(function() MissionProgress.OnRunComplete(plr, 0, seconds, diedThisRun, extra) end)
