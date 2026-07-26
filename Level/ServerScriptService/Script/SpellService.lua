@@ -41,6 +41,7 @@ end
 local modFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
 local SpellDefs = modFolder and require(modFolder:WaitForChild("SpellDefinitions"))
 local NpcService = require(findServerModule("NpcService") or error("[SpellService] Missing NpcService"))
+local DamageIndicatorService = require(findServerModule("DamageIndicatorService") or error("[SpellService] Missing DamageIndicatorService"))
 local PlayerData = require(findServerModule("PlayerData") or error("[SpellService] Missing PlayerData"))
 local SpellEffects = require(findServerModule("SpellEffects") or error("[SpellService] Missing SpellEffects"))
 local SpellProjectiles = require(findServerModule("SpellProjectiles") or error("[SpellService] Missing SpellProjectiles"))
@@ -125,7 +126,7 @@ local function safeDamage(enemyModel, dmg, meta)
 	if dmg <= 0 then
 		return 0
 	end
-	return NpcService.ApplyDamage(enemyModel, dmg, meta)
+	return DamageIndicatorService.ApplyDamage(enemyModel, dmg, meta)
 end
 
 local function getEnemyPosition(model)
@@ -261,7 +262,12 @@ local function hitEnemy(plr, enemy, damage, stats, sourcePos, impactPos)
 	end
 	local dealt = damage * getAtkMult(plr) * getTargetDamageMultiplier(enemy, stats)
 	dealt *= SpellEffects.GetVulnerabilityDamageMultiplier(enemy, spellClock())
-	local applied = safeDamage(enemy, dealt, { player = plr })
+	local applied = safeDamage(enemy, dealt, {
+		player = plr,
+		element = stats and stats.element,
+		secondaryElement = stats and stats.secondaryElement,
+		sourceId = tostring(stats and stats.spellId or "Spell"),
+	})
 	if applied > 0 then
 		applyEffects(plr, enemy, stats, sourcePos)
 		if shouldSpawnImpact(plr, tostring(stats and stats.spellId or "Spell"), enemy) then
@@ -590,5 +596,3 @@ end)
 Players.PlayerRemoving:Connect(function(plr)
 	state[plr.UserId] = nil
 end)
-
-print("[SpellService] Ready (elemental spell engine)")
