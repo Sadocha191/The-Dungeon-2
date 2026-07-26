@@ -36,7 +36,7 @@
 
 ### Validation
 
-- Active Studio: `Level`, PlaceId `113361902471683`. Exact source parity passed for `NpcNavigationConfig` (`4745` bytes), `NpcGroundSurface` (`21310`), `NpcGroundNavigation` (`28350`) and `NpcService` (`32525`).
+- Active Studio: `Level`, PlaceId `113361902471683`. Final source parity after normalizing Studio's optional terminal newline passed for `NpcNavigationConfig` (`4744` bytes, hash `299645496`), `NpcGroundSurface` (`21556`, `1864131347`), `NpcGroundNavigation` (`29201`, `1606816556`) and `NpcService` (`33451`, `1613147374`).
 - An isolated clock test paused a traversal at `100.10`, resumed it at `105.10`, and verified `startedAt=105.00`, `endsAt=105.42`, an unchanged step position and idempotent repeated pause/resume calls.
 - A live registered `GroundSmall` NPC paused in mid-hop for 1.5 s with zero position delta. It resumed by `2.069` studs rather than teleporting to its landing and then completed normally.
 - Freeze also suspended the arc with zero movement and an active pause marker. Slow completed the current traversal without an invalid position. A strong lateral impulse stayed inside the validated corridor. Death and explicit despawn both cleared the navigation record, while a target change completed the current traversal and then adopted the new target.
