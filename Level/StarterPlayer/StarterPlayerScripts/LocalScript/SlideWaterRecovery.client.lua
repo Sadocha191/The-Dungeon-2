@@ -104,7 +104,7 @@ local function bindCharacter(character)
 			local slideIsActive = type(slideAttribute) == "string"
 				and slideAttribute ~= ""
 				and humanoid:GetAttribute(slideAttribute) == true
-			if slideWasRecent or slideIsActive or humanoid.WalkSpeed <= ZERO_SPEED_THRESHOLD then
+			if slideWasRecent or slideIsActive then
 				recoveryUntil = now + RECOVERY_WINDOW
 				task.defer(recoverSwimmingMovement)
 			end

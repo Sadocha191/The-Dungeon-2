@@ -168,7 +168,7 @@ local function bindCameraStep()
 	end
 	cameraStepBound = true
 
-	RunService:BindToRenderStep(CAMERA_BIND_NAME, Enum.RenderPriority.Camera.Value + 1, function()
+	RunService:BindToRenderStep(CAMERA_BIND_NAME, Enum.RenderPriority.Camera.Value + 2, function()
 		if #activeCameraImpulses == 0 then
 			return
 		end

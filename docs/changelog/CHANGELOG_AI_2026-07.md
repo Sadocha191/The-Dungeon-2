@@ -9,6 +9,8 @@
 - Added explicit zero-rate particle bursts, authored Goblin emission counts, an above-ground explosion offset, complete-model VFX anchoring, and whole-model Goblin attack tilt.
 - Restricted the tilt render pass to a separate set of currently attacking Goblins instead of scanning every tracked Goblin each frame.
 - Restricted Goblin death explosions to real death tombstones; lifecycle despawns now clean up without playing a false detonation.
+- Restricted water recovery activation to active/recent slides, so unrelated zero-speed swimming locks remain owned by their original movement ability.
+- Scheduled camera impulses one render priority after the existing `OrbitCam` owner so desktop camera writes cannot overwrite hit shake in the same frame.
 
 ### Files
 
@@ -32,6 +34,7 @@
 - A separate two-part model-VFX test after the review fix created two welds, left zero parts anchored, and followed its anchor by exactly 7 studs.
 - Real Terrain water naturally changed the Humanoid to `Swimming`; recovery restored positive movement speed, `AutoRotate = true`, zero camera offset, and cleared slide state. Dry-ground running, freefall, and slide re-arming still worked.
 - A stacked PR #140 integration probe despawned a production Goblin during its active leap: the server recorded one leap, zero detonations and zero death callbacks, while the client recorded zero `ExplosionRuntime` instances after the despawn guard.
+- Review regressions cover both sides of the recovery gate: recent slide plus `Swimming` restores movement, while zero-speed `Swimming` without a slide marker leaves the lock unchanged. Camera priority is `Camera + 2`, after `OrbitCam` at `Camera + 1`.
 - No console error or warning referenced the five changed runtime owners or `PlayerHitVFXEvent`. Existing unrelated terrain-generator, preload, and disabled error-reporting warnings remained.
 - `git diff --check` passed in final validation.
 
