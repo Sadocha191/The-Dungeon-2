@@ -1,0 +1,558 @@
+name: Apply NPC obstacle traversal patch
+
+on:
+  push:
+    branches:
+      - fix/npc-obstacle-traversal
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply focused navigation changes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file_path = Path(path)
+              text = file_path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{path}: expected one match, found {count}")
+              file_path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          config_path = "Level/ServerScriptService/ModuleScript/NpcNavigationConfig.lua"
+          replace_once(
+              config_path,
+              '''\t\tRepathCooldown = 0.5,\n\t\tCosts = {''',
+              '''\t\tRepathCooldown = 0.5,\n\t\tTraversalKind = "Hop",\n\t\tTraversalArcHeight = 3.25,\n\t\tTraversalDuration = 0.42,\n\t\tTraversalMaxDistance = 8.5,\n\t\tTraversalMaxRise = 2.75,\n\t\tTraversalMaxDrop = 6,\n\t\tTraversalMaxObstacleTop = 3.75,\n\t\tTraversalCooldown = 0.55,\n\t\tCosts = {''',
+          )
+          replace_once(config_path, '''\t\tMaxStepUp = 3,\n\t\tMaxDrop = 5,\n\t\tMaxSlopeDegrees = 34,''', '''\t\tMaxStepUp = 4.5,\n\t\tMaxDrop = 8,\n\t\tMaxSlopeDegrees = 38,''')
+          replace_once(config_path, '''\t\tDirectSampleSpacing = 4,''', '''\t\tDirectSampleSpacing = 4.5,''')
+          replace_once(
+              config_path,
+              '''\t\tRepathCooldown = 0.7,\n\t\tCosts = {''',
+              '''\t\tRepathCooldown = 0.7,\n\t\tTraversalKind = "Stride",\n\t\tTraversalArcHeight = 4,\n\t\tTraversalDuration = 0.55,\n\t\tTraversalMaxDistance = 12,\n\t\tTraversalMaxRise = 6,\n\t\tTraversalMaxDrop = 8,\n\t\tTraversalMaxObstacleTop = 6.5,\n\t\tTraversalCooldown = 0.5,\n\t\tCosts = {''',
+          )
+
+          surface_path = "Level/ServerScriptService/ModuleScript/NpcGroundSurface.lua"
+          replace_once(
+              surface_path,
+              '''local metrics = {\n\traycastCount = 0,\n\tblockcastCount = 0,\n\tsurfaceCacheHits = 0,\n\tfalseSlopeObstacleHits = 0,\n\tgroundProbeMisses = 0,\n}''',
+              '''local metrics = {\n\traycastCount = 0,\n\tblockcastCount = 0,\n\ttraversalBlockcastCount = 0,\n\ttraversalFailures = 0,\n\tsurfaceCacheHits = 0,\n\tfalseSlopeObstacleHits = 0,\n\tgroundProbeMisses = 0,\n}''',
+          )
+
+          traversal_surface = r'''
+local function traversalCast(startCenter: Vector3, endCenter: Vector3, size: Vector3): RaycastResult?
+	local direction = endCenter - startCenter
+	if direction.Magnitude <= 0.05 then
+		return nil
+	end
+	metrics.blockcastCount += 1
+	metrics.traversalBlockcastCount += 1
+	return workspace:Blockcast(CFrame.new(startCenter), size, direction, corridorParams)
+end
+
+function NpcGroundSurface.ValidateTraversal(npc, landingCandidate: Vector3, profile, options)
+	options = options or {}
+	local maxDistance = math.max(0, tonumber(options.maxDistance) or profile.TraversalMaxDistance or 0)
+	local maxRise = math.max(0, tonumber(options.maxRise) or profile.TraversalMaxRise or profile.MaxStepUp)
+	local maxDrop = math.max(0, tonumber(options.maxDrop) or profile.TraversalMaxDrop or profile.MaxDrop)
+	local arcHeight = math.max(0, tonumber(options.arcHeight) or profile.TraversalArcHeight or 0)
+	local horizontal = flat(landingCandidate - npc.position)
+	if horizontal.Magnitude <= 0.05 then
+		metrics.traversalFailures += 1
+		return failedResult("traversal_too_short", {}, 1)
+	end
+	if maxDistance <= 0 or horizontal.Magnitude > maxDistance + 0.05 then
+		metrics.traversalFailures += 1
+		return failedResult("traversal_too_far", {}, 1)
+	end
+
+	local currentSurfaceY = npc.position.Y - npc.groundOffset
+	local startSample = NpcGroundSurface.SamplePrecise(npc.position, currentSurfaceY, profile)
+	if not startSample then
+		metrics.traversalFailures += 1
+		return failedResult("missing_surface", {}, 1)
+	end
+	local startReason = NpcGroundSurface.GetFailureReason(startSample, profile)
+	if startReason then
+		metrics.traversalFailures += 1
+		return failedResult(startReason, { startSample }, 1)
+	end
+
+	local expectedLandingY = landingCandidate.Y - npc.groundOffset
+	local centerSample = NpcGroundSurface.SamplePrecise(landingCandidate, expectedLandingY, profile)
+	local samples = { startSample }
+	if not centerSample then
+		metrics.traversalFailures += 1
+		return failedResult("missing_landing_surface", samples, 2)
+	end
+	table.insert(samples, centerSample)
+	local centerReason = NpcGroundSurface.GetFailureReason(centerSample, profile)
+	if centerReason then
+		metrics.traversalFailures += 1
+		return failedResult(centerReason, samples, 2)
+	end
+
+	local moveDirection = horizontal.Unit
+	local right = Vector3.new(-moveDirection.Z, 0, moveDirection.X)
+	local probes = {
+		landingCandidate + moveDirection * math.max(0.5, profile.AgentRadius * profile.FrontProbeScale),
+		landingCandidate + right * profile.AgentRadius * profile.WidthProbeScale,
+		landingCandidate - right * profile.AgentRadius * profile.WidthProbeScale,
+	}
+	for _, probePosition in ipairs(probes) do
+		local sample = NpcGroundSurface.SamplePrecise(probePosition, centerSample.position.Y, profile)
+		if not sample then
+			metrics.traversalFailures += 1
+			return failedResult("missing_landing_surface", samples, #samples + 1)
+		end
+		table.insert(samples, sample)
+		local reason = NpcGroundSurface.GetFailureReason(sample, profile)
+		if reason then
+			metrics.traversalFailures += 1
+			return failedResult(reason, samples, #samples)
+		end
+		if not widthLayerClear(centerSample, sample, profile) then
+			metrics.traversalFailures += 1
+			return failedResult("landing_layer_mismatch", samples, #samples)
+		end
+	end
+
+	local deltaY = centerSample.position.Y - startSample.position.Y
+	if deltaY > maxRise + 0.05 then
+		metrics.traversalFailures += 1
+		return failedResult("traversal_rise_too_high", samples, 2)
+	end
+	if deltaY < -maxDrop - 0.05 then
+		metrics.traversalFailures += 1
+		return failedResult("traversal_drop_too_far", samples, 2)
+	end
+
+	local skin = profile.GroundSkin
+	local size = Vector3.new(
+		math.max(0.5, (profile.AgentRadius * 2) - (skin * 2)),
+		math.max(1, profile.AgentHeight - (skin * 2)),
+		math.max(0.5, (profile.AgentRadius * 2) - (skin * 2))
+	)
+	local startCenter = bodyCenter(startSample, profile)
+	local clearanceSurfaceY = math.max(startSample.position.Y, centerSample.position.Y) + arcHeight
+	local clearanceCenterY = clearanceSurfaceY + (profile.AgentHeight * 0.5)
+	local liftedStart = Vector3.new(startCenter.X, clearanceCenterY, startCenter.Z)
+	local liftedEnd = Vector3.new(centerSample.position.X, clearanceCenterY, centerSample.position.Z)
+	local hit = traversalCast(startCenter, liftedStart, size)
+	if not hit then
+		hit = traversalCast(liftedStart, liftedEnd, size)
+	end
+	if hit then
+		metrics.traversalFailures += 1
+		return failedResult("traversal_blocked", samples, 2, hit)
+	end
+
+	return {
+		clear = true,
+		reason = "traversal_clear",
+		position = Vector3.new(landingCandidate.X, centerSample.position.Y + npc.groundOffset, landingCandidate.Z),
+		surfaceSamples = samples,
+		startSurfaceY = startSample.position.Y,
+		endSurfaceY = centerSample.position.Y,
+		deltaY = deltaY,
+		slopeDegrees = centerSample.slopeDegrees,
+	}
+end
+
+'''
+          replace_once(surface_path, '''function NpcGroundSurface.BeginTick(alivePlayers: {any})''', traversal_surface + '''function NpcGroundSurface.BeginTick(alivePlayers: {any})''')
+
+          navigation_path = "Level/ServerScriptService/ModuleScript/NpcGroundNavigation.lua"
+          replace_once(
+              navigation_path,
+              '''\tstalePathResults = 0,\n\tstateTransitions = 0,''',
+              '''\tstalePathResults = 0,\n\tstateTransitions = 0,\n\ttraversalStarts = 0,\n\ttraversalCompletions = 0,\n\ttraversalFailures = 0,''',
+          )
+          replace_once(
+              navigation_path,
+              '''\t\tnextRepathAt = 0,\n\t\tpathExpiresAt = 0,''',
+              '''\t\tnextRepathAt = 0,\n\t\tnextTraversalAt = 0,\n\t\ttraversal = nil,\n\t\tpathExpiresAt = 0,''',
+          )
+
+          traversal_navigation = r'''
+local function isJumpWaypoint(waypoint): boolean
+	return waypoint
+		and (waypoint.Label == "Jump" or waypoint.Action == Enum.PathWaypointAction.Jump)
+		or false
+end
+
+local function partTopY(part: BasePart): number
+	local half = part.Size * 0.5
+	local highest = -math.huge
+	for _, x in ipairs({ -half.X, half.X }) do
+		for _, y in ipairs({ -half.Y, half.Y }) do
+			for _, z in ipairs({ -half.Z, half.Z }) do
+				highest = math.max(highest, part.CFrame:PointToWorldSpace(Vector3.new(x, y, z)).Y)
+			end
+		end
+	end
+	return highest
+end
+
+local function projectedHalfExtent(part: BasePart, direction: Vector3): number
+	local horizontal = flat(direction)
+	if horizontal.Magnitude <= 0.01 then
+		return 0
+	end
+	local unit = horizontal.Unit
+	local half = part.Size * 0.5
+	return math.abs(flat(part.CFrame.RightVector):Dot(unit)) * half.X
+		+ math.abs(flat(part.CFrame.UpVector):Dot(unit)) * half.Y
+		+ math.abs(flat(part.CFrame.LookVector):Dot(unit)) * half.Z
+end
+
+local function traversalFallbackTarget(npc, nav, moveTarget: Vector3, stepResult, profile): Vector3?
+	local reason = stepResult and stepResult.reason
+	local allowed = reason == "body_obstacle" or reason == "step_too_high"
+	if profile.TraversalKind == "Stride" and reason == "surface_layer_mismatch" then
+		allowed = true
+	end
+	if not allowed then
+		return nil
+	end
+
+	local direction = flat(moveTarget - npc.position)
+	if direction.Magnitude <= 0.05 then
+		return nil
+	end
+	direction = direction.Unit
+	local maxDistance = math.max(0, tonumber(profile.TraversalMaxDistance) or 0)
+	if maxDistance <= 0 then
+		return nil
+	end
+
+	local distance = math.max(profile.AgentRadius * 1.5, profile.DirectSampleSpacing * 1.75)
+	local hit = stepResult and stepResult.hit
+	local obstacle = hit and hit.Instance
+	if obstacle and obstacle:IsA("BasePart") then
+		local startSurfaceY = nav.lastSafeSurfaceY or (npc.position.Y - npc.groundOffset)
+		if partTopY(obstacle) - startSurfaceY > (profile.TraversalMaxObstacleTop or 0) + 0.05 then
+			return nil
+		end
+		local centerDistance = flat(obstacle.Position - npc.position):Dot(direction)
+		local farEdgeDistance = centerDistance + projectedHalfExtent(obstacle, direction)
+		distance = math.max(distance, farEdgeDistance + profile.AgentRadius + 0.5)
+	end
+
+	distance = math.clamp(distance, math.max(1, profile.AgentRadius * 1.1), maxDistance)
+	return npc.position + direction * distance
+end
+
+local function tryStartTraversal(
+	npc,
+	nav,
+	targetPosition: Vector3,
+	profile,
+	now: number,
+	source: string,
+	hit: RaycastResult?
+): boolean
+	if not profile.TraversalKind or now < (nav.nextTraversalAt or 0) then
+		return false
+	end
+	if hit and hit.Instance and hit.Instance:IsA("BasePart") then
+		local startSurfaceY = nav.lastSafeSurfaceY or (npc.position.Y - npc.groundOffset)
+		if partTopY(hit.Instance) - startSurfaceY > (profile.TraversalMaxObstacleTop or 0) + 0.05 then
+			metrics.traversalFailures += 1
+			return false
+		end
+	end
+
+	local result = NpcGroundSurface.ValidateTraversal(npc, targetPosition, profile, {
+		maxDistance = profile.TraversalMaxDistance,
+		maxRise = profile.TraversalMaxRise,
+		maxDrop = profile.TraversalMaxDrop,
+		arcHeight = profile.TraversalArcHeight,
+	})
+	nav.lastStepCheck = result
+	local endSample = result.surfaceSamples and result.surfaceSamples[2] or nil
+	nav.debugGroundProbe = endSample and endSample.position or nil
+	if not result.clear or not result.position then
+		metrics.traversalFailures += 1
+		return false
+	end
+
+	if source ~= "path_jump" then
+		nav.waypoints = nil
+	end
+	local duration = math.max(0.1, tonumber(profile.TraversalDuration) or 0.4)
+	nav.traversal = {
+		kind = profile.TraversalKind,
+		source = source,
+		startPosition = npc.position,
+		landingPosition = result.position,
+		startedAt = now,
+		endsAt = now + duration,
+		duration = duration,
+		arcHeight = math.max(0, tonumber(profile.TraversalArcHeight) or 0),
+		stepPosition = npc.position,
+		complete = false,
+	}
+	nav.nextTraversalAt = now + math.max(0, tonumber(profile.TraversalCooldown) or 0)
+	nav.blockedSince = nil
+	nav.stepFailureCount = 0
+	metrics.traversalStarts += 1
+	setStatus(nav, profile.TraversalKind == "Stride" and "Striding" or "Hopping")
+	return true
+end
+
+local function stepTraversal(npc, nav, now: number, dt: number): (Vector3, string)
+	local traversal = nav.traversal
+	if not traversal then
+		return finishStep(nav, Vector3.zero, "missing_traversal", 0)
+	end
+	local sampleTime = math.min(traversal.endsAt, now + math.max(0, dt))
+	local alpha = math.clamp((sampleTime - traversal.startedAt) / traversal.duration, 0, 1)
+	local basePosition = traversal.startPosition:Lerp(traversal.landingPosition, alpha)
+	local arcOffset = math.sin(math.pi * alpha) * traversal.arcHeight
+	local nextPosition = basePosition + Vector3.yAxis * arcOffset
+	traversal.stepPosition = nextPosition
+	traversal.complete = alpha >= 1
+	local expectedDistance = (nextPosition - npc.position).Magnitude
+	return finishStep(
+		nav,
+		nextPosition - npc.position,
+		string.lower(traversal.kind) .. ":" .. traversal.source,
+		expectedDistance
+	)
+end
+
+'''
+          replace_once(
+              navigation_path,
+              '''function NpcGroundNavigation.BeginTick(alivePlayers: {any})''',
+              traversal_navigation + '''function NpcGroundNavigation.BeginTick(alivePlayers: {any})''',
+          )
+
+          old_waypoint_block = r'''
+	local moveTarget = desiredPosition
+	local specialTransition = false
+	if nav.waypoints then
+		local waypoint = nav.waypoints[nav.waypointIndex]
+		if waypoint then
+			moveTarget = waypoint.Position + Vector3.new(0, npc.groundOffset, 0)
+			specialTransition = waypoint.Label == "Jump"
+				or waypoint.Label == "Climb"
+				or waypoint.Label == "Drop"
+				or waypoint.Action == Enum.PathWaypointAction.Jump
+			if (moveTarget - npc.position).Magnitude <= math.max(1.5, profile.AgentRadius * 0.7) then
+				nav.waypointIndex += 1
+				waypoint = nav.waypoints[nav.waypointIndex]
+				if waypoint then
+					moveTarget = waypoint.Position + Vector3.new(0, npc.groundOffset, 0)
+				else
+					nav.waypoints = nil
+					moveTarget = desiredPosition
+				end
+			end
+		else
+			nav.waypoints = nil
+		end
+	end
+'''
+          new_waypoint_block = r'''
+	local moveTarget = desiredPosition
+	local specialTransition = false
+	local jumpTransition = false
+	if nav.waypoints then
+		local waypoint = nav.waypoints[nav.waypointIndex]
+		if waypoint then
+			moveTarget = waypoint.Position + Vector3.new(0, npc.groundOffset, 0)
+			local transitionWaypoint = nav.waypoints[math.max(1, nav.waypointIndex - 1)]
+			if (moveTarget - npc.position).Magnitude <= math.max(1.5, profile.AgentRadius * 0.7) then
+				transitionWaypoint = waypoint
+				nav.waypointIndex += 1
+				waypoint = nav.waypoints[nav.waypointIndex]
+				if waypoint then
+					moveTarget = waypoint.Position + Vector3.new(0, npc.groundOffset, 0)
+				else
+					nav.waypoints = nil
+					moveTarget = desiredPosition
+					transitionWaypoint = nil
+				end
+			end
+			jumpTransition = isJumpWaypoint(transitionWaypoint)
+			specialTransition = transitionWaypoint
+				and (transitionWaypoint.Label == "Climb" or transitionWaypoint.Label == "Drop")
+				or false
+		else
+			nav.waypoints = nil
+		end
+	end
+'''
+          replace_once(navigation_path, old_waypoint_block, new_waypoint_block)
+
+          replace_once(
+              navigation_path,
+              '''\tlocal profile = npc.navigationProfile\n\tlocal nav = getNavigation(npc)\n\tlocal goalHorizontalSector = horizontalSectorKey(goalPosition)''',
+              '''\tlocal profile = npc.navigationProfile\n\tlocal nav = getNavigation(npc)\n\tif nav.traversal then\n\t\treturn stepTraversal(npc, nav, now, dt)\n\tend\n\tlocal goalHorizontalSector = horizontalSectorKey(goalPosition)''',
+          )
+
+          replace_once(
+              navigation_path,
+              '''\tlocal toTarget = specialTransition and (moveTarget - npc.position) or flat(moveTarget - npc.position)''',
+              '''\tif jumpTransition then\n\t\tif tryStartTraversal(npc, nav, moveTarget, profile, now, "path_jump", nil) then\n\t\t\treturn stepTraversal(npc, nav, now, dt)\n\t\tend\n\t\tinvalidateRoute(npc, nav, "jump_transition_blocked")\n\t\tqueuePath(npc, goalPosition, profile, now, "jump_transition_blocked")\n\t\tsetStatus(nav, nav.pathPending and "WaitingPath" or "Blocked")\n\t\treturn finishStep(nav, Vector3.zero, "jump_transition_blocked", 0)\n\tend\n\n\tlocal toTarget = specialTransition and (moveTarget - npc.position) or flat(moveTarget - npc.position)''',
+          )
+
+          replace_once(
+              navigation_path,
+              '''\tif not stepResult.clear or not stepResult.position then\n\t\tmetrics.stepValidationFailures += 1\n\t\tnav.stepFailureCount += 1''',
+              '''\tif not stepResult.clear or not stepResult.position then\n\t\tlocal traversalTarget = traversalFallbackTarget(npc, nav, moveTarget, stepResult, profile)\n\t\tif traversalTarget\n\t\t\tand tryStartTraversal(npc, nav, traversalTarget, profile, now, "local_obstacle", stepResult.hit) then\n\t\t\treturn stepTraversal(npc, nav, now, dt)\n\t\tend\n\t\tmetrics.stepValidationFailures += 1\n\t\tnav.stepFailureCount += 1''',
+          )
+
+          old_constrain = r'''
+function NpcGroundNavigation.ConstrainPosition(npc, candidate: Vector3, now: number): Vector3
+	local nav = getNavigation(npc)
+	if nav.lastSafePosition and (candidate - nav.lastSafePosition).Magnitude <= 0.01 then
+		return candidate
+	end
+	if flat(candidate - npc.position).Magnitude <= 0.05 then
+		return npc.position
+	end
+	local result = NpcGroundSurface.ValidateStep(npc, candidate, npc.navigationProfile)
+	return result.clear and result.position or npc.position
+end
+'''
+          new_constrain = r'''
+function NpcGroundNavigation.ConstrainPosition(npc, candidate: Vector3, now: number): Vector3
+	local nav = getNavigation(npc)
+	local traversal = nav.traversal
+	if traversal then
+		local position = traversal.stepPosition or candidate
+		if traversal.complete then
+			position = traversal.landingPosition
+			nav.traversal = nil
+			nav.lastSafeSurfaceY = position.Y - npc.groundOffset
+			nav.lastSafePosition = position
+			nav.blockedSince = nil
+			nav.stepFailureCount = 0
+			markProgress(npc, nav, position, npc.navigationProfile, now)
+			metrics.traversalCompletions += 1
+			nav.lastMoveReason = string.lower(traversal.kind) .. "_complete"
+			setStatus(nav, nav.waypoints and "Path" or "Direct")
+		end
+		return position
+	end
+	if nav.lastSafePosition and (candidate - nav.lastSafePosition).Magnitude <= 0.01 then
+		return candidate
+	end
+	if flat(candidate - npc.position).Magnitude <= 0.05 then
+		return npc.position
+	end
+	local result = NpcGroundSurface.ValidateStep(npc, candidate, npc.navigationProfile)
+	return result.clear and result.position or npc.position
+end
+'''
+          replace_once(navigation_path, old_constrain, new_constrain)
+
+          replace_once(
+              navigation_path,
+              '''function NpcGroundNavigation.Cleanup(npc)\n\tNpcGroundNavigation.Invalidate(npc, "cleanup")\n\tnpc.navigation = nil''',
+              '''function NpcGroundNavigation.Cleanup(npc)\n\tNpcGroundNavigation.Invalidate(npc, "cleanup")\n\tif npc.navigation then\n\t\tnpc.navigation.traversal = nil\n\tend\n\tnpc.navigation = nil''',
+          )
+          replace_once(
+              navigation_path,
+              '''\t\tconsecutiveZeroMoveTicks = nav.consecutiveZeroMoveTicks,\n\t}''',
+              '''\t\tconsecutiveZeroMoveTicks = nav.consecutiveZeroMoveTicks,\n\t\ttraversal = nav.traversal and {\n\t\t\tkind = nav.traversal.kind,\n\t\t\tsource = nav.traversal.source,\n\t\t\tlandingPosition = nav.traversal.landingPosition,\n\t\t\tcomplete = nav.traversal.complete,\n\t\t} or nil,\n\t}''',
+          )
+
+          docs_path = "docs/NPC_NAVIGATION.md"
+          replace_once(
+              docs_path,
+              '''- `GroundSmall` — domyślny profil istniejących mobów; agent o promieniu 1,75 i wysokości 6 studów.\n- `GroundLarge` — większy korytarz, mniejszy limit nachylenia i zakaz automatycznych skoków/wspinania. Obecnie używany przez Grzyba, Golema, Knighta i Enta.''',
+              '''- `GroundSmall` — domyślny profil istniejących mobów; agent o promieniu 1,75 i wysokości 6 studów. Może wykonać niski, kinematyczny hop przez waypoint `Jump` albo nad zwalidowaną niską przeszkodą.\n- `GroundLarge` — większy korytarz, krok do 4,5 studa i zwalidowany `Stride` do 6 studów w górę / 8 w dół. Nie używa klasycznego skoku. Obecnie używany przez Grzyba, Golema, Knighta i Enta.''',
+          )
+          replace_once(
+              docs_path,
+              '''Profil można wskazać w konfiguracji moba przez `movementProfile`, przez `movementMode`, `canFly` albo atrybut modelu `CanFly`. Brak konfiguracji zawsze daje profil naziemny. Nie ustawiaj `CanFly` tylko dlatego, że nazwa lub wygląd moba sugeruje latanie.\n\n## Powierzchnie i proxy mapy''',
+              '''Profil można wskazać w konfiguracji moba przez `movementProfile`, przez `movementMode`, `canFly` albo atrybut modelu `CanFly`. Brak konfiguracji zawsze daje profil naziemny. Nie ustawiaj `CanFly` tylko dlatego, że nazwa lub wygląd moba sugeruje latanie.\n\n## Przechodzenie nad przeszkodami\n\nPróba hopu albo dużego kroku uruchamia się tylko po zablokowanym lokalnym kroku lub na przejściu `Jump`. System najpierw sprawdza wysokość przeszkody, dystans, dozwolony wznios/opad, pełny footprint lądowania oraz podniesiony korytarz korpusu. Skrzynie, niskie pnie i małe kamienie mogą zostać przekroczone, ale wysoka ściana, stromy klif, woda/lawa albo brak bezpiecznej powierzchni nadal wymuszają zatrzymanie i repath.\n\nPrzejście jest stanem w istniejącym schedulerze ruchu 12 Hz. Nie powstaje osobny `Heartbeat`, task ani fizyczny `Humanoid` dla NPC. Podczas aktywnego przejścia `ConstrainPosition` zwraca wyliczoną pozycję łuku zamiast ponownie przyklejać Y do ziemi; po lądowaniu wykonuje normalny snap do zwalidowanej powierzchni.\n\n## Powierzchnie i proxy mapy''',
+          )
+
+          monthly_path = "docs/changelog/CHANGELOG_AI_2026-07.md"
+          monthly_entry = r'''# CHANGELOG_AI 2026-07
+
+## 2026-07-26 - Poziom NPC obstacle traversal
+
+### Summary
+
+- Added persistent kinematic `Hop` traversal for `GroundSmall` NPCs across valid `Jump` transitions and low local obstacles such as chests, fallen logs and small decorative collision.
+- Added a separate `Stride` traversal for `GroundLarge` NPCs, with a larger ordinary step, validated long stride, higher terrain-rise tolerance and no classic jump behavior.
+- Prevented the final ground constraint from deleting the airborne Y component while a traversal is active.
+- Kept tall walls, forbidden surfaces, missing landing surfaces and excessive rises/drops blocked so pathfinding can route around them.
+
+### Files
+
+- Updated `Level/ServerScriptService/ModuleScript/NpcNavigationConfig.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/NpcGroundSurface.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/NpcGroundNavigation.lua`.
+- Updated `docs/NPC_NAVIGATION.md`, `CHANGELOG_AI.md` and this monthly changelog.
+
+### Runtime cost and cleanup
+
+- No new `Heartbeat`, `Stepped`, `RenderStepped`, remote, persistent-data field or `_G` dependency was added.
+- Traversal runs inside the existing centralized 12 Hz NPC movement scheduler.
+- Normal clear movement keeps the existing probe cost. Extra landing probes and at most two traversal `Blockcast` calls occur only when a jump waypoint or blocked local step attempts a hop/stride.
+- Traversal state is stored on the existing per-NPC navigation record and cleared on landing or NPC cleanup.
+
+### Validation
+
+- Patch application assertions and `git diff --check` run in the branch workflow.
+- Static review verifies that `NpcGroundNavigation.Step` keeps its public return shape and `NpcService` requires no scheduler/signature change.
+- Roblox Studio/MCP was unavailable in this session, so live Play validation, animation appearance and tuning under a large horde remain required before merge/publish.
+
+### Risks and rollback
+
+- Hop/stride tuning is intentionally conservative but may require per-map adjustment for unusually wide chest/log meshes or very uneven proxy geometry.
+- A collidable decorative object taller than the configured obstacle limit remains a real blocker and must be routed around or have its collision/proxy corrected.
+- Roll back by reverting this PR. No data migration, remote rollback or client rollback is required.
+
+'''
+          replace_once(monthly_path, '''# CHANGELOG_AI 2026-07\n\n''', monthly_entry)
+
+          index_path = "CHANGELOG_AI.md"
+          replace_once(
+              index_path,
+              '''## Ostatnie wpisy z importowanej historii\n\n- **2026-07-24**''',
+              '''## Ostatnie wpisy z importowanej historii\n\n- **2026-07-26** — Poziom niski hop małych NPC i duży krok `GroundLarge` nad zwalidowanymi przeszkodami\n- **2026-07-24**''',
+          )
+
+          workflow_path = Path(".github/workflows/apply-npc-obstacle-traversal.yml")
+          if workflow_path.exists():
+              workflow_path.unlink()
+          PY
+
+          git diff --check
+          test "$(grep -R "RunService.Heartbeat" -n \
+            Level/ServerScriptService/ModuleScript/NpcGroundNavigation.lua \
+            Level/ServerScriptService/ModuleScript/NpcGroundSurface.lua | wc -l)" -eq 0
+          grep -q 'TraversalKind = "Hop"' Level/ServerScriptService/ModuleScript/NpcNavigationConfig.lua
+          grep -q 'TraversalKind = "Stride"' Level/ServerScriptService/ModuleScript/NpcNavigationConfig.lua
+          grep -q 'function NpcGroundSurface.ValidateTraversal' Level/ServerScriptService/ModuleScript/NpcGroundSurface.lua
+          grep -q 'local function stepTraversal' Level/ServerScriptService/ModuleScript/NpcGroundNavigation.lua
+
+      - name: Commit generated patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Improve NPC obstacle traversal"
+          git push origin HEAD:${GITHUB_REF_NAME}
