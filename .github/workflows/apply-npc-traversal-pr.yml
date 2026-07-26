@@ -24,15 +24,29 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import textwrap
+          import traceback
 
-          source = Path('.github/workflows/apply-npc-obstacle-traversal.yml').read_text(encoding='utf-8')
-          marker = "          python3 - <<'PY'\n"
-          start = source.index(marker) + len(marker)
-          end = source.index("\n          PY\n", start)
-          script = textwrap.dedent(source[start:end])
-          exec(compile(script, 'apply_npc_obstacle_traversal.py', 'exec'), {})
-          Path('.github/workflows/apply-npc-traversal-pr.yml').unlink(missing_ok=True)
+          try:
+              source = Path('.github/workflows/apply-npc-obstacle-traversal.yml').read_text(encoding='utf-8')
+              marker = "          python3 - <<'PY'\n"
+              start = source.index(marker) + len(marker)
+              end = source.index("\n          PY\n", start)
+              script = textwrap.dedent(source[start:end])
+              exec(compile(script, 'apply_npc_obstacle_traversal.py', 'exec'), {})
+              Path('.github/workflows/apply-npc-traversal-pr.yml').unlink(missing_ok=True)
+          except Exception:
+              Path('.github/patch-error.txt').write_text(traceback.format_exc(), encoding='utf-8')
           PY
+
+          if test -f .github/patch-error.txt; then
+            cat .github/patch-error.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/patch-error.txt
+            git commit -m "Record NPC traversal patch failure"
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+            exit 1
+          fi
 
           git diff --check
           grep -q 'TraversalKind = "Hop"' Level/ServerScriptService/ModuleScript/NpcNavigationConfig.lua
