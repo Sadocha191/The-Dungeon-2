@@ -1,5 +1,46 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-26 - Four Peaks summoning altar review fixes (PR #142)
+
+### Summary
+
+- Preserved `UICorner`, `UIStroke`, and other structural children when a weapon preview is refreshed by giving generated preview content a dedicated `GeneratedWeaponContent` owner.
+- Rendered every configured `FeaturedWeaponIds` entry in the altar, featured-information panel, and banner cards instead of silently choosing the first weapon.
+- Added full featured-name summaries to the altar badge, information panel, and banner cards while retaining the single-feature presentation.
+
+### Files
+
+- Updated `Four Peaks/StarterPlayer/StarterPlayerScripts/BannerUI.lua`.
+- Updated this monthly changelog.
+
+### Studio and validation
+
+- Active Studio: `Four Peaks`.
+- Synchronized the updated `BannerUI` source to `StarterPlayer.StarterPlayerScripts.BannerUI`.
+- Temporarily configured the active schedule with `Harvest of the End` and `Excalion, Blade of Kings`, opened the banner through `OpenWeaponBannerUI`, and verified that the altar, information panel, and sidebar each created two generated weapon cells.
+- Verified the altar badge and sidebar summary contained both configured weapon names.
+- Verified the preview containers retained their pre-existing `UICorner` and `UIStroke` instances after rendering.
+- Restored `BannerConfigs` and `BannerSchedule` from the repository after the test.
+- Play reached the Four Peaks lobby without a `BannerUI` error. The existing unrelated `BlacksmithUI` wait for `PassiveDesc` remained.
+- `git diff --check` passed before the changelog update and is rerun in final validation.
+
+### Runtime loops and cleanup
+
+- No new `Heartbeat`, `Stepped`, `RenderStepped`, polling task, remote, persistent-data field, teleport field, or `_G` dependency was added.
+- Generated preview frames remain owned by their presentation container and are cleared synchronously before reuse; no connection or long-lived runtime-table lifecycle changed.
+- Multi-feature rendering costs O(F) GUI instances per visible banner, where F is the configured featured-weapon count. Current validation covered two featured weapons.
+
+### Not verified
+
+- Studio screenshot and pointer-input tools timed out in this MCP session, so visual pixel quality and physical mouse/touch interaction were not verified.
+- Real x1/x10 rolls, skip/continue, pity/guarantee transitions, conversion, insufficient-currency behavior, and persistence were not exercised because this review fix does not change those paths and a live roll would mutate player economy.
+- Phone, tablet, and ultrawide visual layouts remain unverified.
+
+### Risks and rollback
+
+- Very large future featured lists can make individual preview cells and name summaries dense; the grid adapts to the configured count but has no explicit content cap.
+- Rollback by reverting the PR #142 review-fix commit and restoring the previous `BannerUI` source in Four Peaks Studio. No data migration or server rollback is required.
+
 ## 2026-07-24 - Poziom slide animation integration (PR #134)
 
 ### Summary

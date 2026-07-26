@@ -281,7 +281,19 @@ local function resolveWeaponDisplayName(weaponId)
 end
 
 local function renderWeaponVisual(container, weaponId, accentColor)
-	clearChildren(container)
+	local generated = container:FindFirstChild("GeneratedWeaponContent")
+	if not (generated and generated:IsA("Frame")) then
+		generated = createFrame(
+			container,
+			"GeneratedWeaponContent",
+			UDim2.fromScale(0, 0),
+			UDim2.fromScale(1, 1),
+			Color3.new(0, 0, 0)
+		)
+		generated.BackgroundTransparency = 1
+	end
+	clearChildren(generated)
+	container = generated
 	local weaponIdString = tostring(weaponId or "")
 	if weaponIdString == "" then
 		local placeholder = createText(container, "Placeholder", "?", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 54, Enum.Font.GothamBlack, COLORS.TextDim, Enum.TextXAlignment.Center)
@@ -331,6 +343,92 @@ local function renderWeaponVisual(container, weaponId, accentColor)
 	local def = getWeaponDef(weaponIdString)
 	local fallback = createText(container, "Fallback", tostring((def and def.weaponType) or "?"):sub(1, 1), UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 54, Enum.Font.GothamBlack, accentColor or COLORS.Purple, Enum.TextXAlignment.Center)
 	fallback.TextYAlignment = Enum.TextYAlignment.Center
+end
+
+local function getFeaturedWeaponIds(banner)
+	local result = {}
+	local seen = {}
+	for _, weaponId in ipairs((banner and banner.FeaturedWeaponIds) or {}) do
+		if typeof(weaponId) == "string" and weaponId ~= "" and not seen[weaponId] then
+			seen[weaponId] = true
+			table.insert(result, weaponId)
+		end
+	end
+	return result
+end
+
+local function getFeaturedDisplayNames(featuredWeaponIds)
+	local names = {}
+	for _, weaponId in ipairs(featuredWeaponIds) do
+		table.insert(names, resolveWeaponDisplayName(weaponId))
+	end
+	return names
+end
+
+local function renderFeaturedWeaponSet(container, featuredWeaponIds, showNames)
+	local generated = container:FindFirstChild("GeneratedFeaturedSet")
+	if not (generated and generated:IsA("Frame")) then
+		generated = createFrame(
+			container,
+			"GeneratedFeaturedSet",
+			UDim2.fromScale(0, 0),
+			UDim2.fromScale(1, 1),
+			Color3.new(0, 0, 0)
+		)
+		generated.BackgroundTransparency = 1
+	end
+	clearChildren(generated)
+
+	local count = #featuredWeaponIds
+	if count == 0 then
+		renderWeaponVisual(generated, nil, COLORS.Purple)
+		return
+	end
+
+	local columns = math.ceil(math.sqrt(count))
+	local rows = math.ceil(count / columns)
+	for index, weaponId in ipairs(featuredWeaponIds) do
+		local column = (index - 1) % columns
+		local row = math.floor((index - 1) / columns)
+		local cell = createFrame(
+			generated,
+			"Featured_" .. tostring(index),
+			UDim2.new(column / columns, 2, row / rows, 2),
+			UDim2.new(1 / columns, -4, 1 / rows, -4),
+			Color3.fromRGB(13, 10, 19),
+			8
+		)
+		local def = getWeaponDef(weaponId)
+		local rarityColor = getRarityColor(def and def.rarity)
+		addStroke(cell, rarityColor, 1, 0.15)
+
+		local visualHeight = showNames and 0.72 or 1
+		local visual = createFrame(
+			cell,
+			"Visual",
+			UDim2.fromScale(0, 0),
+			UDim2.new(1, 0, visualHeight, 0),
+			Color3.new(0, 0, 0)
+		)
+		visual.BackgroundTransparency = 1
+		renderWeaponVisual(visual, weaponId, rarityColor)
+
+		if showNames then
+			local name = createText(
+				cell,
+				"Name",
+				resolveWeaponDisplayName(weaponId),
+				UDim2.new(0, 3, visualHeight, 0),
+				UDim2.new(1, -6, 1 - visualHeight, 0),
+				8,
+				Enum.Font.GothamBold,
+				COLORS.Text,
+				Enum.TextXAlignment.Center
+			)
+			name.TextScaled = true
+			name.TextWrapped = true
+		end
+	end
 end
 
 local gui = playerGui:WaitForChild("BannerUI")
@@ -618,14 +716,6 @@ local function renderRates(rates)
 	end
 end
 
-local function getPrimaryFeaturedWeapon(banner)
-	local featured = banner and banner.FeaturedWeaponIds
-	if typeof(featured) == "table" and #featured > 0 then
-		return featured[1]
-	end
-	return nil
-end
-
 local function updateActionButtons()
 	local banner = banners[selectedBannerId]
 	local currencies = state.Currencies or {}
@@ -644,8 +734,8 @@ local function renderSelectedBanner()
 		bannerName.Text = "NO ACTIVE ALTAR"
 		bannerDescription.Text = "No summoning banner is currently available."
 		featuredBadgeText.Text = "Featured: -"
-		renderWeaponVisual(featuredVisual, nil, COLORS.Purple)
-		renderWeaponVisual(featuredInfoVisual, nil, COLORS.Purple)
+		renderFeaturedWeaponSet(featuredVisual, {}, false)
+		renderFeaturedWeaponSet(featuredInfoVisual, {}, true)
 		featuredWeaponName.Text = "-"
 		featuredWeaponRarity.Text = "-"
 		featuredWeaponMeta.Text = "-"
@@ -663,22 +753,44 @@ local function renderSelectedBanner()
 	summonOneCost.Text = string.format("%d Ticket%s", cost, cost == 1 and "" or "s")
 	summonTenCost.Text = string.format("%d Tickets", cost * 10)
 
-	local weaponId = getPrimaryFeaturedWeapon(banner)
+	local featuredWeaponIds = getFeaturedWeaponIds(banner)
+	local weaponId = featuredWeaponIds[1]
 	local weaponDef = getWeaponDef(weaponId)
 	local rarity = (weaponDef and weaponDef.rarity) or (banner.Pity and banner.Pity.TargetRarity) or "Legendary"
 	local rarityColor = getRarityColor(rarity)
+	local featuredNames = getFeaturedDisplayNames(featuredWeaponIds)
 	local displayName = resolveWeaponDisplayName(weaponId)
 
-	featuredBadgeText.Text = string.format("Featured: %s", displayName)
+	featuredBadgeText.Text = "Featured: " .. table.concat(featuredNames, "  •  ")
 	featuredBadgeText.TextColor3 = rarityColor
-	renderWeaponVisual(featuredVisual, weaponId, rarityColor)
-	renderWeaponVisual(featuredInfoVisual, weaponId, rarityColor)
-	featuredWeaponName.Text = displayName
-	featuredWeaponRarity.Text = tostring(rarity)
+	featuredBadgeText.TextScaled = #featuredWeaponIds > 1
+	renderFeaturedWeaponSet(featuredVisual, featuredWeaponIds, false)
+	renderFeaturedWeaponSet(featuredInfoVisual, featuredWeaponIds, true)
+	featuredWeaponName.Text = #featuredWeaponIds == 1
+		and displayName
+		or string.format("%d FEATURED WEAPONS", #featuredWeaponIds)
+
+	local rarityNames = {}
+	local seenRarities = {}
+	for _, featuredId in ipairs(featuredWeaponIds) do
+		local featuredDef = getWeaponDef(featuredId)
+		local featuredRarity = tostring((featuredDef and featuredDef.rarity) or rarity)
+		if not seenRarities[featuredRarity] then
+			seenRarities[featuredRarity] = true
+			table.insert(rarityNames, featuredRarity)
+		end
+	end
+	featuredWeaponRarity.Text = table.concat(rarityNames, " • ")
 	featuredWeaponRarity.TextColor3 = rarityColor
 	local weaponType = weaponDef and tostring(weaponDef.weaponType or "Weapon") or "Weapon"
 	local element = weaponDef and tostring(weaponDef.element or weaponDef.Element or "") or ""
-	featuredWeaponMeta.Text = element ~= "" and string.format("%s • %s\nIncreased featured rate", element, weaponType) or string.format("%s\nIncreased featured rate", weaponType)
+	if #featuredWeaponIds == 1 then
+		featuredWeaponMeta.Text = element ~= ""
+			and string.format("%s • %s\nIncreased featured rate", element, weaponType)
+			or string.format("%s\nIncreased featured rate", weaponType)
+	else
+		featuredWeaponMeta.Text = table.concat(featuredNames, " • ") .. "\nAll listed weapons share the featured rate"
+	end
 
 	outerRune:FindFirstChildOfClass("UIStroke").Color = rarityColor
 	middleRune:FindFirstChildOfClass("UIStroke").Color = blendColor(rarityColor, Color3.new(1, 1, 1), 0.24)
@@ -737,7 +849,8 @@ local function renderBannerList()
 		local id = item.Id
 		local banner = item.Banner
 		local selected = id == selectedBannerId
-		local featuredId = getPrimaryFeaturedWeapon(banner)
+		local featuredIds = getFeaturedWeaponIds(banner)
+		local featuredId = featuredIds[1]
 		local featuredDef = getWeaponDef(featuredId)
 		local rarity = (featuredDef and featuredDef.rarity) or (banner.Pity and banner.Pity.TargetRarity) or "Legendary"
 		local rarityColor = getRarityColor(rarity)
@@ -752,15 +865,26 @@ local function renderBannerList()
 		createFrame(button, "Accent", UDim2.fromOffset(0, 0), UDim2.fromOffset(5, 92), rarityColor, 6)
 		local miniVisual = createFrame(button, "MiniVisual", UDim2.fromOffset(12, 10), UDim2.fromOffset(64, 72), Color3.fromRGB(13, 10, 19), 10)
 		addStroke(miniVisual, blendColor(rarityColor, COLORS.BorderSoft, 0.45), 1)
-		renderWeaponVisual(miniVisual, featuredId, rarityColor)
+		renderFeaturedWeaponSet(miniVisual, featuredIds, false)
 
-		local title = createText(button, "Title", tostring(banner.DisplayName or id), UDim2.fromOffset(86, 8), UDim2.new(1, -96, 0, 34), 11, Enum.Font.GothamBold, COLORS.Text)
+		local title = createText(button, "Title", tostring(banner.DisplayName or id), UDim2.fromOffset(86, 6), UDim2.new(1, -96, 0, 28), 11, Enum.Font.GothamBold, COLORS.Text)
 		title.TextWrapped = true
 		title.TextYAlignment = Enum.TextYAlignment.Top
+		local featuredSummary = createText(
+			button,
+			"FeaturedSummary",
+			"Featured: " .. table.concat(getFeaturedDisplayNames(featuredIds), ", "),
+			UDim2.fromOffset(86, 34),
+			UDim2.new(1, -96, 0, 16),
+			8,
+			Enum.Font.Gotham,
+			COLORS.TextSoft
+		)
+		featuredSummary.TextTruncate = Enum.TextTruncate.AtEnd
 		local timerText = banner.Active ~= false and formatTimeRemaining(banner.EndTime) or "Unavailable"
-		createText(button, "Timer", timerText, UDim2.fromOffset(86, 46), UDim2.new(1, -96, 0, 18), 9, Enum.Font.Gotham, banner.Active ~= false and COLORS.Gold or COLORS.Bad)
+		createText(button, "Timer", timerText, UDim2.fromOffset(86, 50), UDim2.new(1, -96, 0, 16), 9, Enum.Font.Gotham, banner.Active ~= false and COLORS.Gold or COLORS.Bad)
 		local cost = clampInt(banner.Cost and banner.Cost.Amount)
-		createText(button, "Cost", string.format("%d ticket%s per summon", cost, cost == 1 and "" or "s"), UDim2.fromOffset(86, 65), UDim2.new(1, -96, 0, 16), 9, Enum.Font.Gotham, COLORS.TextDim)
+		createText(button, "Cost", string.format("%d ticket%s per summon", cost, cost == 1 and "" or "s"), UDim2.fromOffset(86, 68), UDim2.new(1, -96, 0, 14), 8, Enum.Font.Gotham, COLORS.TextDim)
 
 		button.MouseButton1Click:Connect(function()
 			if isRolling then
