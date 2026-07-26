@@ -4,10 +4,40 @@ local Workspace = game:GetService("Workspace")
 local NpcLifecycle = require(script.Parent:WaitForChild("NpcLifecycle"))
 local NpcMelee = require(script.Parent:WaitForChild("NpcMelee"))
 local NpcMovement = require(script.Parent:WaitForChild("NpcMovement"))
-local NpcRegistry = require(script.Parent:WaitForChild("NpcRegistry"))
-local NpcTargeting = require(script.Parent:WaitForChild("NpcTargeting"))
 
 local LeapExplodeBehavior = {}
+
+-- NpcService loads this behavior while it is initializing, so resolve the public
+-- damage API only when a detonation actually happens.
+local npcService = nil
+local npcServiceWarningShown = false
+
+local function getNpcService()
+	if npcService then
+		return npcService
+	end
+
+	local module = script.Parent:FindFirstChild("NpcService")
+	if not module or not module:IsA("ModuleScript") then
+		if not npcServiceWarningShown then
+			npcServiceWarningShown = true
+			warn("[LeapExplodeBehavior] NpcService ModuleScript is required for NPC blast damage")
+		end
+		return nil
+	end
+
+	local ok, result = pcall(require, module)
+	if ok and type(result) == "table" then
+		npcService = result
+		return npcService
+	end
+
+	if not npcServiceWarningShown then
+		npcServiceWarningShown = true
+		warn("[LeapExplodeBehavior] Failed to resolve NpcService for NPC blast damage:", result)
+	end
+	return nil
+end
 
 local metrics = {
 	armed = 0,
@@ -42,7 +72,6 @@ local function getState(npc: any): {[string]: any}
 	state = {
 		kind = "LeapExplode",
 		phase = "Chase",
-		phaseEndsAt = 0,
 		leapStartedAt = 0,
 		leapEndsAt = 0,
 		leapStart = nil,
@@ -109,24 +138,24 @@ local function damagePlayers(npc: any, origin: Vector3, radius: number, damage: 
 end
 
 local function damageNpcs(npc: any, origin: Vector3, radius: number, damage: number)
-	local targets = {}
-	for _, targetNpc in NpcRegistry.Pairs() do
-		if targetNpc ~= npc
-			and NpcTargeting.IsTargetable(targetNpc)
-			and (targetNpc.position - origin).Magnitude <= radius
-			and hasLineOfSight(npc, targetNpc.model, targetNpc.position, origin)
-		then
-			targets[#targets + 1] = targetNpc
-		end
+	local service = getNpcService()
+	if not service then
+		return
 	end
 
-	for _, targetNpc in ipairs(targets) do
-		local dealt = NpcLifecycle.ApplyDamage(targetNpc, damage, {
-			cause = "LeapExplode",
-			sourceModel = npc.model,
-		})
-		if dealt > 0 then
-			metrics.npcDamageHits += 1
+	for _, targetModel in ipairs(service.GetEnemiesInRadius(origin, radius)) do
+		if targetModel ~= npc.model then
+			local targetPosition = service.GetPosition(targetModel)
+			if targetPosition and hasLineOfSight(npc, targetModel, targetPosition, origin) then
+				local dealt = service.ApplyDamage(targetModel, damage, {
+					cause = "LeapExplode",
+					sourceModel = npc.model,
+					showFloating = false,
+				})
+				if dealt > 0 then
+					metrics.npcDamageHits += 1
+				end
+			end
 		end
 	end
 end
@@ -184,7 +213,6 @@ function LeapExplodeBehavior.Step(
 		liveTargetPosition = targetInfo.hrp.Position
 		state.lastTargetPosition = liveTargetPosition
 	end
-	local targetPosition = liveTargetPosition or state.leapTarget or state.lastTargetPosition
 	local triggerRange = math.max(1, numberAttribute(npc.model, "LeapExplodeTriggerRange", 16))
 
 	if state.phase == "Chase" then
@@ -195,7 +223,6 @@ function LeapExplodeBehavior.Step(
 	end
 
 	if npc.freezeEnd > now then
-		state.phaseEndsAt += dt
 		state.leapStartedAt += dt
 		state.leapEndsAt += dt
 		npc.velocity = Vector3.zero
@@ -231,7 +258,6 @@ function LeapExplodeBehavior.Pause(npc: any, dt: number)
 		return
 	end
 	local pausedFor = math.max(0, tonumber(dt) or 0)
-	state.phaseEndsAt += pausedFor
 	state.leapStartedAt += pausedFor
 	state.leapEndsAt += pausedFor
 end
