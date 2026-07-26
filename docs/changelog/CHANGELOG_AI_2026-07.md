@@ -1,5 +1,58 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-26 - Level combat feedback and slide-water recovery (PR #135)
+
+### Summary
+
+- Added reusable client `VfxTemplatePlayer`, Goblin/player `CombatFeedback`, and `SlideWaterRecovery`.
+- Added `PlayerHitVFXEvent`; `DamageService` fires it only after real server-authoritative HP damage.
+- Added explicit zero-rate particle bursts, authored Goblin emission counts, an above-ground explosion offset, complete-model VFX anchoring, and whole-model Goblin attack tilt.
+- Restricted the tilt render pass to a separate set of currently attacking Goblins instead of scanning every tracked Goblin each frame.
+
+### Files
+
+- Added `Level/ReplicatedStorage/ModuleScripts/VfxTemplatePlayer.lua`.
+- Updated `Level/ReplicatedStorage/Remotes/RemotesInit.server.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/DamageService.lua`.
+- Added `Level/StarterPlayer/StarterPlayerScripts/LocalScript/CombatFeedback.client.lua`.
+- Added `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SlideWaterRecovery.client.lua`.
+- Updated this monthly changelog.
+
+### Studio and validation
+
+- Active Studio: `Level`.
+- All five runtime sources were synchronized from the PR, and `CombatFeedback` was resynchronized after the active-attacker review fix.
+- Both ModuleScripts passed Edit-mode `require` checks.
+- A controlled real `DamageService.Apply` changed HP by exactly 5 and created one welded `PlayerHitVFXRuntime` containing four particle emitters; a fully shielded hit changed no HP and created no hit VFX.
+- A real damage call drove the client camera impulse by up to 0.0801 studs and 1.1395 degrees.
+- A production Goblin rig clone reached 27.99 degrees of whole-model tilt during `Attacking` and restored to 0 degrees on `Idle`.
+- Repeating the same Goblin death packet produced one `ExplosionRuntime` with 16 explicit bursts and one sound; prior visual capture confirmed the particles rendered.
+- A separate two-part model-VFX test after the review fix created two welds, left zero parts anchored, and followed its anchor by exactly 7 studs.
+- Real Terrain water naturally changed the Humanoid to `Swimming`; recovery restored positive movement speed, `AutoRotate = true`, zero camera offset, and cleared slide state. Dry-ground running, freefall, and slide re-arming still worked.
+- No console error or warning referenced the five changed runtime owners or `PlayerHitVFXEvent`. Existing unrelated terrain-generator, preload, and disabled error-reporting warnings remained.
+- `git diff --check` passed in final validation.
+
+### Runtime loops and cleanup
+
+- `CombatFeedback` keeps one client render-step binding, but its per-frame loop now visits only active attackers. Idle/dead/despawned Goblins are removed from that set event-driven from NPC batches; tilt is restored on transition and cleanup.
+- `VfxTemplatePlayer` lazily adds one client camera render-step binding after the first impulse. It returns immediately when empty and caps simultaneous impulses at eight.
+- `SlideWaterRecovery` adds one client `Heartbeat` with O(1) state checks plus character/Humanoid lifecycle connections.
+- VFX clones use Debris cleanup; delayed emitter/trail/beam callbacks check parent existence.
+- No server frame loop, new `_G` dependency, persistent-data field, teleport field, or gameplay damage value was added.
+
+### Not verified
+
+- The Goblin checks used a production rig clone with controlled NPC payloads rather than a complete natural combat encounter.
+- A reliable target-scale profiler capture with 100-500 naturally replicated Goblins was not obtained; live full snapshots invalidated temporary synthetic IDs before a meaningful render-cost sample.
+- The live `PlayerHitVFX.CameraData` stores `ShakeJSON`; this PR uses documented fallback impulse values rather than parsing that JSON.
+- Multiplayer camera/VFX behavior was not exercised.
+
+### Risks and rollback
+
+- The active-attacker set relies on state/death/despawn NPC batch transitions; full-snapshot and script-destroy cleanup paths remove stale records.
+- Whole-model tilt intentionally composes after the regular NPC presentation pivot and restores only when the current pivot still matches the applied tilt, avoiding overwriting a newer presentation transform.
+- Rollback by reverting PR #135, removing the three added scripts from Level Studio, and restoring the previous `RemotesInit` and `DamageService` sources. No data migration is required.
+
 ## 2026-07-24 - Poziom slide animation integration (PR #134)
 
 ### Summary

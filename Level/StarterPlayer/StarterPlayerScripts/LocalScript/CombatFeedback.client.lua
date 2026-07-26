@@ -38,6 +38,7 @@ local GOBLIN_EXPLOSION_EMIT_COUNTS = {
 }
 
 local goblins = {}
+local attackingGoblins = {}
 
 local function resolveAnimationTemplate(name)
 	local assets = ReplicatedStorage:FindFirstChild("Assets")
@@ -78,6 +79,7 @@ local function cleanupGoblin(id)
 		return
 	end
 	removeAppliedTilt(entry)
+	attackingGoblins[id] = nil
 	goblins[id] = nil
 end
 
@@ -157,6 +159,15 @@ npcBatchEvent.OnClientEvent:Connect(function(payload)
 		local wasDead = entry.dead == true
 		entry.dead = item.dead == true
 		entry.despawned = item.despawned == true
+		local isActiveAttacker = not entry.dead
+			and not entry.despawned
+			and entry.state == NpcShared.States.Attacking
+		if isActiveAttacker then
+			attackingGoblins[id] = entry
+		elseif attackingGoblins[id] then
+			attackingGoblins[id] = nil
+			removeAppliedTilt(entry)
+		end
 		if not fullSnapshot
 			and not wasDead
 			and entry.dead
@@ -183,7 +194,7 @@ end)
 
 RunService:BindToRenderStep(GOBLIN_TILT_BIND_NAME, Enum.RenderPriority.Last.Value, function()
 	local now = os.clock()
-	for id, entry in pairs(goblins) do
+	for id, entry in pairs(attackingGoblins) do
 		local model = entry.model
 		if not model or not model.Parent or entry.despawned then
 			cleanupGoblin(id)
@@ -193,6 +204,7 @@ RunService:BindToRenderStep(GOBLIN_TILT_BIND_NAME, Enum.RenderPriority.Last.Valu
 		local shouldTilt = not entry.dead
 			and entry.state == NpcShared.States.Attacking
 		if not shouldTilt then
+			attackingGoblins[id] = nil
 			removeAppliedTilt(entry)
 			continue
 		end
