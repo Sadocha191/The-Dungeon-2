@@ -9,6 +9,7 @@
 - Prevented the final ground constraint from deleting the airborne Y component while a traversal is active.
 - Suspended the active traversal clock during `PauseState` and freeze, shifting both traversal timestamps on resume so an NPC continues from its current arc position instead of jumping to the landing position.
 - Kept tall walls, forbidden surfaces, missing landing surfaces and excessive rises/drops blocked so pathfinding can route around them.
+- Started authored `Jump` traversal toward the marked waypoint itself, canceled active traversal on external `SetPosition`, and validated six body sweeps along the same sinusoidal curve used at runtime.
 
 ### Files
 
@@ -22,7 +23,7 @@
 
 - No new `Heartbeat`, `Stepped`, `RenderStepped`, remote, persistent-data field or `_G` dependency was added.
 - Traversal runs inside the existing centralized 12 Hz NPC movement scheduler.
-- Normal clear movement keeps the existing probe cost. Extra landing probes and at most three traversal `Blockcast` calls occur only when a jump waypoint or blocked local step attempts a hop/stride.
+- Normal clear movement keeps the existing probe cost. Extra landing probes and six bounded traversal `Blockcast` calls occur only when a jump waypoint or blocked local step attempts a hop/stride.
 - Pause transitions reuse the centralized movement tick and visit the NPC registry once only when the global pause value changes. Freeze suspension is an O(1) check inside the existing per-NPC update.
 - Traversal state is stored on the existing per-NPC navigation record and cleared on landing or NPC cleanup.
 
@@ -32,9 +33,13 @@
 - An isolated clock test paused a traversal at `100.10`, resumed it at `105.10`, and verified `startedAt=105.00`, `endsAt=105.42`, an unchanged step position and idempotent repeated pause/resume calls.
 - A live registered `GroundSmall` NPC paused in mid-hop for 1.5 s with zero position delta. It resumed by `2.069` studs rather than teleporting to its landing and then completed normally.
 - Freeze also suspended the arc with zero movement and an active pause marker. Slow completed the current traversal without an invalid position. A strong lateral impulse stayed inside the validated corridor. Death and explicit despawn both cleared the navigation record, while a target change completed the current traversal and then adopted the new target.
+- A controlled three-waypoint route marked waypoint 2 as `Jump`; traversal began immediately toward waypoint 2 (`landingX = markedX = 27006`) instead of waiting at the ledge and targeting waypoint 3.
+- Public `Invalidate(..., "external_set_position")` cleared the active traversal, route and pending request while advancing the generation, preventing a stale arc from overwriting an ability destination.
 - Separate physical validation cases passed for a `GroundSmall` chest hop, fallen-log hop, small-rock hop, `GroundLarge` stride, uneven `1.5`-stud terrain rise and a `0.75`-stud stair step.
+- The final curved-corridor validator kept a low chest clear and rejected a narrow obstacle intersecting the first-quarter body arc as `traversal_blocked`; this is the region the previous up-horizontal-down corridor did not represent.
 - Tall walls returned `traversal_blocked`; a traversal beyond maximum width returned `traversal_too_far`; a missing landing footprint returned `missing_landing_surface`; a real temporary Terrain water landing returned `water_forbidden`; a modifier-protected surface returned `surface_forbidden`; and a physical `45`-degree wedge returned `slope_too_steep`.
 - A transient 250-NPC Play stress test ran 72 movement ticks over 6 s: average movement tick `0.917 ms`, observed global maximum `8.323 ms`, `3032` raycasts (`505.3/s`), `806` blockcasts including `18` traversal blockcasts, `6` traversal starts, `6` completions and `0` failures. All temporary NPCs, parts, tags and Terrain water were removed or discarded with the Play session.
+- A focused final curved-corridor stress validated 250 clear traversals in `8.619 ms` total (`0.0345 ms` per case), issuing exactly `1,500` bounded traversal blockcasts and `1,250` surface raycasts with zero failures.
 - The console contained no NPC navigation error. The unrelated pre-existing `Hybrid Terrain Hex Generator:16` plugin-context error and bounded loading preload timeouts remained.
 
 ### Risks and rollback

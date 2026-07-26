@@ -574,13 +574,13 @@ function NpcGroundNavigation.Step(
 		local waypoint = nav.waypoints[nav.waypointIndex]
 		if waypoint then
 			moveTarget = waypoint.Position + Vector3.new(0, npc.groundOffset, 0)
-			local transitionWaypoint = nav.waypoints[math.max(1, nav.waypointIndex - 1)]
+			local transitionWaypoint = waypoint
 			if (moveTarget - npc.position).Magnitude <= math.max(1.5, profile.AgentRadius * 0.7) then
-				transitionWaypoint = waypoint
 				nav.waypointIndex += 1
 				waypoint = nav.waypoints[nav.waypointIndex]
 				if waypoint then
 					moveTarget = waypoint.Position + Vector3.new(0, npc.groundOffset, 0)
+					transitionWaypoint = waypoint
 				else
 					nav.waypoints = nil
 					moveTarget = desiredPosition
@@ -785,6 +785,7 @@ end
 function NpcGroundNavigation.Invalidate(npc, reason: string?)
 	local nav = npc.navigation
 	if nav then
+		nav.traversal = nil
 		invalidateRoute(npc, nav, reason or "invalidated")
 	end
 end

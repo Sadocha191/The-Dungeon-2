@@ -20,6 +20,7 @@ groundParams.RespectCanCollide = true
 local sharedIgnore = {}
 local groundIgnore = {}
 local surfaceCache = {}
+local TRAVERSAL_CORRIDOR_SEGMENTS = 6
 
 local metrics = {
 	raycastCount = 0,
@@ -509,17 +510,23 @@ function NpcGroundSurface.ValidateTraversal(npc, landingCandidate: Vector3, prof
 		math.max(0.5, (profile.AgentRadius * 2) - (skin * 2))
 	)
 	local startCenter = bodyCenter(startSample, profile)
-	local clearanceSurfaceY = math.max(startSample.position.Y, centerSample.position.Y) + arcHeight
-	local clearanceCenterY = clearanceSurfaceY + (profile.AgentHeight * 0.5)
-	local liftedStart = Vector3.new(startCenter.X, clearanceCenterY, startCenter.Z)
-	local liftedEnd = Vector3.new(centerSample.position.X, clearanceCenterY, centerSample.position.Z)
 	local endCenter = bodyCenter(centerSample, profile)
-	local hit = traversalCast(startCenter, liftedStart, size)
-	if not hit then
-		hit = traversalCast(liftedStart, liftedEnd, size)
-	end
-	if not hit then
-		hit = traversalCast(liftedEnd, endCenter, size)
+	local alphaStep = 1 / TRAVERSAL_CORRIDOR_SEGMENTS
+	local curvePadding = arcHeight * ((math.pi * alphaStep) ^ 2) / 8
+	local castSize = Vector3.new(size.X, size.Y + curvePadding, size.Z)
+	local castOffset = Vector3.yAxis * (curvePadding * 0.5)
+	local hit = nil
+	for segment = 1, TRAVERSAL_CORRIDOR_SEGMENTS do
+		local startAlpha = (segment - 1) * alphaStep
+		local endAlpha = segment * alphaStep
+		local segmentStart = startCenter:Lerp(endCenter, startAlpha)
+			+ Vector3.yAxis * (math.sin(math.pi * startAlpha) * arcHeight)
+		local segmentEnd = startCenter:Lerp(endCenter, endAlpha)
+			+ Vector3.yAxis * (math.sin(math.pi * endAlpha) * arcHeight)
+		hit = traversalCast(segmentStart + castOffset, segmentEnd + castOffset, castSize)
+		if hit then
+			break
+		end
 	end
 	if hit then
 		metrics.traversalValidationFailures += 1
