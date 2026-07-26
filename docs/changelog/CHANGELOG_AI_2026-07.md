@@ -7,6 +7,7 @@
 - Made drop attraction fast enough to overtake sprint, slide, downhill, and momentum movement by adding a 40 stud/s margin over the target player's actual horizontal `AssemblyLinearVelocity`.
 - Added `DropAttractionConfig` as the single owner of attraction-speed tuning and calculation.
 - Required the same shared calculation from the authoritative server `Heartbeat` and client `RenderStepped` presentation so rendered orbs no longer trail the authoritative position because of a slower client-only formula.
+- Cached normal and global-magnet attraction speeds once per alive player snapshot, avoiding redundant velocity reads and magnitude calculations for every attracted drop.
 - Preserved pickup radii, global magnet behavior, collection animation, and server-authoritative reward ownership.
 
 ### Files
@@ -30,8 +31,7 @@
 
 - The existing single server `Heartbeat` remains the authoritative owner for all active drops; no per-drop connection was added.
 - The existing single client `RenderStepped` remains the presentation owner for all active visuals; no per-drop connection was added.
-- Each actively attracted drop now performs one shared O(1) horizontal-speed magnitude and maximum calculation on both server and client.
-- Player snapshots still cache root, Humanoid, position, and movement values once per frame. The client snapshot adds one cached velocity value.
+- Server player snapshots compute both shared attraction speeds once per alive player per frame; each attracted drop selects one cached number. The client snapshot continues to cache the same movement inputs once per frame for presentation.
 - No remote, persistent-data field, teleport field, reward owner, or new `_G` dependency was added.
 
 ### Not verified

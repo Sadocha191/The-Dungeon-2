@@ -74,7 +74,22 @@ local function buildAlivePlayerSnapshots()
 			local hrp = char and char:FindFirstChild("HumanoidRootPart")
 			local hum = char and char:FindFirstChildOfClass("Humanoid")
 			if hrp and hum and hum.Health > 0 then
-				local snapshot = { player = plr, hrp = hrp, humanoid = hum }
+				local assemblyLinearVelocity = hrp.AssemblyLinearVelocity
+				local snapshot = {
+					player = plr,
+					hrp = hrp,
+					humanoid = hum,
+					attractionSpeed = DropAttractionConfig.GetSpeed(
+						hum.WalkSpeed,
+						assemblyLinearVelocity,
+						false
+					),
+					globalAttractionSpeed = DropAttractionConfig.GetSpeed(
+						hum.WalkSpeed,
+						assemblyLinearVelocity,
+						true
+					),
+				}
 				table.insert(list, snapshot)
 				byUserId[plr.UserId] = snapshot
 			end
@@ -349,11 +364,9 @@ RunService.Heartbeat:Connect(function(dt)
 			local toTarget = target - meta.corePos
 			local toTargetDist = toTarget.Magnitude
 			if toTargetDist > 0 then
-				local attractSpeed = DropAttractionConfig.GetSpeed(
-					snapshot.humanoid.WalkSpeed,
-					snapshot.hrp.AssemblyLinearVelocity,
-					usingGlobalMagnet
-				)
+				local attractSpeed = usingGlobalMagnet
+					and snapshot.globalAttractionSpeed
+					or snapshot.attractionSpeed
 				local step = math.min(toTargetDist, attractSpeed * math.max(0, dt))
 				meta.corePos += toTarget.Unit * step
 				meta.needsGroundSettle = true
