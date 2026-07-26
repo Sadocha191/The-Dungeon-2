@@ -9,10 +9,17 @@ local playerGui = player:WaitForChild("PlayerGui")
 local remoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions")
 local GetDailyLoginState = remoteFunctions:WaitForChild("GetDailyLoginState")
 local ClaimDailyLoginReward = remoteFunctions:WaitForChild("ClaimDailyLoginReward")
+local InventoryIconResolver = require(script.Parent:WaitForChild("InventoryIconResolver"))
+local sharedIconResolver = InventoryIconResolver.new({
+	ReplicatedStorage = ReplicatedStorage,
+	WeaponConfigs = {},
+})
 
 local DESIGN_SIZE = Vector2.new(980, 640)
 local SECONDS_PER_DAY = 24 * 60 * 60
 local AUTO_OPEN_DELAY_SECONDS = 1.25
+local RESET_REFRESH_MIN_SECONDS = 5
+local RESET_REFRESH_MAX_SECONDS = 60
 
 local THEME = {
 	overlay = Color3.fromRGB(3, 5, 10),
@@ -51,6 +58,8 @@ local currentState = nil
 local isBusy = false
 local hasAutoOpenChecked = false
 local resetRefreshPending = false
+local resetRefreshRetrySeconds = RESET_REFRESH_MIN_SECONDS
+local nextResetRefreshAt = 0
 local uiTransitionToken = 0
 local tiles = {}
 local progressSegments = {}
@@ -153,6 +162,13 @@ local function resolveRewardImage(reward)
 	if configuredIcon:match("^rbxassetid://") or configuredIcon:match("^https?://") then
 		return configuredIcon
 	end
+	if reward.RewardType == "MaterialBundle" then
+		return sharedIconResolver.MaterialImage({
+			id = "materials_icon",
+			displayName = configuredIcon,
+			iconName = "materials_icon",
+		})
+	end
 
 	local candidateNames = {
 		configuredIcon,
@@ -162,7 +178,6 @@ local function resolveRewardImage(reward)
 	local containerNames = {
 		"DailyLoginIcons",
 		"CurrencyIcons",
-		"MaterialIcons",
 	}
 
 	for _, containerName in ipairs(containerNames) do
@@ -854,6 +869,40 @@ end
 
 local renderState
 
+local function requestResetRefresh()
+	local now = os.clock()
+	if resetRefreshPending or now < nextResetRefreshAt then
+		return
+	end
+
+	resetRefreshPending = true
+	nextResetRefreshAt = now + RESET_REFRESH_MIN_SECONDS
+	task.defer(function()
+		local ok, payload = pcall(function()
+			return GetDailyLoginState:InvokeServer()
+		end)
+
+		local responseIsStale = true
+		if ok and typeof(payload) == "table" then
+			renderState(payload)
+			local nextClaimDayUTC = tonumber(payload.NextClaimDayUTC)
+			responseIsStale = payload.CanClaim ~= true
+				and (not nextClaimDayUTC or (nextClaimDayUTC * SECONDS_PER_DAY) <= os.time())
+		end
+
+		if responseIsStale then
+			resetRefreshRetrySeconds = math.min(
+				RESET_REFRESH_MAX_SECONDS,
+				resetRefreshRetrySeconds * 2
+			)
+		else
+			resetRefreshRetrySeconds = RESET_REFRESH_MIN_SECONDS
+		end
+		nextResetRefreshAt = os.clock() + resetRefreshRetrySeconds
+		resetRefreshPending = false
+	end)
+end
+
 local function updateCountdown()
 	local state = currentState
 	if typeof(state) ~= "table" then
@@ -878,18 +927,7 @@ local function updateCountdown()
 	if remaining <= 0 then
 		resetLabel.Text = "Refreshing reward availability..."
 		resetLabel.TextColor3 = THEME.goldBright
-		if not resetRefreshPending then
-			resetRefreshPending = true
-			task.defer(function()
-				local ok, payload = pcall(function()
-					return GetDailyLoginState:InvokeServer()
-				end)
-				resetRefreshPending = false
-				if ok and typeof(payload) == "table" then
-					renderState(payload)
-				end
-			end)
-		end
+		requestResetRefresh()
 		return
 	end
 
