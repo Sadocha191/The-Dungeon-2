@@ -20,6 +20,9 @@ local characterConnections = {}
 local currentHumanoid = nil
 local recoveryUntil = -math.huge
 local lastSlideActiveAt = -math.huge
+local destroyed = false
+local characterAddedConnection = nil
+local heartbeatConnection = nil
 
 local function disconnectCharacterConnections()
 	for index = #characterConnections, 1, -1 do
@@ -74,13 +77,16 @@ local function recoverSwimmingMovement()
 end
 
 local function bindCharacter(character)
+	if destroyed then
+		return
+	end
 	disconnectCharacterConnections()
 	currentHumanoid = nil
 	recoveryUntil = -math.huge
 	lastSlideActiveAt = -math.huge
 
 	local humanoid = character:WaitForChild("Humanoid", 5)
-	if not humanoid or not humanoid:IsA("Humanoid") then
+	if destroyed or not humanoid or not humanoid:IsA("Humanoid") then
 		return
 	end
 	currentHumanoid = humanoid
@@ -118,16 +124,25 @@ local function bindCharacter(character)
 	end))
 end
 
-player.CharacterAdded:Connect(bindCharacter)
+characterAddedConnection = player.CharacterAdded:Connect(bindCharacter)
 if player.Character then
 	task.spawn(bindCharacter, player.Character)
 end
 
-RunService.Heartbeat:Connect(function()
+heartbeatConnection = RunService.Heartbeat:Connect(function()
 	recoverSwimmingMovement()
 end)
 
 script.Destroying:Connect(function()
+	destroyed = true
+	if characterAddedConnection then
+		characterAddedConnection:Disconnect()
+		characterAddedConnection = nil
+	end
+	if heartbeatConnection then
+		heartbeatConnection:Disconnect()
+		heartbeatConnection = nil
+	end
 	disconnectCharacterConnections()
 	currentHumanoid = nil
 end)

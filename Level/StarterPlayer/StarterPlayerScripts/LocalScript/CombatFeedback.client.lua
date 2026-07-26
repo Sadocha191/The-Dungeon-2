@@ -241,7 +241,7 @@ playerHitVfxEvent.OnClientEvent:Connect(function(payload)
 	local character = localPlayer.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if not humanoid or humanoid.Health <= 0 or not root or not root:IsA("BasePart") then
+	if not humanoid or not root or not root:IsA("BasePart") then
 		return
 	end
 
