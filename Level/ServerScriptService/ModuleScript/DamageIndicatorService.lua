@@ -26,6 +26,7 @@ local damageIndicatorEvent = remotes:WaitForChild("DamageIndicatorEvent")
 assert(damageIndicatorEvent:IsA("RemoteEvent"), "[DamageIndicatorService] DamageIndicatorEvent must be a RemoteEvent")
 
 local BATCH_WINDOW = 0.05
+local MAX_PENDING_BATCHES_PER_PLAYER = 128
 
 local ELEMENT_ALIASES = {
 	Electric = "Electricity",
@@ -50,6 +51,7 @@ local VALID_ELEMENTS = {
 
 local DamageIndicatorService = {}
 local pendingByPlayer = {}
+local pendingCountByPlayer = {}
 
 local function isActivePlayer(value: any): boolean
 	return typeof(value) == "Instance" and value:IsA("Player") and value.Parent == Players
@@ -120,6 +122,9 @@ local function queueIndicator(sourcePlayer: Player, payload)
 		bucket.pos = bucket.pos:Lerp(payload.pos, 0.35)
 		return
 	end
+	if (pendingCountByPlayer[sourcePlayer] or 0) >= MAX_PENDING_BATCHES_PER_PLAYER then
+		return
+	end
 
 	bucket = {
 		amount = payload.amount,
@@ -133,6 +138,7 @@ local function queueIndicator(sourcePlayer: Player, payload)
 		sourceId = payload.sourceId,
 	}
 	playerBuckets[key] = bucket
+	pendingCountByPlayer[sourcePlayer] = (pendingCountByPlayer[sourcePlayer] or 0) + 1
 
 	task.delay(BATCH_WINDOW, function()
 		local currentBuckets = pendingByPlayer[sourcePlayer]
@@ -141,8 +147,13 @@ local function queueIndicator(sourcePlayer: Player, payload)
 		end
 
 		currentBuckets[key] = nil
+		pendingCountByPlayer[sourcePlayer] = math.max(
+			0,
+			(pendingCountByPlayer[sourcePlayer] or 1) - 1
+		)
 		if next(currentBuckets) == nil then
 			pendingByPlayer[sourcePlayer] = nil
+			pendingCountByPlayer[sourcePlayer] = nil
 		end
 		if not isActivePlayer(sourcePlayer) then
 			return
@@ -207,6 +218,7 @@ end
 
 Players.PlayerRemoving:Connect(function(player)
 	pendingByPlayer[player] = nil
+	pendingCountByPlayer[player] = nil
 end)
 
 return DamageIndicatorService

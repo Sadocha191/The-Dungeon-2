@@ -1,5 +1,56 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-26 - Level elemental damage indicators (PR #139)
+
+### Summary
+
+- Replaced basic white/red floating numbers with pooled animated indicators for Physical, Fire, Electricity, Air, Water, Earth, Void, and Light damage.
+- Added a presentation facade over `NpcService.ApplyDamage`; `NpcService` remains the authoritative damage owner while weapon and spell hits supply element metadata.
+- Batches rapid hits per target/element/crit/kind for 50 ms while keeping different elements separate.
+- Preserved legacy `DamageIndicatorEvent` payloads by treating missing/unknown elements as Physical and batching them client-side.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/DamageIndicatorService.lua`.
+- Updated `Level/ServerScriptService/Script/SpellService.lua`.
+- Updated `Level/ServerScriptService/Script/WeaponCombat.server.lua`.
+- Updated `Level/StarterPlayer/StarterPlayerScripts/LocalScript/DamageIndicators.lua`.
+- Updated this monthly changelog.
+
+### Studio and validation
+
+- Active Studio: `Level`.
+- Created/synchronized `DamageIndicatorService` and synchronized all three existing runtime sources.
+- Level Play loaded `DamageIndicatorService`, `SpellService`, `WeaponCombat`, and `DamageIndicators` without a related error.
+- Five real 2-damage facade calls against one temporary registered NPC produced one client payload: amount `10`, hits `5`, `batched = true`, element `Electricity`; the temporary NPC was despawned after the test.
+- Five compatible legacy Water payloads produced one `10 | WATER x5` indicator.
+- Two Fire and two Water legacy hits against the same target remained separate as `6 | FIRE x2` and `8 | WATER x2`.
+- A batched critical payload rendered `321! | FIRE x7` with the CRIT tag.
+- A burst of 60 already-batched events created exactly the configured maximum of 36 active indicators, which returned to zero after their 1.05-second lifetime.
+- `git diff --check` passed in final validation.
+
+### Runtime loops, bounds, and cleanup
+
+- No `Heartbeat`, `Stepped`, `RenderStepped`, or per-indicator connection was added.
+- New server/client batching uses 50 ms delayed flushes, bounded at 128 pending unique batches per player on the server and 128 legacy batches on the client. Overflow drops only presentation; authoritative damage is already applied.
+- The client allows at most 36 active indicators and retains at most 24 inactive instances in its pool; excess active presentation is skipped and excess released instances are destroyed.
+- Each active indicator owns four bounded tweens and one delayed lifetime release guarded by an in-use generation token.
+- Server pending state is removed after flush and on `PlayerRemoving`.
+- No remote name, persistent-data field, teleport field, NPC damage calculation, or new `_G` dependency changed.
+
+### Not verified
+
+- Studio screenshot and input tools timed out, so final visual legibility across phone/tablet/ultrawide layouts was validated structurally rather than by pixel inspection.
+- Natural weapon swings and spells were not manually aimed through every element; their metadata call sites and the shared facade were exercised programmatically.
+- Multiplayer network latency and a long combat session with 500 NPC were not profiled.
+
+### Risks and rollback
+
+- Presentation batches intentionally merge hits sharing target, element, secondary element, crit state, and kind within 50 ms; source IDs are retained but are not part of the batch key.
+- When more than 128 unique batches are queued per player within one window or more than 36 indicators are active, additional visuals are skipped while damage remains authoritative.
+- Element inference for weapon definitions without explicit metadata uses a documented name heuristic and falls back to Physical.
+- Rollback by reverting PR #139, deleting `DamageIndicatorService` from Level Studio, and restoring the previous spell, weapon, and client indicator sources. No data migration or server-state rollback is required.
+
 ## 2026-07-24 - Poziom slide animation integration (PR #134)
 
 ### Summary

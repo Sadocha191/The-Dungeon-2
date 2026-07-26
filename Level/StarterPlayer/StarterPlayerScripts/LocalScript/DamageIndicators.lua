@@ -10,11 +10,13 @@ local BATCH_WINDOW = 0.05
 local LIFETIME = 1.05
 local MAX_ACTIVE = 36
 local MAX_POOL = 24
+local MAX_PENDING = 128
 
 local random = Random.new()
 local activeCount = 0
 local pool = {}
 local pending = {}
+local pendingCount = 0
 
 local ELEMENTS = {
 	Physical = {
@@ -386,6 +388,9 @@ local function queueIndicator(payload)
 		bucket.pos = bucket.pos:Lerp(pos, 0.35)
 		return
 	end
+	if pendingCount >= MAX_PENDING then
+		return
+	end
 
 	bucket = {
 		amount = amount,
@@ -396,12 +401,14 @@ local function queueIndicator(payload)
 		secondaryElement = secondaryElement,
 	}
 	pending[key] = bucket
+	pendingCount += 1
 
 	task.delay(BATCH_WINDOW, function()
 		if pending[key] ~= bucket then
 			return
 		end
 		pending[key] = nil
+		pendingCount = math.max(0, pendingCount - 1)
 		popText(
 			bucket.pos,
 			bucket.amount,
