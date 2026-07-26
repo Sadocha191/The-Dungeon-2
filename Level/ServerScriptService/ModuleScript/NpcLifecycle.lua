@@ -133,31 +133,6 @@ function NpcLifecycle.Kill(npc: any, context: {[string]: any}?)
 	NpcLifecycle.DestroyNow(npc, true)
 end
 
-function NpcLifecycle.ApplyDamage(npc: any, amount: number, context: {[string]: any}?): number
-	if npc.dead then
-		return 0
-	end
-
-	local dealt = tonumber(amount) or 0
-	if npc.damageTakenEnd > os.clock() then
-		dealt *= npc.damageTakenMult
-	elseif npc.damageTakenEnd ~= 0 then
-		npc.damageTakenEnd = 0
-		npc.damageTakenMult = 1
-	end
-	dealt = math.floor(dealt)
-	if dealt <= 0 then
-		return 0
-	end
-
-	npc.health = math.max(0, npc.health - dealt)
-	NpcLifecycle.WriteHealthAttributes(npc)
-	if npc.health <= 0 then
-		NpcLifecycle.Kill(npc, context or {})
-	end
-	return dealt
-end
-
 function NpcLifecycle.Despawn(npc: any)
 	if not npc.dead then
 		npc.dead = true
