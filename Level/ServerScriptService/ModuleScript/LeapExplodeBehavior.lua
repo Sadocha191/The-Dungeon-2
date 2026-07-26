@@ -47,6 +47,7 @@ local metrics = {
 	detonations = 0,
 	damageHits = 0,
 	npcDamageHits = 0,
+	npcOcclusionTests = 0,
 	lineOfSightRaycasts = 0,
 	legacyVisualFallbacks = 0,
 }
@@ -150,6 +151,28 @@ local function damagePlayers(npc: any, origin: Vector3, radius: number, damage: 
 	end
 end
 
+local function isOccludedByNpcBody(origin: Vector3, target, targets): boolean
+	local segment = target.position - origin
+	local segmentLengthSq = segment:Dot(segment)
+	if segmentLengthSq <= 1e-4 then
+		return false
+	end
+
+	for _, blocker in ipairs(targets) do
+		if blocker ~= target and blocker.distanceSq < target.distanceSq then
+			metrics.npcOcclusionTests += 1
+			local alpha = (blocker.position - origin):Dot(segment) / segmentLengthSq
+			if alpha > 0 and alpha < 1 then
+				local closestPoint = origin + segment * alpha
+				if (blocker.position - closestPoint).Magnitude <= blocker.bodyRadius then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+
 local function damageNpcs(npc: any, origin: Vector3, radius: number, damage: number)
 	local service = getNpcService()
 	if not service then
@@ -163,25 +186,40 @@ local function damageNpcs(npc: any, origin: Vector3, radius: number, damage: num
 		end
 	end
 
+	local targets = {}
 	for _, targetModel in ipairs(service.GetEnemiesInRadius(origin, radius)) do
 		if targetModel ~= npc.model then
 			local targetPosition = service.GetPosition(targetModel)
-			if targetPosition and hasLineOfSight(
+			local targetRoot = service.GetRoot(targetModel)
+			if targetPosition and targetRoot then
+				table.insert(targets, {
+					model = targetModel,
+					position = targetPosition,
+					distanceSq = (targetPosition - origin):Dot(targetPosition - origin),
+					bodyRadius = math.max(0.75, targetRoot.Size.Magnitude * 0.5),
+				})
+			end
+		end
+	end
+
+	for _, target in ipairs(targets) do
+		if not isOccludedByNpcBody(origin, target, targets)
+			and hasLineOfSight(
 				npc,
-				targetModel,
-				targetPosition,
+				target.model,
+				target.position,
 				origin,
 				lineOfSightIgnore
-			) then
-				local dealt = service.ApplyDamage(targetModel, damage, {
-					cause = "LeapExplode",
-					sourceModel = npc.model,
-					showFloating = false,
-					suppressRewards = true,
-				})
-				if dealt > 0 then
-					metrics.npcDamageHits += 1
-				end
+			)
+		then
+			local dealt = service.ApplyDamage(target.model, damage, {
+				cause = "LeapExplode",
+				sourceModel = npc.model,
+				showFloating = false,
+				suppressRewards = true,
+			})
+			if dealt > 0 then
+				metrics.npcDamageHits += 1
 			end
 		end
 	end

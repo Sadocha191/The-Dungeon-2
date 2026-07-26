@@ -7,6 +7,7 @@
 - Kept the production Goblin combat sequence server-authoritative and direct: `Chase -> Leap -> Detonate -> Dead`, with no stationary arm phase.
 - Applied blast damage to nearby living NPCs through `NpcService.ApplyDamage`, excluding the source Goblin and suppressing rewards for friendly-fire deaths.
 - Added player and NPC line-of-sight validation. NPC blast rays ignore the source and player characters at the landing point, while world geometry and other NPC bodies remain valid blockers.
+- Added explicit segment-versus-body occlusion for registered NPCs because their server-authoritative roots are intentionally non-queryable and cannot block a workspace raycast.
 - Kept the existing death lifecycle as the single owner of callbacks, deregistration, replication, rewards and authored client death VFX.
 - Retained a zero-damage legacy `Explosion` presenter only while the authored `VfxTemplatePlayer` dependency is absent; once PR #135 is present, the fallback is skipped so the client-authored effect remains single-owner.
 
@@ -23,6 +24,7 @@
 - A real registered Goblin damaged one player and one visible registered NPC exactly once, killed itself once, left a wall-blocked NPC at full health, and reported one detonation. Source and victim death contexts used `cause = "LeapExplode"` and `suppressRewards = true`; the victim context retained the source model.
 - Three nearby production Goblins produced three detonations, three player hits, three one-shot death callbacks and three authored client `ExplosionRuntime` instances, with no scripted `Explosion` instance or duplicate authored effect.
 - A dependency-presence regression test produced exactly one zero-damage legacy presenter when `VfxTemplatePlayer` was hidden and zero legacy presenters when it was restored.
+- A collinear near/far registered-NPC regression with both roots `CanQuery = false` damaged the nearer NPC once and left the farther NPC undamaged behind its body.
 - Despawning a production Goblin during a two-second active leap produced one leap, zero detonations and zero death callbacks. In the combined PR #135 integration, truthful `Dead` versus `Despawned` tombstone state yielded one authored VFX for a real detonation and zero for lifecycle despawn.
 - The active production Goblin template retains `NpcMovementSystem_V2`, `NpcMove_GroundRunner` and `NpcCombat_LeapExplode`.
 
@@ -31,6 +33,7 @@
 - No `Heartbeat`, `Stepped`, `RenderStepped`, connection, remote, persistent-data field or `_G` dependency was added.
 - Leap execution remains inside the existing shared `NpcService` movement scheduler at `12 Hz`.
 - Each detonation performs one bounded player pass plus the existing radius query over registered NPCs; LOS raycasts run only for eligible targets inside the configured blast radius.
+- NPC-body occlusion precomputes one target snapshot, then checks only nearer target pairs inside the same blast radius. Its worst case is O(K²) for K registered NPCs inside one detonation radius, without a persistent loop or allocation per pair.
 - The legacy visual availability check is one pair of direct folder lookups per detonation, not a runtime scan or loop.
 - Behavior cleanup clears the captured leap state. Death and NPC friendly-fire remain routed through the existing lifecycle and `NpcService` owners.
 
