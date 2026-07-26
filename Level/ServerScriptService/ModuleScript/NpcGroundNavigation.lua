@@ -344,15 +344,11 @@ end
 
 local function partTopY(part: BasePart): number
 	local half = part.Size * 0.5
-	local highest = -math.huge
-	for _, x in ipairs({ -half.X, half.X }) do
-		for _, y in ipairs({ -half.Y, half.Y }) do
-			for _, z in ipairs({ -half.Z, half.Z }) do
-				highest = math.max(highest, part.CFrame:PointToWorldSpace(Vector3.new(x, y, z)).Y)
-			end
-		end
-	end
-	return highest
+	local cframe = part.CFrame
+	local verticalExtent = math.abs(cframe.RightVector.Y) * half.X
+		+ math.abs(cframe.UpVector.Y) * half.Y
+		+ math.abs(cframe.LookVector.Y) * half.Z
+	return part.Position.Y + verticalExtent
 end
 
 local function projectedHalfExtent(part: BasePart, direction: Vector3): number

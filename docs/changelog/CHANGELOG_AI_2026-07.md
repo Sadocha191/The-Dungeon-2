@@ -20,7 +20,7 @@
 
 - No new `Heartbeat`, `Stepped`, `RenderStepped`, remote, persistent-data field or `_G` dependency was added.
 - Traversal runs inside the existing centralized 12 Hz NPC movement scheduler.
-- Normal clear movement keeps the existing probe cost. Extra landing probes and at most two traversal `Blockcast` calls occur only when a jump waypoint or blocked local step attempts a hop/stride.
+- Normal clear movement keeps the existing probe cost. Extra landing probes and at most three traversal `Blockcast` calls occur only when a jump waypoint or blocked local step attempts a hop/stride.
 - Traversal state is stored on the existing per-NPC navigation record and cleared on landing or NPC cleanup.
 
 ### Validation

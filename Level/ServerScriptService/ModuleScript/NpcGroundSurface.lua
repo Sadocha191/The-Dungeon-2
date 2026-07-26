@@ -513,9 +513,13 @@ function NpcGroundSurface.ValidateTraversal(npc, landingCandidate: Vector3, prof
 	local clearanceCenterY = clearanceSurfaceY + (profile.AgentHeight * 0.5)
 	local liftedStart = Vector3.new(startCenter.X, clearanceCenterY, startCenter.Z)
 	local liftedEnd = Vector3.new(centerSample.position.X, clearanceCenterY, centerSample.position.Z)
+	local endCenter = bodyCenter(centerSample, profile)
 	local hit = traversalCast(startCenter, liftedStart, size)
 	if not hit then
 		hit = traversalCast(liftedStart, liftedEnd, size)
+	end
+	if not hit then
+		hit = traversalCast(liftedEnd, endCenter, size)
 	end
 	if hit then
 		metrics.traversalValidationFailures += 1
