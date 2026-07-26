@@ -8,12 +8,14 @@
 - Added `PlayerHitVFXEvent`; `DamageService` fires it only after real server-authoritative HP damage.
 - Added explicit zero-rate particle bursts, authored Goblin emission counts, an above-ground explosion offset, complete-model VFX anchoring, and whole-model Goblin attack tilt.
 - Restricted the tilt render pass to a separate set of currently attacking Goblins instead of scanning every tracked Goblin each frame.
+- Restricted Goblin death explosions to real death tombstones; lifecycle despawns now clean up without playing a false detonation.
 
 ### Files
 
 - Added `Level/ReplicatedStorage/ModuleScripts/VfxTemplatePlayer.lua`.
 - Updated `Level/ReplicatedStorage/Remotes/RemotesInit.server.lua`.
 - Updated `Level/ServerScriptService/ModuleScript/DamageService.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/NpcLifecycle.lua`.
 - Added `Level/StarterPlayer/StarterPlayerScripts/LocalScript/CombatFeedback.client.lua`.
 - Added `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SlideWaterRecovery.client.lua`.
 - Updated this monthly changelog.
@@ -29,6 +31,7 @@
 - Repeating the same Goblin death packet produced one `ExplosionRuntime` with 16 explicit bursts and one sound; prior visual capture confirmed the particles rendered.
 - A separate two-part model-VFX test after the review fix created two welds, left zero parts anchored, and followed its anchor by exactly 7 studs.
 - Real Terrain water naturally changed the Humanoid to `Swimming`; recovery restored positive movement speed, `AutoRotate = true`, zero camera offset, and cleared slide state. Dry-ground running, freefall, and slide re-arming still worked.
+- A stacked PR #140 integration probe despawned a production Goblin during its active leap: the server recorded one leap, zero detonations and zero death callbacks, while the client recorded zero `ExplosionRuntime` instances after the despawn guard.
 - No console error or warning referenced the five changed runtime owners or `PlayerHitVFXEvent`. Existing unrelated terrain-generator, preload, and disabled error-reporting warnings remained.
 - `git diff --check` passed in final validation.
 
@@ -50,6 +53,7 @@
 ### Risks and rollback
 
 - The active-attacker set relies on state/death/despawn NPC batch transitions; full-snapshot and script-destroy cleanup paths remove stale records.
+- Death tombstones now preserve the truthful `Dead` state while retaining the existing `despawned` cleanup flag; non-death lifecycle removal still reports `Despawned`.
 - Whole-model tilt intentionally composes after the regular NPC presentation pivot and restores only when the current pivot still matches the applied tilt, avoiding overwriting a newer presentation transform.
 - Rollback by reverting PR #135, removing the three added scripts from Level Studio, and restoring the previous `RemotesInit` and `DamageService` sources. No data migration is required.
 

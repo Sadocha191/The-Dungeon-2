@@ -171,6 +171,7 @@ npcBatchEvent.OnClientEvent:Connect(function(payload)
 		if not fullSnapshot
 			and not wasDead
 			and entry.dead
+			and entry.state == NpcShared.States.Dead
 			and not entry.explosionPlayed
 			and typeof(entry.lastPosition) == "Vector3"
 		then
