@@ -370,9 +370,6 @@ end
 local function traversalFallbackTarget(npc, nav, moveTarget: Vector3, stepResult, profile): Vector3?
 	local reason = stepResult and stepResult.reason
 	local allowed = reason == "body_obstacle" or reason == "step_too_high"
-	if profile.TraversalKind == "Stride" and reason == "surface_layer_mismatch" then
-		allowed = true
-	end
 	if not allowed then
 		return nil
 	end
@@ -387,7 +384,8 @@ local function traversalFallbackTarget(npc, nav, moveTarget: Vector3, stepResult
 		return nil
 	end
 
-	local distance = math.max(profile.AgentRadius * 1.5, profile.DirectSampleSpacing * 1.75)
+	local minimumDistance = math.max(profile.AgentRadius * 1.5, profile.DirectSampleSpacing * 1.75)
+	local distance = minimumDistance
 	local hit = stepResult and stepResult.hit
 	local obstacle = hit and hit.Instance
 	if obstacle and obstacle:IsA("BasePart") then
@@ -397,10 +395,14 @@ local function traversalFallbackTarget(npc, nav, moveTarget: Vector3, stepResult
 		end
 		local centerDistance = flat(obstacle.Position - npc.position):Dot(direction)
 		local farEdgeDistance = centerDistance + projectedHalfExtent(obstacle, direction)
-		distance = math.max(distance, farEdgeDistance + profile.AgentRadius + 0.5)
+		local requiredDistance = farEdgeDistance + profile.AgentRadius + 0.5
+		if requiredDistance > maxDistance + 0.05 then
+			return nil
+		end
+		distance = math.max(distance, requiredDistance)
 	end
 
-	distance = math.clamp(distance, math.max(1, profile.AgentRadius * 1.1), maxDistance)
+	distance = math.max(distance, math.max(1, profile.AgentRadius * 1.1))
 	return npc.position + direction * distance
 end
 
@@ -413,7 +415,10 @@ local function tryStartTraversal(
 	source: string,
 	hit: RaycastResult?
 ): boolean
-	if not profile.TraversalKind or now < (nav.nextTraversalAt or 0) then
+	if not profile.TraversalKind then
+		return false
+	end
+	if source ~= "path_jump" and now < (nav.nextTraversalAt or 0) then
 		return false
 	end
 	if hit and hit.Instance and hit.Instance:IsA("BasePart") then

@@ -25,7 +25,7 @@ local metrics = {
 	raycastCount = 0,
 	blockcastCount = 0,
 	traversalBlockcastCount = 0,
-	traversalFailures = 0,
+	traversalValidationFailures = 0,
 	surfaceCacheHits = 0,
 	falseSlopeObstacleHits = 0,
 	groundProbeMisses = 0,
@@ -433,23 +433,23 @@ function NpcGroundSurface.ValidateTraversal(npc, landingCandidate: Vector3, prof
 	local arcHeight = math.max(0, tonumber(options.arcHeight) or profile.TraversalArcHeight or 0)
 	local horizontal = flat(landingCandidate - npc.position)
 	if horizontal.Magnitude <= 0.05 then
-		metrics.traversalFailures += 1
+		metrics.traversalValidationFailures += 1
 		return failedResult("traversal_too_short", {}, 1)
 	end
 	if maxDistance <= 0 or horizontal.Magnitude > maxDistance + 0.05 then
-		metrics.traversalFailures += 1
+		metrics.traversalValidationFailures += 1
 		return failedResult("traversal_too_far", {}, 1)
 	end
 
 	local currentSurfaceY = npc.position.Y - npc.groundOffset
 	local startSample = NpcGroundSurface.SamplePrecise(npc.position, currentSurfaceY, profile)
 	if not startSample then
-		metrics.traversalFailures += 1
+		metrics.traversalValidationFailures += 1
 		return failedResult("missing_surface", {}, 1)
 	end
 	local startReason = NpcGroundSurface.GetFailureReason(startSample, profile)
 	if startReason then
-		metrics.traversalFailures += 1
+		metrics.traversalValidationFailures += 1
 		return failedResult(startReason, { startSample }, 1)
 	end
 
@@ -457,13 +457,13 @@ function NpcGroundSurface.ValidateTraversal(npc, landingCandidate: Vector3, prof
 	local centerSample = NpcGroundSurface.SamplePrecise(landingCandidate, expectedLandingY, profile)
 	local samples = { startSample }
 	if not centerSample then
-		metrics.traversalFailures += 1
+		metrics.traversalValidationFailures += 1
 		return failedResult("missing_landing_surface", samples, 2)
 	end
 	table.insert(samples, centerSample)
 	local centerReason = NpcGroundSurface.GetFailureReason(centerSample, profile)
 	if centerReason then
-		metrics.traversalFailures += 1
+		metrics.traversalValidationFailures += 1
 		return failedResult(centerReason, samples, 2)
 	end
 
@@ -477,28 +477,28 @@ function NpcGroundSurface.ValidateTraversal(npc, landingCandidate: Vector3, prof
 	for _, probePosition in ipairs(probes) do
 		local sample = NpcGroundSurface.SamplePrecise(probePosition, centerSample.position.Y, profile)
 		if not sample then
-			metrics.traversalFailures += 1
+			metrics.traversalValidationFailures += 1
 			return failedResult("missing_landing_surface", samples, #samples + 1)
 		end
 		table.insert(samples, sample)
 		local reason = NpcGroundSurface.GetFailureReason(sample, profile)
 		if reason then
-			metrics.traversalFailures += 1
+			metrics.traversalValidationFailures += 1
 			return failedResult(reason, samples, #samples)
 		end
 		if not widthLayerClear(centerSample, sample, profile) then
-			metrics.traversalFailures += 1
+			metrics.traversalValidationFailures += 1
 			return failedResult("landing_layer_mismatch", samples, #samples)
 		end
 	end
 
 	local deltaY = centerSample.position.Y - startSample.position.Y
 	if deltaY > maxRise + 0.05 then
-		metrics.traversalFailures += 1
+		metrics.traversalValidationFailures += 1
 		return failedResult("traversal_rise_too_high", samples, 2)
 	end
 	if deltaY < -maxDrop - 0.05 then
-		metrics.traversalFailures += 1
+		metrics.traversalValidationFailures += 1
 		return failedResult("traversal_drop_too_far", samples, 2)
 	end
 
@@ -518,7 +518,7 @@ function NpcGroundSurface.ValidateTraversal(npc, landingCandidate: Vector3, prof
 		hit = traversalCast(liftedStart, liftedEnd, size)
 	end
 	if hit then
-		metrics.traversalFailures += 1
+		metrics.traversalValidationFailures += 1
 		return failedResult("traversal_blocked", samples, 2, hit)
 	end
 
