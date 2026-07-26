@@ -1,49 +1,81 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+local moduleRoot = ReplicatedStorage:FindFirstChild("ModuleScripts")
+	or ReplicatedStorage:FindFirstChild("ModuleScript")
+	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
+	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
+local UiResponsive = require(moduleRoot:WaitForChild("UiResponsive"))
+
 local remoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions")
 local GetDailyLoginState = remoteFunctions:WaitForChild("GetDailyLoginState")
 local ClaimDailyLoginReward = remoteFunctions:WaitForChild("ClaimDailyLoginReward")
 
+local DESIGN_SIZE = Vector2.new(980, 640)
+local SECONDS_PER_DAY = 24 * 60 * 60
+local AUTO_OPEN_DELAY_SECONDS = 1.25
+
 local THEME = {
-	overlay = Color3.fromRGB(3, 4, 8),
-	panel = Color3.fromRGB(19, 16, 24),
-	panelSoft = Color3.fromRGB(28, 24, 35),
-	text = Color3.fromRGB(244, 235, 214),
-	muted = Color3.fromRGB(171, 159, 139),
-	gold = Color3.fromRGB(255, 203, 86),
-	goldSoft = Color3.fromRGB(71, 52, 18),
-	claimed = Color3.fromRGB(40, 115, 72),
-	claimedSoft = Color3.fromRGB(22, 51, 36),
-	locked = Color3.fromRGB(69, 69, 76),
-	lockedSoft = Color3.fromRGB(29, 29, 35),
-	danger = Color3.fromRGB(158, 70, 66),
-	button = Color3.fromRGB(176, 124, 48),
-	buttonDisabled = Color3.fromRGB(70, 68, 72),
+	overlay = Color3.fromRGB(3, 5, 10),
+	panelTop = Color3.fromRGB(25, 27, 39),
+	panelBottom = Color3.fromRGB(12, 14, 22),
+	surface = Color3.fromRGB(24, 27, 38),
+	surfaceSoft = Color3.fromRGB(19, 22, 31),
+	text = Color3.fromRGB(247, 244, 235),
+	muted = Color3.fromRGB(166, 171, 187),
+	mutedDark = Color3.fromRGB(111, 116, 130),
+	gold = Color3.fromRGB(239, 187, 79),
+	goldBright = Color3.fromRGB(255, 218, 132),
+	goldSoft = Color3.fromRGB(68, 50, 20),
+	green = Color3.fromRGB(76, 171, 109),
+	greenSoft = Color3.fromRGB(22, 55, 38),
+	locked = Color3.fromRGB(68, 73, 88),
+	lockedSoft = Color3.fromRGB(25, 28, 37),
+	danger = Color3.fromRGB(209, 100, 91),
+	button = Color3.fromRGB(195, 132, 45),
+	buttonHover = Color3.fromRGB(216, 154, 57),
+	buttonDisabled = Color3.fromRGB(61, 64, 74),
+}
+
+local REWARD_COLORS = {
+	Ticket = Color3.fromRGB(239, 187, 79),
+	Souls = Color3.fromRGB(150, 102, 226),
+	MaterialBundle = Color3.fromRGB(97, 172, 121),
+	Booster = Color3.fromRGB(89, 153, 222),
+}
+
+local REWARD_GLYPHS = {
+	Ticket = "◆",
+	Souls = "◈",
+	MaterialBundle = "▦",
+	Booster = "XP",
 }
 
 local currentState = nil
 local isBusy = false
-local tiles = {}
 local hasAutoOpenChecked = false
-local AUTO_OPEN_DELAY_SECONDS = 1.25
+local resetRefreshPending = false
+local uiTransitionToken = 0
+local tiles = {}
+local progressSegments = {}
 
 local function create(className, props, parent)
-	local inst = Instance.new(className)
+	local instance = Instance.new(className)
 	for key, value in pairs(props or {}) do
-		inst[key] = value
+		instance[key] = value
 	end
-	inst.Parent = parent
-	return inst
+	instance.Parent = parent
+	return instance
 end
 
 local function addCorner(parent, radius)
 	return create("UICorner", {
-		CornerRadius = UDim.new(0, radius or 8),
+		CornerRadius = UDim.new(0, radius or 10),
 	}, parent)
 end
 
@@ -55,272 +87,108 @@ local function addStroke(parent, color, thickness, transparency)
 	}, parent)
 end
 
-local function setButtonEnabled(button, enabled, text)
-	button.Active = enabled
-	button.AutoButtonColor = enabled
-	button.Selectable = enabled
-	button.Text = text
-	button.BackgroundColor3 = enabled and THEME.button or THEME.buttonDisabled
-	button.TextColor3 = enabled and Color3.fromRGB(255, 248, 225) or Color3.fromRGB(178, 174, 166)
+local function addGradient(parent, topColor, bottomColor, rotation)
+	return create("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, topColor),
+			ColorSequenceKeypoint.new(1, bottomColor),
+		}),
+		Rotation = rotation or 90,
+	}, parent)
 end
 
-local gui = playerGui:FindFirstChild("DailyLoginGui")
-if not (gui and gui:IsA("ScreenGui")) then
-	gui = Instance.new("ScreenGui")
-	gui.Name = "DailyLoginGui"
-	gui.Parent = playerGui
+local function tween(instance, duration, properties, easingStyle, easingDirection)
+	local handle = TweenService:Create(
+		instance,
+		TweenInfo.new(
+			duration,
+			easingStyle or Enum.EasingStyle.Quad,
+			easingDirection or Enum.EasingDirection.Out
+		),
+		properties
+	)
+	handle:Play()
+	return handle
 end
 
-gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = false
-gui.Enabled = false
-gui:SetAttribute("Modal", true)
-
-for _, child in ipairs(gui:GetChildren()) do
-	child:Destroy()
+local function formatInteger(value)
+	local number = math.max(0, math.floor(tonumber(value) or 0))
+	return tostring(number):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
 end
 
-local overlay = create("Frame", {
-	Name = "overlay",
-	Size = UDim2.fromScale(1, 1),
-	BackgroundColor3 = THEME.overlay,
-	BackgroundTransparency = 0.18,
-	BorderSizePixel = 0,
-}, gui)
-
-local panel = create("Frame", {
-	Name = "panel",
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.fromScale(0.5, 0.5),
-	Size = UDim2.fromScale(0.86, 0.74),
-	BackgroundColor3 = THEME.panel,
-	BorderSizePixel = 0,
-}, overlay)
-addCorner(panel, 10)
-addStroke(panel, Color3.fromRGB(129, 97, 44), 2, 0.1)
-create("UISizeConstraint", {
-	MaxSize = Vector2.new(760, 540),
-	MinSize = Vector2.new(320, 360),
-}, panel)
-create("UIPadding", {
-	PaddingTop = UDim.new(0, 18),
-	PaddingBottom = UDim.new(0, 18),
-	PaddingLeft = UDim.new(0, 18),
-	PaddingRight = UDim.new(0, 18),
-}, panel)
-create("UIListLayout", {
-	FillDirection = Enum.FillDirection.Vertical,
-	SortOrder = Enum.SortOrder.LayoutOrder,
-	Padding = UDim.new(0, 12),
-}, panel)
-
-local header = create("Frame", {
-	Name = "Header",
-	Size = UDim2.new(1, 0, 0, 42),
-	BackgroundTransparency = 1,
-	LayoutOrder = 1,
-}, panel)
-
-local title = create("TextLabel", {
-	Name = "Title",
-	AnchorPoint = Vector2.new(0, 0.5),
-	Position = UDim2.fromScale(0, 0.5),
-	Size = UDim2.new(1, -52, 1, 0),
-	BackgroundTransparency = 1,
-	Font = Enum.Font.GothamBold,
-	Text = "Daily Login Rewards",
-	TextColor3 = THEME.text,
-	TextSize = 28,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	TextTruncate = Enum.TextTruncate.AtEnd,
-}, header)
-
-local closeButton = create("TextButton", {
-	Name = "Close",
-	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.fromScale(1, 0.5),
-	Size = UDim2.fromOffset(38, 38),
-	BackgroundColor3 = Color3.fromRGB(49, 38, 42),
-	BorderSizePixel = 0,
-	Font = Enum.Font.GothamBold,
-	Text = "X",
-	TextColor3 = Color3.fromRGB(255, 235, 220),
-	TextSize = 20,
-}, header)
-addCorner(closeButton, 8)
-addStroke(closeButton, Color3.fromRGB(117, 85, 77), 1, 0.25)
-
-local gridHolder = create("Frame", {
-	Name = "GridHolder",
-	Size = UDim2.new(1, 0, 1, -126),
-	BackgroundTransparency = 1,
-	LayoutOrder = 2,
-}, panel)
-
-local grid = create("UIGridLayout", {
-	CellPadding = UDim2.fromOffset(10, 10),
-	CellSize = UDim2.new(0.25, -8, 0.5, -8),
-	FillDirection = Enum.FillDirection.Horizontal,
-	SortOrder = Enum.SortOrder.LayoutOrder,
-	HorizontalAlignment = Enum.HorizontalAlignment.Center,
-	VerticalAlignment = Enum.VerticalAlignment.Center,
-}, gridHolder)
-
-local footer = create("Frame", {
-	Name = "Footer",
-	Size = UDim2.new(1, 0, 0, 72),
-	BackgroundTransparency = 1,
-	LayoutOrder = 3,
-}, panel)
-
-local feedback = create("TextLabel", {
-	Name = "Feedback",
-	Position = UDim2.fromScale(0, 0),
-	Size = UDim2.new(1, 0, 0, 26),
-	BackgroundTransparency = 1,
-	Font = Enum.Font.Gotham,
-	Text = "",
-	TextColor3 = THEME.muted,
-	TextSize = 15,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	TextTruncate = Enum.TextTruncate.AtEnd,
-}, footer)
-
-local claimButton = create("TextButton", {
-	Name = "Claim",
-	AnchorPoint = Vector2.new(0.5, 1),
-	Position = UDim2.fromScale(0.5, 1),
-	Size = UDim2.new(1, 0, 0, 40),
-	BackgroundColor3 = THEME.buttonDisabled,
-	BorderSizePixel = 0,
-	Font = Enum.Font.GothamBold,
-	Text = "Loading...",
-	TextColor3 = THEME.text,
-	TextSize = 18,
-}, footer)
-addCorner(claimButton, 8)
-addStroke(claimButton, Color3.fromRGB(255, 216, 121), 1, 0.35)
-
-local function adjustGrid()
-	local width = gridHolder.AbsoluteSize.X
-	if width < 520 then
-		grid.CellSize = UDim2.new(0.5, -8, 0.25, -8)
-	else
-		grid.CellSize = UDim2.new(0.25, -8, 0.5, -8)
-	end
+local function formatCountdown(totalSeconds)
+	local seconds = math.max(0, math.floor(tonumber(totalSeconds) or 0))
+	local hours = math.floor(seconds / 3600)
+	local minutes = math.floor((seconds % 3600) / 60)
+	local remainingSeconds = seconds % 60
+	return string.format("%02d:%02d:%02d", hours, minutes, remainingSeconds)
 end
 
-gridHolder:GetPropertyChangedSignal("AbsoluteSize"):Connect(adjustGrid)
-adjustGrid()
-
-local function makeTile(day)
-	local tile = create("Frame", {
-		Name = "Day" .. tostring(day),
-		BackgroundColor3 = THEME.lockedSoft,
-		BorderSizePixel = 0,
-		LayoutOrder = day,
-	}, gridHolder)
-	addCorner(tile, 8)
-	local stroke = addStroke(tile, THEME.locked, 1, 0.25)
-	create("UIPadding", {
-		PaddingTop = UDim.new(0, 8),
-		PaddingBottom = UDim.new(0, 8),
-		PaddingLeft = UDim.new(0, 8),
-		PaddingRight = UDim.new(0, 8),
-	}, tile)
-
-	local dayLabel = create("TextLabel", {
-		Name = "DayLabel",
-		Size = UDim2.new(1, 0, 0, 20),
-		BackgroundTransparency = 1,
-		Font = Enum.Font.GothamBold,
-		Text = "Day " .. tostring(day),
-		TextColor3 = THEME.text,
-		TextSize = 15,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-	}, tile)
-
-	local icon = create("TextLabel", {
-		Name = "Icon",
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 26),
-		Size = UDim2.fromOffset(42, 30),
-		BackgroundColor3 = Color3.fromRGB(14, 12, 18),
-		BorderSizePixel = 0,
-		Font = Enum.Font.GothamBold,
-		Text = "?",
-		TextColor3 = THEME.gold,
-		TextSize = 20,
-	}, tile)
-	addCorner(icon, 8)
-
-	local rewardName = create("TextLabel", {
-		Name = "RewardName",
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -25),
-		Size = UDim2.new(1, 0, 0, 20),
-		BackgroundTransparency = 1,
-		Font = Enum.Font.GothamMedium,
-		Text = "Reward",
-		TextColor3 = THEME.text,
-		TextSize = 14,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-	}, tile)
-
-	local amount = create("TextLabel", {
-		Name = "Amount",
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -6),
-		Size = UDim2.new(1, 0, 0, 18),
-		BackgroundTransparency = 1,
-		Font = Enum.Font.Gotham,
-		Text = "",
-		TextColor3 = THEME.muted,
-		TextSize = 13,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-	}, tile)
-
-	local status = create("TextLabel", {
-		Name = "Status",
-		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -4, 0, 4),
-		Size = UDim2.fromOffset(70, 18),
-		BackgroundColor3 = THEME.locked,
-		BorderSizePixel = 0,
-		Font = Enum.Font.GothamBold,
-		Text = "Locked",
-		TextColor3 = Color3.fromRGB(230, 230, 230),
-		TextSize = 11,
-	}, tile)
-	addCorner(status, 6)
-
-	tiles[day] = {
-		root = tile,
-		stroke = stroke,
-		dayLabel = dayLabel,
-		icon = icon,
-		rewardName = rewardName,
-		amount = amount,
-		status = status,
-	}
-end
-
-for day = 1, 7 do
-	makeTile(day)
-end
-
-local function getRewardIcon(reward)
+local function getRewardColor(reward)
 	local rewardType = tostring((reward and reward.RewardType) or "")
-	if rewardType == "Ticket" then
-		return "T"
-	elseif rewardType == "Souls" then
-		return "S"
-	elseif rewardType == "MaterialBundle" then
-		return "M"
-	elseif rewardType == "Booster" then
-		return "XP"
+	return REWARD_COLORS[rewardType] or THEME.gold
+end
+
+local function getRewardGlyph(reward)
+	local rewardType = tostring((reward and reward.RewardType) or "")
+	return REWARD_GLYPHS[rewardType] or "?"
+end
+
+local function getImageFromInstance(instance)
+	if not instance then
+		return nil
 	end
-	return "?"
+	if instance:IsA("StringValue") then
+		return instance.Value
+	elseif instance:IsA("ImageLabel") or instance:IsA("ImageButton") then
+		return instance.Image
+	elseif instance:IsA("Decal") or instance:IsA("Texture") then
+		return instance.Texture
+	end
+
+	local attribute = instance:GetAttribute("Image") or instance:GetAttribute("Texture")
+	if typeof(attribute) == "string" then
+		return attribute
+	end
+	return nil
+end
+
+local function resolveRewardImage(reward)
+	if typeof(reward) ~= "table" then
+		return nil
+	end
+
+	local configuredIcon = tostring(reward.Icon or "")
+	if configuredIcon:match("^rbxassetid://") or configuredIcon:match("^https?://") then
+		return configuredIcon
+	end
+
+	local candidateNames = {
+		configuredIcon,
+		tostring(reward.RewardType or ""),
+		tostring(reward.DisplayName or ""),
+	}
+	local containerNames = {
+		"DailyLoginIcons",
+		"CurrencyIcons",
+		"MaterialIcons",
+	}
+
+	for _, containerName in ipairs(containerNames) do
+		local container = ReplicatedStorage:FindFirstChild(containerName)
+		if container then
+			for _, candidateName in ipairs(candidateNames) do
+				if candidateName ~= "" then
+					local image = getImageFromInstance(container:FindFirstChild(candidateName))
+					if image and image ~= "" then
+						return image
+					end
+				end
+			end
+		end
+	end
+
+	return nil
 end
 
 local function getRewardAmountText(reward)
@@ -329,15 +197,44 @@ local function getRewardAmountText(reward)
 	end
 
 	if reward.RewardType == "MaterialBundle" then
-		return "Bundle"
+		local count = 0
+		for _, entry in ipairs(reward.Materials or {}) do
+			if (tonumber(entry.Amount) or 0) > 0 then
+				count += 1
+			end
+		end
+		return count == 1 and "1 material" or tostring(count) .. " materials"
 	end
 
 	local amount = math.max(0, math.floor(tonumber(reward.Amount) or 0))
 	if amount <= 0 then
 		return ""
 	end
+	return "x" .. formatInteger(amount)
+end
 
-	return "x" .. tostring(amount)
+local function getRewardSummary(reward)
+	if typeof(reward) ~= "table" then
+		return "Reward unavailable"
+	end
+
+	if reward.RewardType == "MaterialBundle" then
+		local parts = {}
+		for _, entry in ipairs(reward.Materials or {}) do
+			local amount = math.max(0, math.floor(tonumber(entry.Amount) or 0))
+			if amount > 0 then
+				table.insert(parts, tostring(amount) .. " " .. tostring(entry.Id or "Material"))
+			end
+		end
+		if #parts > 0 then
+			return table.concat(parts, "  •  ")
+		end
+		return tostring(reward.DisplayName or "Materials")
+	end
+
+	local amount = math.max(0, math.floor(tonumber(reward.Amount) or 0))
+	local name = tostring(reward.DisplayName or reward.RewardType or "Reward")
+	return "x" .. formatInteger(amount) .. " " .. name
 end
 
 local function findReward(state, day)
@@ -358,41 +255,671 @@ local function findDayStatus(state, day)
 	return nil
 end
 
-local function applyTileStyle(tile, status, canClaim)
-	if status == "ClaimedInCurrentCycle" then
-		tile.root.BackgroundColor3 = THEME.claimedSoft
-		tile.stroke.Color = THEME.claimed
-		tile.status.BackgroundColor3 = THEME.claimed
-		tile.status.Text = "Claimed"
-		tile.icon.TextColor3 = Color3.fromRGB(169, 235, 181)
-	elseif status == "Current" then
+local gui = playerGui:FindFirstChild("DailyLoginGui")
+if not (gui and gui:IsA("ScreenGui")) then
+	gui = Instance.new("ScreenGui")
+	gui.Name = "DailyLoginGui"
+	gui.Parent = playerGui
+end
+
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = false
+gui.Enabled = false
+gui.DisplayOrder = 65
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui:SetAttribute("Modal", true)
+
+for _, child in ipairs(gui:GetChildren()) do
+	child:Destroy()
+end
+
+local overlay = create("Frame", {
+	Name = "Overlay",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundColor3 = THEME.overlay,
+	BackgroundTransparency = 0.16,
+	BorderSizePixel = 0,
+	Active = true,
+}, gui)
+
+local backdropButton = create("TextButton", {
+	Name = "BackdropButton",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	Text = "",
+	AutoButtonColor = false,
+	ZIndex = 1,
+}, overlay)
+
+local panel = create("CanvasGroup", {
+	Name = "Panel",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(DESIGN_SIZE.X, DESIGN_SIZE.Y),
+	BackgroundColor3 = THEME.panelBottom,
+	BorderSizePixel = 0,
+	GroupTransparency = 0,
+	Active = true,
+	ZIndex = 2,
+}, overlay)
+addCorner(panel, 22)
+addStroke(panel, Color3.fromRGB(57, 63, 82), 1, 0.05)
+addGradient(panel, THEME.panelTop, THEME.panelBottom, 90)
+UiResponsive.attachCenteredPanel(panel, DESIGN_SIZE, {
+	margin = 18,
+})
+
+create("Frame", {
+	Name = "TopAccent",
+	Position = UDim2.fromOffset(24, 0),
+	Size = UDim2.new(1, -48, 0, 4),
+	BackgroundColor3 = THEME.gold,
+	BorderSizePixel = 0,
+	ZIndex = 3,
+}, panel)
+
+local title = create("TextLabel", {
+	Name = "Title",
+	Position = UDim2.fromOffset(30, 24),
+	Size = UDim2.new(1, -100, 0, 36),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBlack,
+	Text = "DAILY REWARDS",
+	TextColor3 = THEME.text,
+	TextSize = 30,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	ZIndex = 3,
+}, panel)
+
+create("TextLabel", {
+	Name = "Subtitle",
+	Position = UDim2.fromOffset(31, 61),
+	Size = UDim2.new(1, -110, 0, 22),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.Gotham,
+	Text = "Log in each day to advance the seven-day reward cycle.",
+	TextColor3 = THEME.muted,
+	TextSize = 14,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	ZIndex = 3,
+}, panel)
+
+local closeButton = create("TextButton", {
+	Name = "Close",
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -24, 0, 22),
+	Size = UDim2.fromOffset(42, 42),
+	BackgroundColor3 = Color3.fromRGB(37, 40, 52),
+	BorderSizePixel = 0,
+	Font = Enum.Font.GothamBold,
+	Text = "X",
+	TextColor3 = Color3.fromRGB(235, 237, 244),
+	TextSize = 17,
+	AutoButtonColor = false,
+	ZIndex = 4,
+}, panel)
+addCorner(closeButton, 13)
+local closeStroke = addStroke(closeButton, Color3.fromRGB(73, 78, 97), 1, 0.1)
+
+local summaryBar = create("Frame", {
+	Name = "SummaryBar",
+	Position = UDim2.fromOffset(30, 98),
+	Size = UDim2.new(1, -60, 0, 54),
+	BackgroundColor3 = THEME.surfaceSoft,
+	BorderSizePixel = 0,
+	ZIndex = 3,
+}, panel)
+addCorner(summaryBar, 14)
+addStroke(summaryBar, Color3.fromRGB(48, 54, 71), 1, 0.15)
+
+local cycleLabel = create("TextLabel", {
+	Name = "CycleLabel",
+	Position = UDim2.fromOffset(16, 8),
+	Size = UDim2.new(0.5, -16, 0, 18),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "CYCLE DAY 1 / 7",
+	TextColor3 = THEME.goldBright,
+	TextSize = 13,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	ZIndex = 4,
+}, summaryBar)
+
+local totalClaimsLabel = create("TextLabel", {
+	Name = "TotalClaimsLabel",
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -16, 0, 8),
+	Size = UDim2.new(0.5, -16, 0, 18),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamMedium,
+	Text = "TOTAL CLAIMED: 0",
+	TextColor3 = THEME.muted,
+	TextSize = 12,
+	TextXAlignment = Enum.TextXAlignment.Right,
+	ZIndex = 4,
+}, summaryBar)
+
+local progressHolder = create("Frame", {
+	Name = "ProgressHolder",
+	Position = UDim2.fromOffset(16, 33),
+	Size = UDim2.new(1, -32, 0, 9),
+	BackgroundTransparency = 1,
+	ZIndex = 4,
+}, summaryBar)
+
+local progressLayout = create("UIListLayout", {
+	FillDirection = Enum.FillDirection.Horizontal,
+	HorizontalAlignment = Enum.HorizontalAlignment.Center,
+	VerticalAlignment = Enum.VerticalAlignment.Center,
+	Padding = UDim.new(0, 6),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, progressHolder)
+progressLayout.Parent = progressHolder
+
+for day = 1, 7 do
+	local segment = create("Frame", {
+		Name = "Day" .. tostring(day),
+		Size = UDim2.new(1 / 7, -6, 1, 0),
+		BackgroundColor3 = THEME.locked,
+		BorderSizePixel = 0,
+		LayoutOrder = day,
+		ZIndex = 4,
+	}, progressHolder)
+	addCorner(segment, 5)
+	progressSegments[day] = segment
+end
+
+create("TextLabel", {
+	Name = "RewardsLabel",
+	Position = UDim2.fromOffset(31, 172),
+	Size = UDim2.new(1, -62, 0, 22),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "REWARD CALENDAR",
+	TextColor3 = THEME.muted,
+	TextSize = 12,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	ZIndex = 3,
+}, panel)
+
+local cardsHolder = create("Frame", {
+	Name = "CardsHolder",
+	Position = UDim2.fromOffset(30, 202),
+	Size = UDim2.new(1, -60, 0, 310),
+	BackgroundTransparency = 1,
+	ZIndex = 3,
+}, panel)
+
+local firstRow = create("Frame", {
+	Name = "FirstRow",
+	Size = UDim2.new(1, 0, 0, 149),
+	BackgroundTransparency = 1,
+	ZIndex = 3,
+}, cardsHolder)
+
+create("UIListLayout", {
+	FillDirection = Enum.FillDirection.Horizontal,
+	HorizontalAlignment = Enum.HorizontalAlignment.Center,
+	VerticalAlignment = Enum.VerticalAlignment.Center,
+	Padding = UDim.new(0, 12),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, firstRow)
+
+local secondRow = create("Frame", {
+	Name = "SecondRow",
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 161),
+	Size = UDim2.fromOffset(690, 149),
+	BackgroundTransparency = 1,
+	ZIndex = 3,
+}, cardsHolder)
+
+create("UIListLayout", {
+	FillDirection = Enum.FillDirection.Horizontal,
+	HorizontalAlignment = Enum.HorizontalAlignment.Center,
+	VerticalAlignment = Enum.VerticalAlignment.Center,
+	Padding = UDim.new(0, 12),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, secondRow)
+
+local function makeTile(day, parent)
+	local tile = create("Frame", {
+		Name = "Day" .. tostring(day),
+		Size = UDim2.fromOffset(222, 149),
+		BackgroundColor3 = THEME.lockedSoft,
+		BorderSizePixel = 0,
+		LayoutOrder = day,
+		ZIndex = 3,
+	}, parent)
+	addCorner(tile, 16)
+	local stroke = addStroke(tile, THEME.locked, 1, 0.15)
+	local backgroundGradient = addGradient(
+		tile,
+		Color3.fromRGB(33, 36, 48),
+		Color3.fromRGB(20, 23, 31),
+		90
+	)
+
+	local accent = create("Frame", {
+		Name = "Accent",
+		Position = UDim2.fromOffset(0, 0),
+		Size = UDim2.new(0, 4, 1, 0),
+		BackgroundColor3 = THEME.locked,
+		BorderSizePixel = 0,
+		ZIndex = 4,
+	}, tile)
+	addCorner(accent, 3)
+
+	local dayLabel = create("TextLabel", {
+		Name = "DayLabel",
+		Position = UDim2.fromOffset(14, 11),
+		Size = UDim2.new(1, -92, 0, 20),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		Text = day == 7 and "DAY 7  •  FINALE" or "DAY " .. tostring(day),
+		TextColor3 = THEME.text,
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = 4,
+	}, tile)
+
+	local status = create("TextLabel", {
+		Name = "Status",
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -10, 0, 9),
+		Size = UDim2.fromOffset(70, 22),
+		BackgroundColor3 = THEME.locked,
+		BorderSizePixel = 0,
+		Font = Enum.Font.GothamBold,
+		Text = "LOCKED",
+		TextColor3 = Color3.fromRGB(226, 228, 234),
+		TextSize = 10,
+		ZIndex = 5,
+	}, tile)
+	addCorner(status, 8)
+
+	local iconBack = create("Frame", {
+		Name = "IconBack",
+		Position = UDim2.fromOffset(14, 43),
+		Size = UDim2.fromOffset(72, 72),
+		BackgroundColor3 = Color3.fromRGB(14, 16, 23),
+		BorderSizePixel = 0,
+		ZIndex = 4,
+	}, tile)
+	addCorner(iconBack, 16)
+	local iconBackStroke = addStroke(iconBack, THEME.locked, 1, 0.25)
+
+	local iconImage = create("ImageLabel", {
+		Name = "IconImage",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(48, 48),
+		BackgroundTransparency = 1,
+		Image = "",
+		ScaleType = Enum.ScaleType.Fit,
+		Visible = false,
+		ZIndex = 5,
+	}, iconBack)
+
+	local iconGlyph = create("TextLabel", {
+		Name = "IconGlyph",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBlack,
+		Text = "?",
+		TextColor3 = THEME.gold,
+		TextSize = 29,
+		ZIndex = 5,
+	}, iconBack)
+
+	local rewardName = create("TextLabel", {
+		Name = "RewardName",
+		Position = UDim2.fromOffset(98, 48),
+		Size = UDim2.new(1, -110, 0, 24),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		Text = "Reward",
+		TextColor3 = THEME.text,
+		TextSize = 15,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = 4,
+	}, tile)
+
+	local amount = create("TextLabel", {
+		Name = "Amount",
+		Position = UDim2.fromOffset(98, 74),
+		Size = UDim2.new(1, -110, 0, 25),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBlack,
+		Text = "",
+		TextColor3 = THEME.goldBright,
+		TextSize = 20,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = 4,
+	}, tile)
+
+	local detail = create("TextLabel", {
+		Name = "Detail",
+		Position = UDim2.fromOffset(98, 103),
+		Size = UDim2.new(1, -110, 0, 18),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.Gotham,
+		Text = "Daily reward",
+		TextColor3 = THEME.muted,
+		TextSize = 11,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = 4,
+	}, tile)
+
+	local claimedMark = create("TextLabel", {
+		Name = "ClaimedMark",
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -10, 1, -9),
+		Size = UDim2.fromOffset(26, 26),
+		BackgroundColor3 = THEME.green,
+		BorderSizePixel = 0,
+		Font = Enum.Font.GothamBold,
+		Text = "✓",
+		TextColor3 = Color3.fromRGB(245, 255, 247),
+		TextSize = 15,
+		Visible = false,
+		ZIndex = 6,
+	}, tile)
+	addCorner(claimedMark, 13)
+
+	local claimScale = create("UIScale", {
+		Name = "ClaimScale",
+		Scale = 1,
+	}, tile)
+
+	tiles[day] = {
+		root = tile,
+		stroke = stroke,
+		backgroundGradient = backgroundGradient,
+		accent = accent,
+		dayLabel = dayLabel,
+		status = status,
+		iconBack = iconBack,
+		iconBackStroke = iconBackStroke,
+		iconImage = iconImage,
+		iconGlyph = iconGlyph,
+		rewardName = rewardName,
+		amount = amount,
+		detail = detail,
+		claimedMark = claimedMark,
+		claimScale = claimScale,
+	}
+end
+
+for day = 1, 4 do
+	makeTile(day, firstRow)
+end
+for day = 5, 7 do
+	makeTile(day, secondRow)
+end
+
+local footer = create("Frame", {
+	Name = "Footer",
+	Position = UDim2.fromOffset(30, 534),
+	Size = UDim2.new(1, -60, 0, 78),
+	BackgroundColor3 = THEME.surfaceSoft,
+	BorderSizePixel = 0,
+	ZIndex = 3,
+}, panel)
+addCorner(footer, 15)
+addStroke(footer, Color3.fromRGB(47, 53, 69), 1, 0.15)
+
+local currentRewardLabel = create("TextLabel", {
+	Name = "CurrentRewardLabel",
+	Position = UDim2.fromOffset(16, 11),
+	Size = UDim2.new(1, -356, 0, 22),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "TODAY'S REWARD: Loading...",
+	TextColor3 = THEME.text,
+	TextSize = 14,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	ZIndex = 4,
+}, footer)
+
+local resetLabel = create("TextLabel", {
+	Name = "ResetLabel",
+	Position = UDim2.fromOffset(16, 36),
+	Size = UDim2.new(1, -356, 0, 18),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamMedium,
+	Text = "Checking availability...",
+	TextColor3 = THEME.goldBright,
+	TextSize = 12,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	ZIndex = 4,
+}, footer)
+
+local feedback = create("TextLabel", {
+	Name = "Feedback",
+	Position = UDim2.fromOffset(16, 55),
+	Size = UDim2.new(1, -356, 0, 16),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.Gotham,
+	Text = "",
+	TextColor3 = THEME.muted,
+	TextSize = 11,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	ZIndex = 4,
+}, footer)
+
+local claimButton = create("TextButton", {
+	Name = "Claim",
+	AnchorPoint = Vector2.new(1, 0.5),
+	Position = UDim2.new(1, -14, 0.5, 0),
+	Size = UDim2.fromOffset(322, 50),
+	BackgroundColor3 = THEME.buttonDisabled,
+	BorderSizePixel = 0,
+	Font = Enum.Font.GothamBlack,
+	Text = "LOADING...",
+	TextColor3 = Color3.fromRGB(175, 178, 187),
+	TextSize = 15,
+	AutoButtonColor = false,
+	ZIndex = 4,
+}, footer)
+addCorner(claimButton, 14)
+local claimStroke = addStroke(claimButton, Color3.fromRGB(92, 95, 108), 1, 0.15)
+local claimGradient = addGradient(
+	claimButton,
+	Color3.fromRGB(204, 145, 52),
+	Color3.fromRGB(161, 101, 31),
+	90
+)
+
+local function setFeedback(text, color)
+	feedback.Text = tostring(text or "")
+	feedback.TextColor3 = color or THEME.muted
+end
+
+local function setButtonEnabled(enabled, text)
+	claimButton.Active = enabled
+	claimButton.Selectable = enabled
+	claimButton.Text = text
+	claimButton.BackgroundColor3 = enabled and THEME.button or THEME.buttonDisabled
+	claimButton.TextColor3 = enabled and Color3.fromRGB(255, 250, 235) or Color3.fromRGB(175, 178, 187)
+	claimStroke.Color = enabled and THEME.goldBright or Color3.fromRGB(92, 95, 108)
+	claimStroke.Transparency = enabled and 0.1 or 0.35
+	claimGradient.Enabled = enabled
+end
+
+local function setTileReward(tile, reward)
+	local rewardColor = getRewardColor(reward)
+	local image = resolveRewardImage(reward)
+
+	tile.rewardName.Text = tostring((reward and reward.DisplayName) or "Reward")
+	tile.amount.Text = getRewardAmountText(reward)
+	tile.amount.TextColor3 = rewardColor
+	tile.iconBackStroke.Color = rewardColor
+	tile.iconGlyph.Text = getRewardGlyph(reward)
+	tile.iconGlyph.TextColor3 = rewardColor
+
+	if image and image ~= "" then
+		tile.iconImage.Image = image
+		tile.iconImage.ImageColor3 = Color3.fromRGB(255, 255, 255)
+		tile.iconImage.Visible = true
+		tile.iconGlyph.Visible = false
+	else
+		tile.iconImage.Visible = false
+		tile.iconGlyph.Visible = true
+	end
+
+	if reward and reward.RewardType == "MaterialBundle" then
+		tile.detail.Text = "Crafting bundle"
+	elseif reward and reward.RewardType == "Ticket" then
+		tile.detail.Text = "Weapon banner currency"
+	elseif reward and reward.RewardType == "Souls" then
+		tile.detail.Text = "Account progression"
+	else
+		tile.detail.Text = "Daily reward"
+	end
+end
+
+local function applyTileStyle(tile, status, canClaim, day)
+	local isClaimed = status == "ClaimedInCurrentCycle"
+	local isCurrent = status == "Current"
+	local isLocked = not isClaimed and not isCurrent
+
+	tile.claimedMark.Visible = isClaimed
+
+	if isClaimed then
+		tile.root.BackgroundColor3 = THEME.greenSoft
+		tile.stroke.Color = THEME.green
+		tile.stroke.Thickness = 1
+		tile.stroke.Transparency = 0.1
+		tile.accent.BackgroundColor3 = THEME.green
+		tile.status.BackgroundColor3 = THEME.green
+		tile.status.Text = "CLAIMED"
+		tile.dayLabel.TextColor3 = Color3.fromRGB(192, 235, 205)
+		tile.backgroundGradient.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(28, 58, 42)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(18, 38, 29)),
+		})
+	elseif isCurrent then
 		tile.root.BackgroundColor3 = THEME.goldSoft
 		tile.stroke.Color = THEME.gold
 		tile.stroke.Thickness = 2
-		tile.status.BackgroundColor3 = canClaim and THEME.gold or Color3.fromRGB(100, 86, 54)
-		tile.status.Text = canClaim and "Current" or "Today"
-		tile.icon.TextColor3 = THEME.gold
+		tile.stroke.Transparency = 0
+		tile.accent.BackgroundColor3 = THEME.gold
+		tile.status.BackgroundColor3 = canClaim and THEME.gold or Color3.fromRGB(104, 83, 43)
+		tile.status.Text = canClaim and "READY" or "NEXT"
+		tile.status.TextColor3 = canClaim and Color3.fromRGB(45, 31, 9) or Color3.fromRGB(236, 226, 202)
+		tile.dayLabel.TextColor3 = THEME.goldBright
+		tile.backgroundGradient.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(72, 53, 24)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(38, 30, 20)),
+		})
 	else
 		tile.root.BackgroundColor3 = THEME.lockedSoft
-		tile.stroke.Color = THEME.locked
-		tile.status.BackgroundColor3 = THEME.locked
-		tile.status.Text = "Locked"
-		tile.icon.TextColor3 = Color3.fromRGB(143, 143, 150)
-	end
-
-	if status ~= "Current" then
+		tile.stroke.Color = day == 7 and Color3.fromRGB(92, 75, 46) or THEME.locked
 		tile.stroke.Thickness = 1
+		tile.stroke.Transparency = 0.25
+		tile.accent.BackgroundColor3 = day == 7 and Color3.fromRGB(112, 87, 47) or THEME.locked
+		tile.status.BackgroundColor3 = THEME.locked
+		tile.status.Text = "LOCKED"
+		tile.status.TextColor3 = Color3.fromRGB(206, 209, 218)
+		tile.dayLabel.TextColor3 = day == 7 and Color3.fromRGB(190, 166, 112) or THEME.muted
+		tile.backgroundGradient.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(31, 34, 45)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 23, 31)),
+		})
 	end
 
-	local alpha = status == "Locked" and 0.35 or 0
-	tile.dayLabel.TextTransparency = alpha
-	tile.icon.TextTransparency = alpha
-	tile.rewardName.TextTransparency = alpha
-	tile.amount.TextTransparency = alpha
+	local transparency = isLocked and 0.38 or 0
+	tile.iconBack.BackgroundTransparency = isLocked and 0.15 or 0
+	tile.iconImage.ImageTransparency = transparency
+	tile.iconGlyph.TextTransparency = transparency
+	tile.rewardName.TextTransparency = transparency
+	tile.amount.TextTransparency = transparency
+	tile.detail.TextTransparency = isLocked and 0.5 or 0
 end
 
-local function renderState(state)
+local function updateProgress(state)
+	for day = 1, 7 do
+		local dayStatus = findDayStatus(state, day)
+		local status = (dayStatus and dayStatus.Status) or "Locked"
+		local canClaim = dayStatus and dayStatus.CanClaim == true
+		local segment = progressSegments[day]
+		if status == "ClaimedInCurrentCycle" then
+			segment.BackgroundColor3 = THEME.green
+		elseif status == "Current" then
+			segment.BackgroundColor3 = canClaim and THEME.goldBright or THEME.gold
+		else
+			segment.BackgroundColor3 = THEME.locked
+		end
+	end
+end
+
+local renderState
+
+local function updateCountdown()
+	local state = currentState
+	if typeof(state) ~= "table" then
+		resetLabel.Text = "Checking availability..."
+		return
+	end
+
+	if state.CanClaim == true then
+		resetLabel.Text = "REWARD READY NOW"
+		resetLabel.TextColor3 = THEME.goldBright
+		return
+	end
+
+	local nextClaimDayUTC = tonumber(state.NextClaimDayUTC)
+	if not nextClaimDayUTC then
+		resetLabel.Text = "Come back tomorrow"
+		resetLabel.TextColor3 = THEME.muted
+		return
+	end
+
+	local remaining = (nextClaimDayUTC * SECONDS_PER_DAY) - os.time()
+	if remaining <= 0 then
+		resetLabel.Text = "Refreshing reward availability..."
+		resetLabel.TextColor3 = THEME.goldBright
+		if not resetRefreshPending then
+			resetRefreshPending = true
+			task.defer(function()
+				local ok, payload = pcall(function()
+					return GetDailyLoginState:InvokeServer()
+				end)
+				resetRefreshPending = false
+				if ok and typeof(payload) == "table" then
+					renderState(payload)
+				end
+			end)
+		end
+		return
+	end
+
+	resetLabel.Text = "NEXT REWARD IN  " .. formatCountdown(remaining) .. "  •  UTC RESET"
+	resetLabel.TextColor3 = THEME.muted
+end
+
+renderState = function(state)
+	if typeof(state) ~= "table" then
+		return
+	end
+
 	currentState = state
+	local currentDay = math.clamp(math.floor(tonumber(state.CurrentDay) or 1), 1, 7)
+	cycleLabel.Text = "CYCLE DAY " .. tostring(currentDay) .. " / 7"
+	totalClaimsLabel.Text = "TOTAL CLAIMED: " .. formatInteger(state.TotalClaims)
+
 	for day = 1, 7 do
 		local tile = tiles[day]
 		local reward = findReward(state, day)
@@ -400,18 +927,22 @@ local function renderState(state)
 		local status = (dayStatus and dayStatus.Status) or "Locked"
 		local canClaim = dayStatus and dayStatus.CanClaim == true
 
-		tile.icon.Text = getRewardIcon(reward)
-		tile.rewardName.Text = tostring((reward and reward.DisplayName) or "Reward")
-		tile.amount.Text = getRewardAmountText(reward)
-		applyTileStyle(tile, status, canClaim)
+		setTileReward(tile, reward)
+		applyTileStyle(tile, status, canClaim, day)
 	end
 
+	updateProgress(state)
+	local currentReward = findReward(state, currentDay)
+	local rewardPrefix = state.CanClaim == true and "TODAY'S REWARD:  " or "NEXT REWARD:  "
+	currentRewardLabel.Text = rewardPrefix .. getRewardSummary(currentReward)
+	updateCountdown()
+
 	if isBusy then
-		setButtonEnabled(claimButton, false, "Claiming...")
-	elseif state and state.CanClaim == true then
-		setButtonEnabled(claimButton, true, "Claim")
+		setButtonEnabled(false, "CLAIMING REWARD...")
+	elseif state.CanClaim == true then
+		setButtonEnabled(true, "CLAIM DAY " .. tostring(currentDay) .. " REWARD")
 	else
-		setButtonEnabled(claimButton, false, "Come back tomorrow")
+		setButtonEnabled(false, "REWARD CLAIMED TODAY")
 	end
 end
 
@@ -420,10 +951,10 @@ local function fetchState()
 		return GetDailyLoginState:InvokeServer()
 	end)
 
-	if not ok then
+	if not ok or typeof(payload) ~= "table" then
 		warn("[DailyLoginClient] GetDailyLoginState failed:", payload)
-		feedback.Text = "Daily rewards are unavailable."
-		setButtonEnabled(claimButton, false, "Unavailable")
+		setFeedback("Daily rewards are currently unavailable.", THEME.danger)
+		setButtonEnabled(false, "UNAVAILABLE")
 		return nil
 	end
 
@@ -431,14 +962,53 @@ local function fetchState()
 	return payload
 end
 
-local function openUI()
+local function playClaimAnimation(day)
+	local tile = tiles[day]
+	if not tile then
+		return
+	end
+
+	tile.claimScale.Scale = 1
+	local grow = tween(tile.claimScale, 0.14, { Scale = 1.045 }, Enum.EasingStyle.Back)
+	grow.Completed:Wait()
+	tween(tile.claimScale, 0.16, { Scale = 1 }, Enum.EasingStyle.Quad).Completed:Wait()
+end
+
+local function openUI(skipFetch)
+	uiTransitionToken += 1
+	local token = uiTransitionToken
 	gui.Enabled = true
-	feedback.Text = ""
-	fetchState()
+	overlay.BackgroundTransparency = 1
+	panel.GroupTransparency = 1
+	setFeedback("")
+
+	tween(overlay, 0.16, { BackgroundTransparency = 0.16 })
+	local reveal = tween(panel, 0.2, { GroupTransparency = 0 }, Enum.EasingStyle.Quad)
+	reveal.Completed:Connect(function()
+		if token ~= uiTransitionToken then
+			return
+		end
+	end)
+
+	if not skipFetch then
+		task.defer(fetchState)
+	end
 end
 
 local function closeUI()
-	gui.Enabled = false
+	if not gui.Enabled then
+		return
+	end
+
+	uiTransitionToken += 1
+	local token = uiTransitionToken
+	tween(overlay, 0.12, { BackgroundTransparency = 1 })
+	local hide = tween(panel, 0.12, { GroupTransparency = 1 })
+	hide.Completed:Connect(function()
+		if token == uiTransitionToken then
+			gui.Enabled = false
+		end
+	end)
 end
 
 local function autoOpenIfClaimable()
@@ -448,15 +1018,13 @@ local function autoOpenIfClaimable()
 
 	hasAutoOpenChecked = true
 	task.wait(AUTO_OPEN_DELAY_SECONDS)
-
 	if gui.Enabled then
 		return
 	end
 
 	local state = fetchState()
 	if state and state.CanClaim == true then
-		gui.Enabled = true
-		feedback.Text = ""
+		openUI(true)
 	end
 end
 
@@ -465,30 +1033,36 @@ local function claim()
 		return
 	end
 
+	local claimedDay = math.clamp(math.floor(tonumber(currentState.CurrentDay) or 1), 1, 7)
 	isBusy = true
 	renderState(currentState)
-	feedback.Text = ""
+	setFeedback("")
 
 	local ok, result = pcall(function()
 		return ClaimDailyLoginReward:InvokeServer()
 	end)
 
 	isBusy = false
-
 	if not ok then
 		warn("[DailyLoginClient] ClaimDailyLoginReward failed:", result)
-		feedback.Text = "Claim failed."
-		setButtonEnabled(claimButton, false, "Unavailable")
+		setFeedback("Claim failed. Try again in a moment.", THEME.danger)
+		setButtonEnabled(false, "UNAVAILABLE")
 		return
 	end
 
 	if typeof(result) ~= "table" then
-		feedback.Text = "Claim failed."
+		setFeedback("Claim failed. The server returned an invalid response.", THEME.danger)
 		fetchState()
 		return
 	end
 
-	feedback.Text = tostring(result.Message or (result.Success and "Claimed." or "Unable to claim."))
+	if result.Success == true then
+		setFeedback(tostring(result.Message or "Reward claimed."), THEME.green)
+		playClaimAnimation(claimedDay)
+	else
+		setFeedback(tostring(result.Message or "Unable to claim reward."), THEME.danger)
+	end
+
 	if result.State then
 		renderState(result.State)
 	else
@@ -498,6 +1072,33 @@ end
 
 claimButton.Activated:Connect(claim)
 closeButton.Activated:Connect(closeUI)
+backdropButton.Activated:Connect(closeUI)
+
+claimButton.MouseEnter:Connect(function()
+	if claimButton.Active then
+		claimGradient.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(224, 166, 67)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(182, 117, 36)),
+		})
+	end
+end)
+claimButton.MouseLeave:Connect(function()
+	if claimButton.Active then
+		claimGradient.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(204, 145, 52)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(161, 101, 31)),
+		})
+	end
+end)
+
+closeButton.MouseEnter:Connect(function()
+	tween(closeButton, 0.1, { BackgroundColor3 = Color3.fromRGB(58, 43, 48) })
+	closeStroke.Color = Color3.fromRGB(133, 89, 91)
+end)
+closeButton.MouseLeave:Connect(function()
+	tween(closeButton, 0.1, { BackgroundColor3 = Color3.fromRGB(37, 40, 52) })
+	closeStroke.Color = Color3.fromRGB(73, 78, 97)
+end)
 
 local lastScreenButtonsNonce = nil
 
@@ -531,6 +1132,15 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	end
 	if input.KeyCode == Enum.KeyCode.Escape and gui.Enabled then
 		closeUI()
+	end
+end)
+
+task.spawn(function()
+	while gui.Parent do
+		if gui.Enabled then
+			updateCountdown()
+		end
+		task.wait(1)
 	end
 end)
 
