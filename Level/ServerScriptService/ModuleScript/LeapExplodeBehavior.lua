@@ -103,10 +103,16 @@ local function resolveLeapTarget(npc: any, targetPosition: Vector3): Vector3
 	return targetPosition
 end
 
-local function hasLineOfSight(npc: any, targetModel: Model, targetPosition: Vector3, origin: Vector3): boolean
+local function hasLineOfSight(
+	npc: any,
+	targetModel: Model,
+	targetPosition: Vector3,
+	origin: Vector3,
+	ignoreInstances: {Instance}?
+): boolean
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { npc.model }
+	params.FilterDescendantsInstances = ignoreInstances or { npc.model }
 	params.IgnoreWater = false
 	local direction = targetPosition - origin
 	if direction.Magnitude <= 1e-4 then
@@ -147,14 +153,28 @@ local function damageNpcs(npc: any, origin: Vector3, radius: number, damage: num
 		return
 	end
 
+	local lineOfSightIgnore = { npc.model }
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Character then
+			table.insert(lineOfSightIgnore, player.Character)
+		end
+	end
+
 	for _, targetModel in ipairs(service.GetEnemiesInRadius(origin, radius)) do
 		if targetModel ~= npc.model then
 			local targetPosition = service.GetPosition(targetModel)
-			if targetPosition and hasLineOfSight(npc, targetModel, targetPosition, origin) then
+			if targetPosition and hasLineOfSight(
+				npc,
+				targetModel,
+				targetPosition,
+				origin,
+				lineOfSightIgnore
+			) then
 				local dealt = service.ApplyDamage(targetModel, damage, {
 					cause = "LeapExplode",
 					sourceModel = npc.model,
 					showFloating = false,
+					suppressRewards = true,
 				})
 				if dealt > 0 then
 					metrics.npcDamageHits += 1

@@ -1,5 +1,43 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-26 - PR #140 Goblin LeapExplode friendly fire
+
+### Summary
+
+- Kept the production Goblin combat sequence server-authoritative and direct: `Chase -> Leap -> Detonate -> Dead`, with no stationary arm phase and no scripted Roblox `Explosion`.
+- Applied blast damage to nearby living NPCs through `NpcService.ApplyDamage`, excluding the source Goblin and suppressing rewards for friendly-fire deaths.
+- Added player and NPC line-of-sight validation. NPC blast rays ignore the source and player characters at the landing point, while world geometry and other NPC bodies remain valid blockers.
+- Kept the existing death lifecycle as the single owner of callbacks, deregistration, replication, rewards and authored client death VFX.
+
+### Files
+
+- Updated `Level/ServerScriptService/ModuleScript/LeapExplodeBehavior.lua`.
+- Updated `docs/NPC_MOVEMENT_SYSTEMS.md`.
+- Updated this monthly changelog.
+
+### Studio and validation
+
+- Active Studio: `Level`, tested with the production `ReplicatedStorage.Enemies.Normal.Goblin` template and the stacked PR #133 runtime sources.
+- Direct behavior-contract validation confirmed the first in-range tick enters `Leap`, there is no `Arm` state, freeze and pause shift leap clocks without movement or teleport, target loss continues toward the captured landing point, cleanup clears state, and a second post-death step cannot detonate again.
+- A real registered Goblin damaged one player and one visible registered NPC exactly once, killed itself once, left a wall-blocked NPC at full health, and reported one detonation. Source and victim death contexts used `cause = "LeapExplode"` and `suppressRewards = true`; the victim context retained the source model.
+- Three nearby production Goblins produced three detonations, three player hits, three one-shot death callbacks and three authored client `ExplosionRuntime` instances, with no scripted `Explosion` instance or duplicate authored effect.
+- Despawning a production Goblin during a two-second active leap produced one leap, zero detonations and zero death callbacks. In the combined PR #135 integration, truthful `Dead` versus `Despawned` tombstone state yielded one authored VFX for a real detonation and zero for lifecycle despawn.
+- The active production Goblin template retains `NpcMovementSystem_V2`, `NpcMove_GroundRunner` and `NpcCombat_LeapExplode`.
+
+### Runtime cost and cleanup
+
+- No `Heartbeat`, `Stepped`, `RenderStepped`, connection, remote, persistent-data field or `_G` dependency was added.
+- Leap execution remains inside the existing shared `NpcService` movement scheduler at `12 Hz`.
+- Each detonation performs one bounded player pass plus the existing radius query over registered NPCs; LOS raycasts run only for eligible targets inside the configured blast radius.
+- Behavior cleanup clears the captured leap state. Death and NPC friendly-fire remain routed through the existing lifecycle and `NpcService` owners.
+
+### Dependencies, risks and rollback
+
+- PR #140 remains stacked on PR #133. Merge #135 and #136 first, rebase #133 on the resulting `main`, then rebase #140 on refreshed #133 and repeat source-parity/startup smoke before merge.
+- The combined authored-VFX test used the live PR #135 source in Studio because #135 is not yet in PR #133's base. Until the dependency chain is merged/rebased, GitHub cannot show that integration in #140's branch diff.
+- A wall-blocked LOS case and several simultaneous detonators passed, but true multiplayer was not exercised.
+- Roll back by reverting PR #140 commits. The source Goblin returns to its previous self-only blast behavior; no data migration, remote rollback or content retagging is required.
+
 ## 2026-07-24 - PR #133 MovementV2 active Level integration
 
 ### Summary

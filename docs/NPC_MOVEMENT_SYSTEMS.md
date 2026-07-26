@@ -90,7 +90,7 @@ This enables the server-authoritative Goblin sequence:
 
 `Chase -> Leap -> Detonate -> Dead`
 
-The Goblin starts the leap during the same shared movement tick in which it reaches trigger range, without a stationary aiming phase. The detonation damages each eligible player and living NPC at most once, performs line-of-sight validation, and then kills and deregisters the Goblin through the existing lifecycle. The behavior does not create a scripted Roblox `Explosion`; authored client VFX can react to the replicated death instead.
+The Goblin starts the leap during the same shared movement tick in which it reaches trigger range, without a stationary aiming phase. The detonation damages each eligible player and living NPC at most once, performs line-of-sight validation, and then kills and deregisters the Goblin through the existing lifecycle. NPC blast rays ignore the source and player characters at the landing point so a player body cannot hide nearby NPCs; world geometry and other NPC bodies still block the ray. NPC damage goes through `NpcService.ApplyDamage`, and LeapExplode friendly-fire deaths suppress rewards. The behavior does not create a scripted Roblox `Explosion`; authored client VFX can react to the replicated death instead.
 
 Optional model attributes:
 

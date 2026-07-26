@@ -17,6 +17,7 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-07-26** — Poziom PR #140 Goblin LeapExplode friendly fire i integracja authored VFX
 - **2026-07-24** — Poziom PR #133 integracja i testy switchable NPC MovementV2
 - **2026-07-24** — Poziom PR #134 slide animation integration and Studio validation
 - **2026-07-20** — Poziom PR #132 usunięcie ReactiveGrassClient i ograniczenie kosztu HUD-u diagnostycznego
