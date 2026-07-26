@@ -7,6 +7,7 @@
 - Preserved `UICorner`, `UIStroke`, and other structural children when a weapon preview is refreshed by giving generated preview content a dedicated `GeneratedWeaponContent` owner.
 - Rendered every configured `FeaturedWeaponIds` entry in the altar, featured-information panel, and banner cards instead of silently choosing the first weapon.
 - Added full featured-name summaries to the altar badge, information panel, and banner cards while retaining the single-feature presentation.
+- Anchored the roll summary to a fixed-height strip inside the reveal panel and reset the altar aura to its authored size before every summon tween.
 
 ### Files
 
@@ -20,6 +21,7 @@
 - Temporarily configured the active schedule with `Harvest of the End` and `Excalion, Blade of Kings`, opened the banner through `OpenWeaponBannerUI`, and verified that the altar, information panel, and sidebar each created two generated weapon cells.
 - Verified the altar badge and sidebar summary contained both configured weapon names.
 - Verified the preview containers retained their pre-existing `UICorner` and `UIStroke` instances after rendering.
+- Verified the summary strip remains inside the reveal panel beside the Continue button, and consecutive reveal setup resets the aura from 360 x 360 to 326 x 326 before expanding again.
 - Restored `BannerConfigs` and `BannerSchedule` from the repository after the test.
 - Play reached the Four Peaks lobby without a `BannerUI` error. The existing unrelated `BlacksmithUI` wait for `PassiveDesc` remained.
 - `git diff --check` passed before the changelog update and is rerun in final validation.

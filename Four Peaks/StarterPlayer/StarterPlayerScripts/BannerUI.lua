@@ -664,7 +664,7 @@ resultsGridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 resultsGridLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 resultsGridLayout.Parent = resultsGrid
 
-local revealSummary = createText(revealPanel, "RevealSummary", "", UDim2.fromOffset(26, 1), UDim2.new(1, -220, 1, -24), 11, Enum.Font.Gotham, COLORS.TextSoft)
+local revealSummary = createText(revealPanel, "RevealSummary", "", UDim2.new(0, 26, 1, -22), UDim2.new(1, -220, 0, 42), 11, Enum.Font.Gotham, COLORS.TextSoft)
 revealSummary.AnchorPoint = Vector2.new(0, 1)
 
 local continueButton = createButton(revealPanel, "ContinueButton", "CONTINUE", UDim2.new(1, -26, 1, -22), UDim2.fromOffset(154, 42), COLORS.PurpleSoft)
@@ -1073,6 +1073,7 @@ local function playSummonReveal(results)
 	renderWeaponVisual(revealWeaponVisual, nil, rarityColor)
 
 	revealWeaponVisual.Size = UDim2.fromOffset(110, 110)
+	revealAura.Size = UDim2.fromOffset(326, 326)
 	revealAura.BackgroundTransparency = 0.98
 	tween(revealAura, TweenInfo.new(skipRequested and 0.03 or 0.65, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		BackgroundTransparency = 0.82,
