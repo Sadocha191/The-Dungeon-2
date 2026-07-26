@@ -6,12 +6,6 @@ local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local moduleRoot = ReplicatedStorage:FindFirstChild("ModuleScripts")
-	or ReplicatedStorage:FindFirstChild("ModuleScript")
-	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
-	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
-local UiResponsive = require(moduleRoot:WaitForChild("UiResponsive"))
-
 local remoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions")
 local GetDailyLoginState = remoteFunctions:WaitForChild("GetDailyLoginState")
 local ClaimDailyLoginReward = remoteFunctions:WaitForChild("ClaimDailyLoginReward")
@@ -24,11 +18,9 @@ local THEME = {
 	overlay = Color3.fromRGB(3, 5, 10),
 	panelTop = Color3.fromRGB(25, 27, 39),
 	panelBottom = Color3.fromRGB(12, 14, 22),
-	surface = Color3.fromRGB(24, 27, 38),
 	surfaceSoft = Color3.fromRGB(19, 22, 31),
 	text = Color3.fromRGB(247, 244, 235),
 	muted = Color3.fromRGB(166, 171, 187),
-	mutedDark = Color3.fromRGB(111, 116, 130),
 	gold = Color3.fromRGB(239, 187, 79),
 	goldBright = Color3.fromRGB(255, 218, 132),
 	goldSoft = Color3.fromRGB(68, 50, 20),
@@ -38,7 +30,6 @@ local THEME = {
 	lockedSoft = Color3.fromRGB(25, 28, 37),
 	danger = Color3.fromRGB(209, 100, 91),
 	button = Color3.fromRGB(195, 132, 45),
-	buttonHover = Color3.fromRGB(216, 154, 57),
 	buttonDisabled = Color3.fromRGB(61, 64, 74),
 }
 
@@ -277,7 +268,7 @@ local overlay = create("Frame", {
 	Name = "Overlay",
 	Size = UDim2.fromScale(1, 1),
 	BackgroundColor3 = THEME.overlay,
-	BackgroundTransparency = 0.16,
+	BackgroundTransparency = 1,
 	BorderSizePixel = 0,
 	Active = true,
 }, gui)
@@ -306,9 +297,6 @@ local panel = create("CanvasGroup", {
 addCorner(panel, 22)
 addStroke(panel, Color3.fromRGB(57, 63, 82), 1, 0.05)
 addGradient(panel, THEME.panelTop, THEME.panelBottom, 90)
-UiResponsive.attachCenteredPanel(panel, DESIGN_SIZE, {
-	margin = 18,
-})
 
 create("Frame", {
 	Name = "TopAccent",
@@ -409,14 +397,13 @@ local progressHolder = create("Frame", {
 	ZIndex = 4,
 }, summaryBar)
 
-local progressLayout = create("UIListLayout", {
+create("UIListLayout", {
 	FillDirection = Enum.FillDirection.Horizontal,
 	HorizontalAlignment = Enum.HorizontalAlignment.Center,
 	VerticalAlignment = Enum.VerticalAlignment.Center,
 	Padding = UDim.new(0, 6),
 	SortOrder = Enum.SortOrder.LayoutOrder,
 }, progressHolder)
-progressLayout.Parent = progressHolder
 
 for day = 1, 7 do
 	local segment = create("Frame", {
@@ -978,11 +965,9 @@ local function openUI(skipFetch)
 	uiTransitionToken += 1
 	local token = uiTransitionToken
 	gui.Enabled = true
-	overlay.BackgroundTransparency = 1
 	panel.GroupTransparency = 1
 	setFeedback("")
 
-	tween(overlay, 0.16, { BackgroundTransparency = 0.16 })
 	local reveal = tween(panel, 0.2, { GroupTransparency = 0 }, Enum.EasingStyle.Quad)
 	reveal.Completed:Connect(function()
 		if token ~= uiTransitionToken then
@@ -1002,7 +987,6 @@ local function closeUI()
 
 	uiTransitionToken += 1
 	local token = uiTransitionToken
-	tween(overlay, 0.12, { BackgroundTransparency = 1 })
 	local hide = tween(panel, 0.12, { GroupTransparency = 1 })
 	hide.Completed:Connect(function()
 		if token == uiTransitionToken then
