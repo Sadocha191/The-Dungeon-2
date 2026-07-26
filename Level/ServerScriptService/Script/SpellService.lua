@@ -596,3 +596,5 @@ end)
 Players.PlayerRemoving:Connect(function(plr)
 	state[plr.UserId] = nil
 end)
+
+print("[SpellService] Ready (elemental spell engine)")
