@@ -155,6 +155,12 @@ local function clearPendingForRequest(nav, request)
 	end
 end
 
+local function clearQueuedRequest(request)
+	if queuedNpc[request.npc] == request then
+		queuedNpc[request.npc] = nil
+	end
+end
+
 local function applyPathResult(request, waypoints, reason: string)
 	local npc = request.npc
 	local nav = npc.navigation
@@ -327,7 +333,7 @@ local function startPathRequest(request)
 			}
 		end
 		applyPathResult(request, waypoints, failureReason)
-		queuedNpc[request.npc] = nil
+		clearQueuedRequest(request)
 		activePaths -= 1
 	end)
 end
@@ -461,7 +467,7 @@ local function tryStartTraversal(
 	end
 
 	if source ~= "path_jump" then
-		nav.waypoints = nil
+		invalidateRoute(npc, nav, "traversal_started:" .. source)
 	end
 	local duration = math.max(0.1, tonumber(profile.TraversalDuration) or 0.4)
 	nav.traversal = {
@@ -786,7 +792,7 @@ function NpcGroundNavigation.StepScheduler(now: number)
 		local request = table.remove(requestQueue, 1)
 		local nav = request.npc.navigation
 		if request.npc.dead or not request.npc.model.Parent or not nav or nav.generation ~= request.generation then
-			queuedNpc[request.npc] = nil
+			clearQueuedRequest(request)
 			clearPendingForRequest(nav, request)
 		else
 			pathTokens -= 1

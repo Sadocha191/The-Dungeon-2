@@ -12,6 +12,7 @@
 - Kept tall walls, forbidden surfaces, missing landing surfaces and excessive rises/drops blocked so pathfinding can route around them.
 - Started authored `Jump` traversal toward the marked waypoint itself, canceled active traversal on external `SetPosition`, and validated six body sweeps along the same sinusoidal curve used at runtime.
 - Evicted the active route's cache entry when custom traversal validation rejects a `Jump`, so the immediate repath cannot reapply the identical cached waypoints.
+- Invalidated pending path generations when a local obstacle starts a hop/stride, preventing a pre-traversal async result from installing stale waypoints after landing.
 
 ### Files
 
@@ -30,6 +31,8 @@
 - Pause transitions reuse the centralized movement tick and visit the NPC registry once only when the global pause value changes. Freeze suspension is an O(1) check inside the existing per-NPC update.
 - Traversal state is stored on the existing per-NPC navigation record and cleared on landing or NPC cleanup.
 - Cache eviction is O(1), happens only on a rejected path jump, and is exposed in the existing navigation metrics as `pathCacheEvictions`.
+- Starting a non-path traversal performs one O(1) generation bump and pending-route cleanup inside the existing movement tick; queued/active callbacks then follow the existing stale-result path.
+- Stale queued/active requests clear the weak-map slot only when they still own that exact slot, so an older canceled callback cannot erase a newer request's deduplication record.
 
 ### Validation
 
@@ -43,6 +46,7 @@
 - Separate physical validation cases passed for a `GroundSmall` chest hop, fallen-log hop, small-rock hop, `GroundLarge` stride, uneven `1.5`-stud terrain rise and a `0.75`-stud stair step.
 - The final curved-corridor validator kept a low chest clear and rejected a narrow obstacle intersecting the first-quarter body arc as `traversal_blocked`; this is the region the previous up-horizontal-down corridor did not represent.
 - A controlled rejected-`Jump` route cleared its waypoints/cache key, incremented `pathCacheEvictions` exactly once and retained `jump_transition_blocked` as the repath reason.
+- A local-obstacle hop started with `pathPending = true`; traversal start advanced generation `7 -> 8`, cleared both pending fields, retained `traversal_started:local_obstacle`, and produced an active `Hopping` step.
 - Tall walls returned `traversal_blocked`; a traversal beyond maximum width returned `traversal_too_far`; a missing landing footprint returned `missing_landing_surface`; a real temporary Terrain water landing returned `water_forbidden`; a modifier-protected surface returned `surface_forbidden`; and a physical `45`-degree wedge returned `slope_too_steep`.
 - A transient 250-NPC Play stress test ran 72 movement ticks over 6 s: average movement tick `0.917 ms`, observed global maximum `8.323 ms`, `3032` raycasts (`505.3/s`), `806` blockcasts including `18` traversal blockcasts, `6` traversal starts, `6` completions and `0` failures. All temporary NPCs, parts, tags and Terrain water were removed or discarded with the Play session.
 - A focused final curved-corridor stress validated 250 clear traversals in `8.619 ms` total (`0.0345 ms` per case), issuing exactly `1,500` bounded traversal blockcasts and `1,250` surface raycasts with zero failures.
