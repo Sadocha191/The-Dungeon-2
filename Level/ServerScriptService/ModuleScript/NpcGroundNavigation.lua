@@ -27,6 +27,7 @@ local metrics = {
 	pathSuccesses = 0,
 	pathFailures = 0,
 	pathCacheHits = 0,
+	pathCacheEvictions = 0,
 	stalePathResults = 0,
 	stateTransitions = 0,
 	traversalStarts = 0,
@@ -109,6 +110,7 @@ local function getNavigation(npc)
 		nextTraversalAt = 0,
 		traversal = nil,
 		pathExpiresAt = 0,
+		pathCacheKey = nil,
 		lastProgressAt = now,
 		lastProgressPosition = npc.position,
 		unreachableSince = nil,
@@ -166,6 +168,7 @@ local function applyPathResult(request, waypoints, reason: string)
 		nav.waypoints = waypoints
 		nav.waypointIndex = math.min(2, #waypoints)
 		nav.pathExpiresAt = os.clock() + request.profile.PathRefreshSeconds
+		nav.pathCacheKey = request.cacheKey
 		setStatus(nav, "Path")
 		nav.unreachableSince = nil
 		npc.unreachableSince = nil
@@ -174,6 +177,7 @@ local function applyPathResult(request, waypoints, reason: string)
 		end
 	else
 		nav.waypoints = nil
+		nav.pathCacheKey = nil
 		setStatus(nav, "Unreachable")
 		nav.unreachableSince = nav.unreachableSince or os.clock()
 		npc.unreachableSince = nav.unreachableSince
@@ -203,11 +207,22 @@ end
 local function invalidateRoute(npc, nav, reason: string)
 	nav.generation += 1
 	nav.waypoints = nil
+	nav.pathCacheKey = nil
 	nav.pathPending = false
 	nav.pendingGeneration = nil
 	nav.nextDirectCheckAt = 0
 	nav.lastRepathReason = reason
 	queuedNpc[npc] = nil
+end
+
+local function evictActiveRouteCache(nav)
+	local cacheKey = nav.pathCacheKey
+	if not cacheKey then
+		return
+	end
+	pathCache[cacheKey] = nil
+	nav.pathCacheKey = nil
+	metrics.pathCacheEvictions += 1
 end
 
 local function queuePath(npc, goalPosition: Vector3, profile, now: number, reason: string): boolean
@@ -235,7 +250,13 @@ local function queuePath(npc, goalPosition: Vector3, profile, now: number, reaso
 		nav.generation += 1
 		nav.pathGoalPosition = goalPosition
 		nav.pathGoalLayerId = nav.goalLayerId
-		applyPathResult({ npc = npc, generation = nav.generation, profile = profile, cached = true }, cached.waypoints, "cache")
+		applyPathResult({
+			npc = npc,
+			generation = nav.generation,
+			profile = profile,
+			cacheKey = cacheKey,
+			cached = true,
+		}, cached.waypoints, "cache")
 		return true
 	end
 	if #requestQueue >= Config.Scheduler.MaxPendingPaths then
@@ -648,6 +669,7 @@ function NpcGroundNavigation.Step(
 		if tryStartTraversal(npc, nav, moveTarget, profile, now, "path_jump", nil) then
 			return stepTraversal(npc, nav, now, dt)
 		end
+		evictActiveRouteCache(nav)
 		invalidateRoute(npc, nav, "jump_transition_blocked")
 		queuePath(npc, goalPosition, profile, now, "jump_transition_blocked")
 		setStatus(nav, nav.pathPending and "WaitingPath" or "Blocked")
