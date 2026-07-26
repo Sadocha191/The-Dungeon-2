@@ -356,11 +356,6 @@ local function syncLiveMissionProgress(plr: Player, totalSecondsOverride: number
 		missionAdd(plr, "LOW_HP_SECONDS", delta)
 	end
 
-	if r.missionBossPhaseReported ~= true and totalSeconds >= 1200 then
-		r.missionBossPhaseReported = true
-		missionAdd(plr, "BOSS_SPAWN_REACHED", 1)
-	end
-
 	local noDamageStreak = tonumber(r.maxNoDamageStreak) or 0
 	if totalSecondsOverride == nil then
 		local nowClock = os.clock()
@@ -1393,6 +1388,10 @@ local function notifyBossSpawn()
 				r.bossSpawnClock = os.clock()
 				r.bossSpawnRunSeconds = spawnSeconds or runSeconds(plr)
 				r.bossNoHit20Failed = false
+				if r.missionBossPhaseReported ~= true then
+					r.missionBossPhaseReported = true
+					missionAdd(plr, "BOSS_SPAWN_REACHED", 1)
+				end
 			end
 		end
 	end
