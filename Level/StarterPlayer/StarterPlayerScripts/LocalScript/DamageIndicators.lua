@@ -1,14 +1,12 @@
 -- DamageIndicators.client.lua (StarterPlayerScripts)
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
-local player = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local damageIndicatorEvent = remotes:WaitForChild("DamageIndicatorEvent")
 
-local BATCH_WINDOW = 0.075
+local BATCH_WINDOW = 0.05
 local LIFETIME = 1.05
 local MAX_ACTIVE = 36
 local MAX_POOL = 24
@@ -177,8 +175,13 @@ local function createIndicator()
 	elementTag.BorderSizePixel = 0
 	elementTag.Font = Enum.Font.GothamBold
 	elementTag.TextColor3 = Color3.fromRGB(18, 14, 20)
-	elementTag.TextSize = 11
+	elementTag.TextScaled = true
 	elementTag.Parent = group
+
+	local elementConstraint = Instance.new("UITextSizeConstraint")
+	elementConstraint.MinTextSize = 8
+	elementConstraint.MaxTextSize = 11
+	elementConstraint.Parent = elementTag
 
 	local tagCorner = Instance.new("UICorner")
 	tagCorner.CornerRadius = UDim.new(1, 0)
@@ -361,6 +364,12 @@ local function queueIndicator(payload)
 		end
 	end
 	local crit = payload.crit == true
+	local incomingHits = math.clamp(math.floor(tonumber(payload.hits) or 1), 1, 999)
+	if payload.batched == true then
+		popText(pos, amount, crit, primaryElement, secondaryElement, incomingHits)
+		return
+	end
+
 	local targetKey = payload.targetId ~= nil and tostring(payload.targetId) or fallbackTargetKey(pos)
 	local key = table.concat({
 		targetKey,
@@ -373,14 +382,14 @@ local function queueIndicator(payload)
 	local bucket = pending[key]
 	if bucket then
 		bucket.amount += amount
-		bucket.hits += 1
+		bucket.hits += incomingHits
 		bucket.pos = bucket.pos:Lerp(pos, 0.35)
 		return
 	end
 
 	bucket = {
 		amount = amount,
-		hits = 1,
+		hits = incomingHits,
 		pos = pos,
 		crit = crit,
 		primaryElement = primaryElement,
