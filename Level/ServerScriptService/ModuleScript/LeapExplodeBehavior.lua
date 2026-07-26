@@ -108,8 +108,12 @@ local function hasLineOfSight(npc: any, targetModel: Model, targetPosition: Vect
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = { npc.model }
 	params.IgnoreWater = false
+	local direction = targetPosition - origin
+	if direction.Magnitude <= 1e-4 then
+		return true
+	end
 	metrics.lineOfSightRaycasts += 1
-	local hit = Workspace:Raycast(origin, targetPosition - origin, params)
+	local hit = Workspace:Raycast(origin, direction, params)
 	return hit == nil or hit.Instance:IsDescendantOf(targetModel)
 end
 
@@ -162,7 +166,7 @@ end
 
 local function beginLeap(npc: any, state: {[string]: any}, targetPosition: Vector3, dt: number, now: number)
 	local leapDuration = math.max(0.12, numberAttribute(npc.model, "LeapExplodeLeapTime", 0.5))
-	local firstStep = math.clamp(math.max(0, tonumber(dt) or 0), 0, leapDuration)
+	local firstStep = math.clamp(math.max(0, tonumber(dt) or 0), 0, leapDuration * 0.5)
 	state.phase = "Leap"
 	state.leapStartedAt = now - firstStep
 	state.leapEndsAt = state.leapStartedAt + leapDuration
