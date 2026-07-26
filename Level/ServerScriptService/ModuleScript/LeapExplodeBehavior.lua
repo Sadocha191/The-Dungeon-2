@@ -1,10 +1,11 @@
-local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
 local NpcLifecycle = require(script.Parent:WaitForChild("NpcLifecycle"))
 local NpcMelee = require(script.Parent:WaitForChild("NpcMelee"))
 local NpcMovement = require(script.Parent:WaitForChild("NpcMovement"))
+local NpcRegistry = require(script.Parent:WaitForChild("NpcRegistry"))
+local NpcTargeting = require(script.Parent:WaitForChild("NpcTargeting"))
 
 local LeapExplodeBehavior = {}
 
@@ -13,6 +14,7 @@ local metrics = {
 	leaps = 0,
 	detonations = 0,
 	damageHits = 0,
+	npcDamageHits = 0,
 	lineOfSightRaycasts = 0,
 }
 
@@ -72,25 +74,33 @@ local function resolveLeapTarget(npc: any, targetPosition: Vector3): Vector3
 	return targetPosition
 end
 
-local function hasLineOfSight(npc: any, character: Model, root: BasePart, origin: Vector3): boolean
+local function hasLineOfSight(npc: any, targetModel: Model, targetPosition: Vector3, origin: Vector3): boolean
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = { npc.model }
 	params.IgnoreWater = false
 	metrics.lineOfSightRaycasts += 1
-	local hit = Workspace:Raycast(origin, root.Position - origin, params)
-	return hit == nil or hit.Instance:IsDescendantOf(character)
+	local hit = Workspace:Raycast(origin, targetPosition - origin, params)
+	return hit == nil or hit.Instance:IsDescendantOf(targetModel)
 end
 
-local function damagePlayers(npc: any, origin: Vector3)
+local function getExplosionStats(npc: any): (number, number)
 	local radius = math.max(1, numberAttribute(npc.model, "LeapExplodeRadius", 10))
-	local damage = math.max(0, math.floor(numberAttribute(npc.model, "LeapExplodeDamage", math.max(npc.damage, npc.damage * 1.75))))
+	local damage = math.max(0, math.floor(numberAttribute(
+		npc.model,
+		"LeapExplodeDamage",
+		math.max(npc.damage, npc.damage * 1.75)
+	)))
+	return radius, damage
+end
+
+local function damagePlayers(npc: any, origin: Vector3, radius: number, damage: number)
 	for _, player in ipairs(Players:GetPlayers()) do
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		if humanoid and root and root:IsA("BasePart") and humanoid.Health > 0 and player:GetAttribute("RunEnded") ~= true then
-			if (root.Position - origin).Magnitude <= radius and hasLineOfSight(npc, character, root, origin) then
+			if (root.Position - origin).Magnitude <= radius and hasLineOfSight(npc, character, root.Position, origin) then
 				NpcMelee.ApplyPlayerDamage(player, damage, npc.model)
 				metrics.damageHits += 1
 			end
@@ -98,15 +108,40 @@ local function damagePlayers(npc: any, origin: Vector3)
 	end
 end
 
-local function createExplosionVisual(origin: Vector3)
-	local explosion = Instance.new("Explosion")
-	explosion.Name = "NpcLeapExplode"
-	explosion.Position = origin
-	explosion.BlastRadius = 0
-	explosion.BlastPressure = 0
-	explosion.DestroyJointRadiusPercent = 0
-	explosion.Parent = Workspace
-	Debris:AddItem(explosion, 1)
+local function damageNpcs(npc: any, origin: Vector3, radius: number, damage: number)
+	local targets = {}
+	for _, targetNpc in NpcRegistry.Pairs() do
+		if targetNpc ~= npc
+			and NpcTargeting.IsTargetable(targetNpc)
+			and (targetNpc.position - origin).Magnitude <= radius
+			and hasLineOfSight(npc, targetNpc.model, targetNpc.position, origin)
+		then
+			targets[#targets + 1] = targetNpc
+		end
+	end
+
+	for _, targetNpc in ipairs(targets) do
+		local dealt = NpcLifecycle.ApplyDamage(targetNpc, damage, {
+			cause = "LeapExplode",
+			sourceModel = npc.model,
+		})
+		if dealt > 0 then
+			metrics.npcDamageHits += 1
+		end
+	end
+end
+
+local function beginLeap(npc: any, state: {[string]: any}, targetPosition: Vector3, dt: number, now: number)
+	local leapDuration = math.max(0.12, numberAttribute(npc.model, "LeapExplodeLeapTime", 0.5))
+	local firstStep = math.clamp(math.max(0, tonumber(dt) or 0), 0, leapDuration)
+	state.phase = "Leap"
+	state.leapStartedAt = now - firstStep
+	state.leapEndsAt = state.leapStartedAt + leapDuration
+	state.leapStart = npc.position
+	state.leapTarget = resolveLeapTarget(npc, targetPosition)
+	npc.look = flatUnit(targetPosition - npc.position, npc.look)
+	metrics.armed += 1
+	metrics.leaps += 1
 end
 
 local function detonate(npc: any, state: {[string]: any}, callbacks: {[string]: any}?)
@@ -117,8 +152,9 @@ local function detonate(npc: any, state: {[string]: any}, callbacks: {[string]: 
 	state.phase = "Detonate"
 	metrics.detonations += 1
 	local origin = npc.position
-	damagePlayers(npc, origin)
-	createExplosionVisual(origin)
+	local radius, damage = getExplosionStats(npc)
+	damagePlayers(npc, origin, radius, damage)
+	damageNpcs(npc, origin, radius, damage)
 	if callbacks and type(callbacks.kill) == "function" then
 		callbacks.kill({
 			cause = "LeapExplode",
@@ -155,9 +191,7 @@ function LeapExplodeBehavior.Step(
 		if not liveTargetPosition or (liveTargetPosition - npc.position).Magnitude > triggerRange then
 			return false
 		end
-		state.phase = "Arm"
-		state.phaseEndsAt = now + math.max(0.05, numberAttribute(npc.model, "LeapExplodeArmTime", 0.45))
-		metrics.armed += 1
+		beginLeap(npc, state, liveTargetPosition, dt, now)
 	end
 
 	if npc.freezeEnd > now then
@@ -166,24 +200,6 @@ function LeapExplodeBehavior.Step(
 		state.leapEndsAt += dt
 		npc.velocity = Vector3.zero
 		NpcLifecycle.SetState(npc, "Attacking")
-		return true
-	end
-
-	if state.phase == "Arm" then
-		npc.velocity = Vector3.zero
-		if targetPosition then
-			npc.look = flatUnit(targetPosition - npc.position, npc.look)
-		end
-		NpcLifecycle.SetState(npc, "Attacking")
-		if now >= state.phaseEndsAt then
-			local leapDuration = math.max(0.12, numberAttribute(npc.model, "LeapExplodeLeapTime", 0.5))
-			state.phase = "Leap"
-			state.leapStartedAt = now
-			state.leapEndsAt = now + leapDuration
-			state.leapStart = npc.position
-			state.leapTarget = resolveLeapTarget(npc, targetPosition or npc.position)
-			metrics.leaps += 1
-		end
 		return true
 	end
 
