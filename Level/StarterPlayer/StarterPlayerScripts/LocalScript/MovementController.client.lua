@@ -600,6 +600,9 @@ local function clearMotion()
 	if humanoid then
 		humanoid.AutoRotate = true
 		humanoid.CameraOffset = Vector3.zero
+		if type(MovementConfig.SlideActiveAttribute) == "string" and MovementConfig.SlideActiveAttribute ~= "" then
+			humanoid:SetAttribute(MovementConfig.SlideActiveAttribute, false)
+		end
 	end
 end
 
@@ -935,6 +938,9 @@ local function startSlide(groundInfo: GroundInfo, options: SlideStartOptions?): 
 		groundLostAt = nil,
 		chainMomentum = options and options.chainMomentum == true,
 	}
+	if type(MovementConfig.SlideActiveAttribute) == "string" and MovementConfig.SlideActiveAttribute ~= "" then
+		humanoid:SetAttribute(MovementConfig.SlideActiveAttribute, true)
+	end
 	clearLandingMomentum()
 
 	debugLog(
@@ -1389,6 +1395,9 @@ local function bindCharacter(character: Model)
 		if humanoid and humanoid:IsA("Humanoid") then
 			currentHumanoid = humanoid
 			humanoid.CameraOffset = Vector3.zero
+			if type(MovementConfig.SlideActiveAttribute) == "string" and MovementConfig.SlideActiveAttribute ~= "" then
+				humanoid:SetAttribute(MovementConfig.SlideActiveAttribute, false)
+			end
 			connect(characterConnections, humanoid.Died, function()
 				clearMotion()
 				clearLandingMomentum()

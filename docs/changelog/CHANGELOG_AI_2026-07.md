@@ -32,6 +32,52 @@
 - No production flying template exists. A complete natural wave reward/drop run after Goblin self-detonation and full stairs/no-route Pathfinding scenarios remain unverified.
 - PR #133 therefore remains draft.
 - Immediate rollback is to tag Slime/Goblin as `NpcMovementSystem_Legacy`; full Studio rollback uses the `Before PR 133 MovementV2 integration` waypoint/place version, and repo rollback reverts the PR/integration commits.
+## 2026-07-24 - Poziom slide animation integration (PR #134)
+
+### Summary
+
+- Added slide animation asset `78771843103599` with configurable fade time and playback speed.
+- Added a dedicated client presentation controller that owns the slide `AnimationTrack` lifecycle without changing slide physics.
+- Replaced the PR's original `CameraOffset` property signal with the explicit client-local Humanoid attribute `MovementSlideActive`; Play proved that `GetPropertyChangedSignal("CameraOffset")` emitted zero callbacks for two value changes and could not drive the animation.
+- Kept `MovementController` as the sole owner of slide gameplay state. It sets the attribute only when a slide starts, clears, or a character binds.
+
+### Files
+
+- Updated `Level/ReplicatedStorage/ModuleScripts/MovementConfig.lua`.
+- Updated `Level/StarterPlayer/StarterPlayerScripts/LocalScript/MovementController.client.lua`.
+- Added `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SlideAnimationController.client.lua`.
+- Updated `CHANGELOG_AI.md` and this monthly changelog.
+
+### Studio and validation
+
+- Active Studio: `Level`, PlaceId `113361902471683`.
+- Created the live `StarterPlayer.StarterPlayerScripts.LocalScript.SlideAnimationController` and synchronized the configuration and equivalent state-owner edits to the active live `MovementController`.
+- Normalized source parity passed for `MovementConfig` (length `2848`, checksum `1140370050`) and `SlideAnimationController` (length `3350`, checksum `125086846`).
+- The live `MovementController` intentionally retained its pre-existing Studio-specific source; the three slide-state writes were applied at character bind, successful slide start, and motion clear instead of replacing the whole script from the PR branch.
+- Level Play reached the loading gate and prepared the world. Animation `rbxassetid://78771843103599` loaded and played looped at `Action` priority and speed `1`.
+- Setting the slide state false stopped the track. Killing the local Humanoid while the track was playing also stopped it.
+- A server `LoadCharacter()` respawn produced a new Humanoid with the state initialized false; the controller rebound and passed a second start/stop animation test.
+- Console output contained no `SlideAnimation` error or warning. The pre-existing unrelated `Hybrid Terrain Hex Generator:16` toolbar error, `RunStatsHud` re-entrancy error, and bounded loading preload timeouts remained.
+- `git diff --check` passed before the changelog update; it is rerun in final validation.
+
+### Runtime cost and cleanup
+
+- No `Heartbeat`, `Stepped`, `RenderStepped`, polling loop, remote, persistent-data field, teleport field, `_G` dependency, physics value, cooldown, or slide speed was added or changed.
+- The presentation controller uses two lifetime player-character connections and two dynamic Humanoid connections (`GetAttributeChangedSignal` and `Died`) for the single local player.
+- Dynamic Humanoid connections are disconnected and the animation track is stopped/destroyed on character removal or rebind.
+- `MovementController` adds O(1) attribute writes only at character bind, successful slide start, and motion clear.
+
+### Not verified
+
+- A physical `C`/Control/gamepad slide input could not be automated because Studio denied `VirtualInputManager.SendKeyEvent` to the MCP command thread. The existing slide owner path was inspected, while the owner-to-presentation state contract and full animation lifecycle were tested directly.
+- Multiplayer client presentation was not tested; the state and animation are intentionally local to each player's Humanoid and PlayerScripts.
+
+### Risks and rollback
+
+- `MovementSlideActive` is a new client-local presentation contract. Repository and Studio searches found no pre-existing use of that name.
+- Future slide-state owners must keep the attribute transition paired with `activeMotion`; polling `CameraOffset` is not a valid fallback in the tested Studio runtime.
+- Studio rollback: undo to the `Before PR 134 slide animation sync` waypoint, or delete the live presentation LocalScript and remove the config fields and three attribute writes.
+- Repository rollback: revert the PR #134 merge/follow-up commit. No data migration or server rollback is required.
 
 ## 2026-07-20 - Poziom ReactiveGrass removal and diagnostics HUD optimization (PR #132)
 
