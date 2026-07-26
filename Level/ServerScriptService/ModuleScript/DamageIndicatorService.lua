@@ -21,23 +21,11 @@ end
 
 local NpcService = require(findServerModule("NpcService") or error("[DamageIndicatorService] Missing NpcService"))
 
-local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-if not remotes then
-	remotes = Instance.new("Folder")
-	remotes.Name = "Remotes"
-	remotes.Parent = ReplicatedStorage
-end
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local damageIndicatorEvent = remotes:WaitForChild("DamageIndicatorEvent")
+assert(damageIndicatorEvent:IsA("RemoteEvent"), "[DamageIndicatorService] DamageIndicatorEvent must be a RemoteEvent")
 
-local damageIndicatorEvent = remotes:FindFirstChild("DamageIndicatorEvent")
-if damageIndicatorEvent and not damageIndicatorEvent:IsA("RemoteEvent") then
-	damageIndicatorEvent:Destroy()
-	damageIndicatorEvent = nil
-end
-if not damageIndicatorEvent then
-	damageIndicatorEvent = Instance.new("RemoteEvent")
-	damageIndicatorEvent.Name = "DamageIndicatorEvent"
-	damageIndicatorEvent.Parent = remotes
-end
+local BATCH_WINDOW = 0.05
 
 local ELEMENT_ALIASES = {
 	Electric = "Electricity",
@@ -61,6 +49,11 @@ local VALID_ELEMENTS = {
 }
 
 local DamageIndicatorService = {}
+local pendingByPlayer = {}
+
+local function isActivePlayer(value: any): boolean
+	return typeof(value) == "Instance" and value:IsA("Player") and value.Parent == Players
+end
 
 local function normalizeElement(value: any): string
 	local element = tostring(value or "")
@@ -93,6 +86,83 @@ local function resolveTargetId(target: any): string?
 	return nil
 end
 
+local function fallbackTargetKey(position: Vector3): string
+	return string.format(
+		"%d:%d:%d",
+		math.floor(position.X * 0.5 + 0.5),
+		math.floor(position.Y * 0.5 + 0.5),
+		math.floor(position.Z * 0.5 + 0.5)
+	)
+end
+
+local function buildBatchKey(payload): string
+	return table.concat({
+		payload.targetId or fallbackTargetKey(payload.pos),
+		payload.element,
+		payload.secondaryElement or "",
+		payload.crit and "crit" or "normal",
+		payload.kind or "hit",
+	}, "|")
+end
+
+local function queueIndicator(sourcePlayer: Player, payload)
+	local playerBuckets = pendingByPlayer[sourcePlayer]
+	if not playerBuckets then
+		playerBuckets = {}
+		pendingByPlayer[sourcePlayer] = playerBuckets
+	end
+
+	local key = buildBatchKey(payload)
+	local bucket = playerBuckets[key]
+	if bucket then
+		bucket.amount += payload.amount
+		bucket.hits += 1
+		bucket.pos = bucket.pos:Lerp(payload.pos, 0.35)
+		return
+	end
+
+	bucket = {
+		amount = payload.amount,
+		hits = 1,
+		pos = payload.pos,
+		crit = payload.crit,
+		element = payload.element,
+		secondaryElement = payload.secondaryElement,
+		targetId = payload.targetId,
+		kind = payload.kind,
+		sourceId = payload.sourceId,
+	}
+	playerBuckets[key] = bucket
+
+	task.delay(BATCH_WINDOW, function()
+		local currentBuckets = pendingByPlayer[sourcePlayer]
+		if not currentBuckets or currentBuckets[key] ~= bucket then
+			return
+		end
+
+		currentBuckets[key] = nil
+		if next(currentBuckets) == nil then
+			pendingByPlayer[sourcePlayer] = nil
+		end
+		if not isActivePlayer(sourcePlayer) then
+			return
+		end
+
+		damageIndicatorEvent:FireClient(sourcePlayer, {
+			pos = bucket.pos,
+			amount = math.max(1, math.floor(bucket.amount + 0.5)),
+			hits = bucket.hits,
+			crit = bucket.crit,
+			element = bucket.element,
+			secondaryElement = bucket.secondaryElement,
+			targetId = bucket.targetId,
+			kind = bucket.kind,
+			sourceId = bucket.sourceId,
+			batched = true,
+		})
+	end)
+end
+
 function DamageIndicatorService.ApplyDamage(target: any, amount: number, meta: {[string]: any}?): number
 	local sourcePlayer = meta and meta.player
 	local showFloating = not (meta and meta.showFloating == false)
@@ -105,10 +175,10 @@ function DamageIndicatorService.ApplyDamage(target: any, amount: number, meta: {
 	end
 
 	local applied = NpcService.ApplyDamage(target, amount, damageMeta)
-	if applied <= 0 or not showFloating then
+	if applied <= 0 or not showFloating or typeof(position) ~= "Vector3" then
 		return applied
 	end
-	if not sourcePlayer or sourcePlayer.Parent ~= Players or typeof(position) ~= "Vector3" then
+	if not isActivePlayer(sourcePlayer) then
 		return applied
 	end
 
@@ -121,24 +191,22 @@ function DamageIndicatorService.ApplyDamage(target: any, amount: number, meta: {
 		end
 	end
 
-	local payload = {
+	queueIndicator(sourcePlayer, {
 		pos = position + Vector3.new(0, 2, 0),
-		amount = math.max(1, math.floor(applied + 0.5)),
+		amount = applied,
 		crit = meta and meta.crit == true or false,
 		element = element,
 		secondaryElement = secondaryElement,
 		targetId = targetId,
-	}
+		kind = meta and typeof(meta.kind) == "string" and meta.kind ~= "" and meta.kind or nil,
+		sourceId = meta and typeof(meta.sourceId) == "string" and meta.sourceId ~= "" and meta.sourceId or nil,
+	})
 
-	if meta and typeof(meta.kind) == "string" and meta.kind ~= "" then
-		payload.kind = meta.kind
-	end
-	if meta and typeof(meta.sourceId) == "string" and meta.sourceId ~= "" then
-		payload.sourceId = meta.sourceId
-	end
-
-	damageIndicatorEvent:FireClient(sourcePlayer, payload)
 	return applied
 end
+
+Players.PlayerRemoving:Connect(function(player)
+	pendingByPlayer[player] = nil
+end)
 
 return DamageIndicatorService
