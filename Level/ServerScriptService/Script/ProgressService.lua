@@ -90,6 +90,10 @@ if not RunStarted then
 	RunStarted.Value = false
 	RunStarted.Parent = ReplicatedStorage
 end
+local bossPhaseActive = false
+RunStarted.Changed:Connect(function()
+	bossPhaseActive = false
+end)
 
 -- Run state
 local run = {} -- [uid] = {startT, pausedTotal, pauseStart, runLevel, runXp, nextXp, runSilver, coinsEarned, kills, ended, banished, pendingLevelUps}
@@ -1380,6 +1384,7 @@ local function notifyBossSpawn()
 	if RunProgressApi.IsConfigured("GetRunSeconds") then
 		spawnSeconds = tonumber(RunProgressApi.GetRunSeconds())
 	end
+	bossPhaseActive = true
 
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr:GetAttribute("RunEnded") ~= true then
@@ -1638,6 +1643,13 @@ Players.PlayerAdded:Connect(function(plr: Player)
 	r.banished = {}
 	r.pendingLevelUps = 0
 	plr:SetAttribute("RunRerollsUsed", 0)
+	if RunStarted.Value == true and bossPhaseActive then
+		r.bossSpawnClock = os.clock()
+		r.bossSpawnRunSeconds = runSeconds(plr)
+		r.bossNoHit20Failed = false
+		r.missionBossPhaseReported = true
+		missionAdd(plr, "BOSS_SPAWN_REACHED", 1)
+	end
 
 	-- reset spell levels for this run
 	if SpellDefs and SpellDefs.SPELLS then

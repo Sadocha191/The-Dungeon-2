@@ -12,6 +12,7 @@
 - Labeled `COINS_EARNED` objectives as Run Gold rather than silver, matching the raw dungeon counter before the separate end-of-run silver conversion.
 - Prevented immediate surrender from advancing `RUNS`, `RUNS_WITH_WEAPON`, or `FAST_RUNS`; victories qualify immediately, while defeated runs require at least 60 seconds of participation.
 - Made `BOSS_SPAWN_REACHED` advance from the authoritative portal-boss spawn notification instead of an unrelated 20-minute elapsed-time threshold.
+- Replayed the active boss-phase milestone for players who join after the one-shot spawn notification, using their own join-relative boss clock and the same per-run duplicate guard.
 
 ### Files
 
@@ -31,6 +32,7 @@
 - All selected goal keys were audited against existing mission progress/service counters.
 - A controlled server test intercepted mission writes without touching player data: surrender and a 59-second defeat added zero `RUNS`/`FAST_RUNS`, while a victory and a 60-second defeat each added one finished run.
 - A source-contract probe confirmed the boss-spawn hook marks and increments `BOSS_SPAWN_REACHED` once per active player/run, while the live-duration sync no longer grants that objective at 1,200 seconds without a boss.
+- `RunStarted` transitions clear the shared boss-phase flag; a late join during the same active boss phase receives one backfilled counter, while the next run starts clean.
 - Neither Play session produced a mission-config or mission-service error. Existing unrelated Four Peaks `BlacksmithUI` and Level terrain-generator/preload warnings remained.
 - `git diff --check` passed in final validation.
 
