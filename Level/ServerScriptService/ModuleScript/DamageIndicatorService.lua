@@ -85,7 +85,7 @@ local function resolveTargetId(target: any): string?
 		if typeof(attribute) == "string" and attribute ~= "" then
 			return attribute
 		end
-		return target:GetDebugId(0)
+		return nil
 	end
 	if typeof(target) == "string" and target ~= "" then
 		return target
