@@ -9,6 +9,9 @@ local localPlayer = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local dropVisualEvent = remotes:WaitForChild("DropVisualEvent")
 local dropSyncRequest = remotes:WaitForChild("DropSyncRequest")
+local DropAttractionConfig = require(
+	ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("DropAttractionConfig")
+)
 
 local dropsRoot = workspace:FindFirstChild("Drops")
 if not dropsRoot then
@@ -22,10 +25,6 @@ local syncRequestId = 0
 
 local ATTRACT_RADIUS = 8
 local PICKUP_DIST = 2.5
-local ATTRACT_SPEED_MULT = 1.15
-local ATTRACT_SPEED_BONUS = 4
-local ATTRACT_SPEED_MIN = 22
-local GLOBAL_MAGNET_SPEED = 180
 local ORB_SETTLE_SPEED = 42
 local ORB_SETTLE_EPSILON = 0.05
 local GROUND_RAY_RETRY_INTERVAL = 0.15
@@ -115,12 +114,15 @@ local function rebuildFramePlayerCache(now: number)
 			local root = character:FindFirstChild("HumanoidRootPart")
 			local humanoid = character:FindFirstChildOfClass("Humanoid")
 			if root and root:IsA("BasePart") and humanoid and humanoid.Health > 0 then
+				local walkSpeed = humanoid.WalkSpeed
+				local velocity = root.AssemblyLinearVelocity
 				local state = {
 					player = plr,
 					root = root,
 					humanoid = humanoid,
 					position = root.Position,
-					walkSpeed = humanoid.WalkSpeed,
+					attractSpeed = DropAttractionConfig.GetSpeed(walkSpeed, velocity, false),
+					globalAttractSpeed = DropAttractionConfig.GetSpeed(walkSpeed, velocity, true),
 					pickupMult = getPickupRangeMult(plr),
 					magnetActive = (tonumber(plr:GetAttribute(GLOBAL_MAGNET_ATTR)) or 0) > now,
 				}
@@ -564,15 +566,9 @@ RunService.RenderStepped:Connect(function(dt)
 				local toTarget = target - entry.corePos
 				local toTargetDist = toTarget.Magnitude
 				if toTargetDist > 0 then
-					local attractSpeed
-					if usingGlobalMagnet then
-						attractSpeed = math.max(GLOBAL_MAGNET_SPEED, targetState.walkSpeed * 6)
-					else
-						attractSpeed = math.max(
-							ATTRACT_SPEED_MIN,
-							targetState.walkSpeed * ATTRACT_SPEED_MULT + ATTRACT_SPEED_BONUS
-						)
-					end
+					local attractSpeed = usingGlobalMagnet
+						and targetState.globalAttractSpeed
+						or targetState.attractSpeed
 					local step = math.min(toTargetDist, attractSpeed * dt)
 					entry.corePos += toTarget.Unit * step
 					resetGrounding(entry)

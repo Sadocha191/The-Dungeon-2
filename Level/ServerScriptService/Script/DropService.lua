@@ -7,6 +7,9 @@ local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local RunProgressApi = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunProgressApi"))
+local DropAttractionConfig = require(
+	ReplicatedStorage:WaitForChild("ModuleScripts"):WaitForChild("DropAttractionConfig")
+)
 
 local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 if not remotes then
@@ -36,10 +39,6 @@ local lastDropSyncRequestAt = {}
 
 local ATTRACT_RADIUS = 8
 local PICKUP_DIST = 2.5
-local ATTRACT_SPEED_MULT = 1.15
-local ATTRACT_SPEED_BONUS = 4
-local ATTRACT_SPEED_MIN = 22
-local GLOBAL_MAGNET_SPEED = 180
 local PICKUP_ANIM_DURATION = 0.24
 local ORB_SPAWN_HEIGHT = 2.5
 local ORB_HALF_HEIGHT = 0.5
@@ -75,7 +74,22 @@ local function buildAlivePlayerSnapshots()
 			local hrp = char and char:FindFirstChild("HumanoidRootPart")
 			local hum = char and char:FindFirstChildOfClass("Humanoid")
 			if hrp and hum and hum.Health > 0 then
-				local snapshot = { player = plr, hrp = hrp, humanoid = hum }
+				local assemblyLinearVelocity = hrp.AssemblyLinearVelocity
+				local snapshot = {
+					player = plr,
+					hrp = hrp,
+					humanoid = hum,
+					attractionSpeed = DropAttractionConfig.GetSpeed(
+						hum.WalkSpeed,
+						assemblyLinearVelocity,
+						false
+					),
+					globalAttractionSpeed = DropAttractionConfig.GetSpeed(
+						hum.WalkSpeed,
+						assemblyLinearVelocity,
+						true
+					),
+				}
 				table.insert(list, snapshot)
 				byUserId[plr.UserId] = snapshot
 			end
@@ -350,10 +364,9 @@ RunService.Heartbeat:Connect(function(dt)
 			local toTarget = target - meta.corePos
 			local toTargetDist = toTarget.Magnitude
 			if toTargetDist > 0 then
-				local walkSpeed = snapshot.humanoid.WalkSpeed or 16
 				local attractSpeed = usingGlobalMagnet
-					and math.max(GLOBAL_MAGNET_SPEED, walkSpeed * 6)
-					or math.max(ATTRACT_SPEED_MIN, walkSpeed * ATTRACT_SPEED_MULT + ATTRACT_SPEED_BONUS)
+					and snapshot.globalAttractionSpeed
+					or snapshot.attractionSpeed
 				local step = math.min(toTargetDist, attractSpeed * math.max(0, dt))
 				meta.corePos += toTarget.Unit * step
 				meta.needsGroundSettle = true
