@@ -339,6 +339,41 @@
 
 - Revert PR #120 and this changelog entry. The added weekly streak fields are backward-compatible and can be ignored; no persistent data migration is required.
 
+## 2026-07-26 - Four Peaks daily login UI review fixes (PR #144)
+
+### Summary
+
+- Rebuilt the daily-login presentation as a responsive seven-day reward calendar without changing `GetDailyLoginState`, `ClaimDailyLoginReward`, reward balance, persistence, or server authority.
+- Kept the reset refresh guard active while a RemoteFunction response is rendered and added a bounded shared retry schedule so a stale boundary response cannot create a response-speed polling loop.
+- Reused `InventoryIconResolver` for material bundles and resolved the authored bundle through the existing `MaterialIcons.materials_icon` contract; the glyph remains a fallback only when the replicated asset folder or value is unavailable.
+
+### Files
+
+- Updated `Four Peaks/StarterPlayer/StarterPlayerScripts/DailyLoginClient.lua`.
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`.
+
+### Studio and validation
+
+- Confirmed the active place and path as `Four Peaks` / `game.StarterPlayer.StarterPlayerScripts.DailyLoginClient`, with `InventoryIconResolver` present beside it.
+- Synchronized the reviewed branch source into active Four Peaks Studio and started Play successfully; the output contained no `DailyLoginClient`, daily-login remote, or icon-resolver error.
+- Confirmed live `WeaponIconReplicator` creates `MaterialIcons.materials_icon`.
+- `git diff --check` and focused static contract checks passed.
+- Studio `screen_capture` and `user_mouse_input` both timed out in the current MCP session, so desktop/mobile screenshots, device-emulator measurements, pointer closing, and live claim-day interaction were not represented as completed.
+
+### Runtime loops, connections, and cost
+
+- The existing client countdown task remains at 1 Hz and only works while `DailyLoginGui` is enabled.
+- At the UTC boundary there can be only one `GetDailyLoginState` request in flight. A stale or failed response retries after 10, 20, 40, then at most every 60 seconds; the explicit minimum gate is 5 seconds.
+- `resetRefreshPending` is cleared only after response rendering and backoff state are complete, preventing `renderState -> updateCountdown` re-entry from scheduling another request.
+- The shared icon resolver is created once for the player-session LocalScript. Its folder invalidation connections are not duplicated by UI reopen or character respawn; the ScreenGui has `ResetOnSpawn=false`.
+- No server loop, remote, persistent-data field, `_G` dependency, or per-object connection was added.
+
+### Risks and rollback
+
+- Device-specific spacing and days 1/4/7 claim animation still require a working visual/input Studio session before manual merge.
+- A client clock substantially ahead of the server can keep showing the boundary refresh state, but requests remain bounded by the 60-second maximum backoff rather than spamming the server.
+- Revert the PR commit and restore the previous Studio `DailyLoginClient` source (or use the `Before PR 144 DailyLogin sync` waypoint). No data migration or server rollback is required.
+
 ## 2026-07-13 - Four Peaks daily login material bundle prevalidation (PR #116)
 
 ### Summary
