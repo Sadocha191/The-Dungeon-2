@@ -78,7 +78,8 @@ local function queueTombstone(npc: any, despawned: boolean)
 		dir = npc.look,
 		vel = npc.velocity,
 		speed = 0,
-		state = despawned and STATE.Despawned or npc.state,
+		state = npc.state == STATE.Dead and STATE.Dead
+			or (despawned and STATE.Despawned or npc.state),
 		hp = npc.health,
 		maxHp = npc.maxHealth,
 		dead = npc.dead,

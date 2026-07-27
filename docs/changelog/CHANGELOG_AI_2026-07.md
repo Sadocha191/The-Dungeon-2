@@ -231,6 +231,76 @@
 - Extremely high replicated player velocity increases attraction speed without an explicit cap so the orb retains the promised 40 stud/s closing margin; server collection and rewards remain authoritative.
 - Rollback by reverting PR #137, deleting `DropAttractionConfig` from Level Studio, and restoring both previous runtime sources. No data or remote rollback is required.
 
+## 2026-07-26 - Level combat feedback and slide-water recovery (PR #135)
+
+### Summary
+
+- Added reusable client `VfxTemplatePlayer`, Goblin/player `CombatFeedback`, and `SlideWaterRecovery`.
+- Added `PlayerHitVFXEvent`; `DamageService` fires it only after real server-authoritative HP damage.
+- Added explicit zero-rate particle bursts, authored Goblin emission counts, an above-ground explosion offset, complete-model VFX anchoring, and whole-model Goblin attack tilt.
+- Restricted the tilt render pass to a separate set of currently attacking Goblins instead of scanning every tracked Goblin each frame.
+- Restricted Goblin death explosions to real death tombstones; lifecycle despawns now clean up without playing a false detonation.
+- Restricted water recovery activation to active/recent slides, so unrelated zero-speed swimming locks remain owned by their original movement ability.
+- Scheduled camera impulses one render priority after the existing `OrbitCam` owner so desktop camera writes cannot overwrite hit shake in the same frame.
+- Allowed confirmed lethal player hits to play feedback after health replication reaches zero, and made both lifetime recovery connections explicit teardown owners.
+- Made `CombatFeedback` own and disconnect both remote subscriptions on teardown, preventing stale closures from duplicating hit/death effects after script recreation.
+- Added a character-bind generation guard so a delayed pre-respawn Humanoid wait cannot replace the current recovery owner or attach stale connections.
+
+### Files
+
+- Added `Level/ReplicatedStorage/ModuleScripts/VfxTemplatePlayer.lua`.
+- Updated `Level/ReplicatedStorage/Remotes/RemotesInit.server.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/DamageService.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/NpcLifecycle.lua`.
+- Added `Level/StarterPlayer/StarterPlayerScripts/LocalScript/CombatFeedback.client.lua`.
+- Added `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SlideWaterRecovery.client.lua`.
+- Updated this monthly changelog.
+
+### Studio and validation
+
+- Active Studio: `Level`.
+- All five runtime sources were synchronized from the PR, and `CombatFeedback` was resynchronized after the active-attacker review fix.
+- Both ModuleScripts passed Edit-mode `require` checks.
+- A controlled real `DamageService.Apply` changed HP by exactly 5 and created one welded `PlayerHitVFXRuntime` containing four particle emitters; a fully shielded hit changed no HP and created no hit VFX.
+- A real damage call drove the client camera impulse by up to 0.0801 studs and 1.1395 degrees.
+- A production Goblin rig clone reached 27.99 degrees of whole-model tilt during `Attacking` and restored to 0 degrees on `Idle`.
+- Repeating the same Goblin death packet produced one `ExplosionRuntime` with 16 explicit bursts and one sound; prior visual capture confirmed the particles rendered.
+- A separate two-part model-VFX test after the review fix created two welds, left zero parts anchored, and followed its anchor by exactly 7 studs.
+- Real Terrain water naturally changed the Humanoid to `Swimming`; recovery restored positive movement speed, `AutoRotate = true`, zero camera offset, and cleared slide state. Dry-ground running, freefall, and slide re-arming still worked.
+- A stacked PR #140 integration probe despawned a production Goblin during its active leap: the server recorded one leap, zero detonations and zero death callbacks, while the client recorded zero `ExplosionRuntime` instances after the despawn guard.
+- Review regressions cover both sides of the recovery gate: recent slide plus `Swimming` restores movement, while zero-speed `Swimming` without a slide marker leaves the lock unchanged. Camera priority is `Camera + 2`, after `OrbitCam` at `Camera + 1`.
+- With the current character at replicated `Health = 0`, the lethal guard was absent, the current root remained valid, and the authored player-hit path created `PlayerHitVFXRuntime`.
+- Destroying `SlideWaterRecovery`, reloading the character, marking the new Humanoid as sliding/swimming and waiting 0.2 seconds left `WalkSpeed = 0`; neither the old `CharacterAdded` closure nor its Heartbeat rebound after teardown.
+- Destroying `CombatFeedback` and then sending both hit and dead-Goblin packets produced zero `PlayerHitVFXRuntime` and zero `ExplosionRuntime` instances, proving both old remote callbacks were disconnected.
+- A controlled rapid-respawn bind completed the newer Humanoid first and the delayed older wait second; only the newer generation was accepted, and the stale bind created no connection owner.
+- No console error or warning referenced the five changed runtime owners or `PlayerHitVFXEvent`. Existing unrelated terrain-generator, preload, and disabled error-reporting warnings remained.
+- `git diff --check` passed in final validation.
+
+### Runtime loops and cleanup
+
+- `CombatFeedback` keeps one client render-step binding, but its per-frame loop now visits only active attackers. Idle/dead/despawned Goblins are removed from that set event-driven from NPC batches; tilt is restored on transition and cleanup.
+- `CombatFeedback` disconnects its `NpcBatchEvent` and `PlayerHitVFXEvent` subscriptions before clearing tracked Goblins on script teardown.
+- `VfxTemplatePlayer` lazily adds one client camera render-step binding after the first impulse. It returns immediately when empty and caps simultaneous impulses at eight.
+- `SlideWaterRecovery` adds one client `Heartbeat` with O(1) state checks plus character/Humanoid lifecycle connections.
+- `SlideWaterRecovery` disconnects its lifetime `Heartbeat`, `CharacterAdded`, and dynamic Humanoid connections on script teardown; deferred character binds also stop once teardown starts.
+- Each character bind advances one O(1) generation token; the post-yield check also requires the same `player.Character`, so late pre-respawn coroutines return before mutating state.
+- VFX clones use Debris cleanup; delayed emitter/trail/beam callbacks check parent existence.
+- No server frame loop, new `_G` dependency, persistent-data field, teleport field, or gameplay damage value was added.
+
+### Not verified
+
+- The Goblin checks used a production rig clone with controlled NPC payloads rather than a complete natural combat encounter.
+- A reliable target-scale profiler capture with 100-500 naturally replicated Goblins was not obtained; live full snapshots invalidated temporary synthetic IDs before a meaningful render-cost sample.
+- The live `PlayerHitVFX.CameraData` stores `ShakeJSON`; this PR uses documented fallback impulse values rather than parsing that JSON.
+- Multiplayer camera/VFX behavior was not exercised.
+
+### Risks and rollback
+
+- The active-attacker set relies on state/death/despawn NPC batch transitions; full-snapshot and script-destroy cleanup paths remove stale records.
+- Death tombstones now preserve the truthful `Dead` state while retaining the existing `despawned` cleanup flag; non-death lifecycle removal still reports `Despawned`.
+- Whole-model tilt intentionally composes after the regular NPC presentation pivot and restores only when the current pivot still matches the applied tilt, avoiding overwriting a newer presentation transform.
+- Rollback by reverting PR #135, removing the three added scripts from Level Studio, and restoring the previous `RemotesInit` and `DamageService` sources. No data migration is required.
+
 ## 2026-07-24 - Poziom slide animation integration (PR #134)
 
 ### Summary
