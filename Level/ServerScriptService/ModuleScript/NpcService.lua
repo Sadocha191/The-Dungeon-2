@@ -380,9 +380,37 @@ local function updateNpc(
 		writeStateAttributes(npc)
 		return
 	end
+	NpcGroundNavigation.SetPaused(npc, npc.freezeEnd > now, now)
 
 	if shouldDistanceDespawn(npc, alivePlayers) then
 		despawnNpcRecord(npc)
+		return
+	end
+
+	if npc.movementMode == "Ground"
+		and npc.freezeEnd <= now
+		and NpcGroundNavigation.IsTraversing(npc)
+	then
+		local traversalMove = NpcGroundNavigation.StepTraversal(npc, now, dt)
+		local nextPos = NpcGroundNavigation.ConstrainPosition(npc, npc.position + traversalMove, now)
+		local newVelocity = Vector3.zero
+		if dt > 1e-4 then
+			newVelocity = (nextPos - npc.position) / dt
+		end
+		if now < npc.aiLockUntil and npc.aiLookTarget then
+			local lookDelta = npc.aiLookTarget - nextPos
+			npc.look = safeUnit(flat(lookDelta), npc.look)
+		elseif traversalMove.Magnitude > 0.05 then
+			npc.look = safeUnit(traversalMove, npc.look)
+		end
+		npc.position = nextPos
+		npc.velocity = newVelocity
+		npc.impulse *= math.max(0, 1 - (dt * 7))
+		if npc.impulse.Magnitude < 0.15 then
+			npc.impulse = Vector3.zero
+		end
+		setState(npc, now < npc.aiLockUntil and STATE.Attacking or STATE.Chasing)
+		writeStateAttributes(npc)
 		return
 	end
 
@@ -995,6 +1023,7 @@ local targetingAccumulator = 1 / NpcNavigationConfig.Scheduler.TargetingHz
 local formationAccumulator = 1 / NpcNavigationConfig.Scheduler.FormationHz
 local cachedAlivePlayers = {}
 local cachedEngagementSlots = {}
+local lastNavigationPauseState = false
 
 RunService.Heartbeat:Connect(function(dt)
 	local now = os.clock()
@@ -1027,6 +1056,13 @@ RunService.Heartbeat:Connect(function(dt)
 	if movementAccumulator >= movementInterval then
 		local movementDt = math.min(movementAccumulator, movementInterval * 2)
 		movementAccumulator %= movementInterval
+		local navigationPaused = pauseState.Value
+		if navigationPaused ~= lastNavigationPauseState then
+			for _, npc in NpcRegistry.Pairs() do
+				NpcGroundNavigation.SetPaused(npc, navigationPaused, now)
+			end
+			lastNavigationPauseState = navigationPaused
+		end
 		NpcGroundNavigation.BeginTick(cachedAlivePlayers)
 		NpcFlightNavigation.BeginTick(cachedAlivePlayers)
 		NpcGroundNavigation.StepScheduler(now)

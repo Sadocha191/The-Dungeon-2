@@ -300,6 +300,64 @@
 - Death tombstones now preserve the truthful `Dead` state while retaining the existing `despawned` cleanup flag; non-death lifecycle removal still reports `Despawned`.
 - Whole-model tilt intentionally composes after the regular NPC presentation pivot and restores only when the current pivot still matches the applied tilt, avoiding overwriting a newer presentation transform.
 - Rollback by reverting PR #135, removing the three added scripts from Level Studio, and restoring the previous `RemotesInit` and `DamageService` sources. No data migration is required.
+## 2026-07-26 - Poziom NPC obstacle traversal
+
+### Summary
+
+- Added persistent kinematic `Hop` traversal for `GroundSmall` NPCs across valid `Jump` transitions and low local obstacles such as chests, fallen logs and small decorative collision.
+- Added a separate `Stride` traversal for `GroundLarge` NPCs, with a larger ordinary step, validated long stride, higher terrain-rise tolerance and no classic jump behavior.
+- Prevented the final ground constraint from deleting the airborne Y component while a traversal is active.
+- Suspended the active traversal clock during `PauseState` and freeze, shifting both traversal timestamps on resume so an NPC continues from its current arc position instead of jumping to the landing position.
+- Advanced an active traversal before target, attack-range and AI-lock branches, so combat cannot leave an NPC suspended on an unchanged arc sample.
+- Kept tall walls, forbidden surfaces, missing landing surfaces and excessive rises/drops blocked so pathfinding can route around them.
+- Started authored `Jump` traversal toward the marked waypoint itself, canceled active traversal on external `SetPosition`, and validated six body sweeps along the same sinusoidal curve used at runtime.
+- Evicted the active route's cache entry when custom traversal validation rejects a `Jump`, so the immediate repath cannot reapply the identical cached waypoints.
+- Invalidated pending path generations when a local obstacle starts a hop/stride, preventing a pre-traversal async result from installing stale waypoints after landing.
+
+### Files
+
+- Updated `Level/ServerScriptService/ModuleScript/NpcNavigationConfig.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/NpcGroundSurface.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/NpcGroundNavigation.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/NpcService.lua`.
+- Updated `docs/NPC_NAVIGATION.md`, `CHANGELOG_AI.md` and this monthly changelog.
+
+### Runtime cost and cleanup
+
+- No new `Heartbeat`, `Stepped`, `RenderStepped`, remote, persistent-data field or `_G` dependency was added.
+- Traversal runs inside the existing centralized 12 Hz NPC movement scheduler.
+- An active traversal advances once per existing movement tick and returns before the ordinary chase/attack branch, so it cannot be stepped twice in one tick.
+- Normal clear movement keeps the existing probe cost. Extra landing probes and six bounded traversal `Blockcast` calls occur only when a jump waypoint or blocked local step attempts a hop/stride.
+- Pause transitions reuse the centralized movement tick and visit the NPC registry once only when the global pause value changes. Freeze suspension is an O(1) check inside the existing per-NPC update.
+- Traversal state is stored on the existing per-NPC navigation record and cleared on landing or NPC cleanup.
+- Cache eviction is O(1), happens only on a rejected path jump, and is exposed in the existing navigation metrics as `pathCacheEvictions`.
+- Starting a non-path traversal performs one O(1) generation bump and pending-route cleanup inside the existing movement tick; queued/active callbacks then follow the existing stale-result path.
+- Stale queued/active requests clear the weak-map slot only when they still own that exact slot, so an older canceled callback cannot erase a newer request's deduplication record.
+
+### Validation
+
+- Active Studio: `Level`, PlaceId `113361902471683`. Final source parity after normalizing Studio's optional terminal newline passed for `NpcNavigationConfig` (`4744` bytes, hash `299645496`), `NpcGroundSurface` (`21556`, `1864131347`), `NpcGroundNavigation` (`29201`, `1606816556`) and `NpcService` (`33451`, `1613147374`).
+- An isolated clock test paused a traversal at `100.10`, resumed it at `105.10`, and verified `startedAt=105.00`, `endsAt=105.42`, an unchanged step position and idempotent repeated pause/resume calls.
+- A live registered `GroundSmall` NPC paused in mid-hop for 1.5 s with zero position delta. It resumed by `2.069` studs rather than teleporting to its landing and then completed normally.
+- Freeze also suspended the arc with zero movement and an active pause marker. Slow completed the current traversal without an invalid position. A strong lateral impulse stayed inside the validated corridor. Death and explicit despawn both cleared the navigation record, while a target change completed the current traversal and then adopted the new target.
+- A controlled three-waypoint route marked waypoint 2 as `Jump`; traversal began immediately toward waypoint 2 (`landingX = markedX = 27006`) instead of waiting at the ledge and targeting waypoint 3.
+- A live registered NPC with a 1-second ability lock advanced a synthetic active hop by exactly 6 studs, retained `Attacking`, and cleared the traversal within 0.6 seconds while the AI lock was still active, proving the early combat return no longer stalls the arc or changes the ability presentation state.
+- Public `Invalidate(..., "external_set_position")` cleared the active traversal, route and pending request while advancing the generation, preventing a stale arc from overwriting an ability destination.
+- Separate physical validation cases passed for a `GroundSmall` chest hop, fallen-log hop, small-rock hop, `GroundLarge` stride, uneven `1.5`-stud terrain rise and a `0.75`-stud stair step.
+- The final curved-corridor validator kept a low chest clear and rejected a narrow obstacle intersecting the first-quarter body arc as `traversal_blocked`; this is the region the previous up-horizontal-down corridor did not represent.
+- A controlled rejected-`Jump` route cleared its waypoints/cache key, incremented `pathCacheEvictions` exactly once and retained `jump_transition_blocked` as the repath reason.
+- A local-obstacle hop started with `pathPending = true`; traversal start advanced generation `7 -> 8`, cleared both pending fields, retained `traversal_started:local_obstacle`, and produced an active `Hopping` step.
+- Tall walls returned `traversal_blocked`; a traversal beyond maximum width returned `traversal_too_far`; a missing landing footprint returned `missing_landing_surface`; a real temporary Terrain water landing returned `water_forbidden`; a modifier-protected surface returned `surface_forbidden`; and a physical `45`-degree wedge returned `slope_too_steep`.
+- A transient 250-NPC Play stress test ran 72 movement ticks over 6 s: average movement tick `0.917 ms`, observed global maximum `8.323 ms`, `3032` raycasts (`505.3/s`), `806` blockcasts including `18` traversal blockcasts, `6` traversal starts, `6` completions and `0` failures. All temporary NPCs, parts, tags and Terrain water were removed or discarded with the Play session.
+- A focused final curved-corridor stress validated 250 clear traversals in `8.619 ms` total (`0.0345 ms` per case), issuing exactly `1,500` bounded traversal blockcasts and `1,250` surface raycasts with zero failures.
+- The console contained no NPC navigation error. The unrelated pre-existing `Hybrid Terrain Hex Generator:16` plugin-context error and bounded loading preload timeouts remained.
+
+### Risks and rollback
+
+- Hop/stride tuning is intentionally conservative but may require per-map adjustment for unusually wide chest/log meshes or very uneven proxy geometry.
+- A collidable decorative object taller than the configured obstacle limit remains a real blocker and must be routed around or have its collision/proxy corrected.
+- The reported maximum movement tick is the maximum since the Play session began rather than an interval-reset maximum; the average is isolated to the 72-tick stress window.
+- Roll back by reverting this PR. No data migration, remote rollback or client rollback is required.
 
 ## 2026-07-24 - Poziom slide animation integration (PR #134)
 
