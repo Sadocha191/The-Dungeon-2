@@ -1,5 +1,67 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-27 - Final integration of PRs #144, #142, #141, #138, #143, #137, #135, #136, #139, #133, and #140
+
+### Summary
+
+- Created `codex/studio-final-integration-20260727` from `origin/main` and merged all 11 requested PR heads in the requested order without merging the integration branch into `main`.
+- Resolved changelog conflicts by retaining every independent entry and combined the PR #136 traversal pause contract with the PR #133 switchable movement dispatcher in `NpcService`.
+- Fixed a Studio-discovered floating-point completion edge in `NpcGroundNavigation`: hop/step traversal now treats a sample within `1e-4` seconds of `endsAt` as complete, snaps alpha to `1`, and releases the NPC instead of leaving it permanently in `Hopping`.
+- Synchronized the final integrated sources to the active `Four Peaks` and `Level` Studio places. A canonical LF-normalized source audit, with three independent checksums and a sibling-name uniqueness check, passed `3/3` Four Peaks scripts and `32/32` Level scripts.
+
+### Files and ownership
+
+- The integration contains the source and documentation changes owned by PRs #144, #142, #141, #138, #143, #137, #135, #136, #139, #133, and #140.
+- The only post-merge gameplay correction is `Level/ServerScriptService/ModuleScript/NpcGroundNavigation.lua`.
+- Updated `CHANGELOG_AI.md` and this monthly changelog with final integration, Studio, validation, runtime-cost, risk, and rollback records.
+- No DataStore name/key/schema, `TeleportData` shape, public remote name, reward value, damage value, mission selection count, or public module name was changed by the integration step.
+
+### Four Peaks Studio validation
+
+- Confirmed place `88516424167732` in universe `9965460435`; pre-publication place version was `1158`.
+- Daily Login rendered the full calendar and active claim state. The authorized live day-4 claim succeeded, advanced the profile to day 5, and persisted after stopping and rejoining (`CanClaim=false`, total claims `25`).
+- `RF_GetMissions` returned exactly 6 unique daily and 3 unique weekly missions from the refreshed pools.
+- The active Harvest summoning banner rendered in the authored altar. A zero-ticket roll returned `NotEnoughTickets` and did not mutate the ticket count.
+- The lobby portal completed its save/teleport preparation and reached `TeleportAsync`; Studio returned the expected request-context failure.
+- Startup was clean for integrated sources. The pre-existing unrelated `BlacksmithUI` wait for `PassiveDesc` remained.
+
+### Level Studio validation
+
+- Confirmed place `113361902471683` in universe `9965460435`; pre-publication place version was `1151`.
+- World preparation completed repeatedly with hundreds of chests plus shrines, statues, and monuments. A controlled Terrain stack verified that default spawn sampling rejects water while the explicit water/seabed opt-ins still work.
+- A real 80-stud/s pickup case overtook the player and completed collection. Shared attraction-speed cases returned `40`, `64`, `120`, and `180` as configured.
+- The authored chest animation and integrated reward presentation displayed rarity, name, description, exact modifiers, and stack limit without claiming the reward.
+- Slide-to-water recovery restored `WalkSpeed=21`, `AutoRotate=true`, zero camera offset, and cleared the slide attribute.
+- Elemental indicator coverage observed all eight emitted hit payloads and the intended three visible batches, including crit, dual element, and multi-hit text.
+- Player-hit VFX, Goblin explosion VFX, and the real registered `LeapExplode` path completed without legacy explosion fallback. The blast damaged a visible NPC, did not damage a wall-occluded NPC, hit the player once, and killed the Goblin once without rewards.
+- A true local-server test with two Studio clients passed: client-targeted damage/VFX events were `1/1` on the target and `0/0` on the other client; the Goblin blast dealt `7` damage to each player, killed once, and each client received exactly one hit-VFX event.
+- A registered Slime selected `MovementV2`/`SurfaceCrawler`, acquired the temporary tagged wall, and reported no adhesion/acquisition failure. Registered ground traversal completed and returned to `Idle`; the floating-point regression probe reproduced the prior `0.99999999999584233` ratio and confirmed the epsilon fix releases the traversal exactly once.
+- End-of-run validation passed `Surrendered`, `Victory`, and real Humanoid-death `Defeated` flows with exactly one summary and `RunEnded=true`. The second return-to-lobby action passed the save barrier and reached `TeleportAsync`, ending with the expected Studio-only `failed:teleport_failed`.
+- Final Level startup smoke had no new integrated-source error. The existing unrelated `Hybrid Terrain Hex Generator:16` plugin-toolbar error and bounded preload timeouts remained.
+
+### Runtime loops, scale, and cleanup
+
+- No per-NPC, per-projectile, per-drop, or per-indicator `Heartbeat`/`RenderStepped` connection was added by the integration work.
+- MovementV2 uses the existing central `NpcService` heartbeat with separated `MovementHz=12`, `TargetingHz=3`, and `FormationHz=2`; path work is capped at 2 concurrent paths, 15 starts/s, and 160 queued requests.
+- Damage indicators use one server and one client heartbeat, each flushing at 20 Hz with bounded pending/active pools. Drop attraction remains on the existing single server heartbeat and single client `RenderStepped`, with velocity computed once per alive-player snapshot.
+- Slide-water recovery has one local-player heartbeat and a one-second recovery window; character/state connections and the heartbeat are disconnected on script destruction.
+- Daily Login retains one one-second countdown task only while its GUI exists. Banner reveal waits remain session-bounded and exit when the overlay continues or closes.
+- All temporary multiplayer probe scripts, remotes, Terrain, NPCs, parts, event connections, and client-only QA state were removed before the final `35/35` Studio source audit.
+
+### Risks
+
+- A complete production-length organic run with every mission naturally completed was not repeated; representative authoritative reward, combat, UI, persistence, and end-run paths were exercised instead.
+- Studio cannot complete cross-place `TeleportAsync`; the requests reached the correct place IDs but live post-publication teleport still requires a production smoke.
+- No production flying NPC template exists. Ground and surface templates were tagged and validated; flying remains an intentionally inactive MovementV2 profile until content supplies an owner/template.
+- MovementV2 remains opt-in: `NpcNavigationConfig.ActiveSystem` is `Legacy`, existing NPCs keep their resolved system until despawn, and only explicitly tagged templates select V2.
+
+### Rollback
+
+- Git rollback: revert the integration merge commits in reverse order, then revert the traversal epsilon commit. Do not rewrite or merge the branch into `main` as part of rollback.
+- Studio code rollback: restore the saved pre-publication place files or restore the previous published place versions (`Four Peaks` version `1158`, `Level` version `1151`) through Roblox version history.
+- Immediate movement-only rollback: keep `NpcNavigationConfig.ActiveSystem = "Legacy"` and replace the Slime/Goblin `NpcMovementSystem_V2` tag with `NpcMovementSystem_Legacy` for newly spawned NPCs.
+- Persistent data requires no migration rollback. The Daily Login validation intentionally consumed the authorized day-4 claim; restoring place code does not and should not reverse that already-saved player reward.
+
 ## 2026-07-26 - Four Peaks summoning altar review fixes (PR #142)
 
 ### Summary

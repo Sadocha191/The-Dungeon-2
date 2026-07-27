@@ -496,12 +496,15 @@ local function stepTraversal(npc, nav, now: number, dt: number): (Vector3, strin
 		return finishStep(nav, Vector3.zero, "missing_traversal", 0)
 	end
 	local sampleTime = math.min(traversal.endsAt, now + math.max(0, dt))
-	local alpha = math.clamp((sampleTime - traversal.startedAt) / traversal.duration, 0, 1)
+	local complete = sampleTime >= traversal.endsAt - 1e-4
+	local alpha = complete
+		and 1
+		or math.clamp((sampleTime - traversal.startedAt) / traversal.duration, 0, 1)
 	local basePosition = traversal.startPosition:Lerp(traversal.landingPosition, alpha)
 	local arcOffset = math.sin(math.pi * alpha) * traversal.arcHeight
 	local nextPosition = basePosition + Vector3.yAxis * arcOffset
 	traversal.stepPosition = nextPosition
-	traversal.complete = alpha >= 1
+	traversal.complete = complete
 	local expectedDistance = (nextPosition - npc.position).Magnitude
 	return finishStep(
 		nav,
