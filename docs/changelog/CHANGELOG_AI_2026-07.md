@@ -129,6 +129,61 @@
 - Maps with too little dry terrain may exhaust their existing bounded candidate retries more often, returning the same existing `nil` failure path instead of spawning in water.
 - Rollback by reverting PR #138 and restoring the previous Level `WorldBounds` source. No data migration, remote, or server-state rollback is required.
 
+## 2026-07-26 - Four Peaks and Level mission pool rebalance (PR #143)
+
+### Summary
+
+- Replaced the 30-daily / 15-weekly mission pools with 12 focused daily and 10 focused weekly definitions.
+- Kept selection counts at 6 daily and 3 weekly.
+- Tuned daily goals toward roughly one normal run and weekly goals toward a few runs, removing objectives that rewarded taking damage, low health, no-hit play, reroll/skip restrictions, win streaks, and extreme multikills.
+- Reduced weekly rewards with the lower requirements to limit economy inflation.
+- Kept the complete configuration byte-identical between Four Peaks and Level.
+- Labeled `COINS_EARNED` objectives as Run Gold rather than silver, matching the raw dungeon counter before the separate end-of-run silver conversion.
+- Prevented immediate surrender from advancing `RUNS`, `RUNS_WITH_WEAPON`, or `FAST_RUNS`; victories qualify immediately, while defeated runs require at least 60 seconds of participation.
+- Made `BOSS_SPAWN_REACHED` advance from the authoritative portal-boss spawn notification instead of an unrelated 20-minute elapsed-time threshold.
+- Replayed the active boss-phase milestone for players who join after the one-shot spawn notification, using their own join-relative boss clock and the same per-run duplicate guard.
+
+### Files
+
+- Updated `Four Peaks/ReplicatedStorage/ModuleScripts/MissionConfigs.lua`.
+- Updated `Level/ReplicatedStorage/ModuleScripts/MissionConfigs.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/MissionProgress.lua`.
+- Updated `Level/ServerScriptService/Script/ProgressService.lua`.
+- Updated this monthly changelog.
+
+### Studio and validation
+
+- Synchronized and required `MissionConfigs` in both active Studio places.
+- Both places returned 12 unique daily and 10 unique weekly definitions with valid positive `Counter` targets, rewards, types, and unique IDs/groups.
+- The two repository files share blob `57899e9c80b20823cfa8e7a42e5f40d84e832266`; source length is 6,268 bytes and both synchronized Studio modules returned normalized checksum `413493289`.
+- Four Peaks Play returned 6 daily and 3 weekly missions through `RF_GetMissions`, with unique IDs and valid goal payloads.
+- Level Play returned 6 unique daily missions through `GetDailyMissions`.
+- All selected goal keys were audited against existing mission progress/service counters.
+- A controlled server test intercepted mission writes without touching player data: surrender and a 59-second defeat added zero `RUNS`/`FAST_RUNS`, while a victory and a 60-second defeat each added one finished run.
+- A source-contract probe confirmed the boss-spawn hook marks and increments `BOSS_SPAWN_REACHED` once per active player/run, while the live-duration sync no longer grants that objective at 1,200 seconds without a boss.
+- `RunStarted` transitions clear the shared boss-phase flag; a late join during the same active boss phase receives one backfilled counter, while the next run starts clean.
+- Neither Play session produced a mission-config or mission-service error. Existing unrelated Four Peaks `BlacksmithUI` and Level terrain-generator/preload warnings remained.
+- `git diff --check` passed in final validation.
+
+### Runtime loops and cost
+
+- No loop, event connection, remote, DataStore schema, teleport field, claim flow, progress owner, or `_G` dependency changed.
+- Pool selection remains a seeded O(P) shuffle at daily/weekly reset or invalidation, with smaller P values (12 daily and 10 weekly instead of 30 and 15).
+- Existing selection invalidation repicks stored rotations with removed mission IDs and marks the existing mission state dirty through its established owner.
+- Run finalization performs one constant-time reason/duration qualification before updating the existing mission counters.
+
+### Not verified
+
+- Real goal progression, completing and claiming rewards, cross-place return, rejoin persistence, and multiplayer were not exercised because those paths mutate player progress/economy.
+- Final thresholds were not compared with production telemetry; silver earned, elite count, and total damage remain the primary tuning risks.
+- Studio screenshot and pointer-input tools timed out, so the mission UI was validated through remote payloads rather than physical interaction.
+
+### Risks and rollback
+
+- Thresholds are balance assumptions until production telemetry confirms typical run output.
+- Reduced pool variety increases how often the same mission can recur across rotations even though IDs/groups are unique within the pool.
+- Rollback by reverting PR #143 and restoring the previous `MissionConfigs` source in both places. Stored selections containing the new-only IDs will be repicked by the existing invalidation path; no DataStore migration is required.
+
 ## 2026-07-24 - Poziom slide animation integration (PR #134)
 
 ### Summary
