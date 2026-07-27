@@ -736,6 +736,9 @@ local function awardPersistentMobDrops(mobType: string, isElite: boolean, isBoss
 end
 
 local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, isBoss: boolean, _ctx)
+	if _ctx and _ctx.suppressRewards == true then
+		return
+	end
 	local pos = (_ctx and _ctx.position) or NpcService.GetPosition(mob) or mob:GetPivot().Position
 	local killer = _ctx and _ctx.player
 	local runSeconds = require(ServerScriptService.ModuleScript.RunProgressApi).GetRunSeconds()
@@ -844,6 +847,9 @@ local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, i
 	setOptionalMobAttribute(mob, "NpcFacingYawDegrees", stats.facingYawDegrees)
 	setOptionalMobAttribute(mob, "MovementProfile", stats.movementProfile)
 	setOptionalMobAttribute(mob, "MovementMode", stats.movementMode)
+	setOptionalMobAttribute(mob, "MovementSystem", stats.movementSystem)
+	setOptionalMobAttribute(mob, "MovementBehavior", stats.movementBehavior)
+	setOptionalMobAttribute(mob, "CombatBehavior", stats.combatBehavior)
 	setOptionalMobAttribute(mob, "CanFly", stats.canFly)
 	setOptionalMobAttribute(mob, "NpcGroundOffset", stats.groundOffset)
 	setOptionalMobAttribute(mob, "EnemyMeleeIgnoreVerticalValidation", stats.meleeIgnoreVerticalValidation)
@@ -863,6 +869,9 @@ local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, i
         isRanged = stats.isRanged == true,
 		movementProfile = stats.movementProfile,
 		movementMode = stats.movementMode,
+		movementSystem = stats.movementSystem,
+		movementBehavior = stats.movementBehavior,
+		combatBehavior = stats.combatBehavior,
 		canFly = stats.canFly,
 		groundOffset = stats.groundOffset,
         despawnDelay = 3,
@@ -901,6 +910,14 @@ local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vecto
 
     local mob = template:Clone()
     mob.Name = mobName
+	local collectionService = game:GetService("CollectionService")
+	for _, tag in ipairs(collectionService:GetTags(template)) do
+		if string.sub(tag, 1, 18) == "NpcMovementSystem_"
+			or string.sub(tag, 1, 8) == "NpcMove_"
+			or string.sub(tag, 1, 10) == "NpcCombat_" then
+			collectionService:AddTag(mob, tag)
+		end
+	end
     cleanupTemplateScripts(mob)
     setMobGroup(mob)
     applyMobVisualScale(mob, isElite, false, cfg)
@@ -937,6 +954,9 @@ local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vecto
         isRanged = cfg.isRanged == true,
 		movementProfile = cfg.movementProfile,
 		movementMode = cfg.movementMode,
+		movementSystem = cfg.movementSystem,
+		movementBehavior = cfg.movementBehavior,
+		combatBehavior = cfg.combatBehavior,
 		canFly = cfg.canFly,
 		groundOffset = cfg.groundOffset,
 		meleeIgnoreVerticalValidation = cfg.meleeIgnoreVerticalValidation,

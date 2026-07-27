@@ -419,6 +419,39 @@
 - Future weapons must declare `element` in `WeaponConfigs`; absent or invalid metadata intentionally displays as Physical.
 - Rollback by reverting PR #139, deleting `DamageIndicatorService` from Level Studio, and restoring the previous spell, weapon, and client indicator sources. No data migration or server-state rollback is required.
 
+## 2026-07-24 - PR #133 MovementV2 active Level integration
+
+### Summary
+
+- Integrated and synchronized the switchable NPC MovementV2 foundation to active Studio `Level`, PlaceId `113361902471683`, without merging PR #133.
+- Kept the global default on Legacy while enabling V2 per template for Slime (`SurfaceCrawler`) and Goblin (`GroundRunner` + `LeapExplode`).
+- Hardened invalid-tag fallback, tag propagation, crawler raycast allocation, outer-corner adhesion, Terrain surface policy, LeapExplode cleanup and self-detonation reward suppression.
+- Persisted explicit Legacy movement tags on all other active ground templates; no production flying template exists.
+
+### Validation
+
+- Repo/Studio source hashes match for all ten synchronized scripts, and template tags survived a Play/Edit cycle and clone test.
+- In the forced-Legacy parity harness, all 12 production NPC templates resolved their intended Legacy profile and moved; freeze, impulse, pause and cleanup checks passed.
+- Slime traversed floor, wall, inner/outer corners and ceiling. Client orientation matched the ceiling normal (`dot = 0.9993`), with zero surface acquisition/adhesion failures in the integrated traversal.
+- Goblin armed/leapt/detonated once; LOS, pause, freeze, target-loss, despawn, damage-once, cleanup and reward-suppression context checks passed.
+- Lower/upper layer cache separation, no vertical cross-layer teleport, bridge body clearance and straight/turning tunnel checks passed.
+- Surface stress averages for 1/20/50/100/120 active V2 Slimes were `0.055/0.271/0.668/1.350/1.396 ms` per shared movement tick, with `25/486/1114/1867/2454` surface rays per second and zero failures. The cumulative-session maximum was `8.101 ms`.
+- At 120 NPCs the client received 120/120 finite transforms with unit up vectors. Cleanup left zero active NPCs, stress models, debug objects or Explosion/VFX objects.
+- Final startup reported no MovementV2 error; the pre-existing unrelated `Hybrid Terrain Hex Generator:16` toolbar error remained.
+
+### Runtime cost and architecture
+
+- No new Heartbeat, Stepped, RenderStepped, per-NPC event connection or `_G` dependency was added.
+- Movement continues through the existing single `NpcService` scheduler at `12 Hz`.
+- Surface navigation now reuses one raycast filter per shared tick and excludes runtime NPC/player/VFX folders without per-ray player scans or `RaycastParams` allocation.
+
+### Remaining risks and rollback
+
+- The production map has no persistent crawler geometry tags; untagged floor-like Terrain works, while intended wall/ceiling routes require a separate map-authoring pass.
+- No production flying template exists. A complete natural wave reward/drop run after Goblin self-detonation and full stairs/no-route Pathfinding scenarios remain unverified.
+- PR #133 therefore remains draft.
+- Immediate rollback is to tag Slime/Goblin as `NpcMovementSystem_Legacy`; full Studio rollback uses the `Before PR 133 MovementV2 integration` waypoint/place version, and repo rollback reverts the PR/integration commits.
+
 ## 2026-07-24 - Poziom slide animation integration (PR #134)
 
 ### Summary
