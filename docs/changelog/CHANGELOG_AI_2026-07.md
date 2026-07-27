@@ -1,5 +1,564 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-27 - Final integration of PRs #144, #142, #141, #138, #143, #137, #135, #136, #139, #133, and #140
+
+### Summary
+
+- Created `codex/studio-final-integration-20260727` from `origin/main` and merged all 11 requested PR heads in the requested order without merging the integration branch into `main`.
+- Resolved changelog conflicts by retaining every independent entry and combined the PR #136 traversal pause contract with the PR #133 switchable movement dispatcher in `NpcService`.
+- Fixed a Studio-discovered floating-point completion edge in `NpcGroundNavigation`: hop/step traversal now treats a sample within `1e-4` seconds of `endsAt` as complete, snaps alpha to `1`, and releases the NPC instead of leaving it permanently in `Hopping`.
+- Synchronized the final integrated sources to the active `Four Peaks` and `Level` Studio places. A canonical LF-normalized source audit, with three independent checksums and a sibling-name uniqueness check, passed `3/3` Four Peaks scripts and `32/32` Level scripts.
+
+### Files and ownership
+
+- The integration contains the source and documentation changes owned by PRs #144, #142, #141, #138, #143, #137, #135, #136, #139, #133, and #140.
+- The only post-merge gameplay correction is `Level/ServerScriptService/ModuleScript/NpcGroundNavigation.lua`.
+- Updated `CHANGELOG_AI.md` and this monthly changelog with final integration, Studio, validation, runtime-cost, risk, and rollback records.
+- No DataStore name/key/schema, `TeleportData` shape, public remote name, reward value, damage value, mission selection count, or public module name was changed by the integration step.
+
+### Four Peaks Studio validation
+
+- Confirmed place `88516424167732` in universe `9965460435`; pre-publication place version was `1158`.
+- Daily Login rendered the full calendar and active claim state. The authorized live day-4 claim succeeded, advanced the profile to day 5, and persisted after stopping and rejoining (`CanClaim=false`, total claims `25`).
+- `RF_GetMissions` returned exactly 6 unique daily and 3 unique weekly missions from the refreshed pools.
+- The active Harvest summoning banner rendered in the authored altar. A zero-ticket roll returned `NotEnoughTickets` and did not mutate the ticket count.
+- The lobby portal completed its save/teleport preparation and reached `TeleportAsync`; Studio returned the expected request-context failure.
+- Startup was clean for integrated sources. The pre-existing unrelated `BlacksmithUI` wait for `PassiveDesc` remained.
+
+### Level Studio validation
+
+- Confirmed place `113361902471683` in universe `9965460435`; pre-publication place version was `1151`.
+- World preparation completed repeatedly with hundreds of chests plus shrines, statues, and monuments. A controlled Terrain stack verified that default spawn sampling rejects water while the explicit water/seabed opt-ins still work.
+- A real 80-stud/s pickup case overtook the player and completed collection. Shared attraction-speed cases returned `40`, `64`, `120`, and `180` as configured.
+- The authored chest animation and integrated reward presentation displayed rarity, name, description, exact modifiers, and stack limit without claiming the reward.
+- Slide-to-water recovery restored `WalkSpeed=21`, `AutoRotate=true`, zero camera offset, and cleared the slide attribute.
+- Elemental indicator coverage observed all eight emitted hit payloads and the intended three visible batches, including crit, dual element, and multi-hit text.
+- Player-hit VFX, Goblin explosion VFX, and the real registered `LeapExplode` path completed without legacy explosion fallback. The blast damaged a visible NPC, did not damage a wall-occluded NPC, hit the player once, and killed the Goblin once without rewards.
+- A true local-server test with two Studio clients passed: client-targeted damage/VFX events were `1/1` on the target and `0/0` on the other client; the Goblin blast dealt `7` damage to each player, killed once, and each client received exactly one hit-VFX event.
+- A registered Slime selected `MovementV2`/`SurfaceCrawler`, acquired the temporary tagged wall, and reported no adhesion/acquisition failure. Registered ground traversal completed and returned to `Idle`; the floating-point regression probe reproduced the prior `0.99999999999584233` ratio and confirmed the epsilon fix releases the traversal exactly once.
+- End-of-run validation passed `Surrendered`, `Victory`, and real Humanoid-death `Defeated` flows with exactly one summary and `RunEnded=true`. The second return-to-lobby action passed the save barrier and reached `TeleportAsync`, ending with the expected Studio-only `failed:teleport_failed`.
+- Final Level startup smoke had no new integrated-source error. The existing unrelated `Hybrid Terrain Hex Generator:16` plugin-toolbar error and bounded preload timeouts remained.
+
+### Runtime loops, scale, and cleanup
+
+- No per-NPC, per-projectile, per-drop, or per-indicator `Heartbeat`/`RenderStepped` connection was added by the integration work.
+- MovementV2 uses the existing central `NpcService` heartbeat with separated `MovementHz=12`, `TargetingHz=3`, and `FormationHz=2`; path work is capped at 2 concurrent paths, 15 starts/s, and 160 queued requests.
+- Damage indicators use one server and one client heartbeat, each flushing at 20 Hz with bounded pending/active pools. Drop attraction remains on the existing single server heartbeat and single client `RenderStepped`, with velocity computed once per alive-player snapshot.
+- Slide-water recovery has one local-player heartbeat and a one-second recovery window; character/state connections and the heartbeat are disconnected on script destruction.
+- Daily Login retains one one-second countdown task only while its GUI exists. Banner reveal waits remain session-bounded and exit when the overlay continues or closes.
+- All temporary multiplayer probe scripts, remotes, Terrain, NPCs, parts, event connections, and client-only QA state were removed before the final `35/35` Studio source audit.
+
+### Risks
+
+- A complete production-length organic run with every mission naturally completed was not repeated; representative authoritative reward, combat, UI, persistence, and end-run paths were exercised instead.
+- Studio cannot complete cross-place `TeleportAsync`; the requests reached the correct place IDs but live post-publication teleport still requires a production smoke.
+- No production flying NPC template exists. Ground and surface templates were tagged and validated; flying remains an intentionally inactive MovementV2 profile until content supplies an owner/template.
+- MovementV2 remains opt-in: `NpcNavigationConfig.ActiveSystem` is `Legacy`, existing NPCs keep their resolved system until despawn, and only explicitly tagged templates select V2.
+
+### Rollback
+
+- Git rollback: revert the integration merge commits in reverse order, then revert the traversal epsilon commit. Do not rewrite or merge the branch into `main` as part of rollback.
+- Studio code rollback: restore the saved pre-publication place files or restore the previous published place versions (`Four Peaks` version `1158`, `Level` version `1151`) through Roblox version history.
+- Immediate movement-only rollback: keep `NpcNavigationConfig.ActiveSystem = "Legacy"` and replace the Slime/Goblin `NpcMovementSystem_V2` tag with `NpcMovementSystem_Legacy` for newly spawned NPCs.
+- Persistent data requires no migration rollback. The Daily Login validation intentionally consumed the authorized day-4 claim; restoring place code does not and should not reverse that already-saved player reward.
+
+## 2026-07-26 - Four Peaks summoning altar review fixes (PR #142)
+
+### Summary
+
+- Preserved `UICorner`, `UIStroke`, and other structural children when a weapon preview is refreshed by giving generated preview content a dedicated `GeneratedWeaponContent` owner.
+- Rendered every configured `FeaturedWeaponIds` entry in the altar, featured-information panel, and banner cards instead of silently choosing the first weapon.
+- Added full featured-name summaries to the altar badge, information panel, and banner cards while retaining the single-feature presentation.
+- Anchored the roll summary to a fixed-height strip inside the reveal panel and reset the altar aura to its authored size before every summon tween.
+
+### Files
+
+- Updated `Four Peaks/StarterPlayer/StarterPlayerScripts/BannerUI.lua`.
+- Updated this monthly changelog.
+
+### Studio and validation
+
+- Active Studio: `Four Peaks`.
+- Synchronized the updated `BannerUI` source to `StarterPlayer.StarterPlayerScripts.BannerUI`.
+- Temporarily configured the active schedule with `Harvest of the End` and `Excalion, Blade of Kings`, opened the banner through `OpenWeaponBannerUI`, and verified that the altar, information panel, and sidebar each created two generated weapon cells.
+- Verified the altar badge and sidebar summary contained both configured weapon names.
+- Verified the preview containers retained their pre-existing `UICorner` and `UIStroke` instances after rendering.
+- Verified the summary strip remains inside the reveal panel beside the Continue button, and consecutive reveal setup resets the aura from 360 x 360 to 326 x 326 before expanding again.
+- Restored `BannerConfigs` and `BannerSchedule` from the repository after the test.
+- Play reached the Four Peaks lobby without a `BannerUI` error. The existing unrelated `BlacksmithUI` wait for `PassiveDesc` remained.
+- `git diff --check` passed before the changelog update and is rerun in final validation.
+
+### Runtime loops and cleanup
+
+- No new `Heartbeat`, `Stepped`, `RenderStepped`, polling task, remote, persistent-data field, teleport field, or `_G` dependency was added.
+- Generated preview frames remain owned by their presentation container and are cleared synchronously before reuse; no connection or long-lived runtime-table lifecycle changed.
+- Multi-feature rendering costs O(F) GUI instances per visible banner, where F is the configured featured-weapon count. Current validation covered two featured weapons.
+
+### Not verified
+
+- Studio screenshot and pointer-input tools timed out in this MCP session, so visual pixel quality and physical mouse/touch interaction were not verified.
+- Real x1/x10 rolls, skip/continue, pity/guarantee transitions, conversion, insufficient-currency behavior, and persistence were not exercised because this review fix does not change those paths and a live roll would mutate player economy.
+- Phone, tablet, and ultrawide visual layouts remain unverified.
+
+### Risks and rollback
+
+- Very large future featured lists can make individual preview cells and name summaries dense; the grid adapts to the configured count but has no explicit content cap.
+- Rollback by reverting the PR #142 review-fix commit and restoring the previous `BannerUI` source in Four Peaks Studio. No data migration or server rollback is required.
+## 2026-07-26 - Level chest reward presentation and run HUD cleanup (PR #141)
+
+### Summary
+
+- Added a responsive presentation layer to the authored Level chest-opening animation.
+- The final reward shows rarity, source, item name, description, exact stat changes, and stack limit.
+- Reused the existing server-selected payload and claim controls; reward rolling, granting, pause state, and remotes are unchanged.
+- Removed the large `Run Stats` panel shown during pause and chest opening while preserving the compact collected-item icon grid during active runs.
+- Added a compact layout for short landscape viewports so the reward header, card, and claim controls remain inside a 568 x 320 viewport.
+- Made the wide side-card layout require at least 480 px of height, so short desktop windows such as 1200 x 400 use the bounded compact layout instead.
+
+### Files
+
+- Added `Level/StarterPlayer/StarterPlayerScripts/LocalScript/ChestRewardPresentation.client.lua`.
+- Updated `Level/StarterPlayer/StarterPlayerScripts/LocalScript/RunStatsHud.client.lua`.
+- Updated `Level/StarterGUI/ChestOpening/MANIFEST.md`.
+- Updated this monthly changelog and removed the non-standard one-off changelog.
+
+### Studio and validation
+
+- Reviewed the complete chest payload contract from `ChestItemService`: item and fallback rewards include display names, descriptions, and formatted modifier lines.
+- Verified the presentation controller does not send reward requests or mutate reward data.
+- Verified the rewritten run HUD only listens for inventory snapshots and `RunStarted` visibility.
+- Synchronized the touched client sources to active Level Studio before Play validation.
+- Programmatically exercised the compact layout at 568 x 320 and 1200 x 400 plus the regular desktop threshold; the reward card and action controls remain inside the presentation root with a positive gap.
+- `git diff --check` passed in final validation.
+
+### Runtime loops and cleanup
+
+- No `Heartbeat`, `Stepped`, `RenderStepped`, polling loop, remote, persistent-data field, teleport field, or `_G` dependency was added.
+- One `AbsoluteSize` signal recalculates O(1) layout properties only when the presentation viewport changes.
+- The dynamic action-frame visibility connection is disconnected before rebinding and when the presentation closes or its GUI is removed.
+- The controller's existing bounded `task.spawn` waits for the authored action frame and is invalidated by a session identifier.
+
+### Not verified
+
+- Studio screenshot and pointer-input tools timed out in this MCP session, so final pixel quality and physical mouse/touch claim interaction were not verified.
+- Device Emulator screenshots remain unavailable; compact bounds were validated programmatically instead.
+- A production reward was not claimed because that would mutate run state.
+
+### Risks and rollback
+
+- Extremely long localized reward text may require additional truncation or scrolling beyond the tested payload contract.
+- Rollback by reverting PR #141 and restoring the previous Level client sources. No DataStore, remote, teleport, server gameplay, or migration rollback is required.
+
+## 2026-07-26 - Level dry-ground world spawn contract (PR #138)
+
+### Summary
+
+- Changed `WorldBounds.RaycastTerrainAtXZ` so gameplay spawns reject Roblox Terrain water by default.
+- Kept water in the default raycast so a water surface rejects the complete sample instead of allowing the seabed beneath it.
+- Added the explicit `allowWater = true` opt-in; callers that intentionally need the seabed may combine it with `ignoreWater = true`.
+- The shared contract applies to existing random/nearby terrain-point consumers, including chests, reward chests, shrines, statues, monuments, the run portal, bosses, enemies, and random player spawn.
+
+### Files
+
+- Updated `Level/ServerScriptService/ModuleScript/WorldBounds.lua`.
+- Updated this monthly changelog.
+
+### Studio and validation
+
+- Active Studio: `Level`.
+- Synchronized `ServerScriptService.ModuleScript.WorldBounds` from the branch before Play validation.
+- In Play, created a temporary isolated Terrain stack outside the map with water over rock. The default `RaycastTerrainAtXZ` returned `nil`, `allowWater = true` returned `Water`, and `allowWater = true, ignoreWater = true` returned the `Rock` seabed.
+- The temporary Terrain region was cleared immediately in the same server test and did not persist after Play stopped.
+- Level startup completed world preparation with 358 chests, 16 shrines, 6 statues, and 3 monuments and produced no `WorldBounds` error.
+- The existing unrelated `Hybrid Terrain Hex Generator:16` toolbar error and bounded loading preload timeouts remained.
+- Repository searches covered every current `WorldBounds` terrain-point call site.
+- `git diff --check` passed in final validation.
+
+### Runtime loops and cost
+
+- No loop, scheduler, connection, remote, persistent-data field, teleport field, or `_G` dependency was added.
+- Each affected terrain sample still performs one bounded terrain raycast. The new default path adds one boolean option normalization and, for a hit, one material comparison.
+- Existing bounded retry counts in `FindRandomTerrainPoint` and `FindNearbyTerrainPoint` are unchanged.
+
+### Not verified
+
+- Studio screenshot and pointer-input tools timed out in this MCP session, so a visual survey of every natural water edge and every spawn category was not performed.
+- Multiplayer and a complete production-length run were not exercised.
+
+### Risks and rollback
+
+- Callers that intentionally expected a water surface must now opt in with `allowWater = true`; repository search found no such explicit gameplay requirement among current consumers.
+- Maps with too little dry terrain may exhaust their existing bounded candidate retries more often, returning the same existing `nil` failure path instead of spawning in water.
+- Rollback by reverting PR #138 and restoring the previous Level `WorldBounds` source. No data migration, remote, or server-state rollback is required.
+
+## 2026-07-26 - Four Peaks and Level mission pool rebalance (PR #143)
+
+### Summary
+
+- Replaced the 30-daily / 15-weekly mission pools with 12 focused daily and 10 focused weekly definitions.
+- Kept selection counts at 6 daily and 3 weekly.
+- Tuned daily goals toward roughly one normal run and weekly goals toward a few runs, removing objectives that rewarded taking damage, low health, no-hit play, reroll/skip restrictions, win streaks, and extreme multikills.
+- Reduced weekly rewards with the lower requirements to limit economy inflation.
+- Kept the complete configuration byte-identical between Four Peaks and Level.
+- Labeled `COINS_EARNED` objectives as Run Gold rather than silver, matching the raw dungeon counter before the separate end-of-run silver conversion.
+- Prevented immediate surrender from advancing `RUNS`, `RUNS_WITH_WEAPON`, or `FAST_RUNS`; victories qualify immediately, while defeated runs require at least 60 seconds of participation.
+- Made `BOSS_SPAWN_REACHED` advance from the authoritative portal-boss spawn notification instead of an unrelated 20-minute elapsed-time threshold.
+- Replayed the active boss-phase milestone for players who join after the one-shot spawn notification, using their own join-relative boss clock and the same per-run duplicate guard.
+
+### Files
+
+- Updated `Four Peaks/ReplicatedStorage/ModuleScripts/MissionConfigs.lua`.
+- Updated `Level/ReplicatedStorage/ModuleScripts/MissionConfigs.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/MissionProgress.lua`.
+- Updated `Level/ServerScriptService/Script/ProgressService.lua`.
+- Updated this monthly changelog.
+
+### Studio and validation
+
+- Synchronized and required `MissionConfigs` in both active Studio places.
+- Both places returned 12 unique daily and 10 unique weekly definitions with valid positive `Counter` targets, rewards, types, and unique IDs/groups.
+- The two repository files share blob `57899e9c80b20823cfa8e7a42e5f40d84e832266`; source length is 6,268 bytes and both synchronized Studio modules returned normalized checksum `413493289`.
+- Four Peaks Play returned 6 daily and 3 weekly missions through `RF_GetMissions`, with unique IDs and valid goal payloads.
+- Level Play returned 6 unique daily missions through `GetDailyMissions`.
+- All selected goal keys were audited against existing mission progress/service counters.
+- A controlled server test intercepted mission writes without touching player data: surrender and a 59-second defeat added zero `RUNS`/`FAST_RUNS`, while a victory and a 60-second defeat each added one finished run.
+- A source-contract probe confirmed the boss-spawn hook marks and increments `BOSS_SPAWN_REACHED` once per active player/run, while the live-duration sync no longer grants that objective at 1,200 seconds without a boss.
+- `RunStarted` transitions clear the shared boss-phase flag; a late join during the same active boss phase receives one backfilled counter, while the next run starts clean.
+- Neither Play session produced a mission-config or mission-service error. Existing unrelated Four Peaks `BlacksmithUI` and Level terrain-generator/preload warnings remained.
+- `git diff --check` passed in final validation.
+
+### Runtime loops and cost
+
+- No loop, event connection, remote, DataStore schema, teleport field, claim flow, progress owner, or `_G` dependency changed.
+- Pool selection remains a seeded O(P) shuffle at daily/weekly reset or invalidation, with smaller P values (12 daily and 10 weekly instead of 30 and 15).
+- Existing selection invalidation repicks stored rotations with removed mission IDs and marks the existing mission state dirty through its established owner.
+- Run finalization performs one constant-time reason/duration qualification before updating the existing mission counters.
+
+### Not verified
+
+- Real goal progression, completing and claiming rewards, cross-place return, rejoin persistence, and multiplayer were not exercised because those paths mutate player progress/economy.
+- Final thresholds were not compared with production telemetry; silver earned, elite count, and total damage remain the primary tuning risks.
+- Studio screenshot and pointer-input tools timed out, so the mission UI was validated through remote payloads rather than physical interaction.
+
+### Risks and rollback
+
+- Thresholds are balance assumptions until production telemetry confirms typical run output.
+- Reduced pool variety increases how often the same mission can recur across rotations even though IDs/groups are unique within the pool.
+- Rollback by reverting PR #143 and restoring the previous `MissionConfigs` source in both places. Stored selections containing the new-only IDs will be repicked by the existing invalidation path; no DataStore migration is required.
+
+## 2026-07-26 - Level velocity-aware drop attraction (PR #137)
+
+### Summary
+
+- Made drop attraction fast enough to overtake sprint, slide, downhill, and momentum movement by adding a 40 stud/s margin over the target player's actual horizontal `AssemblyLinearVelocity`.
+- Added `DropAttractionConfig` as the single owner of attraction-speed tuning and calculation.
+- Required the same shared calculation from the authoritative server `Heartbeat` and client `RenderStepped` presentation so rendered orbs no longer trail the authoritative position because of a slower client-only formula.
+- Cached normal and global-magnet attraction speeds once per alive player snapshot on both server and client, avoiding redundant velocity reads and magnitude calculations for every attracted drop.
+- Preserved pickup radii, global magnet behavior, collection animation, and server-authoritative reward ownership.
+
+### Files
+
+- Added `Level/ReplicatedStorage/ModuleScripts/DropAttractionConfig.lua`.
+- Updated `Level/ServerScriptService/Script/DropService.lua`.
+- Updated `Level/StarterPlayer/StarterPlayerScripts/LocalScript/DropPresentation.client.lua`.
+- Updated this monthly changelog.
+
+### Studio and validation
+
+- Active Studio: `Level`.
+- Created/synchronized the shared config module and synchronized both runtime owners before Play.
+- Exact shared-config cases passed in Edit: stationary `40`, 24 stud/s sprint `64`, 80 stud/s slide `120`, pure vertical velocity `40`, normal global magnet `180`, and 200 stud/s global-magnet target `240`.
+- Level Play compiled both runtime owners and the client confirmed it required the shared config and returned the same slide/global-magnet values.
+- Injected 300 non-authoritative presentation-only drops outside pickup range; the client rendered all 300 and returned to its 32 pre-existing visuals after one batched removal payload.
+- A final source-contract probe found exactly two `GetSpeed` calls and one velocity read in the per-player cache, with zero per-drop reads of the cached movement inputs. A separate 300-drop in-range payload rendered all 300 visuals and removed all 300 cleanly.
+- No drop-service or drop-presentation error appeared. The existing unrelated terrain-generator toolbar error and loading preload timeouts remained.
+- `git diff --check` passed in final validation.
+
+### Runtime loops and cost
+
+- The existing single server `Heartbeat` remains the authoritative owner for all active drops; no per-drop connection was added.
+- The existing single client `RenderStepped` remains the presentation owner for all active visuals; no per-drop connection was added.
+- Server and client player snapshots each compute both shared attraction speeds once per alive player per frame; every attracted drop then selects one cached number.
+- No remote, persistent-data field, teleport field, reward owner, or new `_G` dependency was added.
+
+### Not verified
+
+- Physical sprint/slide/downhill inputs and the complete pickup/grant animation could not be automated because Studio screenshot/input tools timed out.
+- The server's private active-drop table could not be inspected from the MCP command environment; authoritative behavior was validated through the shared module contract and clean runtime compilation.
+- Multiplayer latency and a sustained 300-drop server-authoritative stress run were not measured.
+
+### Risks and rollback
+
+- Attraction now has a minimum effective catch-up speed of 40 stud/s even for a stationary target, intentionally making ordinary nearby pickups faster than before.
+- Extremely high replicated player velocity increases attraction speed without an explicit cap so the orb retains the promised 40 stud/s closing margin; server collection and rewards remain authoritative.
+- Rollback by reverting PR #137, deleting `DropAttractionConfig` from Level Studio, and restoring both previous runtime sources. No data or remote rollback is required.
+
+## 2026-07-26 - Level combat feedback and slide-water recovery (PR #135)
+
+### Summary
+
+- Added reusable client `VfxTemplatePlayer`, Goblin/player `CombatFeedback`, and `SlideWaterRecovery`.
+- Added `PlayerHitVFXEvent`; `DamageService` fires it only after real server-authoritative HP damage.
+- Added explicit zero-rate particle bursts, authored Goblin emission counts, an above-ground explosion offset, complete-model VFX anchoring, and whole-model Goblin attack tilt.
+- Restricted the tilt render pass to a separate set of currently attacking Goblins instead of scanning every tracked Goblin each frame.
+- Restricted Goblin death explosions to real death tombstones; lifecycle despawns now clean up without playing a false detonation.
+- Restricted water recovery activation to active/recent slides, so unrelated zero-speed swimming locks remain owned by their original movement ability.
+- Scheduled camera impulses one render priority after the existing `OrbitCam` owner so desktop camera writes cannot overwrite hit shake in the same frame.
+- Allowed confirmed lethal player hits to play feedback after health replication reaches zero, and made both lifetime recovery connections explicit teardown owners.
+- Made `CombatFeedback` own and disconnect both remote subscriptions on teardown, preventing stale closures from duplicating hit/death effects after script recreation.
+- Added a character-bind generation guard so a delayed pre-respawn Humanoid wait cannot replace the current recovery owner or attach stale connections.
+
+### Files
+
+- Added `Level/ReplicatedStorage/ModuleScripts/VfxTemplatePlayer.lua`.
+- Updated `Level/ReplicatedStorage/Remotes/RemotesInit.server.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/DamageService.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/NpcLifecycle.lua`.
+- Added `Level/StarterPlayer/StarterPlayerScripts/LocalScript/CombatFeedback.client.lua`.
+- Added `Level/StarterPlayer/StarterPlayerScripts/LocalScript/SlideWaterRecovery.client.lua`.
+- Updated this monthly changelog.
+
+### Studio and validation
+
+- Active Studio: `Level`.
+- All five runtime sources were synchronized from the PR, and `CombatFeedback` was resynchronized after the active-attacker review fix.
+- Both ModuleScripts passed Edit-mode `require` checks.
+- A controlled real `DamageService.Apply` changed HP by exactly 5 and created one welded `PlayerHitVFXRuntime` containing four particle emitters; a fully shielded hit changed no HP and created no hit VFX.
+- A real damage call drove the client camera impulse by up to 0.0801 studs and 1.1395 degrees.
+- A production Goblin rig clone reached 27.99 degrees of whole-model tilt during `Attacking` and restored to 0 degrees on `Idle`.
+- Repeating the same Goblin death packet produced one `ExplosionRuntime` with 16 explicit bursts and one sound; prior visual capture confirmed the particles rendered.
+- A separate two-part model-VFX test after the review fix created two welds, left zero parts anchored, and followed its anchor by exactly 7 studs.
+- Real Terrain water naturally changed the Humanoid to `Swimming`; recovery restored positive movement speed, `AutoRotate = true`, zero camera offset, and cleared slide state. Dry-ground running, freefall, and slide re-arming still worked.
+- A stacked PR #140 integration probe despawned a production Goblin during its active leap: the server recorded one leap, zero detonations and zero death callbacks, while the client recorded zero `ExplosionRuntime` instances after the despawn guard.
+- Review regressions cover both sides of the recovery gate: recent slide plus `Swimming` restores movement, while zero-speed `Swimming` without a slide marker leaves the lock unchanged. Camera priority is `Camera + 2`, after `OrbitCam` at `Camera + 1`.
+- With the current character at replicated `Health = 0`, the lethal guard was absent, the current root remained valid, and the authored player-hit path created `PlayerHitVFXRuntime`.
+- Destroying `SlideWaterRecovery`, reloading the character, marking the new Humanoid as sliding/swimming and waiting 0.2 seconds left `WalkSpeed = 0`; neither the old `CharacterAdded` closure nor its Heartbeat rebound after teardown.
+- Destroying `CombatFeedback` and then sending both hit and dead-Goblin packets produced zero `PlayerHitVFXRuntime` and zero `ExplosionRuntime` instances, proving both old remote callbacks were disconnected.
+- A controlled rapid-respawn bind completed the newer Humanoid first and the delayed older wait second; only the newer generation was accepted, and the stale bind created no connection owner.
+- No console error or warning referenced the five changed runtime owners or `PlayerHitVFXEvent`. Existing unrelated terrain-generator, preload, and disabled error-reporting warnings remained.
+- `git diff --check` passed in final validation.
+
+### Runtime loops and cleanup
+
+- `CombatFeedback` keeps one client render-step binding, but its per-frame loop now visits only active attackers. Idle/dead/despawned Goblins are removed from that set event-driven from NPC batches; tilt is restored on transition and cleanup.
+- `CombatFeedback` disconnects its `NpcBatchEvent` and `PlayerHitVFXEvent` subscriptions before clearing tracked Goblins on script teardown.
+- `VfxTemplatePlayer` lazily adds one client camera render-step binding after the first impulse. It returns immediately when empty and caps simultaneous impulses at eight.
+- `SlideWaterRecovery` adds one client `Heartbeat` with O(1) state checks plus character/Humanoid lifecycle connections.
+- `SlideWaterRecovery` disconnects its lifetime `Heartbeat`, `CharacterAdded`, and dynamic Humanoid connections on script teardown; deferred character binds also stop once teardown starts.
+- Each character bind advances one O(1) generation token; the post-yield check also requires the same `player.Character`, so late pre-respawn coroutines return before mutating state.
+- VFX clones use Debris cleanup; delayed emitter/trail/beam callbacks check parent existence.
+- No server frame loop, new `_G` dependency, persistent-data field, teleport field, or gameplay damage value was added.
+
+### Not verified
+
+- The Goblin checks used a production rig clone with controlled NPC payloads rather than a complete natural combat encounter.
+- A reliable target-scale profiler capture with 100-500 naturally replicated Goblins was not obtained; live full snapshots invalidated temporary synthetic IDs before a meaningful render-cost sample.
+- The live `PlayerHitVFX.CameraData` stores `ShakeJSON`; this PR uses documented fallback impulse values rather than parsing that JSON.
+- Multiplayer camera/VFX behavior was not exercised.
+
+### Risks and rollback
+
+- The active-attacker set relies on state/death/despawn NPC batch transitions; full-snapshot and script-destroy cleanup paths remove stale records.
+- Death tombstones now preserve the truthful `Dead` state while retaining the existing `despawned` cleanup flag; non-death lifecycle removal still reports `Despawned`.
+- Whole-model tilt intentionally composes after the regular NPC presentation pivot and restores only when the current pivot still matches the applied tilt, avoiding overwriting a newer presentation transform.
+- Rollback by reverting PR #135, removing the three added scripts from Level Studio, and restoring the previous `RemotesInit` and `DamageService` sources. No data migration is required.
+## 2026-07-26 - Poziom NPC obstacle traversal
+
+### Summary
+
+- Added persistent kinematic `Hop` traversal for `GroundSmall` NPCs across valid `Jump` transitions and low local obstacles such as chests, fallen logs and small decorative collision.
+- Added a separate `Stride` traversal for `GroundLarge` NPCs, with a larger ordinary step, validated long stride, higher terrain-rise tolerance and no classic jump behavior.
+- Prevented the final ground constraint from deleting the airborne Y component while a traversal is active.
+- Suspended the active traversal clock during `PauseState` and freeze, shifting both traversal timestamps on resume so an NPC continues from its current arc position instead of jumping to the landing position.
+- Advanced an active traversal before target, attack-range and AI-lock branches, so combat cannot leave an NPC suspended on an unchanged arc sample.
+- Kept tall walls, forbidden surfaces, missing landing surfaces and excessive rises/drops blocked so pathfinding can route around them.
+- Started authored `Jump` traversal toward the marked waypoint itself, canceled active traversal on external `SetPosition`, and validated six body sweeps along the same sinusoidal curve used at runtime.
+- Evicted the active route's cache entry when custom traversal validation rejects a `Jump`, so the immediate repath cannot reapply the identical cached waypoints.
+- Invalidated pending path generations when a local obstacle starts a hop/stride, preventing a pre-traversal async result from installing stale waypoints after landing.
+
+### Files
+
+- Updated `Level/ServerScriptService/ModuleScript/NpcNavigationConfig.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/NpcGroundSurface.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/NpcGroundNavigation.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/NpcService.lua`.
+- Updated `docs/NPC_NAVIGATION.md`, `CHANGELOG_AI.md` and this monthly changelog.
+
+### Runtime cost and cleanup
+
+- No new `Heartbeat`, `Stepped`, `RenderStepped`, remote, persistent-data field or `_G` dependency was added.
+- Traversal runs inside the existing centralized 12 Hz NPC movement scheduler.
+- An active traversal advances once per existing movement tick and returns before the ordinary chase/attack branch, so it cannot be stepped twice in one tick.
+- Normal clear movement keeps the existing probe cost. Extra landing probes and six bounded traversal `Blockcast` calls occur only when a jump waypoint or blocked local step attempts a hop/stride.
+- Pause transitions reuse the centralized movement tick and visit the NPC registry once only when the global pause value changes. Freeze suspension is an O(1) check inside the existing per-NPC update.
+- Traversal state is stored on the existing per-NPC navigation record and cleared on landing or NPC cleanup.
+- Cache eviction is O(1), happens only on a rejected path jump, and is exposed in the existing navigation metrics as `pathCacheEvictions`.
+- Starting a non-path traversal performs one O(1) generation bump and pending-route cleanup inside the existing movement tick; queued/active callbacks then follow the existing stale-result path.
+- Stale queued/active requests clear the weak-map slot only when they still own that exact slot, so an older canceled callback cannot erase a newer request's deduplication record.
+
+### Validation
+
+- Active Studio: `Level`, PlaceId `113361902471683`. Final source parity after normalizing Studio's optional terminal newline passed for `NpcNavigationConfig` (`4744` bytes, hash `299645496`), `NpcGroundSurface` (`21556`, `1864131347`), `NpcGroundNavigation` (`29201`, `1606816556`) and `NpcService` (`33451`, `1613147374`).
+- An isolated clock test paused a traversal at `100.10`, resumed it at `105.10`, and verified `startedAt=105.00`, `endsAt=105.42`, an unchanged step position and idempotent repeated pause/resume calls.
+- A live registered `GroundSmall` NPC paused in mid-hop for 1.5 s with zero position delta. It resumed by `2.069` studs rather than teleporting to its landing and then completed normally.
+- Freeze also suspended the arc with zero movement and an active pause marker. Slow completed the current traversal without an invalid position. A strong lateral impulse stayed inside the validated corridor. Death and explicit despawn both cleared the navigation record, while a target change completed the current traversal and then adopted the new target.
+- A controlled three-waypoint route marked waypoint 2 as `Jump`; traversal began immediately toward waypoint 2 (`landingX = markedX = 27006`) instead of waiting at the ledge and targeting waypoint 3.
+- A live registered NPC with a 1-second ability lock advanced a synthetic active hop by exactly 6 studs, retained `Attacking`, and cleared the traversal within 0.6 seconds while the AI lock was still active, proving the early combat return no longer stalls the arc or changes the ability presentation state.
+- Public `Invalidate(..., "external_set_position")` cleared the active traversal, route and pending request while advancing the generation, preventing a stale arc from overwriting an ability destination.
+- Separate physical validation cases passed for a `GroundSmall` chest hop, fallen-log hop, small-rock hop, `GroundLarge` stride, uneven `1.5`-stud terrain rise and a `0.75`-stud stair step.
+- The final curved-corridor validator kept a low chest clear and rejected a narrow obstacle intersecting the first-quarter body arc as `traversal_blocked`; this is the region the previous up-horizontal-down corridor did not represent.
+- A controlled rejected-`Jump` route cleared its waypoints/cache key, incremented `pathCacheEvictions` exactly once and retained `jump_transition_blocked` as the repath reason.
+- A local-obstacle hop started with `pathPending = true`; traversal start advanced generation `7 -> 8`, cleared both pending fields, retained `traversal_started:local_obstacle`, and produced an active `Hopping` step.
+- Tall walls returned `traversal_blocked`; a traversal beyond maximum width returned `traversal_too_far`; a missing landing footprint returned `missing_landing_surface`; a real temporary Terrain water landing returned `water_forbidden`; a modifier-protected surface returned `surface_forbidden`; and a physical `45`-degree wedge returned `slope_too_steep`.
+- A transient 250-NPC Play stress test ran 72 movement ticks over 6 s: average movement tick `0.917 ms`, observed global maximum `8.323 ms`, `3032` raycasts (`505.3/s`), `806` blockcasts including `18` traversal blockcasts, `6` traversal starts, `6` completions and `0` failures. All temporary NPCs, parts, tags and Terrain water were removed or discarded with the Play session.
+- A focused final curved-corridor stress validated 250 clear traversals in `8.619 ms` total (`0.0345 ms` per case), issuing exactly `1,500` bounded traversal blockcasts and `1,250` surface raycasts with zero failures.
+- The console contained no NPC navigation error. The unrelated pre-existing `Hybrid Terrain Hex Generator:16` plugin-context error and bounded loading preload timeouts remained.
+
+### Risks and rollback
+
+- Hop/stride tuning is intentionally conservative but may require per-map adjustment for unusually wide chest/log meshes or very uneven proxy geometry.
+- A collidable decorative object taller than the configured obstacle limit remains a real blocker and must be routed around or have its collision/proxy corrected.
+- The reported maximum movement tick is the maximum since the Play session began rather than an interval-reset maximum; the average is isolated to the 72-tick stress window.
+- Roll back by reverting this PR. No data migration, remote rollback or client rollback is required.
+
+## 2026-07-26 - Level elemental damage indicators (PR #139)
+
+### Summary
+
+- Replaced basic white/red floating numbers with pooled animated indicators for Physical, Fire, Electricity, Air, Water, Earth, Void, and Light damage.
+- Added a presentation facade over `NpcService.ApplyDamage`; `NpcService` remains the authoritative damage owner while weapon and spell hits supply element metadata.
+- Batches rapid hits per target/element/crit/kind for 50 ms while keeping different elements separate.
+- Preserved legacy `DamageIndicatorEvent` payloads by treating missing/unknown elements as Physical and batching them client-side.
+- Replaced per-bucket delayed tasks with one bounded 20 Hz server flush and one bounded 20 Hz client flush/lifetime scheduler.
+- Moved all current weapon elements into canonical `WeaponConfigs` metadata and removed name inference and the duplicate manual override table from combat.
+
+### Files
+
+- Added `Level/ServerScriptService/ModuleScript/DamageIndicatorService.lua`.
+- Updated `Level/ReplicatedStorage/ModuleScripts/WeaponConfigs.lua`.
+- Updated `Level/ServerScriptService/Script/SpellService.lua`.
+- Updated `Level/ServerScriptService/Script/WeaponCombat.server.lua`.
+- Updated `Level/StarterPlayer/StarterPlayerScripts/LocalScript/DamageIndicators.lua`.
+- Updated this monthly changelog.
+
+### Studio and validation
+
+- Active Studio: `Level`.
+- Created/synchronized `DamageIndicatorService` and synchronized all four existing runtime sources.
+- Exact source parity passed for `WeaponConfigs` (`9858` bytes), `DamageIndicatorService` (`7052`), `SpellService` (`18293`), `WeaponCombat` (`9945`) and `DamageIndicators` (`12646`).
+- Level Play loaded `DamageIndicatorService`, `SpellService`, `WeaponCombat`, and `DamageIndicators` without a related error.
+- Five real 2-damage facade calls against one temporary registered NPC produced one client payload: amount `10`, hits `5`, `batched = true`, element `Electricity`; the temporary NPC was despawned after the test.
+- Five compatible legacy Water payloads produced one `10 | WATER x5` indicator.
+- Two Fire and two Water legacy hits against the same target remained separate as `6 | FIRE x2` and `8 | WATER x2`.
+- A batched critical payload rendered `321! | FIRE x7` with the CRIT tag.
+- A burst of 60 already-batched events created exactly the configured maximum of 36 active indicators, which returned to zero after their 1.05-second lifetime.
+- Pool instrumentation confirmed maximum active `36`, final active `0`, retained pool `24`, and `36` bounded releases with no per-indicator delayed task.
+- Twenty hidden Fire DoT ticks applied `20` authoritative damage and emitted zero matching indicator payloads.
+- A run-end test applied damage, set `RunEnded = true` before the flush and emitted zero matching payloads, confirming pending cleanup.
+- All 12 current weapon definitions returned their explicit canonical element. Missing/invalid config metadata falls back to Physical without inspecting the weapon name or loadout copy.
+- A transient 500-NPC server stress test applied 500 authoritative hits. Registration took `86.90 ms`, queueing all facade calls took `8.62 ms`, the server capped pending unique buckets at 128 and emitted only 36 client payloads in the flush; all 500 temporary NPCs were despawned.
+- `git diff --check` passed in final validation.
+
+### Runtime loops, bounds, and cleanup
+
+- One server `Heartbeat` and one local-client `Heartbeat` are added. Both accumulate time and do real work at 20 Hz (one 50 ms batching window); there is no loop or delayed task per target, element, NPC or indicator.
+- Server batching is bounded at 128 pending unique batches per player and emits at most 36 batches per player per flush. Client legacy batching is bounded at 128. Overflow drops only presentation; authoritative damage is already applied.
+- The client allows at most 36 active indicators and retains at most 24 inactive instances in its pool; excess active presentation is skipped and excess released instances are destroyed.
+- Each active indicator owns four bounded tweens. The shared 20 Hz client scheduler owns all lifetime releases; no indicator creates a task or connection.
+- Server pending state is removed after flush, when `RunEnded` is true, and on `PlayerRemoving`. The client clears pending and active visuals when `RunEnded` is true.
+- No remote name, persistent-data field, teleport field, NPC damage calculation, or new `_G` dependency changed.
+
+### Not verified
+
+- Studio screenshot and input tools timed out, so final visual legibility across phone/tablet/ultrawide layouts was validated structurally rather than by pixel inspection.
+- Natural weapon swings and spells were not manually aimed through every element; their metadata call sites and the shared facade were exercised programmatically.
+- Only one Studio client was available, so true simultaneous multi-player isolation and network latency remain unverified. The server stores buckets independently by `Player` and the per-player bounds were inspected, but this does not replace a multi-client test.
+
+### Risks and rollback
+
+- Presentation batches intentionally merge hits sharing target, element, secondary element, crit state, and kind within 50 ms; source IDs are retained but are not part of the batch key.
+- When more than 128 unique batches are queued per player within one window, more than 36 batches are due in one flush, or more than 36 indicators are active, additional visuals are skipped while damage remains authoritative.
+- Future weapons must declare `element` in `WeaponConfigs`; absent or invalid metadata intentionally displays as Physical.
+- Rollback by reverting PR #139, deleting `DamageIndicatorService` from Level Studio, and restoring the previous spell, weapon, and client indicator sources. No data migration or server-state rollback is required.
+
+## 2026-07-26 - PR #140 Goblin LeapExplode friendly fire
+
+### Summary
+
+- Kept the production Goblin combat sequence server-authoritative and direct: `Chase -> Leap -> Detonate -> Dead`, with no stationary arm phase.
+- Applied blast damage to nearby living NPCs through `NpcService.ApplyDamage`, excluding the source Goblin and suppressing rewards for friendly-fire deaths.
+- Added player and NPC line-of-sight validation. NPC blast rays ignore the source and player characters at the landing point, while world geometry and other NPC bodies remain valid blockers.
+- Added explicit segment-versus-body occlusion for registered NPCs because their server-authoritative roots are intentionally non-queryable and cannot block a workspace raycast.
+- Kept the existing death lifecycle as the single owner of callbacks, deregistration, replication, rewards and authored client death VFX.
+- Retained a zero-damage legacy `Explosion` presenter only while the authored `VfxTemplatePlayer` dependency is absent; once PR #135 is present, the fallback is skipped so the client-authored effect remains single-owner.
+
+### Files
+
+- Updated `Level/ServerScriptService/ModuleScript/LeapExplodeBehavior.lua`.
+- Updated `docs/NPC_MOVEMENT_SYSTEMS.md`.
+- Updated this monthly changelog.
+
+### Studio and validation
+
+- Active Studio: `Level`, tested with the production `ReplicatedStorage.Enemies.Normal.Goblin` template and the stacked PR #133 runtime sources.
+- Direct behavior-contract validation confirmed the first in-range tick enters `Leap`, there is no `Arm` state, freeze and pause shift leap clocks without movement or teleport, target loss continues toward the captured landing point, cleanup clears state, and a second post-death step cannot detonate again.
+- A real registered Goblin damaged one player and one visible registered NPC exactly once, killed itself once, left a wall-blocked NPC at full health, and reported one detonation. Source and victim death contexts used `cause = "LeapExplode"` and `suppressRewards = true`; the victim context retained the source model.
+- Three nearby production Goblins produced three detonations, three player hits, three one-shot death callbacks and three authored client `ExplosionRuntime` instances, with no scripted `Explosion` instance or duplicate authored effect.
+- A dependency-presence regression test produced exactly one zero-damage legacy presenter when `VfxTemplatePlayer` was hidden and zero legacy presenters when it was restored.
+- A collinear near/far registered-NPC regression with both roots `CanQuery = false` damaged the nearer NPC once and left the farther NPC undamaged behind its body.
+- A 500-target bucket stress completed one detonation scan in `6.453 ms` and performed `624` exact occlusion tests, below the hard cap of `4,000` (`500 * 8`).
+- Despawning a production Goblin during a two-second active leap produced one leap, zero detonations and zero death callbacks. In the combined PR #135 integration, truthful `Dead` versus `Despawned` tombstone state yielded one authored VFX for a real detonation and zero for lifecycle despawn.
+- The active production Goblin template retains `NpcMovementSystem_V2`, `NpcMove_GroundRunner` and `NpcCombat_LeapExplode`.
+
+### Runtime cost and cleanup
+
+- No `Heartbeat`, `Stepped`, `RenderStepped`, connection, remote, persistent-data field or `_G` dependency was added.
+- Leap execution remains inside the existing shared `NpcService` movement scheduler at `12 Hz`.
+- Each detonation performs one bounded player pass plus the existing radius query over registered NPCs; LOS raycasts run only for eligible targets inside the configured blast radius.
+- NPC-body occlusion sorts one target snapshot, then uses 48 fixed angular buckets retaining at most eight nearer candidates each. Its worst case is O(K log K + 48K), with at most eight exact segment/body tests per target and no persistent loop or allocation per pair.
+- The legacy visual availability check is one pair of direct folder lookups per detonation, not a runtime scan or loop.
+- Behavior cleanup clears the captured leap state. Death and NPC friendly-fire remain routed through the existing lifecycle and `NpcService` owners.
+
+### Dependencies, risks and rollback
+
+- PR #140 remains stacked on PR #133. Merge #135 and #136 first, rebase #133 on the resulting `main`, then rebase #140 on refreshed #133 and repeat source-parity/startup smoke before merge.
+- The combined authored-VFX test used the live PR #135 source in Studio because #135 is not yet in PR #133's base. Until the dependency chain is merged/rebased, the zero-damage legacy presenter prevents a silent detonation; the required rebase onto #135 then disables that fallback through the authored module-presence contract.
+- A wall-blocked LOS case and several simultaneous detonators passed, but true multiplayer was not exercised.
+- Roll back by reverting PR #140 commits. The source Goblin returns to its previous self-only blast behavior; no data migration, remote rollback or content retagging is required.
+
+## 2026-07-24 - PR #133 MovementV2 active Level integration
+
+### Summary
+
+- Integrated and synchronized the switchable NPC MovementV2 foundation to active Studio `Level`, PlaceId `113361902471683`, without merging PR #133.
+- Kept the global default on Legacy while enabling V2 per template for Slime (`SurfaceCrawler`) and Goblin (`GroundRunner` + `LeapExplode`).
+- Hardened invalid-tag fallback, tag propagation, crawler raycast allocation, outer-corner adhesion, Terrain surface policy, LeapExplode cleanup and self-detonation reward suppression.
+- Persisted explicit Legacy movement tags on all other active ground templates; no production flying template exists.
+
+### Validation
+
+- Repo/Studio source hashes match for all ten synchronized scripts, and template tags survived a Play/Edit cycle and clone test.
+- In the forced-Legacy parity harness, all 12 production NPC templates resolved their intended Legacy profile and moved; freeze, impulse, pause and cleanup checks passed.
+- Slime traversed floor, wall, inner/outer corners and ceiling. Client orientation matched the ceiling normal (`dot = 0.9993`), with zero surface acquisition/adhesion failures in the integrated traversal.
+- Goblin armed/leapt/detonated once; LOS, pause, freeze, target-loss, despawn, damage-once, cleanup and reward-suppression context checks passed.
+- Lower/upper layer cache separation, no vertical cross-layer teleport, bridge body clearance and straight/turning tunnel checks passed.
+- Surface stress averages for 1/20/50/100/120 active V2 Slimes were `0.055/0.271/0.668/1.350/1.396 ms` per shared movement tick, with `25/486/1114/1867/2454` surface rays per second and zero failures. The cumulative-session maximum was `8.101 ms`.
+- At 120 NPCs the client received 120/120 finite transforms with unit up vectors. Cleanup left zero active NPCs, stress models, debug objects or Explosion/VFX objects.
+- Final startup reported no MovementV2 error; the pre-existing unrelated `Hybrid Terrain Hex Generator:16` toolbar error remained.
+
+### Runtime cost and architecture
+
+- No new Heartbeat, Stepped, RenderStepped, per-NPC event connection or `_G` dependency was added.
+- Movement continues through the existing single `NpcService` scheduler at `12 Hz`.
+- Surface navigation now reuses one raycast filter per shared tick and excludes runtime NPC/player/VFX folders without per-ray player scans or `RaycastParams` allocation.
+
+### Remaining risks and rollback
+
+- The production map has no persistent crawler geometry tags; untagged floor-like Terrain works, while intended wall/ceiling routes require a separate map-authoring pass.
+- No production flying template exists. A complete natural wave reward/drop run after Goblin self-detonation and full stairs/no-route Pathfinding scenarios remain unverified.
+- PR #133 therefore remains draft.
+- Immediate rollback is to tag Slime/Goblin as `NpcMovementSystem_Legacy`; full Studio rollback uses the `Before PR 133 MovementV2 integration` waypoint/place version, and repo rollback reverts the PR/integration commits.
+
 ## 2026-07-24 - Poziom slide animation integration (PR #134)
 
 ### Summary
@@ -338,6 +897,41 @@
 ### Rollback
 
 - Revert PR #120 and this changelog entry. The added weekly streak fields are backward-compatible and can be ignored; no persistent data migration is required.
+
+## 2026-07-26 - Four Peaks daily login UI review fixes (PR #144)
+
+### Summary
+
+- Rebuilt the daily-login presentation as a responsive seven-day reward calendar without changing `GetDailyLoginState`, `ClaimDailyLoginReward`, reward balance, persistence, or server authority.
+- Kept the reset refresh guard active while a RemoteFunction response is rendered and added a bounded shared retry schedule so a stale boundary response cannot create a response-speed polling loop.
+- Reused `InventoryIconResolver` for material bundles and resolved the authored bundle through the existing `MaterialIcons.materials_icon` contract; the glyph remains a fallback only when the replicated asset folder or value is unavailable.
+
+### Files
+
+- Updated `Four Peaks/StarterPlayer/StarterPlayerScripts/DailyLoginClient.lua`.
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`.
+
+### Studio and validation
+
+- Confirmed the active place and path as `Four Peaks` / `game.StarterPlayer.StarterPlayerScripts.DailyLoginClient`, with `InventoryIconResolver` present beside it.
+- Synchronized the reviewed branch source into active Four Peaks Studio and started Play successfully; the output contained no `DailyLoginClient`, daily-login remote, or icon-resolver error.
+- Confirmed live `WeaponIconReplicator` creates `MaterialIcons.materials_icon`.
+- `git diff --check` and focused static contract checks passed.
+- Studio `screen_capture` and `user_mouse_input` both timed out in the current MCP session, so desktop/mobile screenshots, device-emulator measurements, pointer closing, and live claim-day interaction were not represented as completed.
+
+### Runtime loops, connections, and cost
+
+- The existing client countdown task remains at 1 Hz and only works while `DailyLoginGui` is enabled.
+- At the UTC boundary there can be only one `GetDailyLoginState` request in flight. A stale or failed response retries after 10, 20, 40, then at most every 60 seconds; the explicit minimum gate is 5 seconds.
+- `resetRefreshPending` is cleared only after response rendering and backoff state are complete, preventing `renderState -> updateCountdown` re-entry from scheduling another request.
+- The shared icon resolver is created once for the player-session LocalScript. Its folder invalidation connections are not duplicated by UI reopen or character respawn; the ScreenGui has `ResetOnSpawn=false`.
+- No server loop, remote, persistent-data field, `_G` dependency, or per-object connection was added.
+
+### Risks and rollback
+
+- Device-specific spacing and days 1/4/7 claim animation still require a working visual/input Studio session before manual merge.
+- A client clock substantially ahead of the server can keep showing the boundary refresh state, but requests remain bounded by the 60-second maximum backoff rather than spamming the server.
+- Revert the PR commit and restore the previous Studio `DailyLoginClient` source (or use the `Before PR 144 DailyLogin sync` waypoint). No data migration or server rollback is required.
 
 ## 2026-07-13 - Four Peaks daily login material bundle prevalidation (PR #116)
 

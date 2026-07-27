@@ -6,33 +6,51 @@ Object parity status: `PARTIAL`
 
 ## Purpose
 
-Authored chest-opening reward UI used by `StarterPlayer.StarterPlayerScripts.LocalScript.ChestRewardClient`.
+Authored chest-opening animation UI used by the Level reward flow. The imported viewport hierarchy remains Studio-owned, while runtime scripts add the reward controls and readable item details.
 
 ## Expected Structure
 
 - `ChestOpening` (`ScreenGui`)
-  - Starts disabled in Studio and is enabled by `ChestRewardClient` when `ChestItemEvent` sends `type = "openReward"`.
+  - Starts disabled in Studio and is enabled when `ChestItemEvent` sends `type = "openReward"`.
   - `ViewportFrame` (`ViewportFrame`)
     - `WorldModel` (`WorldModel`)
       - `skrzynia` (`Model`)
         - Has `AnimationController.Animator`.
         - Has `OpenAnimation` (`Animation`) with `AnimationId = rbxassetid://128606196135074`.
-        - Has the animated armature root `Bone`; its authored root motion is transferred to the model pivot by `ChestOpeningRootMotion.client.lua`.
-        - The client plays the full animation and freezes it at the final frame.
+        - Has the animated armature root `Bone`; authored root motion is transferred to the model pivot by `ChestOpeningRootMotion.client.lua`.
   - `Camera` (`Camera`)
-    - Assigned to `ViewportFrame.CurrentCamera` by the client.
+    - Assigned to `ViewportFrame.CurrentCamera` by `ChestRewardClient.client.lua`.
   - `Frame` (`Frame`)
     - `Item` (`ImageLabel`)
-      - Hidden while the chest animation plays.
-      - Receives the rolled item icon after the animation finishes.
-      - Gets a runtime transparent `TakeRewardButton` child so clicking/tapping the item claims the reward.
+      - Hidden while the chest animation starts.
+      - Cycles preview icons during the roll and lands on the server-selected reward.
+      - Gets a transparent runtime claim button so clicking or tapping the item accepts it.
+
+## Runtime Presentation
+
+`ChestRewardClient.client.lua` remains the owner of animation playback, reward reveal timing, claiming and fallback UI.
+
+`ChestRewardPresentation.client.lua` adds a presentation layer to the authored `ChestOpening` GUI:
+
+- dark responsive backdrop,
+- opening status while the animation is playing,
+- rarity-colored reward card after the final reveal,
+- item name and description,
+- exact stat changes from the server payload,
+- stack limit or immediate-reward label,
+- responsive placement for desktop and narrower screens,
+- restyling and positioning of the existing `ChestRewardActions` claim controls.
+
+The presentation controller does not roll rewards, grant items, change pause state or send additional remote requests.
 
 ## Runtime Scripts
 
-- `ChestRewardClient.client.lua` starts the authored animation and controls the reward reveal.
-- `ChestOpeningRootMotion.client.lua` reads the animated root `Bone.Transform` after animation evaluation, applies the same transform to the `skrzynia` model pivot, and clears the bone transform to prevent doubled movement. It does not create a replacement tween or procedural jump.
+- `ChestRewardClient.client.lua` controls the reward flow and authored animation.
+- `ChestRewardPresentation.client.lua` renders the final reward information.
+- `ChestOpeningRootMotion.client.lua` transfers animated root motion to the `skrzynia` model pivot and prevents doubled movement.
 
 ## Notes
 
 - The imported GUI/model hierarchy is not fully mirrored on disk; this manifest documents the live object contract used by code.
-- The client keeps the old generated `ChestRewardGui` as a fallback only when `ChestOpening` is missing.
+- The generated `ChestRewardGui` remains a fallback only when the authored `ChestOpening` GUI is missing.
+- The old pause/chest `Run Stats` panel is intentionally removed. `RunStatsHud.client.lua` now only renders the compact collected-item icons during an active run.

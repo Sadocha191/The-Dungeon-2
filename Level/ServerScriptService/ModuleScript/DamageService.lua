@@ -9,6 +9,23 @@ local RunDefenseState = require(ServerScriptService:WaitForChild("ModuleScript")
 
 local DamageService = {}
 
+local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+if not remotes then
+	remotes = Instance.new("Folder")
+	remotes.Name = "Remotes"
+	remotes.Parent = ReplicatedStorage
+end
+
+local playerHitVfxEvent = remotes:FindFirstChild("PlayerHitVFXEvent")
+if not playerHitVfxEvent or not playerHitVfxEvent:IsA("RemoteEvent") then
+	if playerHitVfxEvent then
+		playerHitVfxEvent:Destroy()
+	end
+	playerHitVfxEvent = Instance.new("RemoteEvent")
+	playerHitVfxEvent.Name = "PlayerHitVFXEvent"
+	playerHitVfxEvent.Parent = remotes
+end
+
 local DEFAULTS = StatsConfig.CloneDefaults()
 local lethalPreventionCallback = nil
 local thornsCallback = nil
@@ -55,6 +72,39 @@ local function getSourceModel(context)
 		end
 	end
 	return nil
+end
+
+local function getSourcePosition(context)
+	local source = getSourceModel(context)
+	if not source then
+		return nil
+	end
+	if source:IsA("BasePart") then
+		return source.Position
+	end
+	if source:IsA("Attachment") then
+		return source.WorldPosition
+	end
+	if source:IsA("Model") then
+		local root = source:FindFirstChild("HumanoidRootPart")
+			or source:FindFirstChild("RootPart")
+			or source.PrimaryPart
+			or source:FindFirstChildWhichIsA("BasePart", true)
+		return root and root.Position or nil
+	end
+	return nil
+end
+
+local function firePlayerHitFeedback(player, amount, context)
+	if amount <= 0 or not player or player.Parent ~= Players then
+		return
+	end
+
+	playerHitVfxEvent:FireClient(player, {
+		amount = amount,
+		sourcePosition = getSourcePosition(context),
+		damageType = typeof(context) == "table" and context.damageType or nil,
+	})
 end
 
 local function isStudioGodModeEnabled()
@@ -134,7 +184,11 @@ function DamageService.Apply(player, amount, context)
 				return amount
 			end
 		end
+
+		local healthBefore = humanoid.Health
 		humanoid:TakeDamage(incoming)
+		local healthDamage = math.max(0, healthBefore - humanoid.Health)
+		firePlayerHitFeedback(player, healthDamage, context)
 	end
 
 	local thorns = math.max(0, getStat(player, "Thorns"))

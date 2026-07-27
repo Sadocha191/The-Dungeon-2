@@ -90,6 +90,10 @@ if not RunStarted then
 	RunStarted.Value = false
 	RunStarted.Parent = ReplicatedStorage
 end
+local bossPhaseActive = false
+RunStarted.Changed:Connect(function()
+	bossPhaseActive = false
+end)
 
 -- Run state
 local run = {} -- [uid] = {startT, pausedTotal, pauseStart, runLevel, runXp, nextXp, runSilver, coinsEarned, kills, ended, banished, pendingLevelUps}
@@ -354,11 +358,6 @@ local function syncLiveMissionProgress(plr: Player, totalSecondsOverride: number
 		local delta = lowHpWholeSeconds - reportedLowHpSeconds
 		r.missionLowHpSecondsReported = lowHpWholeSeconds
 		missionAdd(plr, "LOW_HP_SECONDS", delta)
-	end
-
-	if r.missionBossPhaseReported ~= true and totalSeconds >= 1200 then
-		r.missionBossPhaseReported = true
-		missionAdd(plr, "BOSS_SPAWN_REACHED", 1)
 	end
 
 	local noDamageStreak = tonumber(r.maxNoDamageStreak) or 0
@@ -1385,6 +1384,7 @@ local function notifyBossSpawn()
 	if RunProgressApi.IsConfigured("GetRunSeconds") then
 		spawnSeconds = tonumber(RunProgressApi.GetRunSeconds())
 	end
+	bossPhaseActive = true
 
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr:GetAttribute("RunEnded") ~= true then
@@ -1393,6 +1393,10 @@ local function notifyBossSpawn()
 				r.bossSpawnClock = os.clock()
 				r.bossSpawnRunSeconds = spawnSeconds or runSeconds(plr)
 				r.bossNoHit20Failed = false
+				if r.missionBossPhaseReported ~= true then
+					r.missionBossPhaseReported = true
+					missionAdd(plr, "BOSS_SPAWN_REACHED", 1)
+				end
 			end
 		end
 	end
@@ -1550,6 +1554,8 @@ local function endRunForPlayer(plr: Player, reason: string)
 
 		local bossSpawnAt = tonumber(r.bossSpawnRunSeconds)
 		local bossSpawned = bossSpawnAt ~= nil and bossSpawnAt >= 0
+		local finishedRunForMissions = reason == "Victory"
+			or (reason == "Defeated" and seconds >= 60)
 		local extra = {
 			coinsGained = coinsGained,
 			runCoinsEarned = runCoinsEarned,
@@ -1574,6 +1580,7 @@ local function endRunForPlayer(plr: Player, reason: string)
 			spells3 = spellsCount >= 3,
 			hp50plusWin = (not diedThisRun) and (r.minHpRatio or 1) >= 0.50,
 			winStreak3 = (r.winStreak or 0) >= 3,
+			finishedRun = finishedRunForMissions,
 		}
 
 		pcall(function() MissionProgress.OnRunComplete(plr, 0, seconds, diedThisRun, extra) end)
@@ -1636,6 +1643,13 @@ Players.PlayerAdded:Connect(function(plr: Player)
 	r.banished = {}
 	r.pendingLevelUps = 0
 	plr:SetAttribute("RunRerollsUsed", 0)
+	if RunStarted.Value == true and bossPhaseActive then
+		r.bossSpawnClock = os.clock()
+		r.bossSpawnRunSeconds = runSeconds(plr)
+		r.bossNoHit20Failed = false
+		r.missionBossPhaseReported = true
+		missionAdd(plr, "BOSS_SPAWN_REACHED", 1)
+	end
 
 	-- reset spell levels for this run
 	if SpellDefs and SpellDefs.SPELLS then

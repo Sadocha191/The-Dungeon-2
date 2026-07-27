@@ -22,6 +22,7 @@ end
 
 local PlayerData = require(findModule("PlayerData") or error("[WeaponCombat] Missing PlayerData"))
 local NpcService = require(findModule("NpcService") or error("[WeaponCombat] Missing NpcService"))
+local DamageIndicatorService = require(findModule("DamageIndicatorService") or error("[WeaponCombat] Missing DamageIndicatorService"))
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript")
 local WeaponConfigs = moduleFolder and moduleFolder:FindFirstChild("WeaponConfigs") and require(moduleFolder.WeaponConfigs) or nil
 
@@ -40,6 +41,27 @@ local AOE_RADIUS_BY_TYPE = {
 	Halberd = 6.5,
 }
 
+local ELEMENT_ALIASES = {
+	Electric = "Electricity",
+	Lightning = "Electricity",
+	Wind = "Air",
+	Nature = "Earth",
+	Holy = "Light",
+	Dark = "Void",
+	Shadow = "Void",
+}
+
+local VALID_ELEMENTS = {
+	Physical = true,
+	Fire = true,
+	Electricity = true,
+	Air = true,
+	Water = true,
+	Earth = true,
+	Void = true,
+	Light = true,
+}
+
 local function getLoadoutEntry(plr: Player)
 	local data = PlayerData.Get(plr)
 	if not data or typeof(data.Loadout) ~= "table" then return nil end
@@ -52,6 +74,20 @@ local function getWeaponDef(entry)
 		return WeaponConfigs.Get(id)
 	end
 	return nil
+end
+
+local function normalizeElement(value): string
+	local element = tostring(value or "")
+	element = ELEMENT_ALIASES[element] or element
+	if VALID_ELEMENTS[element] then
+		return element
+	end
+	return "Physical"
+end
+
+local function resolveWeaponElement(entry): string
+	local def = getWeaponDef(entry)
+	return normalizeElement(def and def.element)
 end
 
 local function resolveWeaponType(entry)
@@ -199,7 +235,9 @@ local function startLoop(plr: Player)
 				continue
 			end
 
+			local weaponId = tostring(entry.id or entry.Id or "")
 			local wType = resolveWeaponType(entry)
+			local element = resolveWeaponElement(entry)
 			local stats = calcAttackStats(plr, entry)
 			local baseCd = CD_BY_TYPE[wType] or 0.7
 			local cd = baseCd / stats.attackSpeedMult
@@ -246,9 +284,11 @@ local function startLoop(plr: Player)
 					end
 					dealt = math.max(1, math.floor(dealt + 0.5))
 
-					local applied = NpcService.ApplyDamage(enemyModel, dealt, {
+					local applied = DamageIndicatorService.ApplyDamage(enemyModel, dealt, {
 						player = plr,
 						crit = isCrit,
+						element = element,
+						sourceId = weaponId,
 					})
 					if applied > 0 then
 						if enemyHitPos and stats.knockbackPower > 0 then
@@ -269,7 +309,6 @@ local function startLoop(plr: Player)
 				hum.Health = math.min(hum.MaxHealth, hum.Health + totalHeal)
 			end
 
-			local weaponId = entry.id or entry.Id or ""
 			VFXEvent:FireAllClients({
 				weaponId = weaponId,
 				pos = enemyPos,
@@ -304,4 +343,3 @@ for _, plr in ipairs(Players:GetPlayers()) do
 		startLoop(plr)
 	end
 end
-
