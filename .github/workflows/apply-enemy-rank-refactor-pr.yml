@@ -1,0 +1,42 @@
+name: Apply enemy rank refactor from PR
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'feature/enemy-ranks-resistances-reward-chests'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Apply guarded repository patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64, gzip, re, subprocess, sys
+          workflow = Path('.github/workflows/apply-enemy-rank-refactor.yml').read_text()
+          match = re.search(r"printf '%s' '([^']+)' \\| base64", workflow)
+          if not match:
+              raise SystemExit('Embedded patch payload was not found')
+          target = Path('/tmp/patch_enemy_rank_refactor.py')
+          target.write_bytes(gzip.decompress(base64.b64decode(match.group(1))))
+          subprocess.run([sys.executable, str(target)], check=True)
+          PY
+      - name: Commit refactor
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Implement enemy ranks, resistances, and reward chests'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
