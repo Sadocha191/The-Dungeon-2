@@ -50,13 +50,13 @@ RunSpawnConfig.SWARM = {
 	maxLivingEnemies = 120,
 }
 
-RunSpawnConfig.POST_ELITE_SPAWN = {
+RunSpawnConfig.POST_MINIBOSS_SPAWN = {
 	catchupDuration = 10,
 	maxPerTick = 4,
 }
 
 RunSpawnConfig.IMPORTANT_ENCOUNTER = {
-	elite = {
+	miniBoss = {
 		maxAliveMultiplier = 0.58,
 		intervalMultiplier = 1.35,
 		burstMultiplier = 0.70,

@@ -165,8 +165,8 @@ local function applyFreeze(model, duration)
 	NpcService.ApplyFreeze(model, duration)
 end
 
-local function addImpulse(model, impulse)
-	NpcService.AddImpulse(model, impulse)
+local function addImpulse(model, impulse, controlKind)
+	NpcService.AddImpulse(model, impulse, controlKind)
 end
 
 local function getVisualIntensity(stats)

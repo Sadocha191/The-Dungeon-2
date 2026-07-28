@@ -7,6 +7,7 @@ local modules = ServerScriptService:WaitForChild("ModuleScript")
 local NpcService = require(modules:WaitForChild("NpcService"))
 local RunProgressApi = require(modules:WaitForChild("RunProgressApi"))
 local WorldBounds = require(modules:WaitForChild("WorldBounds"))
+local ChestRewardApi = require(modules:WaitForChild("ChestRewardApi"))
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:FindFirstChild("ModuleScript")
 	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
@@ -320,15 +321,12 @@ local function finishChallenge(monument, success)
 			monument.label.Text = "REWARD"
 		end
 
-		local spawnRewardChest = _G.SpawnRewardChestForPlayer
-		if type(spawnRewardChest) == "function" then
-			spawnRewardChest(monument.owner, monument.rewardPos, {
-				recipeId = monument.recipeId,
-				recipeRarity = monument.recipeRarity,
-				rewardLabel = string.format("Recipe: %s", monument.recipeName),
-				accentColor = getRarityColor(monument.recipeRarity),
-			})
-		end
+		ChestRewardApi.SpawnForPlayer(monument.owner, monument.rewardPos, {
+			recipeId = monument.recipeId,
+			recipeRarity = monument.recipeRarity,
+			rewardLabel = string.format("Recipe: %s", monument.recipeName),
+			accentColor = getRarityColor(monument.recipeRarity),
+		})
 
 		broadcast({
 			type = "heroMonumentRewardReady",

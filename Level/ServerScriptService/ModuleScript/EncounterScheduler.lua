@@ -109,21 +109,15 @@ function EncounterScheduler:GetPool(elapsedSeconds: number)
 	if elapsedSeconds < 90 then
 		return { { "Slime", 100 } }
 	elseif elapsedSeconds < 210 then
-		return { { "Slime", 58 }, { "Zombie", 42 } }
+		return { { "Slime", 55 }, { "Bat", 25 }, { "Goblin", 20 } }
 	elseif elapsedSeconds < 360 then
-		return { { "Slime", 18 }, { "Zombie", 38 }, { "Skeleton", 28 }, { "Grzyb", 16 } }
+		return { { "Slime", 25 }, { "Bat", 20 }, { "Goblin", 30 }, { "Grzyb", 25 } }
 	elseif elapsedSeconds < 540 then
-		return { { "Zombie", 24 }, { "Skeleton", 26 }, { "Goblin", 26 }, { "Grzyb", 16 }, { "Slime", 8 } }
+		return { { "Bat", 18 }, { "Goblin", 25 }, { "Grzyb", 22 }, { "Stump", 20 }, { "Cauldron", 15 } }
 	elseif elapsedSeconds < 720 then
-		return { { "Skeleton", 22 }, { "Goblin", 28 }, { "Warewolf", 24 }, { "Zombie", 16 }, { "Grzyb", 10 } }
-	elseif elapsedSeconds < 900 then
-		return { { "Goblin", 22 }, { "Warewolf", 23 }, { "Harp", 19 }, { "Demon", 17 }, { "Skeleton", 13 }, { "Grzyb", 6 } }
-	elseif elapsedSeconds < 1080 then
-		return { { "Warewolf", 22 }, { "Harp", 20 }, { "Demon", 20 }, { "LandShark", 20 }, { "Knight", 18 } }
-	elseif elapsedSeconds < 1200 then
-		return { { "Harp", 18 }, { "Demon", 18 }, { "LandShark", 18 }, { "Knight", 18 }, { "Golem", 14 }, { "Ent", 14 } }
+		return { { "Goblin", 20 }, { "Grzyb", 15 }, { "Stump", 25 }, { "Cauldron", 20 }, { "Ent_Fat", 20 } }
 	else
-		return { { "Goblin", 10 }, { "Warewolf", 16 }, { "Harp", 14 }, { "Demon", 16 }, { "LandShark", 16 }, { "Golem", 12 }, { "Knight", 10 }, { "Ent", 6 } }
+		return { { "Slime", 8 }, { "Bat", 12 }, { "Goblin", 18 }, { "Grzyb", 10 }, { "Stump", 20 }, { "Cauldron", 15 }, { "Ent_Fat", 17 } }
 	end
 end
 

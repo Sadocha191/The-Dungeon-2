@@ -107,7 +107,7 @@ local function getTargetPriority(target): number
 	if target and target.isBoss then
 		return 2
 	end
-	if target and target.isElite then
+	if target and target.isMiniBoss then
 		return 1
 	end
 	return 0
@@ -182,23 +182,23 @@ end
 
 local function resolveFlags(model: Model?, existing)
 	local isBoss = false
-	local isElite = false
+	local isMiniBoss = false
 
 	if model then
 		isBoss = model:GetAttribute(ATTR.IsBoss) == true or string.sub(model.Name, 1, 5) == "Boss_"
-		isElite = model:GetAttribute(ATTR.IsElite) == true
+		isMiniBoss = model:GetAttribute(ATTR.IsMiniBoss) == true
 	end
 
 	if existing then
 		if not isBoss then
 			isBoss = existing.isBoss == true
 		end
-		if not isElite then
-			isElite = existing.isElite == true
+		if not isMiniBoss then
+			isMiniBoss = existing.isMiniBoss == true
 		end
 	end
 
-	return isElite, isBoss
+	return isMiniBoss, isBoss
 end
 
 local function isValidTarget(target, now: number): boolean
@@ -211,7 +211,7 @@ local function isValidTarget(target, now: number): boolean
 		return false
 	end
 
-	if not target.isElite and not target.isBoss then
+	if not target.isMiniBoss and not target.isBoss then
 		return false
 	end
 
@@ -312,12 +312,12 @@ batchEvent.OnClientEvent:Connect(function(payload)
 			model = item.model
 		end
 
-		local isElite, isBoss = resolveFlags(model, existing)
+		local isMiniBoss, isBoss = resolveFlags(model, existing)
 		if seen then
 			seen[id] = true
 		end
 
-		if not isElite and not isBoss then
+		if not isMiniBoss and not isBoss then
 			trackedTargets[id] = nil
 			continue
 		end
@@ -327,7 +327,7 @@ batchEvent.OnClientEvent:Connect(function(payload)
 		}
 
 		target.model = model
-		target.isElite = isElite
+		target.isMiniBoss = isMiniBoss
 		target.isBoss = isBoss
 		target.state = typeof(item.state) == "string" and item.state or target.state
 		target.hp = typeof(item.hp) == "number" and item.hp or target.hp

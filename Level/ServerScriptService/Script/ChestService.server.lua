@@ -10,6 +10,7 @@ local PickupToastService = require(ServerScriptService:WaitForChild("ModuleScrip
 local RunProgressApi = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunProgressApi"))
 local WorldBounds = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WorldBounds"))
 local ChestItemService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("Items"):WaitForChild("ChestItemService"))
+local ChestRewardApi = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("ChestRewardApi"))
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:FindFirstChild("ModuleScript")
 	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
@@ -75,12 +76,13 @@ local nextChestId = 0
 local recipeRng = Random.new()
 local revealRng = Random.new()
 
+local assets = ReplicatedStorage:WaitForChild("Assets", 15)
+assert(assets, "[ChestService] Missing ReplicatedStorage.Assets")
+local chestAssetTemplate = assets:WaitForChild("Chest", 15)
+assert(chestAssetTemplate and chestAssetTemplate:IsA("Model"), "[ChestService] ReplicatedStorage.Assets.Chest must be a Model")
+
 local function getWorldChestTemplate()
-	local template = workspace:FindFirstChild(WORLD_CHEST_TEMPLATE_NAME)
-	if template and template:IsA("Model") then
-		return template
-	end
-	return nil
+	return chestAssetTemplate
 end
 
 local function resolveChestYawRadians(config)
@@ -305,17 +307,6 @@ local function groundPointFromXZ(pos: Vector3)
 	return pos
 end
 
-local function newPart(parent, name, size, color, material)
-	local p = Instance.new("Part")
-	p.Name = name
-	p.Size = size
-	p.Color = color
-	p.Material = material
-	p.Anchored = true
-	p.Parent = parent
-	return p
-end
-
 local function getFirstBasePart(root)
 	for _, descendant in ipairs(root:GetDescendants()) do
 		if descendant:IsA("BasePart") then
@@ -403,6 +394,10 @@ local function createChestFromWorldTemplate(pos, idx, config)
 		opened = false,
 		forceFree = config.forceFree == true,
 		ownerUserId = tonumber(config.ownerUserId),
+		eligibleUserIds = typeof(config.eligibleUserIds) == "table" and table.clone(config.eligibleUserIds) or nil,
+		claimedUserIds = {},
+		claimingUserIds = {},
+		expiresAt = tonumber(config.expiresAfter) and (os.clock() + math.max(5, tonumber(config.expiresAfter) or 60)) or nil,
 		countsForScaling = config.countsForScaling ~= false,
 		recipeId = typeof(config.recipeId) == "string" and config.recipeId or nil,
 		recipeRarity = typeof(config.recipeRarity) == "string" and config.recipeRarity or nil,
@@ -648,78 +643,9 @@ end
 
 local function createChestModel(pos, idx, config)
 	config = config or {}
-	local accentColor = typeof(config.accentColor) == "Color3" and config.accentColor or Color3.fromRGB(213, 168, 69)
-	local coreColor = typeof(config.coreColor) == "Color3" and config.coreColor or accentColor
-	if config.forceFree == true and not config.recipeId and typeof(config.coreColor) ~= "Color3" then
-		coreColor = Color3.fromRGB(109, 255, 157)
-	end
-
-	local worldTemplateChest = createChestFromWorldTemplate(pos, idx, config)
-	if worldTemplateChest then
-		return worldTemplateChest
-	end
-
-	local model = Instance.new("Model")
-	model.Name = tostring(config.name or ("Chest_%d"):format(idx))
-	local chestFrame = CFrame.new(
-		pos + Vector3.new(0, GENERATED_CHEST_BOTTOM_OFFSET - CHEST_HEIGHT + CHEST_GROUND_CLEARANCE, 0)
-	) * CFrame.Angles(0, resolveChestYawRadians(config), 0)
-
-	local base = newPart(model, "Base", Vector3.new(5.2, 1.2, 4.2), Color3.fromRGB(86, 56, 35), Enum.Material.WoodPlanks)
-	base.CFrame = chestFrame * CFrame.new(0, -1.4, 0)
-	base.CanCollide = true
-
-	local body = newPart(model, "Body", Vector3.new(4.4, 2, 3.4), Color3.fromRGB(121, 80, 44), Enum.Material.Wood)
-	body.CFrame = chestFrame
-	body.CanCollide = true
-
-	local band = newPart(model, "Band", Vector3.new(4.5, 0.4, 3.6), accentColor, Enum.Material.Metal)
-	band.CFrame = chestFrame * CFrame.new(0, 0.75, 0)
-	band.CanCollide = false
-
-	local lid = newPart(model, "Lid", Vector3.new(4.6, 0.9, 3.6), Color3.fromRGB(103, 67, 38), Enum.Material.Wood)
-	lid.CFrame = chestFrame * CFrame.new(0, 1.5, -0.2)
-	lid.CanCollide = true
-
-	local core = newPart(model, "Core", Vector3.new(1.2, 1.2, 1.2), coreColor, Enum.Material.Neon)
-	core.Shape = Enum.PartType.Ball
-	core.CFrame = chestFrame * CFrame.new(0, 1.3, 0.8)
-	core.CanCollide = false
-	core.CanTouch = false
-	core.CanQuery = false
-
-	local light = Instance.new("PointLight")
-	light.Color = coreColor
-	light.Brightness = 1.8
-	light.Range = 14
-	light.Parent = core
-
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.Name = "OpenPrompt"
-	prompt.ActionText = tostring(config.actionText or "Open Chest")
-	prompt.ObjectText = tostring(config.objectText or "")
-	prompt.HoldDuration = 0
-	prompt.MaxActivationDistance = 12
-	prompt.RequiresLineOfSight = false
-	prompt.Parent = core
-
-	model.PrimaryPart = core
-	model.Parent = chestsFolder
-
-	return {
-		model = model,
-		core = core,
-		lid = lid,
-		prompt = prompt,
-		opened = false,
-		forceFree = config.forceFree == true,
-		ownerUserId = tonumber(config.ownerUserId),
-		countsForScaling = config.countsForScaling ~= false,
-		recipeId = typeof(config.recipeId) == "string" and config.recipeId or nil,
-		recipeRarity = typeof(config.recipeRarity) == "string" and config.recipeRarity or nil,
-		specialRewardOnly = config.specialRewardOnly == true,
-		rewardLabel = typeof(config.rewardLabel) == "string" and config.rewardLabel or nil,
-	}
+	local chest = createChestFromWorldTemplate(pos, idx, config)
+	assert(chest, "[ChestService] Failed to clone ReplicatedStorage.Assets.Chest")
+	return chest
 end
 
 local handleOpen
@@ -733,6 +659,15 @@ local function spawnChestInstance(pos: Vector3, config)
 		handleOpen(chest, plr)
 	end)
 	table.insert(chests, chest)
+	if chest.expiresAt then
+		task.delay(math.max(0.1, chest.expiresAt - os.clock()), function()
+			if chest.model and chest.model.Parent then
+				chest.opened = true
+				if chest.prompt then chest.prompt.Enabled = false end
+				chest.model:Destroy()
+			end
+		end)
+	end
 	return chest
 end
 
@@ -742,79 +677,96 @@ local function isAlive(plr)
 	return hum and hum.Health > 0 and plr:GetAttribute("RunEnded") ~= true
 end
 
-handleOpen = function(chest, plr)
-	if not chest or chest.opened then
-		return
-	end
-	if not RunStarted.Value or PauseState.Value then
-		return
-	end
-	if not plr or not plr.Parent or not isAlive(plr) then
-		return
-	end
-	if chest.ownerUserId and chest.ownerUserId ~= plr.UserId then
-		return
-	end
+local function isSharedChest(chest): boolean
+	return typeof(chest.eligibleUserIds) == "table"
+end
 
-	print(string.format("[ChestService] Chest open requested by %s", plr.Name))
-	ensureDefaults(plr)
-
-	local cost = getChestCost(plr)
-	local freeChance = computeFreeChance(plr)
-	local openedForFree = chest.forceFree == true or (math.random() < freeChance)
-
-	if not openedForFree then
-		local canSpend = RunProgressApi.TrySpendRunCoins(plr, cost)
-		if not canSpend then
-			WaveStatusEvent:FireClient(plr, {
-				type = "chestFail",
-				cost = cost,
-				required = cost,
-				freeChancePct = math.floor(freeChance * 100 + 0.5),
-			})
-			return
+local function allSharedClaimsComplete(chest): boolean
+	if not isSharedChest(chest) then
+		return chest.opened == true
+	end
+	for userId in pairs(chest.eligibleUserIds) do
+		if chest.claimedUserIds[userId] ~= true then
+			return false
 		end
 	end
+	return true
+end
 
+local function finishChestVisual(chest)
 	chest.opened = true
-	if chest.prompt then
-		chest.prompt.Enabled = false
-	end
-
+	if chest.prompt then chest.prompt.Enabled = false end
 	if chest.lid and chest.lid:IsA("BasePart") then
 		chest.lid.CFrame = chest.lid.CFrame * CFrame.new(0, 0.5, -0.8) * CFrame.Angles(math.rad(-28), 0, 0)
 	end
 	if chest.core and chest.core:IsA("BasePart") then
 		chest.core.Color = Color3.fromRGB(93, 255, 137)
 	end
+	task.delay(1.8, function()
+		if chest.model and chest.model.Parent then chest.model:Destroy() end
+	end)
+end
+
+handleOpen = function(chest, plr)
+	if not chest or chest.opened then return end
+	if not RunStarted.Value or PauseState.Value then return end
+	if not plr or not plr.Parent or not isAlive(plr) then return end
+	if chest.ownerUserId and chest.ownerUserId ~= plr.UserId then return end
+
+	local shared = isSharedChest(chest)
+	if shared then
+		if chest.eligibleUserIds[plr.UserId] ~= true then return end
+		if chest.claimedUserIds[plr.UserId] == true or chest.claimingUserIds[plr.UserId] == true then return end
+		chest.claimingUserIds[plr.UserId] = true
+	end
+
+	ensureDefaults(plr)
+	local cost = getChestCost(plr)
+	local freeChance = computeFreeChance(plr)
+	local openedForFree = chest.forceFree == true or (math.random() < freeChance)
+	if not openedForFree then
+		local canSpend = RunProgressApi.TrySpendRunCoins(plr, cost)
+		if not canSpend then
+			if shared then chest.claimingUserIds[plr.UserId] = nil end
+			WaveStatusEvent:FireClient(plr, { type = "chestFail", cost = cost, required = cost, freeChancePct = math.floor(freeChance * 100 + 0.5) })
+			return
+		end
+	end
+
+	if not shared then
+		chest.opened = true
+		if chest.prompt then chest.prompt.Enabled = false end
+	end
 
 	local rewardName = nil
 	local rarity = "Common"
 	local foundRecipeId, recipeState = nil, nil
 	local reward = nil
-
 	if chest.recipeId then
 		foundRecipeId, recipeState = awardRecipeDiscovery(plr, chest.recipeId)
 		local recipeDef = foundRecipeId and CraftingConfig.GetRecipe(foundRecipeId) or nil
 		rarity = chest.recipeRarity or (recipeDef and recipeDef.rarity) or "Common"
 		rewardName = chest.rewardLabel or ((recipeDef and recipeDef.weaponId) or foundRecipeId or "Recipe")
 	else
-		local rewardDefinition, rewardDetail = ChestItemService.OpenReward(plr, {
-			SourceName = getChestSourceName(chest),
-		})
+		local rewardDefinition, rewardDetail = ChestItemService.OpenReward(plr, { SourceName = getChestSourceName(chest) })
 		if not rewardDefinition or not rewardDetail then
-			chest.opened = false
-			if chest.prompt then
-				chest.prompt.Enabled = true
+			if shared then
+				chest.claimingUserIds[plr.UserId] = nil
+			else
+				chest.opened = false
+				if chest.prompt then chest.prompt.Enabled = true end
 			end
 			return
 		end
 		reward = rewardDefinition
 		rarity = rewardDetail.Rarity or rewardDefinition.Rarity or "Common"
 		rewardName = rewardDefinition.Name or rewardDefinition.label or "Reward"
-		print(string.format("[ChestService] Chest paused run for %s", plr.Name))
 	end
 
+	if shared then
+		chest.claimingUserIds[plr.UserId] = nil
+		chest.claimedUserIds[plr.UserId] = true
+	end
 	if chest.countsForScaling ~= false then
 		setNumAttr(plr, "ChestOpenedCount", getNumAttr(plr, "ChestOpenedCount", 0) + 1)
 	end
@@ -834,35 +786,25 @@ handleOpen = function(chest, plr)
 		local recipeCopies = recipeState and recipeState.copies or 1
 		PickupToastService.PushRecipe(plr, foundRecipeId, string.format("Weapon Schematic - Tier %d", tier), 1)
 		WaveStatusEvent:FireClient(plr, {
-			type = "rewardReveal",
-			revealKind = "chest",
-			headerText = "Chest Draw",
-			sourceName = getChestSourceName(chest),
-			itemName = rewardName,
-			rarity = rarity,
+			type = "rewardReveal", revealKind = "chest", headerText = "Chest Draw", sourceName = getChestSourceName(chest),
+			itemName = rewardName, rarity = rarity,
 			description = string.format("Weapon schematic secured. Copies: %d. Current tier: %d.", recipeCopies, tier),
 			detailText = getRewardDetailText(chest, openedForFree, chest.forceFree == true and 0 or cost),
-			rollDuration = 1.05,
-			holdDuration = 1.9,
-			candidates = buildRecipeRevealCandidates(foundRecipeId),
+			rollDuration = 1.05, holdDuration = 1.9, candidates = buildRecipeRevealCandidates(foundRecipeId),
 		})
 		WaveStatusEvent:FireClient(plr, {
-			type = "recipeFound",
-			recipeId = foundRecipeId,
+			type = "recipeFound", recipeId = foundRecipeId,
 			recipeName = recipeDef and recipeDef.weaponId or foundRecipeId,
-			copies = recipeCopies,
-			tier = tier,
+			copies = recipeCopies, tier = tier,
 			rarity = recipeDef and recipeDef.rarity or chest.recipeRarity,
 		})
 	elseif reward then
 		print(string.format("[ChestService] Rolled chest item %s (%s) for %s", rewardName, rarity, plr.Name))
 	end
 
-	task.delay(1.8, function()
-		if chest.model and chest.model.Parent then
-			chest.model:Destroy()
-		end
-	end)
+	if not shared or allSharedClaimsComplete(chest) then
+		finishChestVisual(chest)
+	end
 end
 
 local function spawnChestsForRun()
@@ -897,17 +839,11 @@ _G.PrepareRunChests = function()
 	return #chests
 end
 
-function _G.SpawnRewardChestForPlayer(plr: Player, pos: Vector3, config)
-	if not plr or not plr.Parent then
-		return nil
-	end
-
+local function normalizeRewardChestConfig(config)
 	local chestConfig = typeof(config) == "table" and table.clone(config) or {}
 	chestConfig.name = chestConfig.name or ("RewardChest_%d"):format(nextChestId + 1)
 	chestConfig.forceFree = true
-	chestConfig.ownerUserId = plr.UserId
 	chestConfig.countsForScaling = false
-
 	if chestConfig.recipeId then
 		local recipeDef = CraftingConfig.GetRecipe(chestConfig.recipeId)
 		chestConfig.recipeRarity = chestConfig.recipeRarity or (recipeDef and recipeDef.rarity) or "Common"
@@ -920,9 +856,12 @@ function _G.SpawnRewardChestForPlayer(plr: Player, pos: Vector3, config)
 	else
 		chestConfig.actionText = chestConfig.actionText or "Claim Chest"
 	end
-
-	return spawnChestInstance(pos, chestConfig)
+	return chestConfig
 end
+
+ChestRewardApi.Configure(function(pos: Vector3, config)
+	return spawnChestInstance(pos, normalizeRewardChestConfig(config))
+end)
 
 Players.PlayerAdded:Connect(function(plr)
 	ensureDefaults(plr)

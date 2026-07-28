@@ -118,10 +118,14 @@ local function isCombatPlayerActive(plr: Player): boolean
 end
 
 local function isEliteEnemy(enemyModel: Model): boolean
-	if enemyModel:GetAttribute("IsElite") == true then
-		return true
+	local rank = enemyModel:GetAttribute("EnemyRank")
+	if typeof(rank) == "string" and rank ~= "" then
+		return rank ~= "Normal"
 	end
-	return string.sub(enemyModel.Name, 1, 5) == "Boss_"
+	return enemyModel:GetAttribute("IsElite") == true
+		or enemyModel:GetAttribute("IsMiniBoss") == true
+		or enemyModel:GetAttribute("IsBoss") == true
+		or string.sub(enemyModel.Name, 1, 5) == "Boss_"
 end
 
 local function getEntryStat(entry, keys: {string}): number

@@ -7,6 +7,7 @@ local DEBUG_GLOBALS = {
 	"DebugSetAutoMobSpawnsEnabled",
 	"DebugForceSpawnMob",
 	"DebugForceEliteSpawn",
+	"DebugForceMiniBossSpawn",
 	"DebugForceBossSpawn",
 	"DebugClearEnemies",
 }
@@ -14,11 +15,11 @@ local DEBUG_GLOBALS = {
 function WaveDebugApi.Register(api)
 	assert(RunService:IsStudio(), "[WaveDebugApi] Debug API can only be registered in Studio")
 	assert(type(api) == "table", "[WaveDebugApi] api table is required")
-
 	_G.DebugAreAutoMobSpawnsEnabled = api.areAutoMobSpawnsEnabled
 	_G.DebugSetAutoMobSpawnsEnabled = api.setAutoMobSpawnsEnabled
 	_G.DebugForceSpawnMob = api.forceSpawnMob
 	_G.DebugForceEliteSpawn = api.forceEliteSpawn
+	_G.DebugForceMiniBossSpawn = api.forceMiniBossSpawn
 	_G.DebugForceBossSpawn = api.forceBossSpawn
 	_G.DebugClearEnemies = api.clearEnemies
 end
