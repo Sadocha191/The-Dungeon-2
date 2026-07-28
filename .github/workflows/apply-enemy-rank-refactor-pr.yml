@@ -36,12 +36,29 @@ jobs:
                   raise SystemExit(f"Expected one marker in {path}, found {count}: {old[:100]!r}")
               path.write_text(text.replace(old, new, 1))
 
+          def add_to_mob_block(path_string, mob_name, anchor, addition):
+              path = Path(path_string)
+              text = path.read_text()
+              start_marker = f"\t{mob_name} = {{"
+              start = text.find(start_marker)
+              if start < 0:
+                  raise SystemExit(f"Missing mob block: {mob_name}")
+              end = text.find("\n\t},", start)
+              if end < 0:
+                  raise SystemExit(f"Unterminated mob block: {mob_name}")
+              block = text[start:end]
+              if addition.strip() in block:
+                  return
+              if block.count(anchor) != 1:
+                  raise SystemExit(f"Expected one anchor in {mob_name}, found {block.count(anchor)}")
+              block = block.replace(anchor, anchor + addition, 1)
+              path.write_text(text[:start] + block + text[end:])
+
           replace_once(
               'Level/ReplicatedStorage/ModuleScripts/NpcShared.lua',
               '\tMobType = "MobType",\n\tEnemyRank = "EnemyRank",',
               '\tMobType = "MobType",\n\tEnemyId = "EnemyId",\n\tEnemyRank = "EnemyRank",',
           )
-
           replace_once(
               'Level/ServerScriptService/ModuleScript/NpcService.lua',
               '\tsetAttributeIfChanged(model, ATTR.MobType, mobType)\n\tsetAttributeIfChanged(model, ATTR.EnemyRank, npc.enemyRank)',
@@ -53,7 +70,6 @@ jobs:
               'local GENERATED_CHEST_BOTTOM_OFFSET = 2\nlocal WORLD_CHEST_TEMPLATE_NAME = "skrzynia"\n',
               '',
           )
-
           replace_once(
               'Level/ServerScriptService/Script/ChestService.server.lua',
               '''local function prepareWorldChestClone(model)\n\tfor _, descendant in ipairs(model:GetDescendants()) do\n\t\tif descendant:IsA("BasePart") then\n\t\t\tdescendant.Anchored = true\n\t\t\tdescendant.CanTouch = false\n\t\t\tif descendant.Name == "RootPart" and descendant.Transparency >= 1 then\n\t\t\t\tdescendant.CanCollide = false\n\t\t\t\tdescendant.CanQuery = false\n\t\t\tend\n\t\tend\n\tend\nend''',
@@ -61,25 +77,29 @@ jobs:
           )
 
           mob_config = 'Level/ServerScriptService/ModuleScript/MobConfig.lua'
-          replace_once(
+          add_to_mob_block(
               mob_config,
-              '''\t\tpreferredFlightAltitude = 10,\n\t\tresistanceProfile = "FlyingBeast",''',
-              '''\t\tpreferredFlightAltitude = 10,\n\t\tidleAnimationId = "rbxassetid://77439435590958",\n\t\trunAnimationId = "rbxassetid://77439435590958",\n\t\tresistanceProfile = "FlyingBeast",''',
+              'Bat',
+              '\t\tpreferredFlightAltitude = 10,',
+              '\n\t\tidleAnimationId = "rbxassetid://77439435590958",\n\t\trunAnimationId = "rbxassetid://77439435590958",',
           )
-          replace_once(
+          add_to_mob_block(
               mob_config,
-              '''\t\tcoins = 3,\n\t\tmovementProfile = "GroundSmall",\n\t\tresistanceProfile = "MetalConstruct",''',
-              '''\t\tcoins = 3,\n\t\tmovementProfile = "GroundSmall",\n\t\trunAnimationId = "rbxassetid://92098878453446",\n\t\tresistanceProfile = "MetalConstruct",''',
+              'Cauldron',
+              '\t\tmovementProfile = "GroundSmall",',
+              '\n\t\trunAnimationId = "rbxassetid://92098878453446",',
           )
-          replace_once(
+          add_to_mob_block(
               mob_config,
-              '''\t\txp = 15,\n\t\tcoins = 3,\n\t\tmovementProfile = "GroundSmall",\n\t\tresistanceProfile = "Wood",''',
-              '''\t\txp = 15,\n\t\tcoins = 3,\n\t\tmovementProfile = "GroundSmall",\n\t\trunAnimationId = "rbxassetid://98960191123613",\n\t\tresistanceProfile = "Wood",''',
+              'Stump',
+              '\t\tmovementProfile = "GroundSmall",',
+              '\n\t\trunAnimationId = "rbxassetid://98960191123613",',
           )
-          replace_once(
+          add_to_mob_block(
               mob_config,
-              '''\t\tfacingYawDegrees = -90,\n\t\tmovementProfile = "GroundLarge",\n\t\tresistanceProfile = "Wood",''',
-              '''\t\tfacingYawDegrees = -90,\n\t\tmovementProfile = "GroundLarge",\n\t\trunAnimationId = "rbxassetid://71526519880141",\n\t\tresistanceProfile = "Wood",''',
+              'Ent_Fat',
+              '\t\tmovementProfile = "GroundLarge",',
+              '\n\t\trunAnimationId = "rbxassetid://71526519880141",',
           )
 
           wave_controller = 'Level/ServerScriptService/Script/Model/WaveController.lua'
@@ -106,7 +126,7 @@ jobs:
               '''local function collectAnimations(model: Model, stateName: string): {Animation}\n\tlocal list = {}\n\tlocal seen = {}\n\tlocal names = SEARCH_NAMES[stateName] or { stateName }\n\tlocal configuredAttribute = CONFIGURED_ANIMATION_ATTRIBUTE_BY_STATE[stateName]\n\tlocal configuredId = configuredAttribute and model:GetAttribute(configuredAttribute) or nil\n\tif typeof(configuredId) == "number" then\n\t\tconfiguredId = tostring(math.floor(configuredId))\n\tend\n\tif typeof(configuredId) == "string" and configuredId ~= "" then\n\t\tif string.match(configuredId, "^%d+$") then\n\t\t\tconfiguredId = "rbxassetid://" .. configuredId\n\t\tend\n\t\tlocal configuredAnimation = Instance.new("Animation")\n\t\tconfiguredAnimation.Name = "Configured_" .. stateName\n\t\tconfiguredAnimation.AnimationId = configuredId\n\t\ttable.insert(list, configuredAnimation)\n\tend\n\n\tfor _, descendant in ipairs(model:GetDescendants()) do''',
           )
 
-          temporary_paths = [
+          for path_string in [
               '.github/patches/enemy-rank-refactor.part01.txt',
               '.github/patches/enemy-rank-refactor.part02.txt',
               '.github/patches/enemy-rank-refactor.part03.txt',
@@ -114,8 +134,7 @@ jobs:
               '.github/patches/enemy-rank-refactor.part05.txt',
               '.github/workflows/apply-enemy-rank-refactor.yml',
               '.github/workflows/apply-enemy-rank-refactor-pr.yml',
-          ]
-          for path_string in temporary_paths:
+          ]:
               Path(path_string).unlink(missing_ok=True)
 
           wave = Path(wave_controller).read_text()
@@ -129,10 +148,8 @@ jobs:
           assert 'Instance.new("Model")' not in chest
           assert 'EnemyId = "EnemyId"' in npc_shared
           assert 'string.format("%s/%s", npc.enemyRank, mobType)' in npc_service
-          assert '77439435590958' in mobs
-          assert '92098878453446' in mobs
-          assert '98960191123613' in mobs
-          assert '71526519880141' in mobs
+          for animation_id in ('77439435590958', '92098878453446', '98960191123613', '71526519880141'):
+              assert animation_id in mobs
           assert 'CONFIGURED_ANIMATION_ATTRIBUTE_BY_STATE' in npc_presentation
           assert not list(Path('.github/patches').glob('enemy-rank-refactor*'))
           PY
