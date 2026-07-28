@@ -77,7 +77,7 @@ jobs:
           assert 'Instance.new("Model")' not in chest
           assert 'EnemyId = "EnemyId"' in npc_shared
           assert 'string.format("%s/%s", npc.enemyRank, mobType)' in npc_service
-          assert not Path('.github/patches').glob('enemy-rank-refactor*')
+          assert not list(Path('.github/patches').glob('enemy-rank-refactor*'))
           PY
       - name: Commit final implementation
         shell: bash
