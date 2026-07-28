@@ -1,70 +1,90 @@
 -- DailyLoginVisibilityGuard.client.lua
--- Keeps the daily login CanvasGroup fully visible while its opening tween settles.
--- Some clients can leave the group close to fully transparent or dark-tinted when
--- the CanvasGroup tween is throttled/interrupted.
+-- Replaces the visible Daily Login CanvasGroup with a regular Frame at runtime.
+-- CanvasGroup can render as a solid black texture on some devices even when its
+-- GroupTransparency and GroupColor3 values are correct. The original CanvasGroup
+-- is kept invisible so DailyLoginClient's existing open/close tween can finish and
+-- disable the ScreenGui without changing reward or button logic.
 
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local OPEN_GUARD_DURATION_SECONDS = 1
-local WHITE = Color3.new(1, 1, 1)
-
+local processedGuis = setmetatable({}, { __mode = "k" })
 local connectedGuis = setmetatable({}, { __mode = "k" })
-local guardGenerations = setmetatable({}, { __mode = "k" })
 
-local function findPanel(gui)
-	local overlay = gui:FindFirstChild("Overlay")
-	local panel = overlay and overlay:FindFirstChild("Panel")
-	if panel and panel:IsA("CanvasGroup") then
-		return panel
-	end
-	return nil
+local function copyPanelProperties(source, target)
+	target.AnchorPoint = source.AnchorPoint
+	target.Position = source.Position
+	target.Size = source.Size
+	target.AutomaticSize = source.AutomaticSize
+	target.BackgroundColor3 = source.BackgroundColor3
+	target.BackgroundTransparency = source.BackgroundTransparency
+	target.BorderColor3 = source.BorderColor3
+	target.BorderMode = source.BorderMode
+	target.BorderSizePixel = source.BorderSizePixel
+	target.ClipsDescendants = source.ClipsDescendants
+	target.LayoutOrder = source.LayoutOrder
+	target.Rotation = source.Rotation
+	target.Visible = source.Visible
+	target.ZIndex = source.ZIndex
+	target.Active = source.Active
+	target.Selectable = source.Selectable
+	target.SelectionOrder = source.SelectionOrder
 end
 
-local function restorePanelVisibility(gui)
-	if not gui.Enabled then
+local function tryReplaceCanvasGroup(gui)
+	if processedGuis[gui] or gui.Parent ~= playerGui then
 		return
 	end
 
-	local panel = findPanel(gui)
+	local overlay = gui:FindFirstChild("Overlay")
+	local panel = overlay and overlay:FindFirstChild("Panel")
 	if not panel then
 		return
 	end
 
-	-- GroupTransparency affects every descendant. GroupColor3 also multiplies every
-	-- descendant color, so a stale dark value makes the whole panel appear black.
-	panel.GroupTransparency = 0
-	panel.GroupColor3 = WHITE
+	if panel:IsA("Frame") then
+		processedGuis[gui] = true
+		return
+	end
+	if not panel:IsA("CanvasGroup") then
+		return
+	end
+
+	-- Wait until the generated UI is complete enough that DailyLoginClient will no
+	-- longer add direct children to the panel. References and event connections on
+	-- moved descendants remain valid after reparenting.
+	local footer = panel:FindFirstChild("Footer")
+	local claimButton = footer and footer:FindFirstChild("Claim")
+	if not claimButton then
+		return
+	end
+
+	local replacement = Instance.new("Frame")
+	replacement.Name = "Panel"
+	copyPanelProperties(panel, replacement)
+	replacement:SetAttribute("CanvasGroupWorkaround", true)
+
+	-- Move styling objects, UIScale, cards, labels, and buttons before parenting the
+	-- replacement into PlayerGui. This also prevents the responsive policy from
+	-- briefly creating a duplicate UIScale.
+	for _, child in ipairs(panel:GetChildren()) do
+		child.Parent = replacement
+	end
+
+	panel.Name = "LegacyPanelCanvasGroup"
+	panel.Visible = false
+	panel.Active = false
+	panel.BackgroundTransparency = 1
+
+	replacement.Parent = overlay
+	processedGuis[gui] = true
 end
 
-local function cancelOpeningGuard(gui)
-	guardGenerations[gui] = (guardGenerations[gui] or 0) + 1
-end
-
-local function guardOpening(gui)
-	cancelOpeningGuard(gui)
-	local generation = guardGenerations[gui]
-
-	task.spawn(function()
-		local deadline = os.clock() + OPEN_GUARD_DURATION_SECONDS
-		repeat
-			if guardGenerations[gui] ~= generation then
-				return
-			end
-			if gui.Parent ~= playerGui or not gui.Enabled then
-				return
-			end
-
-			restorePanelVisibility(gui)
-			RunService.RenderStepped:Wait()
-		until os.clock() >= deadline
-
-		if guardGenerations[gui] == generation and gui.Parent == playerGui and gui.Enabled then
-			restorePanelVisibility(gui)
-		end
+local function scheduleReplacement(gui)
+	task.defer(function()
+		tryReplaceCanvasGroup(gui)
 	end)
 end
 
@@ -75,29 +95,19 @@ local function connectDailyLoginGui(gui)
 
 	connectedGuis[gui] = true
 
+	gui.DescendantAdded:Connect(function(descendant)
+		if descendant.Name == "Panel" or descendant.Name == "Footer" or descendant.Name == "Claim" then
+			scheduleReplacement(gui)
+		end
+	end)
+
 	gui:GetPropertyChangedSignal("Enabled"):Connect(function()
 		if gui.Enabled then
-			guardOpening(gui)
-		else
-			cancelOpeningGuard(gui)
+			scheduleReplacement(gui)
 		end
 	end)
 
-	gui.DescendantAdded:Connect(function(descendant)
-		if descendant.Name == "Panel" and descendant:IsA("CanvasGroup") and gui.Enabled then
-			guardOpening(gui)
-		end
-	end)
-
-	gui.AncestryChanged:Connect(function(_, parent)
-		if parent == nil then
-			cancelOpeningGuard(gui)
-		end
-	end)
-
-	if gui.Enabled then
-		guardOpening(gui)
-	end
+	scheduleReplacement(gui)
 end
 
 for _, child in ipairs(playerGui:GetChildren()) do
