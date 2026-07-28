@@ -109,6 +109,7 @@ local HELP_LINES = {
 	";debug spawns [on/off/toggle]",
 	";debug stress [on/off/toggle]",
 	";debug elite [name] [count]",
+	";debug miniboss [name] [count]",
 	";debug normal [name] [count]",
 	";debug boss",
 	";debug clear",
@@ -141,45 +142,39 @@ local function reportStatus(player: Player)
 	)
 end
 
-local function handleSpawnRequest(player: Player, isElite: boolean, args: {string})
+local function handleSpawnRequest(player: Player, enemyRank: string, args: {string})
 	local count = 1
 	local name = args[2]
-
 	if #args == 2 then
 		local maybeCount = parsePositiveInt(args[2])
-		if maybeCount and maybeCount >= 1 then
-			name = nil
-			count = maybeCount
-		end
+		if maybeCount and maybeCount >= 1 then name = nil count = maybeCount end
 	elseif #args >= 3 then
 		local explicitCount = parsePositiveInt(args[3])
 		if explicitCount and explicitCount >= 1 then
 			count = explicitCount
 		else
-			log(player, ("Use: ;debug %s [name] [count]"):format(isElite and "elite" or "normal"))
+			log(player, ("Use: ;debug %s [name] [count]"):format(string.lower(enemyRank)))
 			return
 		end
 	end
 
-	local spawnFn = isElite and _G.DebugForceEliteSpawn or _G.DebugForceSpawnMob
+	local spawnFn = enemyRank == "Elite" and _G.DebugForceEliteSpawn
+		or (enemyRank == "MiniBoss" and _G.DebugForceMiniBossSpawn)
+		or _G.DebugForceSpawnMob
 	if type(spawnFn) ~= "function" then
 		log(player, "Spawn hook is not ready yet.")
 		return
 	end
-
 	local ok, result = pcall(function()
-		if isElite then
-			return spawnFn(name, count)
-		end
-		return spawnFn(name, false, count)
+		if enemyRank == "Normal" then return spawnFn(name, false, count) end
+		return spawnFn(name, count)
 	end)
 	if not ok then
 		log(player, ("Spawn failed: %s"):format(tostring(result)))
 		return
 	end
-
 	local spawnedCount = typeof(result) == "table" and #result or 0
-	log(player, ("Spawned %d %s mob(s)."):format(spawnedCount, isElite and "elite" or "normal"))
+	log(player, ("Spawned %d %s mob(s)."):format(spawnedCount, enemyRank))
 end
 
 local function handleCommand(player: Player, message: string)
@@ -327,12 +322,17 @@ local function handleCommand(player: Player, message: string)
 	end
 
 	if command == "elite" then
-		handleSpawnRequest(player, true, args)
+		handleSpawnRequest(player, "Elite", args)
 		return
 	end
 
 	if command == "normal" then
-		handleSpawnRequest(player, false, args)
+		handleSpawnRequest(player, "Normal", args)
+		return
+	end
+
+	if command == "miniboss" then
+		handleSpawnRequest(player, "MiniBoss", args)
 		return
 	end
 

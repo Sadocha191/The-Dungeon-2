@@ -1,6 +1,6 @@
 -- WaveHud.client.lua (StarterPlayerScripts)
 -- Reworked: time-based horde HUD
--- Shows: elapsed time, next elite timer, elite progress, and short center alerts.
+-- Shows: elapsed time, next mini-boss timer, mini-boss progress, and short center alerts.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -83,7 +83,7 @@ sub.Font = Enum.Font.Gotham
 sub.TextSize = 12
 sub.TextXAlignment = Enum.TextXAlignment.Left
 sub.TextColor3 = Color3.fromRGB(210,210,210)
-sub.Text = "Next Elite: --:--"
+sub.Text = "Next Mini-Boss: --:--"
 sub.Parent = panel
 
 local elites = Instance.new("TextLabel")
@@ -94,7 +94,7 @@ elites.Font = Enum.Font.Gotham
 elites.TextSize = 12
 elites.TextXAlignment = Enum.TextXAlignment.Left
 elites.TextColor3 = Color3.fromRGB(210,210,210)
-elites.Text = "Elites: 0/3"
+elites.Text = "Mini-Bosses: 0/3"
 elites.Parent = panel
 
 local barBack = Instance.new("Frame")
@@ -133,7 +133,7 @@ center.Visible = false
 center.Parent = gui
 Instance.new("UICorner", center).CornerRadius = UDim.new(0, 14)
 
-local function sanitizeEliteProgress(defeatedRaw, totalRaw)
+local function sanitizeMiniBossProgress(defeatedRaw, totalRaw)
 	local total = math.floor(tonumber(totalRaw) or 0)
 	if total <= 0 then total = 3 end
 	total = math.min(total, 99)
@@ -163,11 +163,11 @@ local function handleWaveStatus(p)
 	if typeof(p) ~= "table" then return end
 
 	if p.type == "timeUpdate" then
-		local defeated, total = sanitizeEliteProgress(p.elitesDefeated, p.elitesTotal)
+		local defeated, total = sanitizeMiniBossProgress(p.miniBossesDefeated, p.miniBossesTotal)
 		if SHOW_TRACKER_PANEL then
 			title.Text = ("Time: %s"):format(fmtTime(p.seconds))
-			sub.Text = ("Next Elite: %s"):format(fmtTime(p.nextEliteIn))
-			elites.Text = ("Elites: %d/%d"):format(defeated, total)
+			sub.Text = ("Next Mini-Boss: %s"):format(fmtTime(p.nextMiniBossIn))
+			elites.Text = ("Mini-Bosses: %d/%d"):format(defeated, total)
 			setBar(defeated / math.max(1, total))
 		end
 
@@ -177,10 +177,21 @@ local function handleWaveStatus(p)
 		center.Text = ("ELITE SPAWNED: %s"):format(name)
 		task.delay(3, function() center.Visible = false end)
 
-	elseif p.type == "eliteDefeated" or p.type == "eliteProgress" then
-		local defeated, total = sanitizeEliteProgress(p.elitesDefeated, p.elitesTotal)
+	elseif p.type == "eliteDefeated" then
 		center.Visible = true
-		center.Text = ("ELITE DEFEATED (%d/%d)"):format(defeated, total)
+		center.Text = "ELITE DEFEATED: FREE CHEST DROPPED"
+		task.delay(3, function() center.Visible = false end)
+
+	elseif p.type == "miniBossSpawn" then
+		local name = tostring(p.name or "Elite")
+		center.Visible = true
+		center.Text = ("MINI-BOSS SPAWNED: %s"):format(name)
+		task.delay(3, function() center.Visible = false end)
+
+	elseif p.type == "miniBossDefeated" or p.type == "miniBossProgress" then
+		local defeated, total = sanitizeMiniBossProgress(p.miniBossesDefeated, p.miniBossesTotal)
+		center.Visible = true
+		center.Text = ("MINI-BOSS DEFEATED (%d/%d)"):format(defeated, total)
 		task.delay(3, function() center.Visible = false end)
 
 	elseif p.type == "shrinesSpawned" then
@@ -298,12 +309,12 @@ local function handleWaveStatus(p)
 		task.delay(2, function() center.Visible = false end)
 
 	elseif p.type == "complete" then
-		local defeated, total = sanitizeEliteProgress(p.elitesDefeated, p.elitesTotal)
+		local defeated, total = sanitizeMiniBossProgress(p.miniBossesDefeated, p.miniBossesTotal)
 		center.Visible = true
 		center.Text = "LEVEL COMPLETE"
 		task.delay(5, function() center.Visible = false end)
 		if SHOW_TRACKER_PANEL then
-			elites.Text = ("Elites: %d/%d"):format(defeated, total)
+			elites.Text = ("Mini-Bosses: %d/%d"):format(defeated, total)
 			setBar(total > 0 and (defeated / total) or 1)
 		end
 	end

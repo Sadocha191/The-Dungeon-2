@@ -30,6 +30,7 @@ local NpcCombatBehaviorService = require(serverModuleFolder:WaitForChild("NpcCom
 local npcTargetingModule = serverModuleFolder:FindFirstChild("NpcTargeting")
 assert(npcTargetingModule and npcTargetingModule:IsA("ModuleScript"), "[NpcService] NpcTargeting ModuleScript is required")
 local NpcTargeting = require(npcTargetingModule)
+local EnemyResistanceConfig = require(serverModuleFolder:WaitForChild("EnemyResistanceConfig"))
 local npcMeleeModule = serverModuleFolder:FindFirstChild("NpcMelee")
 assert(npcMeleeModule and npcMeleeModule:IsA("ModuleScript"), "[NpcService] NpcMelee ModuleScript is required")
 local NpcMelee = require(npcMeleeModule)
@@ -79,12 +80,15 @@ local STATE = NpcShared.States
 
 type NpcConfig = {
 	mobType: string?,
+	enemyRank: string?,
+	resistanceProfile: string?,
 	maxHealth: number?,
 	speed: number?,
 	attackRange: number?,
 	attackCooldown: number?,
 	damage: number?,
 	isElite: boolean?,
+	isMiniBoss: boolean?,
 	isBoss: boolean?,
 	isRanged: boolean?,
 	movementProfile: string?,
@@ -102,6 +106,7 @@ type NpcConfig = {
 type ActiveCountFilter = {
 	includeNormal: boolean?,
 	includeElite: boolean?,
+	includeMiniBoss: boolean?,
 	includeBoss: boolean?,
 }
 
@@ -122,6 +127,8 @@ type NpcRecord = {
 	model: Model,
 	root: BasePart,
 	mobType: string,
+	enemyRank: string,
+	resistanceProfile: string,
 	maxHealth: number,
 	health: number,
 	baseSpeed: number,
@@ -129,6 +136,7 @@ type NpcRecord = {
 	attackCooldown: number,
 	damage: number,
 	isElite: boolean,
+	isMiniBoss: boolean,
 	isBoss: boolean,
 	isRanged: boolean,
 	movementSystem: string,
@@ -328,15 +336,19 @@ local function matchesActiveCountFilter(npc: NpcRecord, filter: ActiveCountFilte
 
 	local includeNormal = filter.includeNormal
 	local includeElite = filter.includeElite
+	local includeMiniBoss = filter.includeMiniBoss
 	local includeBoss = filter.includeBoss
-	if includeNormal == nil and includeElite == nil and includeBoss == nil then
+	if includeNormal == nil and includeElite == nil and includeMiniBoss == nil and includeBoss == nil then
 		return true
 	end
 
-	if npc.isBoss then
+	if npc.enemyRank == "Boss" then
 		return includeBoss == true
 	end
-	if npc.isElite then
+	if npc.enemyRank == "MiniBoss" then
+		return includeMiniBoss == true
+	end
+	if npc.enemyRank == "Elite" then
 		return includeElite == true
 	end
 	return includeNormal == true
@@ -609,7 +621,7 @@ function NpcService.DespawnOldestFarNormal(minDistance: number): Model?
 
 	local bestNpc = nil
 	for _, npc in NpcRegistry.Pairs() do
-		if not npc.dead and npc.model.Parent and not npc.isElite and npc.model:GetAttribute("IsBoss") ~= true then
+		if not npc.dead and npc.model.Parent and npc.enemyRank == "Normal" then
 			local nearestDist = math.huge
 			for _, info in ipairs(alivePlayers) do
 				nearestDist = math.min(nearestDist, NpcMovement.FlatMagnitude(info.hrp.Position, npc.position))
@@ -725,9 +737,14 @@ function NpcService.ApplyFreeze(target: any, duration: number)
 	NpcLifecycle.ApplyFreeze(npc, duration)
 end
 
-function NpcService.AddImpulse(target: any, impulse: Vector3)
+function NpcService.AddImpulse(target: any, impulse: Vector3, controlKind: string?)
 	local npc = resolveNpc(target)
 	if not npc or npc.dead or typeof(impulse) ~= "Vector3" then
+		return
+	end
+
+	local resolvedKind = tostring(controlKind or "knockback")
+	if resolvedKind ~= "pull" and npc.enemyRank ~= "Normal" then
 		return
 	end
 
@@ -756,6 +773,11 @@ function NpcService.ApplyDamage(target: any, amount: number, meta: {[string]: an
 		npc.damageTakenEnd = 0
 		npc.damageTakenMult = 1
 	end
+	dealt *= EnemyResistanceConfig.GetDamageMultiplier(
+		npc.model,
+		meta and meta.element,
+		meta and meta.secondaryElement
+	)
 	dealt = math.floor(dealt)
 	if dealt <= 0 then
 		return 0
@@ -827,6 +849,21 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 
 	local npcId = NpcRegistry.NextId()
 	local mobType = tostring((config and config.mobType) or model.Name)
+	local requestedRank = tostring((config and config.enemyRank) or model:GetAttribute("EnemyRank") or "")
+	if requestedRank == "" then
+		if config and config.isBoss == true then
+			requestedRank = "Boss"
+		elseif config and config.isMiniBoss == true then
+			requestedRank = "MiniBoss"
+		elseif config and config.isElite == true then
+			requestedRank = "Elite"
+		else
+			requestedRank = "Normal"
+		end
+	end
+	local validRanks = { Normal = true, Elite = true, MiniBoss = true, Boss = true }
+	local enemyRank = validRanks[requestedRank] and requestedRank or "Normal"
+	local resistanceProfile = tostring((config and config.resistanceProfile) or model:GetAttribute("ResistanceProfile") or "Neutral")
 	local maxHealth = math.max(1, math.floor(tonumber(config and config.maxHealth) or 1))
 	local speed = math.max(0, tonumber(config and config.speed) or 0)
 	local movementProfile, navigationProfile = NpcNavigationConfig.Resolve(model, config)
@@ -853,14 +890,17 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		model = model,
 		root = root,
 		mobType = mobType,
+		enemyRank = enemyRank,
+		resistanceProfile = resistanceProfile,
 		maxHealth = maxHealth,
 		health = maxHealth,
 		baseSpeed = speed,
 		attackRange = math.max(0, tonumber(config and config.attackRange) or 0),
 		attackCooldown = math.max(0.1, tonumber(config and config.attackCooldown) or 1),
 		damage = math.max(0, math.floor(tonumber(config and config.damage) or 0)),
-		isElite = config and config.isElite == true or false,
-		isBoss = config and config.isBoss == true or false,
+		isElite = enemyRank == "Elite",
+		isMiniBoss = enemyRank == "MiniBoss",
+		isBoss = enemyRank == "Boss",
 		isRanged = config and config.isRanged == true or false,
 		movementSystem = movementSystem,
 		movementBehavior = movementBehavior,
@@ -921,8 +961,11 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 	setAttributeIfChanged(model, ATTR.Id, npc.id)
 	setAttributeIfChanged(model, ATTR.Type, mobType)
 	setAttributeIfChanged(model, ATTR.MobType, mobType)
+	setAttributeIfChanged(model, ATTR.EnemyRank, npc.enemyRank)
+	setAttributeIfChanged(model, "ResistanceProfile", npc.resistanceProfile)
 	setAttributeIfChanged(model, ATTR.Speed, npc.baseSpeed)
 	setAttributeIfChanged(model, ATTR.IsElite, npc.isElite)
+	setAttributeIfChanged(model, ATTR.IsMiniBoss, npc.isMiniBoss)
 	setAttributeIfChanged(model, ATTR.IsBoss, npc.isBoss)
 	setAttributeIfChanged(model, ATTR.IsRanged, npc.isRanged)
 	setAttributeIfChanged(model, "MovementProfile", npc.movementProfile)

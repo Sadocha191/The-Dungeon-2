@@ -18,6 +18,7 @@ local NPC_FORMATION_JITTER_SCALE = 0.22
 local NPC_FORMATION_COLLAPSE_BUFFER = 2.75
 local NPC_FORMATION_BLEND_DISTANCE = 7.5
 local TARGET_PRIORITY_ELITE_DISTANCE_BONUS = 12
+local TARGET_PRIORITY_MINIBOSS_DISTANCE_BONUS = 20
 local TARGET_PRIORITY_BOSS_DISTANCE_BONUS = 24
 
 NpcTargeting.FormationMovementConfig = {
@@ -116,20 +117,26 @@ function NpcTargeting.IsTargetable(npc: any): boolean
 end
 
 function NpcTargeting.GetTargetPriority(npc: any): number
-	if npc.isBoss then
+	if npc.enemyRank == "Boss" or npc.isBoss then
+		return 4
+	end
+	if npc.enemyRank == "MiniBoss" or npc.isMiniBoss then
 		return 3
 	end
-	if npc.isElite then
+	if npc.enemyRank == "Elite" or npc.isElite then
 		return 2
 	end
 	return 1
 end
 
 function NpcTargeting.GetTargetPriorityDistanceBonus(npc: any): number
-	if npc.isBoss then
+	if npc.enemyRank == "Boss" or npc.isBoss then
 		return TARGET_PRIORITY_BOSS_DISTANCE_BONUS
 	end
-	if npc.isElite then
+	if npc.enemyRank == "MiniBoss" or npc.isMiniBoss then
+		return TARGET_PRIORITY_MINIBOSS_DISTANCE_BONUS
+	end
+	if npc.enemyRank == "Elite" or npc.isElite then
 		return TARGET_PRIORITY_ELITE_DISTANCE_BONUS
 	end
 	return 0
@@ -142,7 +149,7 @@ function NpcTargeting.ComputeTargetingMetrics(npc: any, fromPos: Vector3): (numb
 end
 
 function NpcTargeting.ShouldDistanceDespawn(npc: any, alivePlayers: {any}, maxDistance: number): boolean
-	if npc.isElite or npc.isBoss or #alivePlayers == 0 then
+	if npc.enemyRank ~= "Normal" or #alivePlayers == 0 then
 		return false
 	end
 	local nearest = math.huge

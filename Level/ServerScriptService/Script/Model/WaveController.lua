@@ -73,6 +73,7 @@ local NpcService = require(ServerScriptService:WaitForChild("ModuleScript"):Wait
 local PlayerData = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerData"))
 local PickupToastService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PickupToastService"))
 local RunSpawnConfig = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunSpawnConfig"))
+local ChestRewardApi = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("ChestRewardApi"))
 local WorldBounds = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WorldBounds"))
 local CraftingConfig = require((ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:FindFirstChild("ModuleScript") or ReplicatedStorage:WaitForChild("ModuleScripts", 5) or ReplicatedStorage:WaitForChild("ModuleScript", 5)):WaitForChild("CraftingConfig"))
 
@@ -120,9 +121,12 @@ local function broadcast(payload)
 end
 
 -- Enemy templates
-local EnemiesRoot = ReplicatedStorage:WaitForChild("Enemies")
+local AssetsRoot = ReplicatedStorage:WaitForChild("Assets")
+local EnemiesRoot = AssetsRoot:WaitForChild("Enemies")
 local NormalFolder = EnemiesRoot:WaitForChild("Normal")
 local EliteFolder = EnemiesRoot:WaitForChild("Elite")
+local MiniBossFolder = EnemiesRoot:WaitForChild("MiniBoss")
+local BossFolder = EnemiesRoot:WaitForChild("Boss")
 
 local ENEMIES_FOLDER = workspace:FindFirstChild("Enemies")
 if not ENEMIES_FOLDER then
@@ -500,7 +504,9 @@ local BOSS_SOUL_DROP_MIN = 45
 local BOSS_SOUL_DROP_MAX = 65
 local RUN_COIN_DROP_MULTIPLIER = 3
 local RUN_SOUL_DROP_MULTIPLIER = 3
-local ELITE_INTERVAL_SECONDS = 5 * 60
+local MINIBOSS_INTERVAL_SECONDS = 5 * 60
+local ELITE_FIRST_SPAWN_SECONDS = 2 * 60
+local ELITE_INTERVAL_SECONDS = 90
 local BOSS_REINFORCEMENT_INTERVAL = 10
 local SWARM_EVENT_TIMES = { 240, 720 } -- 4:00, 12:00
 local SWARM_DURATION = 60
@@ -519,26 +525,35 @@ local spawnLimitConfig = {
 	),
 	postEliteCatchupDuration = math.max(
 		0.1,
-		tonumber((RunSpawnConfig.POST_ELITE_SPAWN or {}).catchupDuration) or 10
+		tonumber((RunSpawnConfig.POST_MINIBOSS_SPAWN or {}).catchupDuration) or 10
 	),
 	postEliteMaxPerTick = math.max(
 		1,
-		math.floor(tonumber((RunSpawnConfig.POST_ELITE_SPAWN or {}).maxPerTick) or 4)
+		math.floor(tonumber((RunSpawnConfig.POST_MINIBOSS_SPAWN or {}).maxPerTick) or 4)
 	),
 }
 local NORMAL_ENEMY_COUNT_FILTER = {
 	includeNormal = true,
 	includeElite = false,
+	includeMiniBoss = false,
 	includeBoss = false,
 }
 local ELITE_ENEMY_COUNT_FILTER = {
 	includeNormal = false,
 	includeElite = true,
+	includeMiniBoss = false,
+	includeBoss = false,
+}
+local MINIBOSS_ENEMY_COUNT_FILTER = {
+	includeNormal = false,
+	includeElite = false,
+	includeMiniBoss = true,
 	includeBoss = false,
 }
 local BOSS_ENEMY_COUNT_FILTER = {
 	includeNormal = false,
 	includeElite = false,
+	includeMiniBoss = false,
 	includeBoss = true,
 }
 
@@ -620,6 +635,10 @@ local function activeEliteEnemiesCount()
 	return NpcService.GetActiveCount(ELITE_ENEMY_COUNT_FILTER)
 end
 
+local function activeMiniBossEnemiesCount()
+	return NpcService.GetActiveCount(MINIBOSS_ENEMY_COUNT_FILTER)
+end
+
 local function activeBossEnemiesCount()
 	return NpcService.GetActiveCount(BOSS_ENEMY_COUNT_FILTER)
 end
@@ -632,8 +651,8 @@ local function getActiveImportantEncounter()
 	if activeBossEnemiesCount() > 0 then
 		return "boss", getImportantEncounterConfig("boss")
 	end
-	if activeEliteEnemiesCount() > 0 then
-		return "elite", getImportantEncounterConfig("elite")
+	if activeMiniBossEnemiesCount() > 0 then
+		return "miniBoss", getImportantEncounterConfig("miniBoss")
 	end
 	return nil, getImportantEncounterConfig(nil)
 end
@@ -692,28 +711,31 @@ local function discoverCodex(plr: Player, category: string, id: string, reason: 
 	end
 end
 
-local function awardPersistentMobDrops(mobType: string, isElite: boolean, isBoss: boolean)
+local function awardPersistentMobDrops(mobType: string, enemyRank: string)
 	local materialId = CraftingConfig.GetMobMaterialForMob(mobType)
 	local activePlayers = getActiveRunPlayers()
 	if #activePlayers == 0 then
 		return
 	end
 
+	local isBoss = enemyRank == "Boss"
+	local isMiniBoss = enemyRank == "MiniBoss"
 	local crystalAward = 0
 	if isBoss then
 		local range = CraftingConfig.BOSS_UPGRADE_CRYSTAL_RANGE or { min = 8, max = 12 }
 		crystalAward = materialRng:NextInteger(range.min or 8, range.max or 12)
-	elseif isElite then
+	elseif isMiniBoss then
 		local range = CraftingConfig.ELITE_UPGRADE_CRYSTAL_RANGE or { min = 3, max = 5 }
 		crystalAward = materialRng:NextInteger(range.min or 3, range.max or 5)
-	elseif materialRng:NextNumber() <= (tonumber(CraftingConfig.NORMAL_MOB_UPGRADE_CRYSTAL_CHANCE) or 0) then
+	elseif enemyRank == "Normal" and materialRng:NextNumber() <= (tonumber(CraftingConfig.NORMAL_MOB_UPGRADE_CRYSTAL_CHANCE) or 0) then
 		crystalAward = 1
 	end
 
 	for _, plr in ipairs(activePlayers) do
-		discoverCodex(plr, isBoss and "Bosses" or (isElite and "Elites" or "Enemies"), mobType, "mob_defeated")
+		local codexCategory = isBoss and "Bosses" or ((isMiniBoss or enemyRank == "Elite") and "Elites" or "Enemies")
+		discoverCodex(plr, codexCategory, mobType, "mob_defeated")
 		if materialId then
-			local materialCount = isBoss and 3 or (isElite and 2 or 1)
+			local materialCount = isBoss and 3 or (isMiniBoss and 2 or 1)
 			addPersistentCount(plr, "mobMaterials", materialId, materialCount)
 			discoverCodex(plr, "Materials", materialId, "mob_drop")
 			PickupToastService.PushMaterial(plr, materialId, materialCount, "Mob Drop", "mobMaterials")
@@ -727,15 +749,15 @@ local function awardPersistentMobDrops(mobType: string, isElite: boolean, isBoss
 			addPersistentCount(plr, "upgradeMaterials", CraftingConfig.BOSS_SPECIAL_ID, 1)
 			discoverCodex(plr, "Materials", CraftingConfig.BOSS_SPECIAL_ID, "boss_drop")
 			PickupToastService.PushMaterial(plr, CraftingConfig.BOSS_SPECIAL_ID, 1, "Boss Drop", "upgradeMaterials")
-		elseif isElite then
+		elseif isMiniBoss then
 			addPersistentCount(plr, "upgradeMaterials", CraftingConfig.ELITE_SPECIAL_ID, 1)
 			discoverCodex(plr, "Materials", CraftingConfig.ELITE_SPECIAL_ID, "elite_drop")
-			PickupToastService.PushMaterial(plr, CraftingConfig.ELITE_SPECIAL_ID, 1, "Elite Drop", "upgradeMaterials")
+			PickupToastService.PushMaterial(plr, CraftingConfig.ELITE_SPECIAL_ID, 1, "Mini-Boss Drop", "upgradeMaterials")
 		end
 	end
 end
 
-local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, isBoss: boolean, _ctx)
+local function handleMobDeath(mob: Model, rewardCfg, enemyRank: string, _ctx)
 	if _ctx and _ctx.suppressRewards == true then
 		return
 	end
@@ -748,25 +770,23 @@ local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, isBoss: b
 		require(ServerScriptService.ModuleScript.RunProgressApi).RegisterEnemyKill(pos, killer)
 	end)
 
-    if MissionProgress and MissionProgress.OnKill and killer and killer.Parent == Players and killer:GetAttribute("RunEnded") ~= true then
-        pcall(function() MissionProgress.OnKill(killer, mob) end)
-    end
+	if MissionProgress and MissionProgress.OnKill and killer and killer.Parent == Players and killer:GetAttribute("RunEnded") ~= true then
+		pcall(function() MissionProgress.OnKill(killer, mob) end)
+	end
 
-    local xpDrop = rewardCfg.xp or 5
-    local coinDrop = rewardCfg.coins or 1
-    local soulsDrop = 0
-
+	local xpDrop = rewardCfg.xp or 5
+	local coinDrop = rewardCfg.coins or 1
+	local soulsDrop = 0
 	local xpScale = 1 + (minutes * 0.04) + (levelPressure * 0.06)
 	local coinScale = 1.45 + (minutes * 0.08) + (levelPressure * 0.10)
-
 	xpDrop = math.max(1, math.floor(xpDrop * xpScale))
 	coinDrop = math.max(1, math.floor(coinDrop * coinScale))
 
-	if isBoss then
+	if enemyRank == "Boss" then
 		xpDrop = math.floor(xpDrop * 6)
 		coinDrop = math.floor(coinDrop * 6)
 		soulsDrop = math.random(BOSS_SOUL_DROP_MIN, BOSS_SOUL_DROP_MAX)
-	elseif isElite then
+	elseif enemyRank == "MiniBoss" then
 		xpDrop = math.floor(xpDrop * 7)
 		coinDrop = math.floor(coinDrop * 7)
 		soulsDrop = math.random(ELITE_SOUL_DROP_MIN, ELITE_SOUL_DROP_MAX)
@@ -781,9 +801,8 @@ local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, isBoss: b
 
 	coinDrop = math.max(1, math.floor(coinDrop * RUN_COIN_DROP_MULTIPLIER))
 	soulsDrop = math.max(0, math.floor(soulsDrop * RUN_SOUL_DROP_MULTIPLIER))
-
 	local dropsOk, dropsErr = pcall(function()
-		awardPersistentMobDrops(tostring(mob:GetAttribute("MobType") or mob.Name), isElite, isBoss)
+		awardPersistentMobDrops(tostring(mob:GetAttribute("MobType") or mob.Name), enemyRank)
 	end)
 	if not dropsOk then
 		warn("[WaveController] Persistent mob drops failed:", dropsErr)
@@ -793,54 +812,26 @@ local function handleMobDeath(mob: Model, rewardCfg, isElite: boolean, isBoss: b
 	end
 end
 
-local ELITE_VISUAL_SCALE = 3
-local BOSS_VISUAL_SCALE = 3
-
-local function getMobVisualScale(isElite: boolean, isBoss: boolean, stats): number
-	local overrideScale = stats and tonumber(stats.visualScale) or nil
-	if overrideScale and overrideScale > 0 then
-		return overrideScale
-	end
-	if isBoss then
-		return BOSS_VISUAL_SCALE
-	end
-	if isElite then
-		return ELITE_VISUAL_SCALE
-	end
-	return 1
-end
-
-local function applyMobVisualScale(mob: Model, isElite: boolean, isBoss: boolean, stats): number
-	local desiredScale = getMobVisualScale(isElite, isBoss, stats)
-	local appliedScale = 1
-	if desiredScale > 1.001 then
-		local ok, err = pcall(function()
-			mob:ScaleTo(desiredScale)
-		end)
-		if ok then
-			appliedScale = desiredScale
-		else
-			warn("[WaveController] Failed to scale mob:", mob.Name, err)
-		end
-	end
-	mob:SetAttribute("NpcVisualScale", appliedScale)
-	return appliedScale
-end
-
 local function setOptionalMobAttribute(mob: Model, name: string, value: any)
 	if value ~= nil then
 		mob:SetAttribute(name, value)
 	end
 end
 
-local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, isElite: boolean, isBoss: boolean, extraOnDeath)
+local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, enemyRank: string, extraOnDeath)
+	local isElite = enemyRank == "Elite"
+	local isMiniBoss = enemyRank == "MiniBoss"
+	local isBoss = enemyRank == "Boss"
 	mob:SetAttribute("MobType", mobType)
 	mob:SetAttribute("DisplayName", mobType)
+	mob:SetAttribute("EnemyRank", enemyRank)
+	mob:SetAttribute("ResistanceProfile", stats.resistanceProfile or "Neutral")
 	mob:SetAttribute("Damage", stats.dmg)
 	mob:SetAttribute("AttackRange", stats.range)
 	mob:SetAttribute("AttackCooldown", stats.cd)
 	mob:SetAttribute("IsElite", isElite)
-	mob:SetAttribute("IsBoss", isBoss == true)
+	mob:SetAttribute("IsMiniBoss", isMiniBoss)
+	mob:SetAttribute("IsBoss", isBoss)
 	mob:SetAttribute("IsRanged", stats.isRanged == true)
 	mob:SetAttribute("IsDead", false)
 	mob:SetAttribute("IsAttacking", false)
@@ -857,16 +848,19 @@ local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, i
 	setOptionalMobAttribute(mob, "EnemyMeleeMaxHitHeightAboveEnemy", stats.meleeMaxHitHeightAboveEnemy)
 	setOptionalMobAttribute(mob, "EnemyMeleeUse3DDistance", stats.meleeUse3DDistance)
 
-    local registeredId = NpcService.Register(mob, {
-        mobType = mobType,
-        maxHealth = stats.hp,
-        speed = stats.speed,
-        attackRange = stats.range,
-        attackCooldown = stats.cd,
-        damage = stats.dmg,
-        isElite = isElite,
-        isBoss = isBoss == true,
-        isRanged = stats.isRanged == true,
+	local registeredId = NpcService.Register(mob, {
+		mobType = mobType,
+		enemyRank = enemyRank,
+		resistanceProfile = stats.resistanceProfile,
+		maxHealth = stats.hp,
+		speed = stats.speed,
+		attackRange = stats.range,
+		attackCooldown = stats.cd,
+		damage = stats.dmg,
+		isElite = isElite,
+		isMiniBoss = isMiniBoss,
+		isBoss = isBoss,
+		isRanged = stats.isRanged == true,
 		movementProfile = stats.movementProfile,
 		movementMode = stats.movementMode,
 		movementSystem = stats.movementSystem,
@@ -874,42 +868,53 @@ local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, i
 		combatBehavior = stats.combatBehavior,
 		canFly = stats.canFly,
 		groundOffset = stats.groundOffset,
-        despawnDelay = 3,
-        attackWindup = math.min(0.6, math.max(0.2, stats.cd * 0.45)),
-        onDeath = function(_npc, ctx)
-            handleMobDeath(mob, rewardCfg, isElite, isBoss == true, ctx)
-            if extraOnDeath then
-                extraOnDeath(mob, ctx)
-            end
-        end,
-    })
-
-    if not registeredId then
-        mob:Destroy()
-        return nil
-    end
-
-    return mob
+		despawnDelay = 3,
+		attackWindup = math.min(0.6, math.max(0.2, stats.cd * 0.45)),
+		onDeath = function(_npc, ctx)
+			handleMobDeath(mob, rewardCfg, enemyRank, ctx)
+			if extraOnDeath then
+				extraOnDeath(mob, ctx)
+			end
+		end,
+	})
+	if not registeredId then
+		mob:Destroy()
+		return nil
+	end
+	return mob
 end
 
 local registerEliteController
 
-local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vector3?, spawnSource: string?)
-    local templateFolder = isElite and EliteFolder or NormalFolder
-    local template = templateFolder:FindFirstChild(mobName)
-    if not template or not template:IsA("Model") then
-        warn("[Horde] Missing template:", (isElite and "Elite" or "Normal"), mobName)
-        return
-    end
+local RANK_FOLDERS = {
+	Normal = NormalFolder,
+	Elite = EliteFolder,
+	MiniBoss = MiniBossFolder,
+	Boss = BossFolder,
+}
 
-    local cfg = ENEMY_CONFIGS[mobName]
-    if not cfg then
-        warn("[Horde] Missing config for", mobName)
-        return
-    end
+local RANK_STAT_MULTIPLIERS = {
+	Normal = { hp = 1.0, damage = 1.0, speed = 1.0, cooldown = 1.0 },
+	Elite = { hp = 3.0, damage = 1.25, speed = 1.05, cooldown = 0.95 },
+	MiniBoss = { hp = 5.0, damage = 2.4, speed = 1.08, cooldown = 0.90 },
+	Boss = { hp = 1.0, damage = 1.0, speed = 1.0, cooldown = 1.0 },
+}
 
-    local mob = template:Clone()
-    mob.Name = mobName
+local function spawnRankedMob(mobName: string, enemyRank: string, spawnAnchorPos: Vector3?, spawnSource: string?, extraOnDeath)
+	local templateFolder = RANK_FOLDERS[enemyRank]
+	local template = templateFolder and templateFolder:FindFirstChild(mobName)
+	if not template or not template:IsA("Model") then
+		warn("[Horde] Missing template:", enemyRank, mobName)
+		return nil
+	end
+	local cfg = ENEMY_CONFIGS[mobName]
+	if not cfg then
+		warn("[Horde] Missing config for", mobName)
+		return nil
+	end
+
+	local mob = template:Clone()
+	mob.Name = mobName
 	local collectionService = game:GetService("CollectionService")
 	for _, tag in ipairs(collectionService:GetTags(template)) do
 		if string.sub(tag, 1, 18) == "NpcMovementSystem_"
@@ -918,40 +923,34 @@ local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vecto
 			collectionService:AddTag(mob, tag)
 		end
 	end
-    cleanupTemplateScripts(mob)
-    setMobGroup(mob)
-    applyMobVisualScale(mob, isElite, false, cfg)
-    mob:SetAttribute("SpawnSource", spawnSource or (isElite and "Elite" or "RunAmbient"))
+	cleanupTemplateScripts(mob)
+	setMobGroup(mob)
+	mob:SetAttribute("SpawnSource", spawnSource or enemyRank)
 
-    local cf = pickSpawnCFrame(spawnAnchorPos, mob, cfg)
+	local cf = pickSpawnCFrame(spawnAnchorPos, mob, cfg)
 	if not cf then
 		mob:Destroy()
-		return
+		return nil
 	end
+	mob.Parent = ENEMIES_FOLDER
+	mob:PivotTo(cf)
 
-    mob.Parent = ENEMIES_FOLDER
-    mob:PivotTo(cf)
+	local hpMult, dmgMult, speedMult, cooldownMult = timeScaleMult(require(ServerScriptService.ModuleScript.RunProgressApi).GetRunSeconds())
+	local rankMult = RANK_STAT_MULTIPLIERS[enemyRank] or RANK_STAT_MULTIPLIERS.Normal
+	local hp = math.floor(cfg.hp * ENEMY_HP_MULTIPLIER * hpMult * rankMult.hp)
+	local dmg = math.floor(cfg.dmg * dmgMult * rankMult.damage)
+	local speed = cfg.speed * speedMult * rankMult.speed
+	local cd = math.max(0.60, cfg.cd * cooldownMult * rankMult.cooldown)
 
-    local hpMult, dmgMult, speedMult, cooldownMult = timeScaleMult(require(ServerScriptService.ModuleScript.RunProgressApi).GetRunSeconds())
-    local hp = math.floor(cfg.hp * ENEMY_HP_MULTIPLIER * hpMult)
-    local dmg = math.floor(cfg.dmg * dmgMult)
-    local speed = cfg.speed * speedMult
-    local cd = math.max(0.7, cfg.cd * cooldownMult)
-
-    if isElite then
-        hp = math.floor(hp * 5.0)
-        dmg = math.floor(dmg * 2.4)
-        speed = speed * 1.08
-        cd = math.max(0.60, cd * 0.90)
-    end
-
-    local registered = registerMobModel(mob, mobName, {
-        hp = hp,
-        speed = speed,
-        range = cfg.range,
-        cd = cd,
-        dmg = dmg,
-        isRanged = cfg.isRanged == true,
+	local registered = registerMobModel(mob, mobName, {
+		hp = hp,
+		speed = speed,
+		range = cfg.range,
+		cd = cd,
+		dmg = dmg,
+		isRanged = cfg.isRanged == true,
+		resistanceProfile = cfg.resistanceProfile,
+		facingYawDegrees = cfg.facingYawDegrees,
 		movementProfile = cfg.movementProfile,
 		movementMode = cfg.movementMode,
 		movementSystem = cfg.movementSystem,
@@ -963,13 +962,16 @@ local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vecto
 		meleeMaxVerticalDelta = cfg.meleeMaxVerticalDelta,
 		meleeMaxHitHeightAboveEnemy = cfg.meleeMaxHitHeightAboveEnemy,
 		meleeUse3DDistance = cfg.meleeUse3DDistance,
-    }, cfg, isElite, false, nil)
+	}, cfg, enemyRank, extraOnDeath)
 
-    if registered and isElite then
+	if registered and enemyRank == "MiniBoss" then
 		registerEliteController(registered, mobName, dmg)
-    end
+	end
+	return registered
+end
 
-    return registered
+local function spawnMob(mobName: string, isElite: boolean, spawnAnchorPos: Vector3?, spawnSource: string?)
+	return spawnRankedMob(mobName, isElite and "MiniBoss" or "Normal", spawnAnchorPos, spawnSource, nil)
 end
 
 local elapsed: () -> number
@@ -1344,14 +1346,14 @@ local function hasEnemyCapacity(slotsNeeded: number?, t: number?): boolean
 	return encounterScheduler:HasEnemyCapacity(activeEnemiesCount(), slotsNeeded, t)
 end
 
-local function buildEliteOrder(): {string}
+local function buildMiniBossOrder(): {string}
 	-- Prefer named elites if they exist, fallback to any elite model in ReplicatedStorage.
-	local preferred = { "Ent", "Golem", "Knight", "Demon" }
+	local preferred = { "Ent", "Golem" }
 	local result = {}
 	local used = {}
 
 	for _, name in ipairs(preferred) do
-		local obj = EliteFolder:FindFirstChild(name)
+		local obj = MiniBossFolder:FindFirstChild(name)
 		if obj and obj:IsA("Model") then
 			table.insert(result, name)
 			used[name] = true
@@ -1359,7 +1361,7 @@ local function buildEliteOrder(): {string}
 	end
 
 	if #result == 0 then
-		for _, obj in ipairs(EliteFolder:GetChildren()) do
+		for _, obj in ipairs(MiniBossFolder:GetChildren()) do
 			if obj:IsA("Model") and not used[obj.Name] then
 				table.insert(result, obj.Name)
 				used[obj.Name] = true
@@ -1371,10 +1373,10 @@ local function buildEliteOrder(): {string}
 	return result
 end
 
-local eliteOrder = buildEliteOrder()
+local eliteOrder = buildMiniBossOrder()
 encounterScheduler = EncounterScheduler.new({
 	runTimeLimit = RUN_TIME_LIMIT,
-	eliteIntervalSeconds = ELITE_INTERVAL_SECONDS,
+	eliteIntervalSeconds = MINIBOSS_INTERVAL_SECONDS,
 	maxLivingEnemies = MAX_LIVING_ENEMIES,
 	levelSpawnBands = LEVEL_SPAWN_BANDS,
 	overtimeSpawnConfig = OVERTIME_SPAWN_CONFIG,
@@ -1385,6 +1387,30 @@ encounterScheduler = EncounterScheduler.new({
 	swarmDuration = SWARM_DURATION,
 	eliteOrder = eliteOrder,
 })
+
+local nextEliteAt = ELITE_FIRST_SPAWN_SECONDS
+local function getEliteTemplateNames(): {string}
+	local names = {}
+	for _, child in ipairs(EliteFolder:GetChildren()) do
+		if child:IsA("Model") and ENEMY_CONFIGS[child.Name] then
+			table.insert(names, child.Name)
+		end
+	end
+	table.sort(names)
+	return names
+end
+
+local function spawnEliteRewardChest(mob: Model, ctx)
+	local pos = (ctx and ctx.position) or NpcService.GetPosition(mob) or mob:GetPivot().Position
+	ChestRewardApi.SpawnShared(getActiveRunPlayers(), pos, {
+		name = "EliteRewardChest",
+		actionText = "Claim Elite Chest",
+		objectText = "Elite Reward",
+		expiresAfter = 60,
+	})
+	broadcast({ type = "eliteDefeated", name = tostring(mob:GetAttribute("MobType") or mob.Name) })
+end
+
 -- === Portal + Boss end condition ===
 local portalController = nil
 local bossModel: Model? = nil
@@ -1447,8 +1473,8 @@ local function endRun(reason: string)
 	broadcast({
 		type = "complete",
 		reason = reason,
-		elitesDefeated = eliteProgress.defeated,
-		elitesTotal = eliteProgress.total,
+		miniBossesDefeated = eliteProgress.defeated,
+		miniBossesTotal = eliteProgress.total,
 	})
 
 	for _, plr in ipairs(Players:GetPlayers()) do
@@ -1460,11 +1486,11 @@ local function endRun(reason: string)
 	end
 end
 
-local function watchEliteDeath(mob: Model)
+local function watchMiniBossDeath(mob: Model)
     NpcService.BindDeath(mob, function()
         local defeated, total = encounterScheduler:RecordEliteDefeated()
-        broadcast({ type = "eliteProgress", elitesDefeated = defeated, elitesTotal = total })
-        broadcast({ type = "eliteDefeated", elitesDefeated = defeated, elitesTotal = total })
+        broadcast({ type = "miniBossProgress", miniBossesDefeated = defeated, miniBossesTotal = total })
+        broadcast({ type = "miniBossDefeated", miniBossesDefeated = defeated, miniBossesTotal = total })
     end)
 end
 local function getWorldBoundsXZ()
@@ -1528,7 +1554,7 @@ spawnBossNearPortal = function()
 
 	controller:SetBossDefeated(false)
 	local bossName = "Golem" -- change if you have a dedicated boss model
-	local tpl = EliteFolder:FindFirstChild(bossName) or NormalFolder:FindFirstChild(bossName)
+	local tpl = BossFolder:FindFirstChild(bossName)
 	if not tpl or not tpl:IsA("Model") then
 		warn("[Portal] Missing boss template:", bossName)
 		bossSpawnPending = false
@@ -1540,7 +1566,6 @@ spawnBossNearPortal = function()
 	cleanupTemplateScripts(mob)
 	setMobGroup(mob)
 	local bossConfig = ENEMY_CONFIGS[bossName]
-	applyMobVisualScale(mob, true, true, bossConfig)
 	mob:SetAttribute("SpawnSource", "Boss")
 	mob.Parent = ENEMIES_FOLDER
 
@@ -1588,7 +1613,8 @@ spawnBossNearPortal = function()
 		cd = bossStats.cd,
 		dmg = bossStats.dmg,
 		isRanged = false,
-	}, { xp = 120, coins = 60 }, true, true, function()
+		resistanceProfile = bossConfig and bossConfig.resistanceProfile,
+	}, { xp = 120, coins = 60 }, "Boss", function()
 		controller:SetBossDefeated(true)
 		bossSpawnPending = false
 		nextBossReinforcementAt = math.huge
@@ -1655,26 +1681,30 @@ local function setDebugBool(name: string, value: boolean): boolean
 	return flag.Value
 end
 
-local function resolveDebugSpawnName(mobName: string?, isElite: boolean): string?
+local function resolveDebugSpawnName(mobName: string?, enemyRank: string): string?
 	local cleaned = typeof(mobName) == "string" and string.gsub(mobName, "^%s*(.-)%s*$", "%1") or ""
 	if cleaned ~= "" then
 		return cleaned
 	end
 
-	if isElite then
+	if enemyRank == "MiniBoss" then
 		local scheduledElite = encounterScheduler:GetCurrentEliteName()
 		if scheduledElite then
 			return scheduledElite
 		end
-		local fallback = EliteFolder:FindFirstChildWhichIsA("Model")
+		local fallback = MiniBossFolder:FindFirstChildWhichIsA("Model")
 		return fallback and fallback.Name or nil
 	end
 
+	if enemyRank == "Elite" then
+		local fallback = EliteFolder:FindFirstChildWhichIsA("Model")
+		return fallback and fallback.Name or nil
+	end
 	local pool = getPool(elapsed())
 	return pickWeighted(pool)
 end
 
-local function debugForceSpawn(mobName: string?, isElite: boolean, count: number?): {Model}
+local function debugForceSpawn(mobName: string?, enemyRank: string, count: number?): {Model}
 	local spawned = {}
 	local targetCount = math.max(1, math.floor(tonumber(count) or 1))
 
@@ -1683,12 +1713,12 @@ local function debugForceSpawn(mobName: string?, isElite: boolean, count: number
 			break
 		end
 
-		local chosenName = resolveDebugSpawnName(mobName, isElite)
+		local chosenName = resolveDebugSpawnName(mobName, enemyRank)
 		if not chosenName then
 			break
 		end
 
-		local mob = spawnMob(chosenName, isElite, nil)
+		local mob = spawnRankedMob(chosenName, enemyRank, nil, "Debug", nil)
 		if not mob then
 			break
 		end
@@ -1738,11 +1768,14 @@ if RunService:IsStudio() then
 		setAutoMobSpawnsEnabled = function(enabled: boolean)
 			return setDebugBool("AutoMobSpawnsEnabled", enabled == true)
 		end,
-		forceSpawnMob = function(mobName: string?, isElite: boolean?, count: number?)
-			return debugForceSpawn(mobName, isElite == true, count)
+		forceSpawnMob = function(mobName: string?, _isElite: boolean?, count: number?)
+			return debugForceSpawn(mobName, "Normal", count)
 		end,
 		forceEliteSpawn = function(mobName: string?, count: number?)
-			return debugForceSpawn(mobName, true, count)
+			return debugForceSpawn(mobName, "Elite", count)
+		end,
+		forceMiniBossSpawn = function(mobName: string?, count: number?)
+			return debugForceSpawn(mobName, "MiniBoss", count)
 		end,
 		forceBossSpawn = debugForceBossSpawn,
 		clearEnemies = debugClearEnemies,
@@ -1758,9 +1791,9 @@ do
 		seconds = 0,
 		secondsLeft = left,
 		overtime = over,
-		nextEliteIn = encounterScheduler:GetNextEliteIn(0),
-		elitesDefeated = 0,
-		elitesTotal = eliteProgress.total,
+		nextMiniBossIn = encounterScheduler:GetNextEliteIn(0),
+		miniBossesDefeated = 0,
+		miniBossesTotal = eliteProgress.total,
 		kills = 0,
 		coins = 0,
 		portalActivated = isPortalActivated(),
@@ -1802,9 +1835,9 @@ RunService.Heartbeat:Connect(function(dt)
             seconds = math.floor(t),
 			secondsLeft = math.floor(left),
 			overtime = math.floor(over),
-            nextEliteIn = nextIn and math.floor(nextIn) or nil,
-            elitesDefeated = eliteProgress.defeated,
-			elitesTotal = eliteProgress.total,
+            nextMiniBossIn = nextIn and math.floor(nextIn) or nil,
+            miniBossesDefeated = eliteProgress.defeated,
+			miniBossesTotal = eliteProgress.total,
 			kills = runKills,
 			coins = runCoins,
 			portalActivated = isPortalActivated(),
@@ -1816,7 +1849,22 @@ RunService.Heartbeat:Connect(function(dt)
 		return
 	end
 
-    -- Elites (every 5 minutes during the scheduled run)
+	-- Elite variants: one active at a time, first at 2:00, then every 90 seconds.
+	if t >= nextEliteAt and activeEliteEnemiesCount() == 0 and hasEnemyCapacity(1, t) then
+		local names = getEliteTemplateNames()
+		if #names > 0 then
+			local eliteName = names[math.random(1, #names)]
+			local elite = spawnRankedMob(eliteName, "Elite", nil, "Elite", spawnEliteRewardChest)
+			if elite then
+				broadcast({ type = "eliteSpawn", name = eliteName })
+				nextEliteAt = t + ELITE_INTERVAL_SECONDS
+			end
+		else
+			nextEliteAt = t + ELITE_INTERVAL_SECONDS
+		end
+	end
+
+    -- Mini-bosses (every 5 minutes during the scheduled run)
 	local pendingEliteName = encounterScheduler:GetPendingElite(t)
     if pendingEliteName then
 		if not hasEnemyCapacity(1, t) then
@@ -1825,8 +1873,8 @@ RunService.Heartbeat:Connect(function(dt)
 			local elite = spawnMob(pendingEliteName, true, nil)
 			if elite then
 				local eliteProgress = encounterScheduler:GetEliteProgress()
-				broadcast({ type = "eliteSpawn", name = pendingEliteName, elitesDefeated = eliteProgress.defeated, elitesTotal = eliteProgress.total })
-				watchEliteDeath(elite)
+				broadcast({ type = "miniBossSpawn", name = pendingEliteName, miniBossesDefeated = eliteProgress.defeated, miniBossesTotal = eliteProgress.total })
+				watchMiniBossDeath(elite)
 				encounterScheduler:RecordEliteSpawnResult(true, t)
 			else
 				-- Spawn could fail due temporary position/template issues; retry shortly.
@@ -1839,14 +1887,14 @@ RunService.Heartbeat:Connect(function(dt)
 		spawnBossNearPortal()
 	end
 
-	local eliteEncounterActive = activeEliteEnemiesCount() > 0
-	local swarmStep = encounterScheduler:StepSwarm(t, eliteEncounterActive)
+	local miniBossEncounterActive = activeMiniBossEnemiesCount() > 0
+	local swarmStep = encounterScheduler:StepSwarm(t, miniBossEncounterActive)
 	for _, event in ipairs(swarmStep.events) do
 		broadcast(event)
 	end
 	if swarmStep.suppressAmbientNormals then
 		for _, enemy in ipairs(ENEMIES_FOLDER:GetChildren()) do
-			if enemy:IsA("Model") and enemy:GetAttribute("IsElite") ~= true and enemy:GetAttribute("IsBoss") ~= true then
+			if enemy:IsA("Model") and enemy:GetAttribute("IsElite") ~= true and enemy:GetAttribute("IsMiniBoss") ~= true and enemy:GetAttribute("IsBoss") ~= true then
 				local source = enemy:GetAttribute("SpawnSource")
 				if source == nil or source == "RunAmbient" or source == "RunSwarm" then
 					NpcService.Despawn(enemy)
@@ -1858,7 +1906,7 @@ RunService.Heartbeat:Connect(function(dt)
 	local avgRunLevel = getAverageRunLevel()
 	local stressBurstSize, stressIntervalScale, stressMaxAliveScale = getSpawnStressConfig()
 	local encounterKind = getActiveImportantEncounter()
-	local normalPlan = encounterScheduler:BuildNormalSpawnBudget(t, dt, eliteEncounterActive, avgRunLevel, {
+	local normalPlan = encounterScheduler:BuildNormalSpawnBudget(t, dt, miniBossEncounterActive, avgRunLevel, {
 		burstSize = stressBurstSize,
 		intervalScale = stressIntervalScale,
 	}, encounterKind)

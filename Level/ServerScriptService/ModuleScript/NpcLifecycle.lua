@@ -163,28 +163,17 @@ function NpcLifecycle.GetCurrentSpeed(npc: any, now: number): number
 end
 
 function NpcLifecycle.GetControlResistance(npc: any)
-	if npc.isBoss then
-		return {
-			slowPct = 0.55,
-			slowDuration = 0.45,
-			freezeDuration = 0.22,
-			impulse = 0.20,
-		}
+	local rank = tostring(npc.enemyRank or "Normal")
+	if rank == "Boss" or npc.isBoss then
+		return { slowPct = 0.55, slowDuration = 0.45, freezeDuration = 0.22, impulse = 0.20 }
 	end
-	if npc.isElite then
-		return {
-			slowPct = 0.78,
-			slowDuration = 0.72,
-			freezeDuration = 0.45,
-			impulse = 0.48,
-		}
+	if rank == "MiniBoss" or npc.isMiniBoss then
+		return { slowPct = 0.78, slowDuration = 0.72, freezeDuration = 0.45, impulse = 0.48 }
 	end
-	return {
-		slowPct = 1,
-		slowDuration = 1,
-		freezeDuration = 1,
-		impulse = 1,
-	}
+	if rank == "Elite" or npc.isElite then
+		return { slowPct = 0.90, slowDuration = 0.85, freezeDuration = 0.70, impulse = 0.65 }
+	end
+	return { slowPct = 1, slowDuration = 1, freezeDuration = 1, impulse = 1 }
 end
 
 function NpcLifecycle.ApplySlow(npc: any, slowPct: number, duration: number)

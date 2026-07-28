@@ -1,5 +1,58 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-28 - PR #149 enemy ranks, resistances, and elite reward chests Studio sync
+
+### Summary
+
+- Synchronized the runtime scope of open draft PR #149, head `18c06d4704232e7186ef3734b0be6474d02f0b1d`, into the active Studio `Level` place without merging the PR, changing the local checkout, or publishing the place.
+- Added distinct `Normal`, `Elite`, `MiniBoss`, and `Boss` ranks using only authored models from `ReplicatedStorage.Assets.Enemies/{Normal,Elite,MiniBoss,Boss}` and no runtime model scaling.
+- Added elemental resistance profiles and rank-aware damage, target priority, knockback, and pull handling.
+- Added scheduled Elite/MiniBoss/Boss integration and shared, per-player free Elite reward chests backed directly by `ReplicatedStorage.Assets.Chest`.
+- Added `ChestRewardApi` and `EnemyResistanceConfig`; removed `ChestAssetTemplateBootstrap`.
+- Ignored the PR's seven repository-only `.github/patches` and workflow artifacts because they are not Roblox runtime sources.
+
+### Studio paths
+
+- Updated `game.ReplicatedStorage.ModuleScripts.NpcShared`.
+- Added `game.ServerScriptService.ModuleScript.ChestRewardApi` and `game.ServerScriptService.ModuleScript.EnemyResistanceConfig`.
+- Updated `game.ServerScriptService.ModuleScript.{EncounterScheduler,MissionProgress,MobConfig,NpcLifecycle,NpcService,NpcTargeting,RunSpawnConfig,SpellEffects,WaveDebugApi}`.
+- Removed `game.ServerScriptService.Script.ChestAssetTemplateBootstrap`.
+- Updated `game.ServerScriptService.Script.{ChestService,DebugCommandService,SpellService,StatueService,WeaponCombat}` and `game.ServerScriptService.Script.Model.WaveController`.
+- Updated `game.StarterGui.BossBar.BossBar` and `game.StarterPlayer.StarterPlayerScripts.LocalScript.WaveHud`.
+
+### Validation
+
+- Confirmed all 19 pre-existing Studio sources matched the PR base before synchronization; the two new modules were absent.
+- Confirmed all 20 resulting Studio sources match PR #149 head by normalized length and rolling checksum, and confirmed the removed bootstrap remains absent.
+- Edit-mode `require` smoke checks passed for `ChestRewardApi`, `EncounterScheduler`, `EnemyResistanceConfig`, `MobConfig`, `RunSpawnConfig`, `SpellEffects`, `WaveDebugApi`, and `NpcShared`.
+- Play startup completed with `SpellService`, `ChestService`, and `HordeController` ready; `RunReadyGate` prepared the world successfully.
+- Controlled spawns for Normal Slime, Elite Grzyb, MiniBoss Golem, and Boss Golem selected the expected authored rank folders, attributes, resistance profiles, and unchanged model sizes.
+- Controlled damage checks produced the expected resistance-adjusted values: Normal Grzyb Fire `13`, Elite Grzyb Water `8`, MiniBoss Golem Earth `6`, and Boss Golem Water `12`.
+- Target priorities were exactly Normal `1`, Elite `2`, MiniBoss `3`, and Boss `4`.
+- Direct impulse checks confirmed knockback `90/0/0/0` and pull `90/58.5/43.2/18` for Normal/Elite/MiniBoss/Boss.
+- A direct shared-chest contract check confirmed per-player eligibility, initially unclaimed state, free claim metadata, and expiry metadata without opening the chest or mutating player rewards.
+- The boss bar moved to its visible position while a controlled Boss existed and returned to its hidden position after despawn. The MiniBoss HUD handler received the updated alert payload.
+- Test NPCs, the validation probe, and temporary `DebugSettings` were removed. Final active test-NPC count was zero.
+- No PR-specific runtime error appeared. Existing unrelated output remained from `Hybrid Terrain Hex Generator:16`; one `AssistantCommand` error was caused by the validation inspector selecting the same-named LocalScript instead of the BossBar Frame.
+
+### Runtime loops and cost
+
+- No new `Heartbeat`, `Stepped`, `RenderStepped`, or per-NPC frame connection was added.
+- Wave scheduling remains in the existing central `WaveController` Heartbeat; the new Elite interval is two minutes initially and every 90 seconds afterward, while MiniBoss scheduling uses the existing five-minute cadence.
+- Rank and resistance lookup is O(1) per damage operation. Shared chest creation and completion iterate eligible players, so their cost is O(players), not O(NPCs).
+- Chest expiry uses one bounded delayed task per shared chest and is cleaned with the run/chest lifecycle.
+- No new gameplay dependency through `_G` was added; the Studio-only MiniBoss debug hook remains isolated to the existing debug path.
+
+### Not verified, risks, and rollback
+
+- The natural two-minute Elite scheduler-to-death-to-chest callback was not waited out end to end; its static connection, ranked spawn path, death callback, and direct chest API contract were verified separately.
+- Real prompt claiming, reward persistence, `ELITE_KILLS` mission progression, two-player shared claiming, and a complete long scheduler run were not exercised to avoid mutating live player/run data. No target-scale MicroProfiler test was run.
+- `WaveHud` keeps its tracker panel hardcoded hidden, so only its center alert was observable. The authored BossBar has no text labels and was validated as a visual bar.
+- `DebugCommandService` remains disabled as it was before the sync, so the chat-facing debug command was not exercised.
+- `WaveController` remains a large controller at roughly 1,750 lines; this PR integrates scheduling there but keeps resistance and chest contracts in separate modules.
+- PR #149 remains draft and still contains seven temporary repository automation artifacts that its description says will be removed before readiness.
+- Immediate rollback is Studio Undo to `Before PR 149 Studio sync`; the post-sync and cleanup waypoints are `After PR 149 Studio sync`, `Removed PR149 validation probe`, and `PR149 validation cleanup complete`. Manual rollback restores the 19 base sources, removes the two new modules, and restores `ChestAssetTemplateBootstrap`.
+
 ## 2026-07-28 - PR #148 Four Peaks daily login CanvasGroup replacement Studio sync
 
 ### Summary

@@ -23,19 +23,45 @@ local function validateCallbacks(newCallbacks)
 	end
 end
 
+local function getEnemyRank(model)
+	if not model then
+		return "Normal"
+	end
+	local rank = model:GetAttribute("EnemyRank")
+	if typeof(rank) == "string" and rank ~= "" then
+		return rank
+	end
+	if model:GetAttribute("IsBoss") == true or string.sub(model.Name, 1, 5) == "Boss_" then
+		return "Boss"
+	end
+	if model:GetAttribute("IsMiniBoss") == true then
+		return "MiniBoss"
+	end
+	if model:GetAttribute("IsElite") == true then
+		return "Elite"
+	end
+	return "Normal"
+end
+
 local function isBossEnemy(model)
-	return model and (model:GetAttribute("IsBoss") == true or string.sub(model.Name, 1, 5) == "Boss_")
+	return getEnemyRank(model) == "Boss"
 end
 
 local function isEliteEnemy(model)
-	return model and (model:GetAttribute("IsElite") == true or isBossEnemy(model))
+	return getEnemyRank(model) ~= "Normal"
 end
 
-local function applyTimedDot(plr, enemy, dps, duration)
+local function applyTimedDot(plr, enemy, dps, duration, element, secondaryElement, sourceId)
 	local endAt = callbacks.spellClock() + duration
 	task.spawn(function()
 		while callbacks.spellClock() < endAt and callbacks.isEnemyAlive(enemy) do
-			callbacks.safeDamage(enemy, dps * 0.5, { player = plr, showFloating = false })
+			callbacks.safeDamage(enemy, dps * 0.5, {
+				player = plr,
+				showFloating = false,
+				element = element,
+				secondaryElement = secondaryElement,
+				sourceId = sourceId,
+			})
 			task.wait(0.5)
 		end
 	end)
@@ -57,25 +83,17 @@ function SpellEffects.GetTargetDamageMultiplier(enemy, stats)
 end
 
 function SpellEffects.GetEffectResistance(enemy)
-	if isBossEnemy(enemy) then
-		return {
-			dot = 0.70,
-			vulnerability = 0.55,
-			duration = 0.45,
-		}
+	local rank = getEnemyRank(enemy)
+	if rank == "Boss" then
+		return { dot = 0.70, vulnerability = 0.55, duration = 0.45 }
 	end
-	if isEliteEnemy(enemy) then
-		return {
-			dot = 0.85,
-			vulnerability = 0.75,
-			duration = 0.72,
-		}
+	if rank == "MiniBoss" then
+		return { dot = 0.85, vulnerability = 0.75, duration = 0.72 }
 	end
-	return {
-		dot = 1,
-		vulnerability = 1,
-		duration = 1,
-	}
+	if rank == "Elite" then
+		return { dot = 0.92, vulnerability = 0.88, duration = 0.85 }
+	end
+	return { dot = 1, vulnerability = 1, duration = 1 }
 end
 
 function SpellEffects.GetVulnerabilityDamageMultiplier(enemy, now)
@@ -101,7 +119,10 @@ function SpellEffects.Apply(plr, enemy, stats, sourcePos)
 			plr,
 			enemy,
 			(effects.dot.dps or 0) * effectPower * resist.dot,
-			(effects.dot.duration or 0) * durationMult * resist.duration
+			(effects.dot.duration or 0) * durationMult * resist.duration,
+			stats.element,
+			stats.secondaryElement,
+			stats.spellId
 		)
 	end
 	if effects.slow then
@@ -117,19 +138,19 @@ function SpellEffects.Apply(plr, enemy, stats, sourcePos)
 	if enemyPos and sourcePos and effects.knockback then
 		local direction = enemyPos - sourcePos
 		if direction.Magnitude > 0.01 then
-			callbacks.addImpulse(enemy, direction.Unit * (effects.knockback.force or 0) * (0.8 + (effectPower * 0.2)))
+			callbacks.addImpulse(enemy, direction.Unit * (effects.knockback.force or 0) * (0.8 + (effectPower * 0.2)), "knockback")
 		end
 	end
 	if enemyPos and sourcePos and effects.pull then
 		local direction = sourcePos - enemyPos
 		if direction.Magnitude > 0.01 then
-			callbacks.addImpulse(enemy, direction.Unit * (effects.pull.force or 0) * (0.8 + (effectPower * 0.2)))
+			callbacks.addImpulse(enemy, direction.Unit * (effects.pull.force or 0) * (0.8 + (effectPower * 0.2)), "pull")
 		end
 	end
 	if enemyPos and sourcePos and tonumber(stats.pullStrength) and tonumber(stats.pullStrength) > 0 then
 		local direction = sourcePos - enemyPos
 		if direction.Magnitude > 0.01 then
-			callbacks.addImpulse(enemy, direction.Unit * 10 * tonumber(stats.pullStrength) * (0.8 + (effectPower * 0.2)))
+			callbacks.addImpulse(enemy, direction.Unit * 10 * tonumber(stats.pullStrength) * (0.8 + (effectPower * 0.2)), "pull")
 		end
 	end
 end

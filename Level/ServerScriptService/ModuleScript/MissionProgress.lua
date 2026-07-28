@@ -167,7 +167,7 @@ end
 
 function MissionProgress.OnKill(plr: Player, mobModel: Model?)
 	MissionProgress.Add(plr, "KILLS", 1)
-	if mobModel and mobModel:GetAttribute("IsElite") == true then
+	if mobModel and mobModel:GetAttribute("EnemyRank") == "Elite" then
 		MissionProgress.Add(plr, "ELITE_KILLS", 1)
 		-- Revenge: elite kill within 10s after player took damage (best-effort)
 		local lastD = tonumber(plr:GetAttribute("LastDamageClock")) or 0
