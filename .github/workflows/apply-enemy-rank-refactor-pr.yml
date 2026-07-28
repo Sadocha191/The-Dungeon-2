@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: finalize-enemy-rank-refactor-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -29,7 +33,7 @@ jobs:
               text = path.read_text()
               count = text.count(old)
               if count != 1:
-                  raise SystemExit(f"Expected one marker in {path}, found {count}: {old[:80]!r}")
+                  raise SystemExit(f"Expected one marker in {path}, found {count}: {old[:100]!r}")
               path.write_text(text.replace(old, new, 1))
 
           replace_once(
@@ -56,6 +60,52 @@ jobs:
               '''local function prepareWorldChestClone(model)\n\tfor _, descendant in ipairs(model:GetDescendants()) do\n\t\tif descendant:IsA("BaseScript") or descendant:IsA("ProximityPrompt") then\n\t\t\tdescendant:Destroy()\n\t\telseif descendant:IsA("BasePart") then\n\t\t\tdescendant.Anchored = true\n\t\t\tdescendant.CanTouch = false\n\t\t\tif descendant.Name == "RootPart" and descendant.Transparency >= 1 then\n\t\t\t\tdescendant.CanCollide = false\n\t\t\t\tdescendant.CanQuery = false\n\t\t\tend\n\t\tend\n\tend\nend''',
           )
 
+          mob_config = 'Level/ServerScriptService/ModuleScript/MobConfig.lua'
+          replace_once(
+              mob_config,
+              '''\t\tpreferredFlightAltitude = 10,\n\t\tresistanceProfile = "FlyingBeast",''',
+              '''\t\tpreferredFlightAltitude = 10,\n\t\tidleAnimationId = "rbxassetid://77439435590958",\n\t\trunAnimationId = "rbxassetid://77439435590958",\n\t\tresistanceProfile = "FlyingBeast",''',
+          )
+          replace_once(
+              mob_config,
+              '''\t\tcoins = 3,\n\t\tmovementProfile = "GroundSmall",\n\t\tresistanceProfile = "MetalConstruct",''',
+              '''\t\tcoins = 3,\n\t\tmovementProfile = "GroundSmall",\n\t\trunAnimationId = "rbxassetid://92098878453446",\n\t\tresistanceProfile = "MetalConstruct",''',
+          )
+          replace_once(
+              mob_config,
+              '''\t\txp = 15,\n\t\tcoins = 3,\n\t\tmovementProfile = "GroundSmall",\n\t\tresistanceProfile = "Wood",''',
+              '''\t\txp = 15,\n\t\tcoins = 3,\n\t\tmovementProfile = "GroundSmall",\n\t\trunAnimationId = "rbxassetid://98960191123613",\n\t\tresistanceProfile = "Wood",''',
+          )
+          replace_once(
+              mob_config,
+              '''\t\tfacingYawDegrees = -90,\n\t\tmovementProfile = "GroundLarge",\n\t\tresistanceProfile = "Wood",''',
+              '''\t\tfacingYawDegrees = -90,\n\t\tmovementProfile = "GroundLarge",\n\t\trunAnimationId = "rbxassetid://71526519880141",\n\t\tresistanceProfile = "Wood",''',
+          )
+
+          wave_controller = 'Level/ServerScriptService/Script/Model/WaveController.lua'
+          replace_once(
+              wave_controller,
+              '''\tmob:SetAttribute("ResistanceProfile", stats.resistanceProfile or "Neutral")\n\tmob:SetAttribute("Damage", stats.dmg)''',
+              '''\tmob:SetAttribute("ResistanceProfile", stats.resistanceProfile or "Neutral")\n\tsetOptionalMobAttribute(mob, "NpcIdleAnimationId", stats.idleAnimationId)\n\tsetOptionalMobAttribute(mob, "NpcRunAnimationId", stats.runAnimationId)\n\tmob:SetAttribute("Damage", stats.dmg)''',
+          )
+          replace_once(
+              wave_controller,
+              '''\t\tresistanceProfile = cfg.resistanceProfile,\n\t\tfacingYawDegrees = cfg.facingYawDegrees,''',
+              '''\t\tresistanceProfile = cfg.resistanceProfile,\n\t\tidleAnimationId = cfg.idleAnimationId,\n\t\trunAnimationId = cfg.runAnimationId,\n\t\tfacingYawDegrees = cfg.facingYawDegrees,''',
+          )
+
+          presentation = 'Level/StarterPlayer/StarterPlayerScripts/LocalScript/NpcPresentation.client.lua'
+          replace_once(
+              presentation,
+              '''local SEARCH_NAMES = {\n\tidle = { "idle" },\n\trun = { "run", "walk" },\n\tattack = { "attack", "toolslash", "toollunge" },\n\tdeath = { "death", "dead", "died" },\n}\n''',
+              '''local SEARCH_NAMES = {\n\tidle = { "idle" },\n\trun = { "run", "walk" },\n\tattack = { "attack", "toolslash", "toollunge" },\n\tdeath = { "death", "dead", "died" },\n}\n\nlocal CONFIGURED_ANIMATION_ATTRIBUTE_BY_STATE = {\n\tidle = "NpcIdleAnimationId",\n\trun = "NpcRunAnimationId",\n\tattack = "NpcAttackAnimationId",\n\tdeath = "NpcDeathAnimationId",\n}\n''',
+          )
+          replace_once(
+              presentation,
+              '''local function collectAnimations(model: Model, stateName: string): {Animation}\n\tlocal list = {}\n\tlocal seen = {}\n\tlocal names = SEARCH_NAMES[stateName] or { stateName }\n\n\tfor _, descendant in ipairs(model:GetDescendants()) do''',
+              '''local function collectAnimations(model: Model, stateName: string): {Animation}\n\tlocal list = {}\n\tlocal seen = {}\n\tlocal names = SEARCH_NAMES[stateName] or { stateName }\n\tlocal configuredAttribute = CONFIGURED_ANIMATION_ATTRIBUTE_BY_STATE[stateName]\n\tlocal configuredId = configuredAttribute and model:GetAttribute(configuredAttribute) or nil\n\tif typeof(configuredId) == "number" then\n\t\tconfiguredId = tostring(math.floor(configuredId))\n\tend\n\tif typeof(configuredId) == "string" and configuredId ~= "" then\n\t\tif string.match(configuredId, "^%d+$") then\n\t\t\tconfiguredId = "rbxassetid://" .. configuredId\n\t\tend\n\t\tlocal configuredAnimation = Instance.new("Animation")\n\t\tconfiguredAnimation.Name = "Configured_" .. stateName\n\t\tconfiguredAnimation.AnimationId = configuredId\n\t\ttable.insert(list, configuredAnimation)\n\tend\n\n\tfor _, descendant in ipairs(model:GetDescendants()) do''',
+          )
+
           temporary_paths = [
               '.github/patches/enemy-rank-refactor.part01.txt',
               '.github/patches/enemy-rank-refactor.part02.txt',
@@ -68,15 +118,22 @@ jobs:
           for path_string in temporary_paths:
               Path(path_string).unlink(missing_ok=True)
 
-          wave = Path('Level/ServerScriptService/Script/Model/WaveController.lua').read_text()
+          wave = Path(wave_controller).read_text()
           chest = Path('Level/ServerScriptService/Script/ChestService.server.lua').read_text()
           npc_shared = Path('Level/ReplicatedStorage/ModuleScripts/NpcShared.lua').read_text()
           npc_service = Path('Level/ServerScriptService/ModuleScript/NpcService.lua').read_text()
+          mobs = Path(mob_config).read_text()
+          npc_presentation = Path(presentation).read_text()
           assert 'ScaleTo(' not in wave
-          assert 'ReplicatedStorage:WaitForChild("Assets")' in chest
+          assert 'ReplicatedStorage:WaitForChild("Assets"' in chest
           assert 'Instance.new("Model")' not in chest
           assert 'EnemyId = "EnemyId"' in npc_shared
           assert 'string.format("%s/%s", npc.enemyRank, mobType)' in npc_service
+          assert '77439435590958' in mobs
+          assert '92098878453446' in mobs
+          assert '98960191123613' in mobs
+          assert '71526519880141' in mobs
+          assert 'CONFIGURED_ANIMATION_ATTRIBUTE_BY_STATE' in npc_presentation
           assert not list(Path('.github/patches').glob('enemy-rank-refactor*'))
           PY
       - name: Commit final implementation
@@ -86,5 +143,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           git diff --cached --check
-          git commit -m 'Finalize enemy rank refactor'
+          git commit -m 'Finalize enemy ranks and configure mob movement animations'
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
