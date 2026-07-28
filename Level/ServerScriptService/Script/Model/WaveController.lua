@@ -826,6 +826,8 @@ local function registerMobModel(mob: Model, mobType: string, stats, rewardCfg, e
 	mob:SetAttribute("DisplayName", mobType)
 	mob:SetAttribute("EnemyRank", enemyRank)
 	mob:SetAttribute("ResistanceProfile", stats.resistanceProfile or "Neutral")
+	setOptionalMobAttribute(mob, "NpcIdleAnimationId", stats.idleAnimationId)
+	setOptionalMobAttribute(mob, "NpcRunAnimationId", stats.runAnimationId)
 	mob:SetAttribute("Damage", stats.dmg)
 	mob:SetAttribute("AttackRange", stats.range)
 	mob:SetAttribute("AttackCooldown", stats.cd)
@@ -950,6 +952,8 @@ local function spawnRankedMob(mobName: string, enemyRank: string, spawnAnchorPos
 		dmg = dmg,
 		isRanged = cfg.isRanged == true,
 		resistanceProfile = cfg.resistanceProfile,
+		idleAnimationId = cfg.idleAnimationId,
+		runAnimationId = cfg.runAnimationId,
 		facingYawDegrees = cfg.facingYawDegrees,
 		movementProfile = cfg.movementProfile,
 		movementMode = cfg.movementMode,

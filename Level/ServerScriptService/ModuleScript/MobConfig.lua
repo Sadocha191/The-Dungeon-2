@@ -27,6 +27,8 @@ MobConfig.Mobs = {
 		movementMode = "Flying",
 		movementProfile = "Flying",
 		preferredFlightAltitude = 10,
+		idleAnimationId = "rbxassetid://77439435590958",
+		runAnimationId = "rbxassetid://77439435590958",
 		resistanceProfile = "FlyingBeast",
 	},
 	Goblin = {
@@ -50,6 +52,7 @@ MobConfig.Mobs = {
 		xp = 17,
 		coins = 3,
 		movementProfile = "GroundSmall",
+		runAnimationId = "rbxassetid://92098878453446",
 		resistanceProfile = "MetalConstruct",
 	},
 	Stump = {
@@ -61,6 +64,7 @@ MobConfig.Mobs = {
 		xp = 15,
 		coins = 3,
 		movementProfile = "GroundSmall",
+		runAnimationId = "rbxassetid://98960191123613",
 		resistanceProfile = "Wood",
 	},
 	Ent_Fat = {
@@ -73,6 +77,7 @@ MobConfig.Mobs = {
 		coins = 4,
 		facingYawDegrees = -90,
 		movementProfile = "GroundLarge",
+		runAnimationId = "rbxassetid://71526519880141",
 		resistanceProfile = "Wood",
 	},
 	Grzyb = {

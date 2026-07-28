@@ -961,6 +961,7 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 	setAttributeIfChanged(model, ATTR.Id, npc.id)
 	setAttributeIfChanged(model, ATTR.Type, mobType)
 	setAttributeIfChanged(model, ATTR.MobType, mobType)
+	setAttributeIfChanged(model, ATTR.EnemyId, string.format("%s/%s", npc.enemyRank, mobType))
 	setAttributeIfChanged(model, ATTR.EnemyRank, npc.enemyRank)
 	setAttributeIfChanged(model, "ResistanceProfile", npc.resistanceProfile)
 	setAttributeIfChanged(model, ATTR.Speed, npc.baseSpeed)

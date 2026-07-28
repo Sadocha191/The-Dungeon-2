@@ -24,8 +24,6 @@ local MIN_CHEST_GAP = 24
 local CHEST_RAYCAST_TRIES = 45
 local CHEST_HEIGHT = 1.8
 local CHEST_GROUND_CLEARANCE = 0.05
-local GENERATED_CHEST_BOTTOM_OFFSET = 2
-local WORLD_CHEST_TEMPLATE_NAME = "skrzynia"
 
 local BASE_CHEST_COST = 55
 local CHEST_COST_STEP = 25
@@ -327,7 +325,9 @@ end
 
 local function prepareWorldChestClone(model)
 	for _, descendant in ipairs(model:GetDescendants()) do
-		if descendant:IsA("BasePart") then
+		if descendant:IsA("BaseScript") or descendant:IsA("ProximityPrompt") then
+			descendant:Destroy()
+		elseif descendant:IsA("BasePart") then
 			descendant.Anchored = true
 			descendant.CanTouch = false
 			if descendant.Name == "RootPart" and descendant.Transparency >= 1 then

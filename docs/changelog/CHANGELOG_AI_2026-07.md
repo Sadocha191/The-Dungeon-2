@@ -1,5 +1,54 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-28 - PR #150 configured enemy movement animations integration
+
+### Summary
+
+- Applied the runtime delta from PR #150 head `d3c093e1c2df140cf3a99b339e2906c3eb438bc0` on top of the already integrated PR #149 content on `main`.
+- Added authored animation IDs for Bat flight/idle, Cauldron walk, Stump walk, and Ent_Fat walk in `MobConfig`.
+- Propagated configured animation IDs through `WaveController` model attributes and let the existing client `NpcPresentation` build the corresponding tracks centrally.
+- Added canonical `EnemyId` values in the form `<EnemyRank>/<MobType>`.
+- Removed obsolete chest constants and made cloned chest assets discard embedded scripts and legacy proximity prompts before adding the canonical prompt.
+- Kept PR #149's existing changelog entry and did not reintroduce the PR branches' temporary `.github/patches` or workflow files.
+
+### Files and Studio paths
+
+- Updated `Level/ReplicatedStorage/ModuleScripts/NpcShared.lua` and `game.ReplicatedStorage.ModuleScripts.NpcShared`.
+- Updated `Level/ServerScriptService/ModuleScript/MobConfig.lua` and `game.ServerScriptService.ModuleScript.MobConfig`.
+- Updated `Level/ServerScriptService/ModuleScript/NpcService.lua` and `game.ServerScriptService.ModuleScript.NpcService`.
+- Updated `Level/ServerScriptService/Script/ChestService.server.lua` and `game.ServerScriptService.Script.ChestService`.
+- Updated `Level/ServerScriptService/Script/Model/WaveController.lua` and `game.ServerScriptService.Script.Model.WaveController`.
+- Updated `Level/StarterPlayer/StarterPlayerScripts/LocalScript/NpcPresentation.client.lua` and `game.StarterPlayer.StarterPlayerScripts.LocalScript.NpcPresentation`.
+- Updated `CHANGELOG_AI.md` and `docs/changelog/CHANGELOG_AI_2026-07.md`.
+
+### Validation
+
+- Confirmed the six repository runtime sources exactly match PR #150 head for the touched paths.
+- Confirmed all six active Studio sources match the repository by normalized source length and rolling checksum.
+- Edit-mode `require` smoke checks passed for `NpcShared` and `MobConfig`.
+- Play startup completed with `ChestService`, `HordeController`, `SpellService`, and `RunReadyGate` ready; no PR-specific runtime or animation loading error appeared.
+- A temporary Studio-only validation probe spawned Normal Bat, Cauldron, Stump, and Ent_Fat through the existing debug API.
+- All four controlled NPCs had an `Animator`, no embedded scripts, the expected `EnemyId`, and the configured animation attributes.
+- Client inspection confirmed active configured tracks: Bat `Configured_idle` with `77439435590958`, Cauldron `Configured_run` with `92098878453446`, Stump `Configured_run` with `98960191123613`, and Ent_Fat `Configured_run` with `71526519880141`.
+- Bat kept its configured flight animation active while the presentation selected idle/hover; the three ground mobs selected their configured run tracks.
+- A controlled run generated 420 chest clones with zero embedded scripts, exactly 420 proximity prompts, and all 420 prompts named `OpenPrompt`.
+- The validation probe and controlled NPC models were removed after the test. The only observed startup error remained the pre-existing unrelated `Hybrid Terrain Hex Generator:16` toolbar error.
+- `git diff --check` passed.
+
+### Runtime loops and cost
+
+- No `Heartbeat`, `Stepped`, `RenderStepped`, cyclic task, remote, persistent-data field, or `_G` dependency was added.
+- Animation metadata adds a constant number of attribute writes per NPC spawn.
+- `NpcPresentation` creates at most one configured `Animation` instance per requested state during the existing one-time track build; it adds no per-frame lookup.
+- Chest sanitation reuses the existing one-time descendant scan per cloned chest and destroys only embedded scripts and legacy prompts before the canonical prompt is created.
+
+### Not verified, risks, and rollback
+
+- Active tracks and absence of load errors confirm that the four animation assets are usable by the current Studio place, but group ownership metadata was not inspected separately.
+- No frame-by-frame visual rig deformation audit or target-scale MicroProfiler capture was performed.
+- `WaveController` and `NpcService` remain large files, but the added lines stay within their existing spawn registration and NPC identity responsibilities.
+- Rollback is to revert the PR #150 integration commit in the repository and restore the six active Studio sources to PR #149/main commit `288675d8931d08d16d20b873636731b6dd797612`.
+
 ## 2026-07-28 - PR #149 enemy ranks, resistances, and elite reward chests Studio sync
 
 ### Summary
