@@ -17,21 +17,34 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
+      - name: Check patch readiness
+        id: gate
+        shell: bash
+        run: |
+          if [ -f .github/patches/enemy-rank-refactor.ready ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+          fi
       - name: Apply guarded repository patch
+        if: steps.gate.outputs.run == 'true'
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
-          import base64, gzip, re, subprocess, sys
-          workflow = Path('.github/workflows/apply-enemy-rank-refactor.yml').read_text()
-          match = re.search(r"printf '%s' '([^']+)' \| base64", workflow)
-          if not match:
-              raise SystemExit('Embedded patch payload was not found')
+          import base64, gzip, hashlib, subprocess, sys
+          parts = sorted(Path('.github/patches').glob('enemy-rank-refactor.part*.txt'))
+          payload = ''.join(part.read_text().strip() for part in parts)
+          expected = '6bdb085a685c5e3486f704afce4afb502a9dfd7e9e58f346f213307e00f3bfdb'
+          actual = hashlib.sha256(payload.encode()).hexdigest()
+          if actual != expected:
+              raise SystemExit(f'Patch payload hash mismatch: {actual}')
           target = Path('/tmp/patch_enemy_rank_refactor.py')
-          target.write_bytes(gzip.decompress(base64.b64decode(match.group(1))))
+          target.write_bytes(gzip.decompress(base64.b64decode(payload, validate=True)))
           subprocess.run([sys.executable, str(target)], check=True)
           PY
       - name: Commit refactor
+        if: steps.gate.outputs.run == 'true'
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
