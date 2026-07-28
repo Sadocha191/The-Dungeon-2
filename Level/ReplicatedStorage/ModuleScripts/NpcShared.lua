@@ -17,6 +17,7 @@ NpcShared.Attributes = table.freeze({
 	Id = "NpcId",
 	Type = "NpcType",
 	MobType = "MobType",
+	EnemyId = "EnemyId",
 	EnemyRank = "EnemyRank",
 	State = "NpcState",
 	LegacyState = "State",

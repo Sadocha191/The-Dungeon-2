@@ -40,6 +40,13 @@ local SEARCH_NAMES = {
 	death = { "death", "dead", "died" },
 }
 
+local CONFIGURED_ANIMATION_ATTRIBUTE_BY_STATE = {
+	idle = "NpcIdleAnimationId",
+	run = "NpcRunAnimationId",
+	attack = "NpcAttackAnimationId",
+	death = "NpcDeathAnimationId",
+}
+
 local presentations = {}
 local pendingTrackBuilds = {}
 local currentSyncRequestId = 0
@@ -340,6 +347,20 @@ local function collectAnimations(model: Model, stateName: string): {Animation}
 	local list = {}
 	local seen = {}
 	local names = SEARCH_NAMES[stateName] or { stateName }
+	local configuredAttribute = CONFIGURED_ANIMATION_ATTRIBUTE_BY_STATE[stateName]
+	local configuredId = configuredAttribute and model:GetAttribute(configuredAttribute) or nil
+	if typeof(configuredId) == "number" then
+		configuredId = tostring(math.floor(configuredId))
+	end
+	if typeof(configuredId) == "string" and configuredId ~= "" then
+		if string.match(configuredId, "^%d+$") then
+			configuredId = "rbxassetid://" .. configuredId
+		end
+		local configuredAnimation = Instance.new("Animation")
+		configuredAnimation.Name = "Configured_" .. stateName
+		configuredAnimation.AnimationId = configuredId
+		table.insert(list, configuredAnimation)
+	end
 
 	for _, descendant in ipairs(model:GetDescendants()) do
 		if descendant:IsA("Animation") then
