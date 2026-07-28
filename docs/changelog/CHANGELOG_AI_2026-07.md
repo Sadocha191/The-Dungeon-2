@@ -1,5 +1,39 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-28 - Merge PRs #146 and #147 to main
+
+### Summary
+
+- Marked PR #146 (`agent/chest-drop-pity`, head `9ab2371aabb01f4f77d861ea35f451fc14d705d9`) ready and merged it into `main` as merge commit `1c96673dec40077efd0471605f772cdfb9d9aae3`.
+- Marked PR #147 (`agent/fix-daily-login-visibility`, head `fccfb1ba865bf5e555af38d927e1169070af1328`) ready and merged it into `main` as merge commit `7c5818a72d920f38e357a1390a2fa168fbe8ddbf`.
+- The exact PR sources had already been synchronized to active Studio `Level` and `Four Peaks` and playtested before merge.
+
+### Files
+
+- Added `Level/ServerScriptService/Script/ChestDropBalance.server.lua`.
+- Added `Four Peaks/StarterPlayer/StarterPlayerScripts/DailyLoginVisibilityGuard.client.lua`.
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`.
+
+### Validation
+
+- Both PR heads were unchanged at merge time and GitHub accepted the expected head SHA guards.
+- Both PRs were mergeable before the first merge and had no required commit status checks.
+- The `Level` Studio server-context probe confirmed active weights `48/28/15/8/1`, four forced Common test rolls, and a fifth Legendary roll with `PityTriggered=true`; the temporary probe was removed.
+- The `Four Peaks` Studio client test forced `DailyLoginGui.Overlay.Panel.GroupTransparency` to `0.5`; the guard restored it to `0` after the configured fallback delay.
+- No new `Heartbeat`, `Stepped`, `RenderStepped`, per-object frame loop, or `_G` dependency was added.
+
+### Runtime cost and cleanup
+
+- `ChestDropBalance` is event-driven. It adds one `Players.PlayerRemoving` connection and one `RunStarted.Changed` connection, and stores at most one pity counter per active player. Player removal and run reset clear retained state.
+- `DailyLoginVisibilityGuard` adds property/descendant connections only for each concrete `DailyLoginGui` instance and uses a weak-key deduplication table. Its `task.delay` callback runs once per enable/panel-creation trigger after `0.25s`; there is no cyclic task or per-frame work.
+
+### Not verified, risks, and rollback
+
+- The places were changed and tested in Studio but were not published to live Roblox by this merge operation.
+- Rapid repeated `DailyLoginGui.Enabled` toggles can queue multiple bounded, idempotent visibility callbacks until their `0.25s` delay expires.
+- `ChestDropBalance` wraps the shared `ChestItemService.RollReward` function at startup, so another future runtime wrapper of the same function would need an explicit ordering contract.
+- Roll back in reverse order by reverting merge commit `7c5818a72d920f38e357a1390a2fa168fbe8ddbf`, then `1c96673dec40077efd0471605f772cdfb9d9aae3`. Studio-only rollback removes `DailyLoginVisibilityGuard` from `Four Peaks` and `ChestDropBalance` from `Level`.
+
 ## 2026-07-27 - Final integration of PRs #144, #142, #141, #138, #143, #137, #135, #136, #139, #133, and #140
 
 ### Summary
