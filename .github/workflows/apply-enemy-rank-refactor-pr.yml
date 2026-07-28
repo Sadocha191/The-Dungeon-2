@@ -24,7 +24,7 @@ jobs:
           from pathlib import Path
           import base64, gzip, re, subprocess, sys
           workflow = Path('.github/workflows/apply-enemy-rank-refactor.yml').read_text()
-          match = re.search(r"printf '%s' '([^']+)' \\| base64", workflow)
+          match = re.search(r"printf '%s' '([^']+)' \| base64", workflow)
           if not match:
               raise SystemExit('Embedded patch payload was not found')
           target = Path('/tmp/patch_enemy_rank_refactor.py')
