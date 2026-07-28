@@ -1,5 +1,45 @@
 # CHANGELOG_AI 2026-07
 
+## 2026-07-28 - PR #148 Four Peaks daily login CanvasGroup replacement Studio sync
+
+### Summary
+
+- Synchronized the final `DailyLoginVisibilityGuard.client.lua` source from PR #148 head `4803262172c436129e2e6bfe71b46bf2ebbb6151` into the active `Four Peaks` Studio place.
+- Replaced the visible daily login `CanvasGroup` with a property-matched `Frame` at runtime, avoiding the device-specific solid-black CanvasGroup texture while preserving the generated UI descendants and their existing connections.
+- Kept the original CanvasGroup hidden and inactive so `DailyLoginClient` can finish its existing close tween and disable the `ScreenGui`.
+- Kept the change presentation-only: no reward, remote, save, persistent-data, or server-authority behavior changed.
+
+### Paths and files
+
+- Updated Studio path `game.StarterPlayer.StarterPlayerScripts.DailyLoginVisibilityGuard`.
+- Updated repository path `Four Peaks/StarterPlayer/StarterPlayerScripts/DailyLoginVisibilityGuard.client.lua`.
+- Updated `docs/changelog/CHANGELOG_AI_2026-07.md`.
+
+### Validation
+
+- The final Studio source was replaced atomically with the exact PR head content.
+- A Studio client probe confirmed the visible `Overlay.Panel` is a `Frame` with `CanvasGroupWorkaround=true`, while the retained `LegacyPanelCanvasGroup` is a `CanvasGroup` with `Visible=false`, `Active=false`, and no remaining children.
+- The replacement retained all 12 generated panel children, including the existing `Footer.Claim` `TextButton`.
+- Disabling and re-enabling `DailyLoginGui` kept the same replacement and legacy instances, with exactly one of each and no lost children.
+- A Studio screen capture visually confirmed the complete daily rewards panel is readable rather than black.
+- No console error referenced `DailyLoginVisibilityGuard`; the existing unrelated `BlacksmithUI` `PassiveDesc` infinite-yield warning remained.
+- `git diff --check` passed after the changelog update; the existing local runtime checkout was otherwise unchanged.
+
+### Runtime loops and cost
+
+- No `Heartbeat`, `Stepped`, or `RenderStepped` loop is added.
+- Replacement is event-driven and runs once per generated `DailyLoginGui`; scheduled retries are limited to relevant `Panel`, `Footer`, and `Claim` descendant additions or GUI enabling.
+- The one-time replacement copies a fixed set of panel properties and reparents the panel's direct children.
+- Weak-key tables do not retain destroyed GUI instances. No networking, `_G` dependency, persistent task, or server runtime cost was added.
+
+### Not verified, risks, and rollback
+
+- Automated activation of the close button was blocked because Studio's command thread lacks the `RobloxScript` capability required by `VirtualInputManager`; the test covered direct disable/re-enable behavior instead.
+- A complete user-driven claim and close flow through every lobby button path was not manually exercised.
+- The workaround assumes the generated panel has `Footer.Claim` before replacement and that future code does not require the visible panel itself to remain a `CanvasGroup`.
+- The Studio place was not published to live Roblox.
+- Immediate rollback restores the PR #147 visibility-guard source; full rollback can use Studio Undo/place versioning and revert the PR #148 merge plus this changelog entry.
+
 ## 2026-07-28 - Merge PRs #146 and #147 to main
 
 ### Summary
