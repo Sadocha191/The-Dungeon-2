@@ -1,4 +1,4 @@
-name: Apply enemy rank refactor from PR
+name: Finalize enemy rank refactor
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  apply:
+  finalize:
     if: github.head_ref == 'feature/enemy-ranks-resistances-reward-chests'
     runs-on: ubuntu-latest
     steps:
@@ -17,39 +17,74 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
-      - name: Check patch readiness
-        id: gate
+      - name: Apply final guarded corrections
         shell: bash
         run: |
-          if [ -f .github/patches/enemy-rank-refactor.ready ]; then
-            echo 'run=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'run=false' >> "$GITHUB_OUTPUT"
-          fi
-      - name: Apply guarded repository patch
-        if: steps.gate.outputs.run == 'true'
-        shell: bash
-        run: |
+          git pull --rebase origin "${{ github.event.pull_request.head.ref }}"
           python - <<'PY'
           from pathlib import Path
-          import base64, gzip, hashlib, subprocess, sys
-          parts = sorted(Path('.github/patches').glob('enemy-rank-refactor.part*.txt'))
-          payload = ''.join(part.read_text().strip() for part in parts)
-          expected = '6bdb085a685c5e3486f704afce4afb502a9dfd7e9e58f346f213307e00f3bfdb'
-          actual = hashlib.sha256(payload.encode()).hexdigest()
-          if actual != expected:
-              raise SystemExit(f'Patch payload hash mismatch: {actual}')
-          target = Path('/tmp/patch_enemy_rank_refactor.py')
-          target.write_bytes(gzip.decompress(base64.b64decode(payload, validate=True)))
-          subprocess.run([sys.executable, str(target)], check=True)
+
+          def replace_once(path_string, old, new):
+              path = Path(path_string)
+              text = path.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected one marker in {path}, found {count}: {old[:80]!r}")
+              path.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              'Level/ReplicatedStorage/ModuleScripts/NpcShared.lua',
+              '\tMobType = "MobType",\n\tEnemyRank = "EnemyRank",',
+              '\tMobType = "MobType",\n\tEnemyId = "EnemyId",\n\tEnemyRank = "EnemyRank",',
+          )
+
+          replace_once(
+              'Level/ServerScriptService/ModuleScript/NpcService.lua',
+              '\tsetAttributeIfChanged(model, ATTR.MobType, mobType)\n\tsetAttributeIfChanged(model, ATTR.EnemyRank, npc.enemyRank)',
+              '\tsetAttributeIfChanged(model, ATTR.MobType, mobType)\n\tsetAttributeIfChanged(model, ATTR.EnemyId, string.format("%s/%s", npc.enemyRank, mobType))\n\tsetAttributeIfChanged(model, ATTR.EnemyRank, npc.enemyRank)',
+          )
+
+          replace_once(
+              'Level/ServerScriptService/Script/ChestService.server.lua',
+              'local GENERATED_CHEST_BOTTOM_OFFSET = 2\nlocal WORLD_CHEST_TEMPLATE_NAME = "skrzynia"\n',
+              '',
+          )
+
+          replace_once(
+              'Level/ServerScriptService/Script/ChestService.server.lua',
+              '''local function prepareWorldChestClone(model)\n\tfor _, descendant in ipairs(model:GetDescendants()) do\n\t\tif descendant:IsA("BasePart") then\n\t\t\tdescendant.Anchored = true\n\t\t\tdescendant.CanTouch = false\n\t\t\tif descendant.Name == "RootPart" and descendant.Transparency >= 1 then\n\t\t\t\tdescendant.CanCollide = false\n\t\t\t\tdescendant.CanQuery = false\n\t\t\tend\n\t\tend\n\tend\nend''',
+              '''local function prepareWorldChestClone(model)\n\tfor _, descendant in ipairs(model:GetDescendants()) do\n\t\tif descendant:IsA("BaseScript") or descendant:IsA("ProximityPrompt") then\n\t\t\tdescendant:Destroy()\n\t\telseif descendant:IsA("BasePart") then\n\t\t\tdescendant.Anchored = true\n\t\t\tdescendant.CanTouch = false\n\t\t\tif descendant.Name == "RootPart" and descendant.Transparency >= 1 then\n\t\t\t\tdescendant.CanCollide = false\n\t\t\t\tdescendant.CanQuery = false\n\t\t\tend\n\t\tend\n\tend\nend''',
+          )
+
+          temporary_paths = [
+              '.github/patches/enemy-rank-refactor.part01.txt',
+              '.github/patches/enemy-rank-refactor.part02.txt',
+              '.github/patches/enemy-rank-refactor.part03.txt',
+              '.github/patches/enemy-rank-refactor.part04.txt',
+              '.github/patches/enemy-rank-refactor.part05.txt',
+              '.github/workflows/apply-enemy-rank-refactor.yml',
+              '.github/workflows/apply-enemy-rank-refactor-pr.yml',
+          ]
+          for path_string in temporary_paths:
+              Path(path_string).unlink(missing_ok=True)
+
+          wave = Path('Level/ServerScriptService/Script/Model/WaveController.lua').read_text()
+          chest = Path('Level/ServerScriptService/Script/ChestService.server.lua').read_text()
+          npc_shared = Path('Level/ReplicatedStorage/ModuleScripts/NpcShared.lua').read_text()
+          npc_service = Path('Level/ServerScriptService/ModuleScript/NpcService.lua').read_text()
+          assert 'ScaleTo(' not in wave
+          assert 'ReplicatedStorage:WaitForChild("Assets")' in chest
+          assert 'Instance.new("Model")' not in chest
+          assert 'EnemyId = "EnemyId"' in npc_shared
+          assert 'string.format("%s/%s", npc.enemyRank, mobType)' in npc_service
+          assert not Path('.github/patches').glob('enemy-rank-refactor*')
           PY
-      - name: Commit refactor
-        if: steps.gate.outputs.run == 'true'
+      - name: Commit final implementation
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           git diff --cached --check
-          git commit -m 'Implement enemy ranks, resistances, and reward chests'
+          git commit -m 'Finalize enemy rank refactor'
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
