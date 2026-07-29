@@ -1,20 +1,39 @@
--- Replace with your default animation IDs
-
 local Players = game:GetService("Players")
 
-local function onCharacterAdded(character)
-	local humanoid = character:WaitForChild("Humanoid")
-	local animator = humanoid:WaitForChild("Animator")
-	print("Animator found!")
+local LEVEL_LOCOMOTION_ANIMATION_ID = "rbxassetid://89814244152772"
 
-	local animateScript = character:WaitForChild("Animate")
-	animateScript.walk.WalkAnim.AnimationId = "rbxassetid://89814244152772"
-	local animateScript = character:WaitForChild("Animate")
-	animateScript.run.RunAnim.AnimationId = "rbxassetid://89814244152772"
+local function setAnimationId(animateScript, setName, animationName)
+	local animationSet = animateScript:WaitForChild(setName, 5)
+	if not animationSet then
+		return
+	end
+
+	local animation = animationSet:WaitForChild(animationName, 5)
+	if animation and animation:IsA("Animation") then
+		animation.AnimationId = LEVEL_LOCOMOTION_ANIMATION_ID
+	end
 end
 
-local function onPlayerAdded(player)
-	player.CharacterAdded:Connect(onCharacterAdded)
+local function applyLevelLocomotionAnimations(character)
+	local animateScript = character:WaitForChild("Animate", 10)
+	if not animateScript then
+		return
+	end
+
+	setAnimationId(animateScript, "walk", "WalkAnim")
+	setAnimationId(animateScript, "run", "RunAnim")
 end
 
-Players.PlayerAdded:Connect(onPlayerAdded)
+local function setupPlayer(player)
+	player.CharacterAdded:Connect(applyLevelLocomotionAnimations)
+
+	if player.Character then
+		task.spawn(applyLevelLocomotionAnimations, player.Character)
+	end
+end
+
+for _, player in Players:GetPlayers() do
+	setupPlayer(player)
+end
+
+Players.PlayerAdded:Connect(setupPlayer)
