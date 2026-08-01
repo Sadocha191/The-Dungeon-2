@@ -41,6 +41,7 @@ NpcMovementSystemResolver.MovementTags = {
 }
 
 NpcMovementSystemResolver.CombatTags = {
+	NpcCombat_DiveAttack = "DiveAttack",
 	NpcCombat_LeapExplode = "LeapExplode",
 }
 
@@ -73,6 +74,8 @@ local MOVEMENT_BEHAVIOR_ALIASES = {
 }
 
 local COMBAT_BEHAVIOR_ALIASES = {
+	diveattack = "DiveAttack",
+	phantomdive = "DiveAttack",
 	leapexplode = "LeapExplode",
 	explodingleap = "LeapExplode",
 }

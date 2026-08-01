@@ -165,10 +165,10 @@ end
 function NpcLifecycle.GetControlResistance(npc: any)
 	local rank = tostring(npc.enemyRank or "Normal")
 	if rank == "Boss" or npc.isBoss then
-		return { slowPct = 0.55, slowDuration = 0.45, freezeDuration = 0.22, impulse = 0.20 }
+		return { slowPct = 0.55, slowDuration = 0.45, freezeDuration = 0.22, impulse = 0 }
 	end
 	if rank == "MiniBoss" or npc.isMiniBoss then
-		return { slowPct = 0.78, slowDuration = 0.72, freezeDuration = 0.45, impulse = 0.48 }
+		return { slowPct = 0.78, slowDuration = 0.72, freezeDuration = 0.45, impulse = 0 }
 	end
 	if rank == "Elite" or npc.isElite then
 		return { slowPct = 0.90, slowDuration = 0.85, freezeDuration = 0.70, impulse = 0.65 }
@@ -196,6 +196,10 @@ function NpcLifecycle.AddImpulse(npc: any, impulse: Vector3)
 	end
 
 	local resist = NpcLifecycle.GetControlResistance(npc)
+	if resist.impulse <= 0 then
+		npc.impulse = Vector3.zero
+		return
+	end
 	npc.impulse = NpcMovement.ClampMagnitude(npc.impulse + (flatImpulse * resist.impulse), 90)
 end
 

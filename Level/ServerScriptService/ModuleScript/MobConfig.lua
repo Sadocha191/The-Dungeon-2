@@ -26,6 +26,7 @@ MobConfig.Mobs = {
 		canFly = true,
 		movementMode = "Flying",
 		movementProfile = "Flying",
+		combatBehavior = "DiveAttack",
 		preferredFlightAltitude = 10,
 		idleAnimationId = "rbxassetid://77439435590958",
 		runAnimationId = "rbxassetid://77439435590958",
