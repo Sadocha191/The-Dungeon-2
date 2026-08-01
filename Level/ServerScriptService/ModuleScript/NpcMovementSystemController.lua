@@ -1,3 +1,4 @@
+local NpcExternalPositioning = require(script.Parent:WaitForChild("NpcExternalPositioning"))
 local NpcGroundNavigation = require(script.Parent:WaitForChild("NpcGroundNavigation"))
 local NpcFlightNavigation = require(script.Parent:WaitForChild("NpcFlightNavigation"))
 local NpcSurfaceNavigation = require(script.Parent:WaitForChild("NpcSurfaceNavigation"))
@@ -84,6 +85,10 @@ function NpcMovementSystemController.Cleanup(npc: any)
 end
 
 function NpcMovementSystemController.Invalidate(npc: any, reason: string?)
+	if reason == "external_set_position" and npc.movementMode == "Ground" then
+		npc.position = NpcExternalPositioning.GroundPosition(npc, npc.position)
+	end
+
 	if isSurfaceCrawler(npc) then
 		NpcSurfaceNavigation.Invalidate(npc, reason)
 	elseif npc.movementMode == "Flying" then
