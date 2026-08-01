@@ -73,6 +73,7 @@ local function getState(npc: any, now: number): {[string]: any}
 		+ (math.random() * (CONFIG.InitialCooldownMax - CONFIG.InitialCooldownMin))
 	state = {
 		kind = "DiveAttack",
+		config = getConfig(npc),
 		phase = "Cooldown",
 		readyAt = now + initialDelay,
 		phaseStartedAt = now,
@@ -84,6 +85,7 @@ local function getState(npc: any, now: number): {[string]: any}
 		diveEndsAt = 0,
 		hitApplied = false,
 		recoveryTarget = nil,
+		raycastParams = nil,
 	}
 	npc.combatBehaviorState = state
 	return state
@@ -138,18 +140,18 @@ local function buildWorldRaycastParams(npc: any): RaycastParams
 	return params
 end
 
-local function hasClearPath(npc: any, fromPosition: Vector3, toPosition: Vector3): boolean
+local function hasClearPath(params: RaycastParams, fromPosition: Vector3, toPosition: Vector3): boolean
 	local direction = toPosition - fromPosition
 	if direction.Magnitude <= 1e-4 then
 		return true
 	end
-	return Workspace:Raycast(fromPosition, direction, buildWorldRaycastParams(npc)) == nil
+	return Workspace:Raycast(fromPosition, direction, params) == nil
 end
 
-local function getGroundY(npc: any, position: Vector3): number?
+local function getGroundY(params: RaycastParams, position: Vector3): number?
 	local origin = position + Vector3.new(0, CONFIG.GroundProbeHeight, 0)
 	local direction = Vector3.new(0, -CONFIG.GroundProbeDistance, 0)
-	local hit = Workspace:Raycast(origin, direction, buildWorldRaycastParams(npc))
+	local hit = Workspace:Raycast(origin, direction, params)
 	return hit and hit.Position.Y or nil
 end
 
@@ -192,12 +194,15 @@ local function enterCooldown(npc: any, state: {[string]: any}, now: number, cool
 	state.diveEndsAt = 0
 	state.hitApplied = false
 	state.recoveryTarget = nil
+	state.raycastParams = nil
 	npc.velocity = Vector3.zero
 	NpcLifecycle.SetState(npc, "Idle")
 end
 
 local function beginRecovery(npc: any, state: {[string]: any}, now: number, cfg, wasMiss: boolean)
-	local groundY = getGroundY(npc, npc.position)
+	local raycastParams = state.raycastParams or buildWorldRaycastParams(npc)
+	state.raycastParams = raycastParams
+	local groundY = getGroundY(raycastParams, npc.position)
 	local minimumRecoveryY = groundY and (groundY + cfg.recoveryHeight) or (npc.position.Y + cfg.recoveryHeight)
 	local recoveryY = math.max(npc.position.Y + 3, minimumRecoveryY)
 	state.phase = "Recovery"
@@ -220,6 +225,7 @@ local function beginWindup(npc: any, state: {[string]: any}, targetInfo: any, no
 	state.targetPlayer = targetInfo.player
 	state.hoverAnchor = npc.position
 	state.hitApplied = false
+	state.raycastParams = buildWorldRaycastParams(npc)
 	npc.velocity = Vector3.zero
 	npc.impulse = Vector3.zero
 	setLook(npc, targetInfo.hrp.Position)
@@ -299,7 +305,9 @@ local function stepDive(npc: any, state: {[string]: any}, dt: number, now: numbe
 
 	local travelDistance = math.min(cfg.diveSpeed * math.max(0, dt), remaining)
 	local nextPosition = previous + (direction * travelDistance)
-	local obstacleHit = Workspace:Raycast(previous, nextPosition - previous, buildWorldRaycastParams(npc))
+	local raycastParams = state.raycastParams or buildWorldRaycastParams(npc)
+	state.raycastParams = raycastParams
+	local obstacleHit = Workspace:Raycast(previous, nextPosition - previous, raycastParams)
 	if obstacleHit then
 		nextPosition = obstacleHit.Position - (direction * CONFIG.ObstacleBackoff)
 		moveNpc(npc, nextPosition, dt)
@@ -313,7 +321,7 @@ local function stepDive(npc: any, state: {[string]: any}, dt: number, now: numbe
 
 	if not state.hitApplied
 		and distancePointToSegment(targetInfo.hrp.Position, previous, nextPosition) <= cfg.hitRadius
-		and hasClearPath(npc, previous, targetInfo.hrp.Position)
+		and hasClearPath(raycastParams, previous, targetInfo.hrp.Position)
 	then
 		state.hitApplied = true
 		NpcMelee.ApplyPlayerDamage(targetInfo.player, npc.damage, npc.model)
@@ -356,7 +364,8 @@ function DiveAttackBehavior.Step(
 	_callbacks: {[string]: any}?
 ): boolean
 	local state = getState(npc, now)
-	local cfg = getConfig(npc)
+	local cfg = state.config or getConfig(npc)
+	state.config = cfg
 
 	if npc.freezeEnd > now then
 		local frozenFor = math.max(0, tonumber(dt) or 0)

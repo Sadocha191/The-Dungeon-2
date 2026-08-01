@@ -67,6 +67,7 @@ function EncounterScheduler.new(options)
 			nextAt = 0,
 			debt = 0,
 			catchupAccumulator = 0,
+			catchupRate = 0,
 			wasEliteEncounterActive = false,
 			nextEncounterTrimAt = 0,
 		},
@@ -348,6 +349,7 @@ function EncounterScheduler:BuildNormalSpawnBudget(t: number, dt: number, eliteE
 
 	if state.wasEliteEncounterActive and not eliteEncounterActive then
 		state.catchupAccumulator = 0
+		state.catchupRate = state.debt / self.spawnLimitConfig.postEliteCatchupDuration
 	end
 	state.wasEliteEncounterActive = eliteEncounterActive
 
@@ -362,8 +364,13 @@ function EncounterScheduler:BuildNormalSpawnBudget(t: number, dt: number, eliteE
 
 	local catchupBudget = 0
 	if state.debt > 0 then
-		local catchupRate = state.debt / self.spawnLimitConfig.postEliteCatchupDuration
-		state.catchupAccumulator += catchupRate * math.max(0, tonumber(dt) or 0)
+		state.catchupAccumulator = math.min(
+			self.spawnLimitConfig.postEliteMaxPerTick,
+			state.catchupAccumulator + (state.catchupRate * math.max(0, tonumber(dt) or 0))
+		)
+	else
+		state.catchupAccumulator = 0
+		state.catchupRate = 0
 	end
 
 	if state.debt > 0 then
@@ -401,6 +408,10 @@ function EncounterScheduler:RecordNormalSpawned(kind: string?)
 		local state = self.normalSpawnState
 		state.debt = math.max(0, state.debt - 1)
 		state.catchupAccumulator = math.max(0, state.catchupAccumulator - 1)
+		if state.debt <= 0 then
+			state.catchupAccumulator = 0
+			state.catchupRate = 0
+		end
 	end
 end
 

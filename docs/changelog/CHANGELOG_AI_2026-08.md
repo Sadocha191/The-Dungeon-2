@@ -1,5 +1,68 @@
 # Changelog AI — 2026-08
 
+## 2026-08-01 — Integration of open PRs #155–#157
+
+### Summary
+
+- Merged the exact heads of PR #155, PR #156, and draft PR #157 into local `main` and synchronized all affected runtime modules to the active `Level` Studio place.
+- PR #155 rebuilds the 54 existing chest item IDs around modifiers consumed by the current run runtime, strengthens rarity rewards, lowers excessive stack caps, validates IDs and modifier values, and increases XP/gold/silver fallback rewards to `140`/`120`/`55`.
+- PR #156 caps post-miniboss ambient spawn debt at 8 and releases at most one catch-up enemy at a time over a bounded 12-second window.
+- PR #157 preserves the computed ground offset after externally positioned ground-NPC abilities, rejects Boss/MiniBoss pull impulse, and adds the Bat `DiveAttack` behavior to the existing central NPC scheduler.
+- The integration follow-up keeps a constant catch-up rate after an encounter and clamps retained accumulator credit so a capacity-blocked catch-up cannot resume as a multi-frame burst.
+- The integration follow-up also caches Bat dive tuning per NPC behavior state and creates one reusable `RaycastParams` per attack instead of rebuilding configuration and player exclusion lists at every 12 Hz movement step.
+
+### Repository files
+
+- Updated `Level/ReplicatedStorage/ModuleScripts/Items/ChestItemConfig.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/{EncounterScheduler,RunSpawnConfig}.lua`.
+- Added `Level/ServerScriptService/ModuleScript/{DiveAttackBehavior,NpcExternalPositioning}.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/{MobConfig,NpcCombatBehaviorService,NpcLifecycle,NpcMovementSystemController,NpcMovementSystemResolver}.lua`.
+- Added `docs/changelog/CHANGELOG_AI_2026-08_BOSS_BAT_FIX.md` from PR #157 and updated `CHANGELOG_AI.md` plus this monthly changelog.
+
+### Studio synchronization
+
+- Set the active Studio instance to `Level`.
+- Updated the eight existing ModuleScripts and created `game.ServerScriptService.ModuleScript.DiveAttackBehavior` plus `game.ServerScriptService.ModuleScript.NpcExternalPositioning`.
+- Confirmed exact normalized source parity for all 10 affected runtime modules after synchronization.
+- Existing authored-weapon changes in repo and Studio remained isolated from this integration.
+
+### Validation
+
+- `git diff --check` passed before Studio synchronization.
+- Edit-mode contract tests required the integrated modules successfully and confirmed 54 unique chest items: 12 Common, 12 Uncommon, 12 Rare, 10 Epic, and 8 Legendary.
+- Confirmed only whitelisted finite modifiers, the preserved `void_duplicator` ID with `Void Engine` display name, both Legendary special-effect contracts, and fallback values `140` XP, `120` gold, and `55` silver.
+- A deterministic scheduler test capped debt at 8, emitted all 8 catch-up spawns with a maximum budget of 1, finished at `12.133s` under a simulated 60 Hz heartbeat, and retained only one spawn credit after 20 seconds of blocked capacity.
+- Contract tests kept Boss/MiniBoss impulse at zero while a Normal NPC retained the full test impulse.
+- A controlled Edit-mode ground probe applied a 5-stud NPC offset exactly (`Y=256`).
+- `Level` startup completed with `SpellService`, `ChestService`, `HordeController`, `RunReadyGate`, all authored weapon templates, and the integrated modules ready.
+- A controlled authored Golem registered as Boss retained its computed `18.1224`-stud ground offset after `NpcService.SetPosition`; measured grounding error was below `0.00001` stud and pull impulse remained zero.
+- A controlled authored Bat completed `windup -> dive -> hit -> recovery`; final behavior metrics recorded two windups, two dives, two hits, and two recoveries. Pausing during an active dive produced zero positional movement.
+- The observed central 12 Hz movement scheduler averaged `0.0062ms` per tick and peaked at `0.4892ms` during the focused one-player probes. This is a smoke measurement, not a target-scale profile.
+- No integrated-script error appeared. Existing unrelated output remained from `Hybrid Terrain Hex Generator:16`; two earlier failed AssistantCommand probes were test-harness errors and did not originate from game scripts.
+
+### Runtime loops, cost, and cleanup
+
+- No new `Heartbeat`, `Stepped`, `RenderStepped`, polling loop, remote, DataStore field, or teleport payload was added.
+- Spawn-debt work remains O(1) inside the existing `WaveController` Heartbeat and emits at most one catch-up spawn budget at a time.
+- DiveAttack runs only through the existing central `NpcService` movement scheduler at 12 Hz. Behavior state and cached tuning are owned by the NPC record and cleared by `NpcCombatBehaviorService.Cleanup` on death/despawn.
+- Each Bat attack builds one reusable world-raycast filter at windup. Raycasts are limited to active dive obstacle checks, a candidate hit line-of-sight check, and one recovery ground probe.
+- Chest config validation is O(54) once when the module loads; reward lookup remains O(1) through `ItemsById`.
+- No per-NPC connection, new `_G` dependency, or unbounded task was added.
+
+### Not verified and risks
+
+- The rebalance was contract-tested but not played through every chest item, rarity reveal, modifier combination, fallback reward, Angel's Debt trigger, or Blood Moon Contract trigger in a natural run.
+- Post-miniboss scheduling was tested deterministically, but the original high-density MicroProfiler scenario was not repeated with a natural miniboss fight and target-scale enemy population.
+- Boss grounding was verified on the live map with a controlled authored Golem, but 30 natural `ChargeCrush` casts across flat terrain, slopes, overhangs, bridges, and map edges were not repeated.
+- Bat validation covered a standing single-player target, one successful authored-rig hit cycle, pause, and cleanup. Misses, obstacle aborts, player death, multiple Bats, moving/sliding/jumping targets, and multiplayer targeting remain unverified.
+- No 100–500 NPC target-scale MicroProfiler capture was performed.
+
+### Rollback
+
+- Revert the integration follow-up commit first, then revert the merge commits for PR #157, PR #156, and PR #155 in reverse order.
+- In `Level` Studio, restore the previous eight existing module sources and delete `DiveAttackBehavior` plus `NpcExternalPositioning` when rolling back all three PRs.
+- PR #155 can be rolled back independently by restoring only `ChestItemConfig`; PR #156 by restoring `EncounterScheduler` and `RunSpawnConfig`; PR #157 by restoring its five existing NPC modules and deleting its two new modules.
+
 ## 2026-08-01 — Integration of open PRs #149–#154
 
 ### Summary
