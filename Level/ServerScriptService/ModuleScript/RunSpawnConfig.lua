@@ -51,8 +51,11 @@ RunSpawnConfig.SWARM = {
 }
 
 RunSpawnConfig.POST_MINIBOSS_SPAWN = {
-	catchupDuration = 10,
-	maxPerTick = 4,
+	-- Do not recreate every ambient spawn missed during a long miniboss fight.
+	-- A small capped debt restores pressure without producing a client-side model burst.
+	catchupDuration = 12,
+	maxPerTick = 1,
+	maxDebt = 8,
 }
 
 RunSpawnConfig.IMPORTANT_ENCOUNTER = {
