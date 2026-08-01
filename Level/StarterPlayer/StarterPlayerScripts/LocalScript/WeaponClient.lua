@@ -262,13 +262,55 @@ local function refresh()
 	end
 end
 
-WeaponSwingVFX.OnClientEvent:Connect(function(payload)
-	if typeof(payload) ~= "table" or typeof(payload.pos) ~= "Vector3" or typeof(payload.lookAt) ~= "Vector3" then
+local observedTools = setmetatable({}, { __mode = "k" })
+local boundContainers = setmetatable({}, { __mode = "k" })
+
+local function observeWeaponTool(instance: Instance)
+	if not instance:IsA("Tool") or observedTools[instance] then
 		return
 	end
-	local character = player.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if not root or not root:IsA("BasePart") or (root.Position - payload.lookAt).Magnitude > 6 then
+
+	local connections = {}
+	observedTools[instance] = connections
+
+	table.insert(connections, instance:GetAttributeChangedSignal("WeaponType"):Connect(function()
+		task.defer(refresh)
+	end))
+	table.insert(connections, instance.Destroying:Connect(function()
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+		end
+		observedTools[instance] = nil
+		task.defer(refresh)
+	end))
+	task.defer(refresh)
+end
+
+local function bindWeaponContainer(container: Instance)
+	if boundContainers[container] then
+		return
+	end
+	boundContainers[container] = true
+
+	for _, child in ipairs(container:GetChildren()) do
+		observeWeaponTool(child)
+	end
+	container.ChildAdded:Connect(function(child)
+		observeWeaponTool(child)
+		task.defer(refresh)
+	end)
+	container.ChildRemoved:Connect(function()
+		task.defer(refresh)
+	end)
+end
+
+WeaponSwingVFX.OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table"
+		or typeof(payload.attackerUserId) ~= "number"
+		or payload.attackerUserId ~= player.UserId
+		or typeof(payload.pos) ~= "Vector3"
+		or typeof(payload.lookAt) ~= "Vector3"
+	then
 		return
 	end
 
@@ -282,21 +324,29 @@ WeaponSwingVFX.OnClientEvent:Connect(function(payload)
 	}
 end)
 
-local function bindBackpack()
-	local backpack = player:WaitForChild("Backpack", 10)
-	if not backpack then
-		return
+local function bindBackpack(instance: Instance?)
+	if instance and instance:IsA("Backpack") then
+		bindWeaponContainer(instance)
 	end
-	backpack.ChildAdded:Connect(function() task.defer(refresh) end)
-	backpack.ChildRemoved:Connect(function() task.defer(refresh) end)
 end
 
-bindBackpack()
-player.CharacterAdded:Connect(function(character)
-	character.ChildAdded:Connect(function() task.defer(refresh) end)
-	character.ChildRemoved:Connect(function() task.defer(refresh) end)
+local function bindCharacter(character: Model?)
+	if not character or boundContainers[character] then
+		return
+	end
+	bindWeaponContainer(character)
 	task.delay(0.2, refresh)
-end)
-if player.Character then
-	task.defer(refresh)
 end
+
+bindBackpack(player:FindFirstChildOfClass("Backpack"))
+player.ChildAdded:Connect(function(child)
+	bindBackpack(child)
+	task.defer(refresh)
+end)
+player.CharacterAdded:Connect(bindCharacter)
+player:GetPropertyChangedSignal("Character"):Connect(function()
+	bindCharacter(player.Character)
+	task.defer(refresh)
+end)
+bindCharacter(player.Character)
+task.defer(refresh)

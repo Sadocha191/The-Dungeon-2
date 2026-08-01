@@ -18,7 +18,7 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
-- **2026-08-01** — Integracja otwartych PR-ów #149–#153 do Studio `Level`/`Four Peaks` i `main`
+- **2026-08-01** — Integracja otwartych PR-ów #149–#154 do Studio `Level`/`Four Peaks` i `main`
 - **2026-07-28** — Poziom PR #150 configured authored enemy movement animations and chest clone cleanup
 - **2026-07-27** — Finalna integracja 11 PR-ów, pełna synchronizacja Four Peaks/Level i walidacja wieloklientowa
 - **2026-07-26** — Poziom niski hop małych NPC i duży krok `GroundLarge` nad zwalidowanymi przeszkodami

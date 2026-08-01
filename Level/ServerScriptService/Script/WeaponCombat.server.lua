@@ -314,6 +314,8 @@ local function startLoop(plr: Player)
 			end
 
 			VFXEvent:FireAllClients({
+				attackerUserId = plr.UserId,
+				element = element,
 				weaponId = weaponId,
 				pos = enemyPos,
 				lookAt = hrp.Position,

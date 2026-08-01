@@ -389,7 +389,7 @@ W aktywnej instancji Studio `Poziom` w `ReplicatedStorage.Remotes` potwierdzono:
 | `DamageIndicatorEvent` | Server -> Client | `NpcService.lua` | `DamageIndicators.lua` | Liczby obrażeń. |
 | `SpellVFXEvent` | Server -> Client | `SpellService.lua` | `SpellVFXClient.lua` | Efekty spellów. |
 | `ClientReady` | Client -> Server | `RunReadyGate.server.lua` | `LoadingClient.lua` | Klient gotowy do startu. |
-| `WeaponSwingVFX` | Server -> Client | `WeaponCombat.server.lua` | `WeaponVFX.lua` | Efekt swing/atak broni. |
+| `WeaponSwingVFX` | Server -> Client | `WeaponCombat.server.lua` | `WeaponClient.lua`, `WeaponVFX.lua` | Serwer wysyła `attackerUserId`, `weaponId`, `element`, `pos` i `lookAt`; każdy klient pokazuje lekki impact VFX, a tylko klient wskazanego atakującego animuje własną unoszącą się broń. |
 | `ReportClientError` | Client -> Server | `ErrorBootstrap`/reporter | `ClientErrorReporter.lua` | Raport błędu klienta. |
 | `PickupIndicatorEvent` | Server -> Client | `DropService.lua` | `PickupIndicators.lua` | Wskaźniki podnoszenia dropów. |
 | `PickupToastEvent` | Server -> Client | `PickupToastService.lua` | `PickupToastClient.lua` | Toast nagrody/dropu. |
@@ -879,7 +879,6 @@ Wspólne helpery UI lobby:
 |---|---|
 | `Level/ServerScriptService/Script/RunSpawnConfig.lua` | Spawn bands, capy, overtime, swarm/post-elite zasady. |
 | `Level/ServerScriptService/Script/WeaponTemplates.lua` | Mapowanie/szablony broni po stronie serwera. |
-| `Level/ServerScriptService/Script/WeaponVFXTemplates.lua` | Szablony VFX broni. |
 
 ### Asset/template folders
 
