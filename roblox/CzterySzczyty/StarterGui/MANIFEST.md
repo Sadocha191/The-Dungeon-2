@@ -35,6 +35,7 @@
 - `StarterGui.PortalUI.PortalUIClient [LocalScript]`
 - `StarterGui.ProfileStats.ProfileStatsClient [LocalScript]`
 - `StarterGui.ScreenGuiButtons.ScreenButtonsClient [LocalScript]`
+- `StarterGui.ScreenGuiButtons.ScreenButtonsHoverClient [LocalScript]`
 - `StarterGui.Settings.SettingsClient [LocalScript]`
 
 ## RemoteEvents / RemoteFunctions
