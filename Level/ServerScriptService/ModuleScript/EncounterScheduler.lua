@@ -51,6 +51,7 @@ function EncounterScheduler.new(options)
 			swarmMaxLivingEnemies = math.max(maxLivingEnemies, math.floor(tonumber(spawnLimitConfig.swarmMaxLivingEnemies) or maxLivingEnemies)),
 			postEliteCatchupDuration = math.max(0.1, tonumber(spawnLimitConfig.postEliteCatchupDuration) or 10),
 			postEliteMaxPerTick = math.max(1, math.floor(tonumber(spawnLimitConfig.postEliteMaxPerTick) or 4)),
+			postEliteMaxDebt = math.max(0, math.floor(tonumber(spawnLimitConfig.postEliteMaxDebt) or 8)),
 		},
 		swarmEventTimes = swarmEventTimes,
 		swarmDuration = tonumber(options.swarmDuration) or 60,
@@ -334,7 +335,12 @@ function EncounterScheduler:BuildNormalSpawnBudget(t: number, dt: number, eliteE
 		state.nextAt += self:SpawnInterval(spawnAt, avgRunLevel, intervalScale, encounterKind)
 		local burstSize = self:GetNormalSpawnBurstSize(spawnAt, avgRunLevel, burstScale, encounterKind)
 		if eliteEncounterActive then
-			state.debt += burstSize
+			local maxDebt = self.spawnLimitConfig.postEliteMaxDebt
+			if maxDebt > 0 then
+				state.debt = math.min(maxDebt, state.debt + burstSize)
+			else
+				state.debt = 0
+			end
 		else
 			scheduledSpawnBudget += burstSize
 		end
