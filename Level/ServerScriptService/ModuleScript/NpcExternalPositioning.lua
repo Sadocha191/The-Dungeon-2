@@ -3,8 +3,8 @@ local Workspace = game:GetService("Workspace")
 
 local NpcExternalPositioning = {}
 
-local MIN_PROBE_HEIGHT = 64
-local MIN_PROBE_DISTANCE = 256
+local MIN_PROBE_HEIGHT = 16
+local MIN_PROBE_DISTANCE = 96
 
 local function buildRaycastParams(npc: any): RaycastParams
 	local ignore = { npc.model }
@@ -44,8 +44,8 @@ function NpcExternalPositioning.GroundPosition(npc: any, candidate: Vector3): Ve
 	end
 
 	local groundOffset = math.max(0, tonumber(npc.groundOffset) or 0)
-	local probeHeight = math.max(MIN_PROBE_HEIGHT, groundOffset + 24)
-	local probeDistance = math.max(MIN_PROBE_DISTANCE, probeHeight * 2)
+	local probeHeight = math.max(MIN_PROBE_HEIGHT, groundOffset + 6)
+	local probeDistance = math.max(MIN_PROBE_DISTANCE, probeHeight + 48)
 	local origin = candidate + Vector3.new(0, probeHeight, 0)
 	local hit = Workspace:Raycast(origin, Vector3.new(0, -probeDistance, 0), buildRaycastParams(npc))
 	if not hit then
