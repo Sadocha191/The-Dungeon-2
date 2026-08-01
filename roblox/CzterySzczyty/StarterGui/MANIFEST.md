@@ -12,6 +12,7 @@
 - `BlacksmithGui [ScreenGui]`
 - `BountyBoardGui [ScreenGui]`
 - `CharacterCreationUI [ScreenGui]`
+- `Currency [ScreenGui]`
 - `DialogueUI [ScreenGui]`
 - `FPSCounter [ScreenGui]`
 - `InventoryGui [ScreenGui]`
@@ -19,7 +20,6 @@
 - `MissionsGui [ScreenGui]`
 - `PartyGui [ScreenGui]`
 - `PickupToastGui [ScreenGui]`
-- `PlayerHudGui_Lobby [ScreenGui]`
 - `PortalUI [ScreenGui]`
 - `ProfileStats [ScreenGui]`
 - `ScreenGuiButtons [ScreenGui]`
@@ -31,6 +31,7 @@
 
 ## Scripts inside
 
+- `StarterGui.Currency.CurrencyClient [LocalScript]`
 - `StarterGui.FPSCounter.FPSCounterClient [LocalScript]`
 - `StarterGui.PortalUI.PortalUIClient [LocalScript]`
 - `StarterGui.ProfileStats.ProfileStatsClient [LocalScript]`
