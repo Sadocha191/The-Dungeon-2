@@ -24,6 +24,25 @@ ChestItemConfig.RarityColors = {
 	Legendary = Color3.fromRGB(246, 194, 84),
 }
 
+-- Chest rewards should create an immediate power spike. Keep this tuning in the
+-- canonical item config so every consumer observes the same values regardless
+-- of server Script startup order.
+ChestItemConfig.BonusScaleByRarity = {
+	Common = 2.00,
+	Uncommon = 2.25,
+	Rare = 2.50,
+	Epic = 2.75,
+	Legendary = 3.00,
+}
+
+ChestItemConfig.MaxStacksByRarity = {
+	Common = 4,
+	Uncommon = 3,
+	Rare = 2,
+	Epic = 1,
+	Legendary = 1,
+}
+
 -- Keep chest items on stats that the current Level runtime actually consumes.
 -- This prevents future rewards from silently doing nothing because a stat exists
 -- in StatsConfig but has no gameplay consumer.
@@ -60,11 +79,31 @@ local itemsByRarity = {
 	Legendary = {},
 }
 
+local INTEGER_STATS = {
+	MaxHP = true,
+	Shield = true,
+	Thorns = true,
+	PickupRange = true,
+}
+
+local UNSCALED_STATS = {
+	-- Difficulty is a drawback, not item power. Keep the authored risk unchanged.
+	Difficulty = true,
+}
+
 local function isFiniteNumber(value)
 	return type(value) == "number"
 		and value == value
 		and value ~= math.huge
 		and value ~= -math.huge
+end
+
+local function roundScaledValue(statName, value, scale)
+	local scaled = value * scale
+	if INTEGER_STATS[statName] then
+		return math.floor(scaled + 0.5)
+	end
+	return math.floor((scaled * 1000) + 0.5) / 1000
 end
 
 local function add(definition)
@@ -75,7 +114,8 @@ local function add(definition)
 
 	local entry = table.clone(definition)
 	entry.Icon = entry.Icon or "placeholder"
-	entry.MaxStacks = math.max(1, math.floor(tonumber(entry.MaxStacks) or 1))
+	local authoredMaxStacks = math.max(1, math.floor(tonumber(entry.MaxStacks) or 1))
+	entry.MaxStacks = math.min(authoredMaxStacks, ChestItemConfig.MaxStacksByRarity[entry.Rarity] or authoredMaxStacks)
 	entry.Modifiers = table.clone(entry.Modifiers or {})
 
 	for statName, delta in pairs(entry.Modifiers) do
@@ -87,6 +127,14 @@ local function add(definition)
 			isFiniteNumber(delta),
 			string.format("Chest item %s has invalid modifier value for %s", entry.Id, tostring(statName))
 		)
+
+		if delta > 0 and UNSCALED_STATS[statName] ~= true then
+			entry.Modifiers[statName] = roundScaledValue(
+				statName,
+				delta,
+				ChestItemConfig.BonusScaleByRarity[entry.Rarity] or 1
+			)
+		end
 	end
 
 	items[#items + 1] = entry

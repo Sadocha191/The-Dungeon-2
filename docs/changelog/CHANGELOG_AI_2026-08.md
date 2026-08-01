@@ -1,5 +1,46 @@
 # Changelog AI — 2026-08
 
+## 2026-08-01 — Integration of PR #158 high-impact chest item bonuses
+
+### Summary
+
+- Merged the exact head of PR #158 into local `main` and preserved its rarity-based bonus multipliers: Common `2.00x`, Uncommon `2.25x`, Rare `2.50x`, Epic `2.75x`, and Legendary `3.00x`.
+- Preserved authored drawbacks and `Difficulty` values while rounding integer stats to whole numbers and percentage-style modifiers to three decimal places.
+- Enforced rarity stack caps of `4/3/2/1/1` for Common through Legendary items; `ChestItemService` continues to own availability, rolling, granting, and inventory state.
+- Replaced the PR's independent startup mutator Script with deterministic scaling inside the canonical `ChestItemConfig` construction path. This removes a race with `ChestService`/`ChestItemService` startup while keeping the requested gameplay values unchanged.
+
+### Repository files
+
+- Updated `Level/ReplicatedStorage/ModuleScripts/Items/ChestItemConfig.lua` with the rarity tuning and deterministic per-definition normalization.
+- Removed the merged `Level/ServerScriptService/Script/ChestItemPowerBalance.server.lua` in the integration follow-up because its responsibility now belongs to the config module and its execution order was not guaranteed.
+- Updated `CHANGELOG_AI.md` and this monthly changelog.
+
+### Studio synchronization and validation
+
+- Set `Level` as the active Studio instance and confirmed the canonical live path `game.ReplicatedStorage.ModuleScripts.Items.ChestItemConfig` matched the pre-change repository source.
+- Synchronized the updated config and confirmed exact normalized source parity (`17,152` characters) between Studio and the repository.
+- Edit-mode contract validation loaded a fresh clone of the updated module and confirmed 54 unique items, all rarity stack caps, preserved negative trade-offs, and both Legendary special-effect contracts.
+- Confirmed representative scaled values: Bent Dagger Damage `0.08 -> 0.16`, Ogre Tooth Damage `0.30 -> 0.75`, Black Sun Pendant Damage `0.42 -> 1.155`, Meteor Spine Damage `0.75 -> 2.25`, and Heart of the Dungeon MaxHP/Shield `90 -> 270`.
+- A fresh Play server and client both loaded the same scaled config. A controlled live `RunStatsService` probe applied Black Sun Pendant as `+1.155 Damage` and `+0.12 Difficulty`, then removed the test modifier and confirmed both stats returned to their original values.
+- `ChestService`, `ChestDropBalance`, authored weapon setup, and `RunReadyGate` reached ready state. No PR-specific error appeared; the existing unrelated `Hybrid Terrain Hex Generator:16` plugin-context error remained in output.
+- `git diff --check` passed. No standalone Luau analyzer, Selene, or StyLua binary was available; Studio module loading and fresh Play supplied the compile/runtime checks.
+
+### Runtime loops, cost, and cleanup
+
+- No `Heartbeat`, `Stepped`, `RenderStepped`, polling loop, connection, remote, DataStore field, teleport payload, `_G` dependency, or task was added.
+- Scaling and validation remain O(54) once per client/server module load. Item lookup remains O(1) through `ItemsById`, and reward selection continues through the existing service paths.
+- The change creates no new runtime state requiring cleanup. The controlled stat probe used one temporary modifier source and removed it before Play ended.
+
+### Not verified and risks
+
+- Every rarity was validated through configuration contracts, but one natural chest reveal per rarity was not forced and visually inspected during this pass.
+- Repeated natural chest drops were not played until each item reached its cap; the cap data and the existing `ChestItemService` `totalStacks < MaxStacks` gate were verified instead.
+- The requested multipliers intentionally create very large late-rarity bonuses. Their gameplay feel and long-run balance under many item combinations remain a design risk even though the application path is verified.
+
+### Rollback
+
+- Revert the PR #158 integration follow-up and merge commits together, restore the previous `ChestItemConfig` source in `Level` Studio, and confirm the old authored bonuses and stack caps in a fresh Play session.
+
 ## 2026-08-01 — Integration of open PRs #155–#157
 
 ### Summary
