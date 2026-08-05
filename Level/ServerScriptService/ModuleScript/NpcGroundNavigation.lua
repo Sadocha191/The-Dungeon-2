@@ -151,11 +151,12 @@ local function copyWaypoints(path): {any}?
 	return #copied >= 2 and copied or nil
 end
 
-local function chooseStartingWaypoint(npcPosition: Vector3, waypoints: {any}): number
+local function chooseStartingWaypoint(npc, waypoints: {any}): number
 	local bestIndex = math.min(2, #waypoints)
 	local bestDistance = math.huge
 	for index = 2, math.min(#waypoints, 6) do
-		local distance = flat(waypoints[index].Position - npcPosition).Magnitude
+		local rootTarget = waypoints[index].Position + Vector3.new(0, npc.groundOffset, 0)
+		local distance = (rootTarget - npc.position).Magnitude
 		if distance < bestDistance then
 			bestDistance = distance
 			bestIndex = index
@@ -188,13 +189,16 @@ local function applyPathResult(request, waypoints, reason: string)
 
 	clearPendingForRequest(nav, request)
 	if waypoints then
+		local acceptedAt = os.clock()
 		nav.waypoints = waypoints
-		nav.waypointIndex = chooseStartingWaypoint(npc.position, waypoints)
+		nav.waypointIndex = chooseStartingWaypoint(npc, waypoints)
 		nav.pathGoalPosition = request.requestedGoalPosition
-		nav.pathExpiresAt = os.clock() + request.profile.PathRefreshSeconds
+		nav.pathExpiresAt = acceptedAt + request.profile.PathRefreshSeconds
 		nav.pathCacheKey = request.cacheKey
 		nav.stepFailureCount = 0
 		nav.blockedSince = nil
+		nav.lastProgressAt = acceptedAt
+		nav.lastProgressPosition = npc.position
 		nav.unreachableSince = nil
 		npc.unreachableSince = nil
 		setStatus(nav, "NativePath")
@@ -247,10 +251,20 @@ local function queuePath(npc, goalPosition: Vector3, profile, now: number, reaso
 	local currentSurfaceY = nav.lastSafeSurfaceY or (npc.position.Y - npc.groundOffset)
 	local startSample = NpcGroundSurface.SamplePrecise(npc.position, currentSurfaceY, profile)
 	local goalSample = NpcGroundSurface.SamplePrecise(goalPosition, goalPosition.Y - npc.groundOffset, profile)
-	if not startSample or not goalSample or NpcGroundSurface.GetFailureReason(goalSample, profile) then
+	local startReason = startSample and NpcGroundSurface.GetFailureReason(startSample, profile) or nil
+	local goalReason = goalSample and NpcGroundSurface.GetFailureReason(goalSample, profile) or nil
+	if not startSample or startReason or not goalSample or goalReason then
 		nav.unreachableSince = nav.unreachableSince or now
 		npc.unreachableSince = nav.unreachableSince
-		nav.lastRepathReason = not goalSample and "missing_goal_surface" or "invalid_goal_surface"
+		if not startSample then
+			nav.lastRepathReason = "missing_start_surface"
+		elseif startReason then
+			nav.lastRepathReason = startReason
+		elseif not goalSample then
+			nav.lastRepathReason = "missing_goal_surface"
+		else
+			nav.lastRepathReason = goalReason or "invalid_goal_surface"
+		end
 		setStatus(nav, "Unreachable")
 		return false
 	end
@@ -409,7 +423,7 @@ local function advanceReachedWaypoints(npc, nav, profile)
 		end
 
 		local target = waypoint.Position + Vector3.new(0, npc.groundOffset, 0)
-		if flat(target - npc.position).Magnitude > reachDistance then
+		if (target - npc.position).Magnitude > reachDistance * 1.25 then
 			return
 		end
 
@@ -621,6 +635,27 @@ function NpcGroundNavigation.Step(
 		local waypoint = nav.waypoints[nav.waypointIndex]
 		if waypoint then
 			if isJumpWaypoint(waypoint) then
+				local jumpTarget = waypoint.Position + Vector3.new(0, npc.groundOffset, 0)
+				local maxJumpStartDistance = math.max(
+					profile.WaypointSpacing * 1.5,
+					tonumber(profile.TraversalMaxDistance) or 0
+				)
+				if flat(jumpTarget - npc.position).Magnitude > maxJumpStartDistance then
+					metrics.nativePathTicks += 1
+					setStatus(nav, "NativePath")
+					return moveToward(
+						npc,
+						nav,
+						jumpTarget,
+						speed,
+						dt,
+						now,
+						separation,
+						waypoint.Position.Y,
+						"native_jump_approach"
+					)
+				end
+
 				if startNativeJump(npc, nav, waypoint, profile, now, speed) then
 					return stepTraversal(npc, nav, now, dt)
 				end
@@ -650,12 +685,14 @@ function NpcGroundNavigation.Step(
 				invalidateRoute(npc, nav, "native_waypoint_blocked")
 				queuePath(npc, routeGoal, profile, now, "native_waypoint_blocked")
 				setStatus(nav, nav.pathPending and "NativePathPending" or "Blocked")
+				return move, nav.status
 			end
 			if now - nav.lastProgressAt >= profile.StuckSeconds then
 				metrics.stuckRepaths += 1
 				evictActiveRouteCache(nav)
 				invalidateRoute(npc, nav, "stuck")
 				queuePath(npc, routeGoal, profile, now, "stuck")
+				return move, nav.status
 			end
 			return move, status
 		end
