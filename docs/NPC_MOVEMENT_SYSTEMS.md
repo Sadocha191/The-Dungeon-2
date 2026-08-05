@@ -1,18 +1,16 @@
-# Switchable NPC movement systems
+# Switchable NPC movement behaviors
 
-## Safety and rollback
+## Important distinction
 
-The proven NPC navigation remains the default:
+`NpcNavigationConfig.ActiveSystem` still selects the behavior/tag dispatcher for newly registered NPCs:
 
 ```lua
 NpcNavigationConfig.ActiveSystem = "Legacy"
 ```
 
-Change it to `"MovementV2"` to route newly registered NPCs through the V2 dispatcher. The selection is resolved once during `NpcService.Register`; NPCs that are already alive are not hot-switched.
+It no longer selects between two different ground-routing implementations. Every `GroundSmall` and `GroundLarge` NPC now uses the same `NpcGroundNavigation` adapter backed by Roblox `PathfindingService`.
 
-To roll back immediately, restore `ActiveSystem` to `"Legacy"`. New spawns will use the existing `NpcGroundNavigation` / `NpcFlightNavigation` paths again. A model can also force the old system with the `NpcMovementSystem_Legacy` tag.
-
-Legacy and V2 are never simulated in parallel for one NPC. Both use the existing single `NpcService` Heartbeat scheduler.
+The `Legacy`/`MovementV2` choice remains relevant for behaviors that are genuinely different, especially `SurfaceCrawler`, and for the existing tag-validation/rollback contract. It does not restore the removed custom direct-probe ground routing.
 
 ## System selection
 
@@ -30,38 +28,41 @@ Resolution order:
 5. `NpcNavigationConfig.ActiveSystem`,
 6. fail-safe `Legacy`.
 
-Unknown or conflicting system tags fail closed to `Legacy`. The selection affects future spawns only.
+The selection is resolved once during `NpcService.Register`; already living NPCs are not hot-switched. Legacy and V2 are never simulated in parallel for one NPC, and both use the same central `NpcService` Heartbeat.
 
 ## Movement tags
 
 Use exactly one movement tag when a model needs tag-driven behavior:
 
-| Tag | Intended NPC | Legacy route | MovementV2 route |
-| --- | --- | --- | --- |
-| `NpcMove_SurfaceCrawler` | Slime | `GroundSmall` fallback | new surface crawler |
-| `NpcMove_GroundWalker` | Zombie | existing `GroundSmall` | compatibility route through existing ground navigation |
-| `NpcMove_GroundRunner` | Goblin | existing `GroundSmall` | compatibility route through existing ground navigation |
-| `NpcMove_Flying` | Bat | existing `Flying` | compatibility route through existing flight navigation |
-| `NpcMove_HeavyWalker` | Ent / Golem | existing `GroundLarge` | compatibility route through existing large-ground navigation |
+| Tag | Intended NPC | Legacy behavior | MovementV2 behavior | Routing backend |
+| --- | --- | --- | --- | --- |
+| `NpcMove_SurfaceCrawler` | Slime | `GroundSmall` fallback | surface crawler | Legacy fallback: `PathfindingService`; V2: custom surface navigation |
+| `NpcMove_GroundWalker` | Zombie | `GroundSmall` | `GroundSmall` compatibility | `PathfindingService` |
+| `NpcMove_GroundRunner` | Goblin | `GroundSmall` | `GroundSmall` compatibility | `PathfindingService` |
+| `NpcMove_Flying` | Bat | flying | flying compatibility | custom 3D flight navigation |
+| `NpcMove_HeavyWalker` | Ent / Golem | `GroundLarge` | `GroundLarge` compatibility | `PathfindingService` |
 
-Movement behavior is not selected by NPC name. A new model can reuse an existing behavior by receiving the corresponding tag.
+Movement behavior is not selected by NPC name. Models with no movement tag retain their existing `movementProfile`, `movementMode`, `CanFly` or `MobConfig` values. Unknown or multiple `NpcMove_*` tags produce a warning and fail closed to Legacy behavior.
 
-Models with no movement tag keep their existing `movementProfile`, `movementMode`, `CanFly`, or `MobConfig` registration values. Unknown or multiple `NpcMove_*` tags produce a warning and fail closed to Legacy behavior.
+## Ground movement
 
-Active `Level` template assignments:
+All ground walkers and heavy walkers use native Roblox path computation:
 
-| Templates | System | Movement | Combat |
-| --- | --- | --- | --- |
-| Slime | `MovementV2` | `SurfaceCrawler` | none |
-| Goblin | `MovementV2` | `GroundRunner` | `LeapExplode` |
-| Demon, Harp, LandShark, Skeleton, Warewolf, Zombie | `Legacy` | `GroundWalker` | none |
-| Grzyb, Ent, Golem, Knight | `Legacy` | `HeavyWalker` | none |
+- `PathfindingService:CreatePath()` receives the active profile plus an effective radius that covers the final square body-corridor probe,
+- `Path:ComputeAsync()` produces the route,
+- `Path:GetWaypoints()` is the only source of long-range ground routing,
+- the existing server scheduler advances anchored NPC records along those waypoints,
+- the existing client batch interpolates the result.
 
-The active place has no production flying template. Do not add a synthetic `NpcMove_Flying` assignment only to satisfy a test matrix.
+This is deliberately not `Humanoid:MoveTo()`. The survivors-scale architecture keeps NPC rigs anchored/non-queryable and avoids one physics controller plus persistent movement connections per enemy.
+
+While a path waits in the bounded global queue, an NPC may continue only locally validated straight movement. Its start surface is resampled when `ComputeAsync` actually begins, and movement pauses during that active calculation so the returned route does not start from a stale position. It cannot use the removed custom obstacle steering, long direct-route probe or automatic local hop/stride.
+
+An active native corridor is not replaced on a fixed timer. Repaths are owned by meaningful state changes: the goal moved far enough, the next step was blocked, progress stalled, or the current waypoint list completed. This keeps path demand within the shared `15/s` budget at horde scale.
 
 ## Surface crawler
 
-`NpcMove_SurfaceCrawler` only activates the new crawler when its resolved system is `MovementV2`. In Legacy it deliberately falls back to `GroundSmall`.
+`NpcMove_SurfaceCrawler` activates the crawler only when its resolved system is `MovementV2`. In Legacy it deliberately falls back to `GroundSmall`, which now means the native `PathfindingService` ground adapter.
 
 The crawler:
 
@@ -78,11 +79,15 @@ Crawlable geometry must be one of:
 - an instance or ancestor tagged `NpcWalkable`,
 - an untagged Roblox Terrain face whose upward normal meets `TerrainFloorNormalMinDot` (`0.65` by default).
 
-The Terrain exception is floor compatibility, not permission to crawl the whole map. Untagged steep Terrain faces, walls, ceilings and Parts are rejected by default; tag only intended crawler geometry. `NpcSurfaceOffset` can be set on a model to tune its distance from the surface.
+The Terrain exception is floor compatibility, not permission to crawl the whole map. Untagged steep Terrain faces, walls, ceilings and Parts are rejected by default.
+
+## Flying movement
+
+Flying NPCs remain on `NpcFlightNavigation`. Standard Roblox ground pathfinding does not describe free 3D flight, altitude selection, no-fly volumes or air-node routing. This is an intentional specialized backend, not a partial migration.
 
 ## Combat behavior tags
 
-Combat behavior is separate from movement. Supported tag:
+Combat behavior remains separate from movement. Supported tag:
 
 - `NpcCombat_LeapExplode`
 
@@ -90,9 +95,9 @@ This enables the server-authoritative Goblin sequence:
 
 `Chase -> Leap -> Detonate -> Dead`
 
-The Goblin starts the leap during the same shared movement tick in which it reaches trigger range, without a stationary aiming phase. The detonation damages each eligible player and living NPC at most once, performs line-of-sight validation, and then kills and deregisters the Goblin through the existing lifecycle. NPC blast rays ignore the source and player characters at the landing point so a player body cannot hide nearby NPCs; world geometry blocks the ray, while registered non-queryable NPC bodies use bounded angular buckets plus an exact bounded-sphere segment test. NPC damage goes through `NpcService.ApplyDamage`, and LeapExplode friendly-fire deaths suppress rewards. Authored client VFX reacts to the replicated death when `VfxTemplatePlayer` is available; until that dependency lands, the behavior retains a zero-damage legacy `Explosion` presenter so detonations are not silent.
+The LeapExplode ability still owns its attack movement and external positioning for the duration of the behavior. After the sequence/interrupt, normal pursuit returns to the native ground path adapter. Boss charges, Bat dives and other authored ability movement follow the same rule: ability movement is not replaced by chase pathfinding.
 
-Optional model attributes:
+Optional Goblin attributes:
 
 | Attribute | Default |
 | --- | ---: |
@@ -110,7 +115,8 @@ Adding only a model is not enough to make it spawn. Complete all applicable step
 2. Add one movement tag and optionally one combat tag.
 3. Add its stats to `MobConfig.Mobs`.
 4. Add its name and weight to the applicable `EncounterScheduler` pool.
-5. Test registration warnings and movement in Studio.
+5. Confirm the correct agent radius/height against the Studio navigation mesh.
+6. Test registration warnings, routing, attack movement, pause/freeze, death and cleanup.
 
 Recommended initial setup:
 
@@ -119,20 +125,23 @@ Recommended initial setup:
 | Slime | `NpcMovementSystem_V2` | `NpcMove_SurfaceCrawler` | none |
 | Zombie | optional/global | `NpcMove_GroundWalker` | none |
 | Goblin | optional/global | `NpcMove_GroundRunner` | `NpcCombat_LeapExplode` |
-| Bat | optional/global | `NpcMove_Flying` | none |
-| Ent / Golem | optional/global | `NpcMove_HeavyWalker` | none |
+| Bat | optional/global | `NpcMove_Flying` | `DiveAttack` from config |
+| Ent / Golem | optional/global | `NpcMove_HeavyWalker` | authored behavior if applicable |
 
-The active `Level` Slime template uses `NpcSurfaceOffset = 1`.
+## Rollback
+
+Changing `ActiveSystem` to `Legacy` is still a quick rollback for SurfaceCrawler/V2 behavior selection. It is not a rollback of the native ground pathfinding refactor.
+
+To roll back ground routing, revert the commit that replaces `NpcGroundNavigation.lua`, synchronize that previous source back to the `Level` Studio place and repeat the NPC navigation smoke tests. No RemoteEvent, DataStore or teleport payload migration is involved.
 
 ## Studio validation checklist
 
-Before enabling V2 globally:
-
-- confirm untagged NPCs behave exactly as before with `ActiveSystem = "Legacy"`,
-- test Slime on floor, wall, inner corner, outer corner, and ceiling,
-- tag only intended map geometry as crawlable,
+- enable Studio `Navigation mesh` and `Pathfinding modifiers`,
+- test `GroundSmall` and `GroundLarge` around walls, bridges, slopes, stairs, water/lava and unreachable targets,
+- confirm native jump waypoints for small agents and rejected jump paths for large agents,
+- test Slime on floor, wall, inner corner, outer corner and ceiling,
 - test Bat pursuit toward players above and below it,
-- confirm Goblin enters its leap directly from the chase, damages nearby players and NPCs once, detonates once, and cleans up,
-- test pause, freeze, slow, impulse, death, despawn, and full client sync,
-- stress-test at least 100 NPCs and review `NpcService.GetNavigationMetrics()`,
-- confirm no per-NPC connections or navigation state leaks remain after despawn.
+- confirm Goblin, boss charges and Bat dives return cleanly to chase routing,
+- test pause, freeze, slow, impulse, external positioning, death, despawn and client sync,
+- stress-test at least `100` NPCs and review `NpcService.GetNavigationMetrics()`,
+- confirm path queue/cache state does not grow after despawn or run end.

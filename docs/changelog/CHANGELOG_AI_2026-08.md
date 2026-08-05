@@ -1,5 +1,48 @@
 # Changelog AI — 2026-08
 
+## 2026-08-05 — Integration of PR #160 native ground NPC pathfinding
+
+### Summary
+
+- Integrated Roblox `PathfindingService` as the route owner for all `GroundSmall` and `GroundLarge` NPCs while preserving the central 12 Hz anchored simulation, `NpcBatchEvent` replication, combat authority and specialized flying/surface movement.
+- Kept the global limits at two active `ComputeAsync` calls, 15 path starts per second and 160 queued requests, with no per-NPC `Heartbeat`, `MoveToFinished` or `Path.Blocked` connection.
+- Added an integration hardening follow-up after Studio tests exposed native corner paths that the final square body-corridor probe rejected. Native path radius now covers that corridor, waypoint completion no longer cuts large-agent corners, queued starts are resampled before computation, and the NPC waits only during an active calculation.
+- Removed fixed-timer replacement of active routes. Repaths remain driven by target movement, blocked steps, stuck detection and route completion, preventing refresh demand from exceeding the shared budget at horde scale.
+
+### Repository files
+
+- Updated `Level/ServerScriptService/ModuleScript/NpcGroundNavigation.lua`.
+- Updated `docs/NPC_NAVIGATION.md` and `docs/NPC_MOVEMENT_SYSTEMS.md`.
+- Updated `docs/changelog/CHANGELOG_AI_2026-08_NATIVE_NPC_PATHFINDING.md`, this monthly changelog and `CHANGELOG_AI.md`.
+
+### Studio synchronization and validation
+
+- Synchronized the final module to the active `Level` Studio place and confirmed successful Edit-mode `require()` plus fresh Play startup.
+- `GroundSmall` and `GroundLarge` both routed around a controlled wall with `2/2` successful native paths, zero blocked steps/failures, and zero active or pending requests after cleanup.
+- A 100-NPC open-floor run produced `100/100` successful path computations, zero failures, queue-full events or blocked steps, and `98/100` arrivals within 18 seconds. The controlled 12 Hz navigation sample averaged `4.11 ms` per tick and peaked at `6.38 ms` in Studio.
+- The real level-up `PauseState` contract produced exactly zero movement during a two-second pause and resumed movement afterward. The public native-jump traversal contract resumed without advancing paused time and landed with zero positional error.
+- The player naturally died during the extended test. `Health=0` and `RunEnded=true` left zero living/targeted NPCs and zero active/pending paths. A controlled `RunEnded` postcondition probe also stopped movement, cleared the target, and cleaned the probe completely.
+- `git diff --check` passed. No standalone Luau analyzer, Selene or StyLua binary was available. The existing unrelated `Hybrid Terrain Hex Generator:16` plugin-context error remained in Studio output.
+
+### Runtime loops, cost and cleanup
+
+- No new runtime loop or persistent event connection was added. The existing shared movement tick remains 12 Hz, target refresh 3 Hz, formations 2 Hz and client batching 10 Hz.
+- At most two asynchronous path calculations run at once. Queued records are bounded at 160 and dead/despawned records are rejected by generation/lifecycle checks.
+- The integration follow-up reduces steady-state path demand by removing unconditional 3–4 second route replacement. The validated 100-NPC run issued one path request per agent.
+- Cleanup tests ended with zero registered probes, zero pending paths and zero active calculations.
+
+### Not verified and risks
+
+- No full 500-NPC MicroProfiler capture was performed; the 100-NPC controlled scheduler timing is evidence, not proof of the target ceiling.
+- A production-map authored `PathfindingLink` jump, every bridge/layer, water/lava and unreachable layout were not exhaustively traversed.
+- Goblin/Boss/Bat authored attack transitions, SurfaceCrawler, flying behavior and real multiplayer interpolation were not repeated end-to-end because those specialized modules/contracts are unchanged by this diff.
+- Map navmesh coverage for the effective large-agent radius remains the main content risk; narrow areas may correctly return `NoPath` where the previous permissive custom stepping passed.
+
+### Rollback
+
+- Revert the PR #160 merge and its integration-hardening commit, then restore the previous `NpcGroundNavigation` source in `Level` Studio.
+- Repeat startup and the small/large obstacle smoke. No DataStore, remote, teleport or migration rollback is required.
+
 ## 2026-08-01 — Integration of PR #158 high-impact chest item bonuses
 
 ### Summary
