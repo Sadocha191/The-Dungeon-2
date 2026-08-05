@@ -17,6 +17,7 @@ local NpcGroundNavigation = {}
 local pathCache = {}
 local requestQueue = {}
 local queuedNpc = setmetatable({}, { __mode = "k" })
+local nativeCostsByProfile = {}
 local activePaths = 0
 local pathTokens = Config.Scheduler.MaxPathStartsPerSecond
 local lastTokenAt = os.clock()
@@ -66,6 +67,22 @@ local function setStatus(nav, status: string)
 		nav.status = status
 		metrics.stateTransitions += 1
 	end
+end
+
+local function getNativeCosts(profile): {[string]: number}
+	local cached = nativeCostsByProfile[profile.Name]
+	if cached then
+		return cached
+	end
+
+	local nativeCosts = {}
+	for label, cost in pairs(profile.Costs or {}) do
+		-- Existing profiles use 1000 as their project-level blocking sentinel.
+		-- Roblox PathfindingService uses math.huge for a truly non-traversable label.
+		nativeCosts[label] = cost >= 1000 and math.huge or cost
+	end
+	nativeCostsByProfile[profile.Name] = nativeCosts
+	return nativeCosts
 end
 
 local function sectorCoordinate(value: number, size: number): number
@@ -130,11 +147,15 @@ local function getNavigation(npc)
 end
 
 local function transitionAllowed(waypoint, profile): boolean
-	if waypoint.Action == Enum.PathWaypointAction.Jump then
+	local label = waypoint.Label
+	if waypoint.Action == Enum.PathWaypointAction.Jump or label == "Jump" then
 		return profile.AgentCanJump == true
 	end
-	if waypoint.Label == "Climb" then
+	if label == "Climb" then
 		return profile.AgentCanClimb == true
+	end
+	if label == "Drop" then
+		return profile.CanDrop == true
 	end
 	return true
 end
@@ -199,6 +220,7 @@ local function applyPathResult(request, waypoints, reason: string)
 		nav.blockedSince = nil
 		nav.lastProgressAt = acceptedAt
 		nav.lastProgressPosition = npc.position
+		nav.lastRepathReason = request.cached and "cache_hit" or "computed"
 		nav.unreachableSince = nil
 		npc.unreachableSince = nil
 		setStatus(nav, "NativePath")
@@ -332,7 +354,7 @@ local function startPathRequest(request)
 				AgentCanJump = profile.AgentCanJump,
 				AgentCanClimb = profile.AgentCanClimb,
 				WaypointSpacing = profile.WaypointSpacing,
-				Costs = profile.Costs,
+				Costs = getNativeCosts(profile),
 			})
 
 			path:ComputeAsync(request.startPosition, request.goalPosition)
@@ -399,7 +421,8 @@ local function finishStep(nav, move: Vector3, reason: string, expectedDistance: 
 end
 
 local function isJumpWaypoint(waypoint): boolean
-	return waypoint ~= nil and waypoint.Action == Enum.PathWaypointAction.Jump
+	return waypoint ~= nil
+		and (waypoint.Action == Enum.PathWaypointAction.Jump or waypoint.Label == "Jump")
 end
 
 local function finishRoute(nav)
@@ -454,6 +477,15 @@ local function startNativeJump(npc, nav, waypoint, profile, now: number, speed: 
 
 	local landingPosition = landingSample.position + Vector3.new(0, npc.groundOffset, 0)
 	local horizontalDistance = flat(landingPosition - npc.position).Magnitude
+	local maxJumpDistance = math.max(
+		profile.WaypointSpacing * 1.75,
+		tonumber(profile.TraversalMaxDistance) or 0
+	)
+	if horizontalDistance > maxJumpDistance + 0.05 then
+		metrics.traversalFailures += 1
+		return false
+	end
+
 	local duration = math.clamp(horizontalDistance / math.max(1, speed), 0.25, profile.TraversalDuration or 0.5)
 	local arcHeight = math.max(2, tonumber(profile.TraversalArcHeight) or 3)
 
@@ -635,27 +667,6 @@ function NpcGroundNavigation.Step(
 		local waypoint = nav.waypoints[nav.waypointIndex]
 		if waypoint then
 			if isJumpWaypoint(waypoint) then
-				local jumpTarget = waypoint.Position + Vector3.new(0, npc.groundOffset, 0)
-				local maxJumpStartDistance = math.max(
-					profile.WaypointSpacing * 1.5,
-					tonumber(profile.TraversalMaxDistance) or 0
-				)
-				if flat(jumpTarget - npc.position).Magnitude > maxJumpStartDistance then
-					metrics.nativePathTicks += 1
-					setStatus(nav, "NativePath")
-					return moveToward(
-						npc,
-						nav,
-						jumpTarget,
-						speed,
-						dt,
-						now,
-						separation,
-						waypoint.Position.Y,
-						"native_jump_approach"
-					)
-				end
-
 				if startNativeJump(npc, nav, waypoint, profile, now, speed) then
 					return stepTraversal(npc, nav, now, dt)
 				end
