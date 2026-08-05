@@ -21,12 +21,12 @@ The ground navigation module no longer:
 
 ## Native path execution
 
-- `PathfindingService:CreatePath()` receives profile radius, height, jump/climb support, waypoint spacing and material/modifier costs.
+- `PathfindingService:CreatePath()` receives profile height, jump/climb support, waypoint spacing and material/modifier costs. Its effective radius also covers the square footprint of the final body-corridor validation, preventing native corner segments that the kinematic safety gate must reject.
 - `Path:ComputeAsync()` is wrapped in protected execution.
 - Successful `Path:GetWaypoints()` results are cached briefly by profile, start sector, goal sector and Y layer.
-- Goal movement, path expiry, a blocked local step and stuck detection invalidate the route and request a new one.
+- Goal movement, a blocked local step, stuck detection and route completion request a fresh route. Active routes are not replaced on a fixed timer because timer refreshes exceed the `15/s` budget at horde scale and can hand off from a stale position.
 - Native jump waypoints are executed as a bounded kinematic arc because the NPC model itself remains anchored and does not use a Humanoid controller.
-- While waiting for the bounded path queue, an NPC may take only a locally validated straight step. It cannot steer around an obstacle without a native path.
+- While waiting in the bounded path queue, an NPC may continue only locally validated straight movement. The start is resampled immediately before `ComputeAsync`, and the NPC holds position during the active calculation so the returned route begins at its real location.
 
 ## Performance safeguards
 
@@ -55,26 +55,28 @@ The refactor adds no RemoteEvent, DataStore field, teleport payload or `_G` depe
 - Preserved profile-driven `PathfindingService` parameters and material/modifier costs.
 - Reviewed the branch diff against `main` after the changes.
 
+## Studio integration validation
+
+- Synchronized the exact PR source into the active `Level` Studio place and loaded the module successfully in Edit mode.
+- Fresh Play reached the normal startup-ready state with no navigation-specific compile/runtime error. The existing unrelated `Hybrid Terrain Hex Generator:16` plugin-context error remained.
+- The first controlled wall route exposed a mismatch between Roblox's circular native radius and the project's square body-corridor `Blockcast`, plus stale timer-based route handoffs. The integration follow-up aligned the effective radius, tightened waypoint completion, removed timer refreshes, and resampled queued starts when `ComputeAsync` actually begins.
+- After the follow-up, `GroundSmall` and `GroundLarge` both routed around the wall with `2/2` successful paths, zero blocked steps, zero failures, and an empty active/pending queue.
+- A 100-NPC open-floor run completed `100/100` path computations with zero failures, queue-full events or blocked steps; `98/100` agents reached their goal within 18 seconds. The controlled scheduler sample averaged `4.11 ms` per 12 Hz navigation tick and peaked at `6.38 ms` in Studio.
+- The level-up pause contract used the real `ReplicatedStorage.PauseState`: movement was exactly `0` during a two-second pause and resumed afterward. A native-jump clock probe resumed without a time jump and landed with zero positional error.
+- The player naturally died during the longer Play session. The post-death state had `Health=0`, `RunEnded=true`, zero living/targeted NPCs and zero active/pending paths. A controlled `RunEnded` postcondition probe also produced zero NPC drift, cleared its target, and left no runtime records after despawn.
+- `git diff --check` passed. No standalone Luau analyzer, Selene or StyLua binary was available, so Studio module loading and fresh Play supplied compile/runtime coverage.
+
 ## Not verified in this pass
 
-The repository connector did not provide a live Roblox Studio session, so the branch has not yet been synchronized into `Level` or run through Studio compile/play/MicroProfiler validation. The PR must remain draft until the following gates pass:
-
-1. fresh `Level` startup with no navigation compile/runtime errors,
-2. normal small ground mob pursuit around an obstacle,
-3. large mob path around narrow geometry without entering an invalid corridor,
-4. native jump waypoint, pause/freeze during jump and landing,
-5. bridge plus lower route layer separation,
-6. water/lava and unreachable target handling,
-7. Goblin/Boss/Bat authored movement returning to chase correctly,
-8. SurfaceCrawler and flying behavior regression smoke,
-9. multiplayer batch presentation,
-10. `100+` NPC MicroProfiler and navigation metrics capture,
-11. despawn/end-run cleanup with no growing pending queue or stale navigation state.
+- A real authored native `PathfindingLink` jump was not generated on the production map; pause/resume and landing were verified through the same public traversal state contract.
+- Bridge/under-bridge, water/lava and every unreachable target layout were not exhaustively traversed on the production map.
+- Goblin/Boss/Bat authored attack transitions, SurfaceCrawler, flying behavior and multiplayer interpolation were not repeated end-to-end because their specialized modules and batch contracts are unchanged by this diff.
+- The 100-NPC sample measured the controlled scheduler duration and navigation metrics, not a captured MicroProfiler trace or the full 500-NPC target ceiling.
 
 ## Main risks
 
 - The game map must expose a correct Roblox navigation mesh for both small and large agent dimensions. `NpcWalkable` ground-probe compatibility cannot make geometry available to `PathfindingService` by itself.
-- Path-first routing creates more `ComputeAsync` demand than the old direct-first system. Sector cache and the existing token bucket bound the load, but target-scale profiling is required.
+- Path-first routing creates more `ComputeAsync` demand than the old direct-first system. Removing timer refreshes keeps the validated 100-NPC sample to one request per agent, but a full 500-NPC MicroProfiler capture is still required before claiming the target ceiling.
 - Large agents may legitimately receive `NoPath` in spaces that previously allowed permissive custom stepping.
 - Native jump waypoint feel may require tuning after Studio testing because the rig remains kinematic.
 - A shared cached route can be locally invalid for another NPC in the same sector; the first blocked step evicts it and recomputes, but this must be observed under density.

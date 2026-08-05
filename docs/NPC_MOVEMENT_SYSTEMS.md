@@ -48,7 +48,7 @@ Movement behavior is not selected by NPC name. Models with no movement tag retai
 
 All ground walkers and heavy walkers use native Roblox path computation:
 
-- `PathfindingService:CreatePath()` receives the active profile,
+- `PathfindingService:CreatePath()` receives the active profile plus an effective radius that covers the final square body-corridor probe,
 - `Path:ComputeAsync()` produces the route,
 - `Path:GetWaypoints()` is the only source of long-range ground routing,
 - the existing server scheduler advances anchored NPC records along those waypoints,
@@ -56,7 +56,9 @@ All ground walkers and heavy walkers use native Roblox path computation:
 
 This is deliberately not `Humanoid:MoveTo()`. The survivors-scale architecture keeps NPC rigs anchored/non-queryable and avoids one physics controller plus persistent movement connections per enemy.
 
-While a path waits in the bounded global queue, an NPC may perform only a locally validated straight step. It cannot use the removed custom obstacle steering, long direct-route probe or automatic local hop/stride.
+While a path waits in the bounded global queue, an NPC may continue only locally validated straight movement. Its start surface is resampled when `ComputeAsync` actually begins, and movement pauses during that active calculation so the returned route does not start from a stale position. It cannot use the removed custom obstacle steering, long direct-route probe or automatic local hop/stride.
+
+An active native corridor is not replaced on a fixed timer. Repaths are owned by meaningful state changes: the goal moved far enough, the next step was blocked, progress stalled, or the current waypoint list completed. This keeps path demand within the shared `15/s` budget at horde scale.
 
 ## Surface crawler
 

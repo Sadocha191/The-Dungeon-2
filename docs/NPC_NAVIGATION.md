@@ -9,12 +9,12 @@ Nie używamy `Humanoid:MoveTo()`. Modele NPC są celowo zakotwiczone, niekolizyj
 Dla wszystkich naziemnych mobów, niezależnie od tagu `Legacy`/`MovementV2`:
 
 1. `NpcGroundNavigation` próbuje od razu zamówić natywną trasę do aktualnego slotu/formacji przy graczu.
-2. `PathfindingService:CreatePath()` dostaje parametry aktywnego profilu (`AgentRadius`, `AgentHeight`, `AgentCanJump`, `AgentCanClimb`, `WaypointSpacing`, `Costs`).
+2. `PathfindingService:CreatePath()` dostaje parametry aktywnego profilu (`AgentHeight`, `AgentCanJump`, `AgentCanClimb`, `WaypointSpacing`, `Costs`) oraz efektywny `AgentRadius` poszerzony tak, aby natywny korytarz uwzględniał kwadratowy footprint końcowego `Blockcast`.
 3. `Path:ComputeAsync()` wyznacza trasę, a `Path:GetWaypoints()` staje się jedynym źródłem dalekiego routingu naziemnego.
 4. Centralny scheduler `NpcService` przesuwa rekord NPC w stronę bieżącego waypointa i replikuje pozycję istniejącym batchem.
 5. Jeżeli bieżący krok jest zablokowany, trasa jest unieważniana, odpowiadający jej wpis cache jest wyrzucany i NPC zamawia nową trasę.
 
-Usunięto z ground routingu własne dalekie sondowanie `CanTraverse`, lokalne omijanie przeszkód i automatyczne wymyślanie hopów/stride nad wykrytą geometrią. Podczas oczekiwania na ograniczony budżetem wynik `ComputeAsync` NPC może wykonać wyłącznie jeden prosty, lokalnie zwalidowany krok w stronę celu. Nie szuka wtedy własnej drogi i zatrzymuje się na przeszkodzie.
+Usunięto z ground routingu własne dalekie sondowanie `CanTraverse`, lokalne omijanie przeszkód i automatyczne wymyślanie hopów/stride nad wykrytą geometrią. Dopóki request czeka w ograniczonej budżetem kolejce, NPC może kontynuować wyłącznie prosty, lokalnie zwalidowany ruch w stronę celu. Tuż przed startem `ComputeAsync` pozycja startowa jest próbkowana ponownie, a podczas aktywnego obliczenia NPC czeka, aby pierwszy natywny segment nadal zaczynał się w jego rzeczywistym położeniu. Nie szuka własnej drogi i zatrzymuje się na przeszkodzie.
 
 ## Dlaczego zostaje lokalna walidacja powierzchni
 
@@ -52,11 +52,11 @@ Obliczenia są współdzielone i ograniczone globalnie:
 - maksymalnie `15` startów ścieżek na sekundę,
 - maksymalnie `160` oczekujących rekordów,
 - krótki cache według profilu, sektora startowego, sektora celu i warstwy Y,
-- trasa jest odświeżana po przesunięciu celu, wygaśnięciu, zablokowanym kroku albo wykryciu braku postępu.
+- świeża trasa jest zamawiana po znaczącym przesunięciu celu, zablokowanym kroku, wykryciu braku postępu albo zakończeniu bieżących waypointów.
 
 Cache przechowuje tylko natywne waypointy. Jeżeli współdzielona trasa nie pasuje do lokalnej geometrii konkretnego NPC, pierwszy zablokowany krok natychmiast usuwa ten wpis i wymusza osobne obliczenie.
 
-Nie podpinamy trwałego `Path.Blocked` dla każdego żywego NPC. Przy setkach mobów oznaczałoby to setki dodatkowych połączeń. Zamiast tego istniejący centralny tick wykrywa blokadę bieżącego kroku, brak postępu i wygaśnięcie trasy.
+Nie podpinamy trwałego `Path.Blocked` dla każdego żywego NPC. Przy setkach mobów oznaczałoby to setki dodatkowych połączeń. Zamiast tego istniejący centralny tick wykrywa blokadę bieżącego kroku, brak postępu, przesunięcie celu i zakończenie trasy. Aktywny korytarz nie jest podmieniany na stałym timerze, ponieważ przy setkach NPC przekraczałoby to limit `ComputeAsync` i tworzyło asynchroniczne połączenia ze starych pozycji.
 
 ## Powierzchnie i proxy mapy
 

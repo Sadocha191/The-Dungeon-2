@@ -104,8 +104,21 @@ local function pathKey(profile, startPosition: Vector3, goalPosition: Vector3): 
 	return profile.Name .. ":" .. pathPointKey(startPosition) .. ">" .. pathPointKey(goalPosition)
 end
 
+local function nativeAgentRadius(profile): number
+	-- PathfindingService plans for a circular footprint, while the final
+	-- kinematic safety gate sweeps a square body corridor. Include the square's
+	-- corner plus the project's grounding tolerances so native segments do not
+	-- graze geometry that ValidateStep must reject.
+	local corridorHalfExtent = math.max(0.25, profile.AgentRadius - profile.GroundSkin)
+	local corridorCornerRadius = corridorHalfExtent * math.sqrt(2)
+	local groundingTolerance = profile.GroundSkin + Config.Scheduler.SurfaceLayerTolerance
+	return math.max(profile.AgentRadius, corridorCornerRadius + groundingTolerance)
+end
+
 local function waypointReachDistance(profile): number
-	return math.max(1.25, math.min(4, profile.AgentRadius * 0.75))
+	-- Move close to the authored native waypoint before taking the next segment.
+	-- A broad radius cuts sharp corners and can leave the Roblox navmesh corridor.
+	return math.max(0.5, math.min(1.25, profile.AgentRadius * 0.25))
 end
 
 local function getNavigation(npc)
@@ -335,6 +348,7 @@ local function queuePath(npc, goalPosition: Vector3, profile, now: number, reaso
 		requestedGoalPosition = goalPosition,
 		cacheKey = cacheKey,
 		cached = false,
+		started = false,
 	}
 	queuedNpc[npc] = request
 	table.insert(requestQueue, request)
@@ -342,6 +356,15 @@ local function queuePath(npc, goalPosition: Vector3, profile, now: number, reaso
 end
 
 local function startPathRequest(request)
+	local npc = request.npc
+	local nav = npc.navigation
+	local currentSurfaceY = nav and nav.lastSafeSurfaceY or (npc.position.Y - npc.groundOffset)
+	local currentSample = NpcGroundSurface.SamplePrecise(npc.position, currentSurfaceY, request.profile)
+	if currentSample and not NpcGroundSurface.GetFailureReason(currentSample, request.profile) then
+		request.startPosition = currentSample.position
+	end
+	request.started = true
+
 	activePaths += 1
 	metrics.pathStarts += 1
 
@@ -349,7 +372,7 @@ local function startPathRequest(request)
 		local ok, waypointsOrError, failureReason = xpcall(function()
 			local profile = request.profile
 			local path = PathfindingService:CreatePath({
-				AgentRadius = profile.AgentRadius,
+				AgentRadius = nativeAgentRadius(profile),
 				AgentHeight = profile.AgentHeight,
 				AgentCanJump = profile.AgentCanJump,
 				AgentCanClimb = profile.AgentCanClimb,
@@ -446,7 +469,7 @@ local function advanceReachedWaypoints(npc, nav, profile)
 		end
 
 		local target = waypoint.Position + Vector3.new(0, npc.groundOffset, 0)
-		if (target - npc.position).Magnitude > reachDistance * 1.25 then
+		if (target - npc.position).Magnitude > reachDistance then
 			return
 		end
 
@@ -654,10 +677,11 @@ function NpcGroundNavigation.Step(
 		invalidateRoute(npc, nav, "goal_moved")
 	end
 
-	if nav.waypoints and now >= nav.pathExpiresAt then
-		invalidateRoute(npc, nav, "path_expired")
-	end
-
+	-- Do not replace an active native corridor on a fixed timer. At horde
+	-- scale that would exceed the global ComputeAsync budget, and an async
+	-- handoff can connect the NPC to a route calculated from an older position.
+	-- Goal movement, a blocked step, stuck detection, or route completion still
+	-- requests a fresh path from the current position.
 	if not nav.waypoints and not nav.pathPending then
 		queuePath(npc, routeGoal, profile, now, nav.lastRepathReason or "path_required")
 	end
@@ -715,6 +739,13 @@ function NpcGroundNavigation.Step(
 	metrics.nativeFallbackTicks += 1
 	if nav.pathPending then
 		setStatus(nav, "NativePathPending")
+		local pendingRequest = queuedNpc[npc]
+		if not pendingRequest or pendingRequest.started then
+			-- The request start was resampled immediately before ComputeAsync.
+			-- Hold position until that active calculation returns so its first
+			-- native segment still begins at the NPC's real location.
+			return finishStep(nav, Vector3.zero, "native_path_compute_wait", 0)
+		end
 	elseif nav.status ~= "Unreachable" and nav.status ~= "PathQueueFull" then
 		setStatus(nav, "NativeFallback")
 	end
