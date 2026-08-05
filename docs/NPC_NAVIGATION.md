@@ -1,22 +1,62 @@
 # Nawigacja NPC
 
-System zachowuje kinematyczną symulację serwera i interpolację klientową. `NpcService` jest właścicielem rekordów, targetowania, walki, statusów i replikacji. `NpcGroundNavigation` oraz `NpcFlightNavigation` wyznaczają bezpieczny następny krok, ale nie używają `Humanoid:MoveTo`.
+System nadal używa serwerowo autorytatywnej, kinematycznej symulacji i klientowej interpolacji batcha. `NpcService` pozostaje właścicielem rekordów NPC, targetowania, walki, statusów i replikacji. Zmienił się właściciel tras naziemnych: `NpcGroundNavigation` zawsze zamawia trasę przez natywny Roblox `PathfindingService`, a następnie prowadzi rekord NPC po zwróconych `PathWaypointach`.
+
+Nie używamy `Humanoid:MoveTo()`. Modele NPC są celowo zakotwiczone, niekolizyjne i replikowane przez istniejący `NpcBatchEvent`. Odkotwiczenie całej hordy oraz uruchomienie fizyki, network ownership i połączeń `MoveToFinished` dla każdego moba byłoby inną architekturą i pogorszyłoby skalowanie survivorsowego runu.
+
+## Zakres refaktoryzacji
+
+Dla wszystkich naziemnych mobów, niezależnie od tagu `Legacy`/`MovementV2`:
+
+1. `NpcGroundNavigation` próbuje od razu zamówić natywną trasę do aktualnego slotu/formacji przy graczu.
+2. `PathfindingService:CreatePath()` dostaje parametry aktywnego profilu (`AgentRadius`, `AgentHeight`, `AgentCanJump`, `AgentCanClimb`, `WaypointSpacing`, `Costs`).
+3. `Path:ComputeAsync()` wyznacza trasę, a `Path:GetWaypoints()` staje się jedynym źródłem dalekiego routingu naziemnego.
+4. Centralny scheduler `NpcService` przesuwa rekord NPC w stronę bieżącego waypointa i replikuje pozycję istniejącym batchem.
+5. Jeżeli bieżący krok jest zablokowany, trasa jest unieważniana, odpowiadający jej wpis cache jest wyrzucany i NPC zamawia nową trasę.
+
+Usunięto z ground routingu własne dalekie sondowanie `CanTraverse`, lokalne omijanie przeszkód i automatyczne wymyślanie hopów/stride nad wykrytą geometrią. Podczas oczekiwania na ograniczony budżetem wynik `ComputeAsync` NPC może wykonać wyłącznie jeden prosty, lokalnie zwalidowany krok w stronę celu. Nie szuka wtedy własnej drogi i zatrzymuje się na przeszkodzie.
+
+## Dlaczego zostaje lokalna walidacja powierzchni
+
+`PathfindingService` wyznacza trasę, ale nie przesuwa zakotwiczonego modelu i nie utrzymuje jego dokładnego offsetu nad low-poly Terrain/proxy. `NpcGroundSurface.ValidateStep()` pozostaje wyłącznie warstwą wykonawczą:
+
+- przykleja root NPC do właściwej warstwy wysokości,
+- sprawdza footprint i korytarz korpusu dla następnego krótkiego kroku,
+- blokuje wodę, lawę, zbyt strome powierzchnie i nagłe przejście między warstwami,
+- chroni przed przejściem pod mostem na jego górną warstwę i odwrotnie.
+
+Nie wyznacza już dalekiej trasy ani obejścia przeszkody.
 
 ## Profile ruchu
 
 Profile są zdefiniowane w `ServerScriptService.ModuleScript.NpcNavigationConfig`:
 
-- `GroundSmall` — domyślny profil istniejących mobów; agent o promieniu 1,75 i wysokości 6 studów. Może wykonać niski, kinematyczny hop przez waypoint `Jump` albo nad zwalidowaną niską przeszkodą.
-- `GroundLarge` — większy korytarz, krok do 4,5 studa i zwalidowany `Stride` do 6 studów w górę / 8 w dół. Nie używa klasycznego skoku. Obecnie używany przez Grzyba, Golema, Knighta i Enta.
-- `Flying` — ruch 3D, promień kolizyjny 2,5, preferowana wysokość 14 i minimalny prześwit 7 studów.
+- `GroundSmall` — agent o promieniu `1.75`, wysokości `6`, z natywnym skokiem i waypoint spacing `6`.
+- `GroundLarge` — agent o promieniu `5.5`, wysokości `18`, bez skoku i z waypoint spacing `8`. Używany przez większe moby, między innymi Golema, Knighta i Enta.
+- `Flying` — osobna nawigacja 3D; Robloxowy ground navmesh nie obsługuje swobodnego lotu.
+- `SurfaceCrawler` — osobna nawigacja po ścianach/sufitach; standardowy ground navmesh nie opisuje takiego ruchu.
 
-Profil można wskazać w konfiguracji moba przez `movementProfile`, przez `movementMode`, `canFly` albo atrybut modelu `CanFly`. Brak konfiguracji zawsze daje profil naziemny. Nie ustawiaj `CanFly` tylko dlatego, że nazwa lub wygląd moba sugeruje latanie.
+`NpcNavigationConfig.ActiveSystem` nadal wybiera zestaw zachowań/tagów dla nowych spawnów, ale nie wybiera już starego lub nowego backendu naziemnego. Każdy `GroundSmall` i `GroundLarge` przechodzi przez ten sam natywny adapter `PathfindingService`.
 
-## Przechodzenie nad przeszkodami
+## Natywne waypointy i skoki
 
-Próba hopu albo dużego kroku uruchamia się tylko po zablokowanym lokalnym kroku lub na przejściu `Jump`. System najpierw sprawdza wysokość przeszkody, dystans, dozwolony wznios/opad, pełny footprint lądowania oraz podniesiony korytarz korpusu. Skrzynie, niskie pnie i małe kamienie mogą zostać przekroczone, ale wysoka ściana, stromy klif, woda/lawa albo brak bezpiecznej powierzchni nadal wymuszają zatrzymanie i repath.
+Zwykłe waypointy są realizowane jako zwalidowane kroki naziemne. Waypoint z `Enum.PathWaypointAction.Jump` uruchamia krótki kinematyczny łuk do pozycji wskazanej przez natywną trasę. Sam punkt skoku i lądowania pochodzi z `PathfindingService`; kod nie próbuje sam wykryć skrzyni, kamienia albo ściany i nie tworzy własnego przejścia.
 
-Przejście jest stanem w istniejącym schedulerze ruchu 12 Hz. Nie powstaje osobny `Heartbeat`, task ani fizyczny `Humanoid` dla NPC. Podczas aktywnego przejścia `ConstrainPosition` zwraca wyliczoną pozycję łuku zamiast ponownie przyklejać Y do ziemi; po lądowaniu wykonuje normalny snap do zwalidowanej powierzchni. `PauseState` i freeze zatrzymują także zegar aktywnego przejścia; przy wznowieniu oba znaczniki czasu są przesuwane o czas zatrzymania, więc NPC kontynuuje od bieżącej pozycji łuku bez skoku do lądowania.
+`PauseState` i freeze zatrzymują zegar aktywnego skoku. Po wznowieniu NPC kontynuuje łuk bez przeskoku czasowego. `GroundLarge` odrzuca trasę zawierającą niedozwolony skok i zamawia inną.
+
+## Cache i limity PathfindingService
+
+Obliczenia są współdzielone i ograniczone globalnie:
+
+- maksymalnie `2` aktywne `ComputeAsync`,
+- maksymalnie `15` startów ścieżek na sekundę,
+- maksymalnie `160` oczekujących rekordów,
+- krótki cache według profilu, sektora startowego, sektora celu i warstwy Y,
+- trasa jest odświeżana po przesunięciu celu, wygaśnięciu, zablokowanym kroku albo wykryciu braku postępu.
+
+Cache przechowuje tylko natywne waypointy. Jeżeli współdzielona trasa nie pasuje do lokalnej geometrii konkretnego NPC, pierwszy zablokowany krok natychmiast usuwa ten wpis i wymusza osobne obliczenie.
+
+Nie podpinamy trwałego `Path.Blocked` dla każdego żywego NPC. Przy setkach mobów oznaczałoby to setki dodatkowych połączeń. Zamiast tego istniejący centralny tick wykrywa blokadę bieżącego kroku, brak postępu i wygaśnięcie trasy.
 
 ## Powierzchnie i proxy mapy
 
@@ -26,13 +66,13 @@ Walkable ground może być:
 - `BasePart` lub model oznaczony starym tagiem `Terrain`,
 - `BasePart` lub model oznaczony tagiem `NpcWalkable`.
 
-Złożony model low-poly powinien mieć proste, niewidoczne i zakotwiczone proxy kolizji. Proxy powinno być `CanCollide=true`, należeć do modelu albo folderu mapy i mieć tag `NpcWalkable`. Nie oznaczaj części czysto wizualnych jako walkable, jeżeli ich geometria ma szczeliny albo strome dekoracyjne powierzchnie.
+Złożony model low-poly powinien mieć proste, niewidoczne i zakotwiczone proxy kolizji. Proxy powinno mieć `CanCollide=true`, należeć do modelu albo folderu mapy i posiadać tag `NpcWalkable`. Nie oznaczaj części czysto wizualnych jako walkable, jeżeli geometria ma szczeliny albo strome dekoracyjne powierzchnie.
 
-Ground probe jest lokalny względem bieżącej lub oczekiwanej warstwy wysokości. Dzięki temu podłoże pod mostem i nawierzchnia mostu nie są zamieniane automatycznie.
+W Studio włącz `Navigation mesh` oraz `Pathfinding modifiers`. Jeżeli obszar nie pojawia się na natywnym navmeshu dla rozmiaru danego profilu, NPC nie otrzyma przez niego poprawnej trasy niezależnie od tagu `NpcWalkable` używanego przez końcową walidację kroku.
 
 ## PathfindingModifier i koszty
 
-Dodaj `PathfindingModifier` jako dziecko proxy i ustaw `Label`. Wbudowane profile rozpoznają:
+Dodaj `PathfindingModifier` jako dziecko proxy i ustaw `Label`. Profile rozpoznają między innymi:
 
 - `Bridge`,
 - `NarrowBridge`,
@@ -41,49 +81,29 @@ Dodaj `PathfindingModifier` jako dziecko proxy i ustaw `Label`. Wbudowane profil
 - `Lava`,
 - `Jump`, `Climb` i `Drop`.
 
-`Water` i `Lava` mają dla zwykłych profili koszt blokujący. `Mud` jest dozwolone, ale droższe. Dalsze etykiety można dodać wyłącznie w tabeli `Costs` profilu, bez zmiany runtime kontrolera.
+`Water` i `Lava` mają dla zwykłych profili koszt blokujący. `Mud` jest dozwolone, ale droższe. Klucze w tabeli `Costs` są przekazywane bezpośrednio do `PathfindingService:CreatePath()`.
 
 ## PathfindingLink
 
-Ręcznie umieszczony `PathfindingLink` może prowadzić przez przejście specjalne. Używaj etykiet:
+Ręcznie umieszczony `PathfindingLink` może prowadzić przez przejście specjalne, ale musi zostać przetestowany z faktycznym profilem agenta. Link `Jump` jest dozwolony tylko dla profilu z `AgentCanJump=true`, a `Climb` tylko dla `AgentCanClimb=true`. Nie generuj losowych linków w runtime.
 
-- `Jump` — tylko profil z `CanJump=true`,
-- `Climb` — tylko profil z `CanClimb=true`,
-- `Drop` — tylko profil z `CanDrop=true`.
+Oba attachmenty linku muszą leżeć na prawidłowym navmeshu i warstwie wysokości. Sam `PathfindingLink` opisuje trasę; wykonanie nietypowej interakcji, takiej jak drzwi, łódź albo teleport, nadal wymaga osobnego jawnego zachowania.
 
-Nie generuj losowych linków w runtime. Oba attachmenty linku muszą leżeć na poprawnych warstwach nawigacyjnych, a odcinek przejścia nie może prowadzić przez wizualną ścianę. Serwer wykonuje przejście kinematycznie między waypointami.
+## Nawigacja lotnicza i surface crawler
 
-## Nawigacja lotnicza
+`NpcFlightNavigation` pozostaje osobnym systemem 3D z testem korytarza i opcjonalnym grafem `NpcAirNode`. `NpcSurfaceNavigation` pozostaje osobnym systemem adhezji do powierzchni oznaczonych `NpcCrawlable`/`NpcWalkable`.
 
-`NpcFlightNavigation` najpierw sprawdza bezpośredni korytarz przez `Spherecast`. Gdy jest zablokowany, korzysta ze wspólnego grafu:
-
-- tag `NpcAirNode` można nadać `Attachment`, `BasePart` albo modelowi,
-- tag `NpcNoFlyZone` nadaje się prostemu `BasePart` albo modelowi opisującemu zakazaną objętość,
-- graf łączy tylko widoczne węzły w limicie odległości,
-- cache A* jest wspólny dla wszystkich NPC,
-- bez węzłów system próbuje bezpiecznej zmiany wysokości i zatrzymuje NPC, jeżeli nie ma wolnego korytarza.
-
-Węzły warto umieszczać po obu stronach zakrętu kanionu, nad i pod mostem, przy wejściu do jaskini oraz na kilku jawnych warstwach wysokości. Nie twórz gęstej regularnej siatki w całej mapie.
-
-## Dodawanie latającego moba
-
-1. Dodaj model do istniejącego folderu template'ów bez zmiany nazw remotes lub folderów.
-2. W `MobConfig` ustaw `movementProfile = "Flying"` albo `canFly = true`.
-3. Dopasuj `attackRange` do preferowanej wysokości lotu; statystyki walki nadal należą do konfiguracji moba.
-4. Zweryfikuj rozmiar modelu względem `CollisionRadius`. Dla większej klasy dodaj osobny jawny profil zamiast zmieniać globalny profil wszystkich latających mobów.
-5. Przetestuj spawn, bezpośredni lot, przeszkodę, air nodes, no-fly zone, LOS ataku i cleanup po śmierci.
-
-Latający profil automatycznie pomija emergence spod ziemi i ground snap. Pole `movementMode` jest dodawane kompatybilnie do batcha klientowego, aby `NpcPresentation` nie spłaszczał kierunku lotu.
+Te dwa tryby nie są błędem ani obejściem. Natywny `PathfindingService` tworzy trasy dla agentów poruszających się po navmeshu powierzchni chodzonych; nie zastępuje swobodnego lotu ani chodzenia po pionowych ścianach i sufitach.
 
 ## Scheduler, debug i metryki
 
-Jeden `Heartbeat` w `NpcService` obsługuje:
+Jeden `Heartbeat` w `NpcService` nadal obsługuje:
 
-- movement/steering: 12 Hz,
-- odświeżanie targetów: 3 Hz,
-- formacje i opcjonalny debug: 2 Hz,
-- istniejący batch klientowy: 10 Hz,
-- pathfinding: maksymalnie 2 aktywne obliczenia, 15 startów/s i 160 oczekujących rekordów.
+- movement: `12 Hz`,
+- odświeżanie targetów: `3 Hz`,
+- formacje i opcjonalny debug: `2 Hz`,
+- batch klientowy: `10 Hz`,
+- kolejkę i token bucket natywnego pathfindingu.
 
 W Studio można wywołać:
 
@@ -94,4 +114,13 @@ print(NpcService.GetNavigationDebug(modelOrId))
 print(NpcService.GetNavigationMetrics())
 ```
 
-Debug jest wyłączony domyślnie i poza Studio nie może zostać włączony. Wizualizuje profil, target, linię bezpośrednią, waypointy, bieżący waypoint, ground probe, status/reason oraz stan kolejki. Wyłącz go przez `SetNavigationDebugEnabled(false)`.
+Debug ground navigation zwraca `backend = "PathfindingService"`, bieżący status, waypointy, indeks waypointa, powód ostatniego repathu, lokalny ground probe i stan skoku. Najważniejsze metryki to `pathRequests`, `pathStarts`, `pathSuccesses`, `pathFailures`, `pathCacheHits`, `pathQueueFull`, `nativePathTicks`, `nativeFallbackTicks`, `blockedStepTicks`, `stuckRepaths`, `pendingPaths` i `activePaths`.
+
+## Obowiązkowy playtest po synchronizacji do Studio
+
+1. Włącz podgląd navmesha i sprawdź mapę dla `GroundSmall` oraz `GroundLarge`.
+2. Przetestuj co najmniej zwykłego moba, Goblina, dużego moba, Bossa/MiniBossa, Bata i SurfaceCrawlera.
+3. Sprawdź ścianę, wąskie przejście, most z drogą pod nim, slope, schody, wodę/lawę, niedostępny cel i zmianę celu w ruchu.
+4. Potwierdź natywny waypoint `Jump`, pause/freeze podczas skoku, knockback i zewnętrzne `NpcService.SetPosition`.
+5. Uruchom próbę `100+` NPC i porównaj MicroProfiler oraz `NpcService.GetNavigationMetrics()`.
+6. Potwierdź brak błędów, brak rosnącej kolejki po despawnie i prawidłowy cleanup po śmierci/end runie.
