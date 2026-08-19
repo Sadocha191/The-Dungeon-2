@@ -24,7 +24,8 @@
 - Four Peaks contract lookup returned both exact PlaceIds, resolved the `Level2` alias to Hollow Marsh and opened the live portal UI showing both dungeon entries.
 - Direct-play fallback passed in both dungeon Places. A real TeleportService hop and return cannot be completed inside Studio and were not represented as verified.
 - Single-client smoke tests passed. A fresh two-client server session was not repeated, so RunMode Multi and party teleport remain a release-gate smoke test despite unchanged payload fields and shared code.
-- Five package assets were successfully published. Poziom has linked instances; Roblox Toolbox/API group indexing still returned an empty/404 result while attaching those same links to level2, so level2 remains on byte-equivalent package-ready roots until the published assets become insertable through `Creations → Group Packages`.
+- Five package assets were successfully published under Pinecone Industries, granted experience access to universe `9965460435`, and installed as true linked instances in both Poziom and level2 with identical asset IDs.
+- A cross-Place package update probe published byte-equivalent package versions from level2; Poziom exposed `Get Latest Package` on the matching linked roots. A temporary Movement attribute probe was reverted to `nil` in both Places, leaving no test-only gameplay or package content behind.
 
 ### Repository files and documentation
 
@@ -35,7 +36,7 @@
 
 ### Risks and rollback
 
-- Release must wait for level2 to contain actual `PackageLink` children for all five recorded asset IDs and for a cross-Place package update probe to pass.
+- Both dungeon Places now contain actual `PackageLink` children for all five recorded asset IDs. Remaining release-gate checks are a real TeleportService/return hop and a fresh two-client party run outside the single-client Studio smoke tests.
 - Because the repo does not serialize full Terrain/object state, the Hollow Marsh map remains Studio-owned and is documented through its World contract manifest.
 - Roll back by restoring the pre-migration package checkpoint in Git, restoring the previous flat Studio roots/config consumers, and reverting the Five Package roots through Roblox package version history. All dungeon Places must use one compatible package set before production servers reopen.
 

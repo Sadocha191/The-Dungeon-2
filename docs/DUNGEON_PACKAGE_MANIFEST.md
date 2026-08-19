@@ -17,7 +17,9 @@ Required root attributes are `DungeonPackageSchemaVersion = 1`, `DungeonPackageR
 | Place | LevelKey | Package state |
 | --- | --- | --- |
 | Poziom (`113361902471683`) | AshenWastes | five published linked roots |
-| level2 (`86815986698401`) | HollowMarsh | five package-ready roots with byte-equivalent content; attaching the published links is pending Roblox Toolbox group-index visibility |
+| level2 (`86815986698401`) | HollowMarsh | five published linked roots using the same asset IDs as Poziom |
+
+All five Pinecone Industries package assets grant the `The Dungeon 2` universe (`9965460435`) experience access. The Level2 links were inserted through Studio package-aware copy/paste after access propagation; `DungeonCombat` used `Paste into at Original Location` to preserve the canonical root path without detaching or dirtying the link.
 
 Do not publish level-specific config, map geometry, Terrain, Lighting or decorations as a shared package version. Do not move/delete a `PackageLink` child; that detaches the instance from package update workflows.
 
@@ -30,5 +32,7 @@ Do not publish level-specific config, map geometry, Terrain, Lighting or decorat
 5. Verify the five package asset IDs and schema attributes.
 6. Smoke test direct play, teleport loadout, run start and return.
 7. Save/publish Places, then mirror Studio into repo.
+
+The migration update probe published byte-equivalent package versions from Level2 and Poziom exposed `Get Latest Package` on the matching linked roots. No gameplay-only probe attribute remains in either Place.
 
 Rollback is either `Package Details → Version History` followed by restoring a known version, or reverting the package-owning checkpoint commit and republishing. Restore all affected Places to the same compatible package set before reopening production servers.
