@@ -6,10 +6,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
+local DungeonLevelContext = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("DungeonLevelContext"))
+local LevelConfig = DungeonLevelContext.GetConfig()
 local WorldBounds = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("WorldBounds"))
 
-local MIN_SHRINES = 10
-local MAX_SHRINES = 20
+local shrinePopulation = LevelConfig.WorldPopulation.Shrines
+local MIN_SHRINES = shrinePopulation.Min
+local MAX_SHRINES = shrinePopulation.Max
 local CHARGE_SECONDS = 5
 local CHARGE_RADIUS = 12
 local CHARGE_DECAY_PER_SECOND = 0.75

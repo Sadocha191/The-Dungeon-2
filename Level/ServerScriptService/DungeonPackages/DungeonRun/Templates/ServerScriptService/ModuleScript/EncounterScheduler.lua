@@ -42,6 +42,7 @@ function EncounterScheduler.new(options)
 		runTimeLimit = runTimeLimit,
 		eliteIntervalSeconds = eliteIntervalSeconds,
 		maxLivingEnemies = maxLivingEnemies,
+		enemyPools = options.enemyPools or {},
 		levelSpawnBands = options.levelSpawnBands or {},
 		overtimeSpawnConfig = options.overtimeSpawnConfig or {},
 		swarmSpawnConfig = options.swarmSpawnConfig or {},
@@ -108,19 +109,15 @@ function EncounterScheduler:TimeScaleMult(elapsedSeconds: number, avgRunLevel: n
 end
 
 function EncounterScheduler:GetPool(elapsedSeconds: number)
-	if elapsedSeconds < 90 then
-		return { { "Slime", 100 } }
-	elseif elapsedSeconds < 210 then
-		return { { "Slime", 55 }, { "Bat", 25 }, { "Goblin", 20 } }
-	elseif elapsedSeconds < 360 then
-		return { { "Slime", 25 }, { "Bat", 20 }, { "Goblin", 30 }, { "Grzyb", 25 } }
-	elseif elapsedSeconds < 540 then
-		return { { "Bat", 18 }, { "Goblin", 25 }, { "Grzyb", 22 }, { "Stump", 20 }, { "Cauldron", 15 } }
-	elseif elapsedSeconds < 720 then
-		return { { "Goblin", 20 }, { "Grzyb", 15 }, { "Stump", 25 }, { "Cauldron", 20 }, { "Ent_Fat", 20 } }
-	else
-		return { { "Slime", 8 }, { "Bat", 12 }, { "Goblin", 18 }, { "Grzyb", 10 }, { "Stump", 20 }, { "Cauldron", 15 }, { "Ent_Fat", 17 } }
+	for _, band in ipairs(self.enemyPools) do
+		local maxElapsedSeconds = tonumber(band.maxElapsedSeconds)
+		if maxElapsedSeconds == nil or elapsedSeconds < maxElapsedSeconds then
+			return band.entries
+		end
 	end
+	local finalBand = self.enemyPools[#self.enemyPools]
+	assert(finalBand and typeof(finalBand.entries) == "table", "[EncounterScheduler] enemyPools must contain entries")
+	return finalBand.entries
 end
 
 function EncounterScheduler.PickWeighted(pool)

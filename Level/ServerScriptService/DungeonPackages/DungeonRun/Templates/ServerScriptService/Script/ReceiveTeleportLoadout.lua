@@ -28,6 +28,7 @@ end
 
 local PlayerData = require(findModule("PlayerData") or error("Missing PlayerData"))
 local WeaponService = require(findModule("WeaponService") or error("Missing WeaponService"))
+local DungeonLevelContext = require(findModule("DungeonLevelContext") or error("Missing DungeonLevelContext"))
 
 local function safeCSV(list: any): string
 	if typeof(list) ~= "table" then
@@ -337,11 +338,8 @@ local function processPlayer(plr: Player)
 	if typeof(partyLeader) == "number" then
 		plr:SetAttribute("PartyLeaderUserId", partyLeader)
 	end
-	if typeof(levelKey) == "string" and levelKey ~= "" then
-		plr:SetAttribute("LevelKey", levelKey)
-	else
-		plr:SetAttribute("LevelKey", "AshenWastes")
-	end
+	levelKey = DungeonLevelContext.ResolveTeleportLevelKey(levelKey, plr)
+	plr:SetAttribute("LevelKey", levelKey)
 
 	applyWeapon(plr, weaponName, weaponEntry)
 

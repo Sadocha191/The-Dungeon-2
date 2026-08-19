@@ -5,6 +5,8 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
+local DungeonLevelContext = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("DungeonLevelContext"))
+local LevelConfig = DungeonLevelContext.GetConfig()
 local PlayerData = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerData"))
 local PickupToastService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PickupToastService"))
 local RunProgressApi = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunProgressApi"))
@@ -18,8 +20,9 @@ local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 
 local CraftingConfig = require(moduleFolder:WaitForChild("CraftingConfig"))
 
-local MIN_CHESTS = 300
-local MAX_CHESTS = 500
+local chestPopulation = LevelConfig.WorldPopulation.Chests
+local MIN_CHESTS = chestPopulation.Min
+local MAX_CHESTS = chestPopulation.Max
 local MIN_CHEST_GAP = 24
 local CHEST_RAYCAST_TRIES = 45
 local CHEST_HEIGHT = 1.8

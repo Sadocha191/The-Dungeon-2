@@ -46,8 +46,12 @@ end
 local PlayerData = safeRequire(findModule("PlayerData"))
 local MissionProgress = safeRequire(findModule("MissionProgress"))
 local RunProgressApi = safeRequire(findModule("RunProgressApi"))
+local DungeonLevelContext = safeRequire(findModule("DungeonLevelContext"))
 if not PlayerData then
 	error("[ProgressService] Missing PlayerData module")
+end
+if not DungeonLevelContext then
+	error("[ProgressService] Missing DungeonLevelContext module")
 end
 if not RunProgressApi then
 	error("[ProgressService] Missing RunProgressApi module")
@@ -1427,13 +1431,8 @@ end
 local TIME_RATE = 0.35
 local KILL_RATE = 5
 
-local function getLevelKey(plr: Player): string
-	local levelKey = plr:GetAttribute("LevelKey")
-	if typeof(levelKey) == "string" and levelKey ~= "" then
-		return levelKey
-	end
-
-	return "AshenWastes"
+local function getLevelKey(_plr: Player): string
+	return DungeonLevelContext.GetLevelKey()
 end
 
 local function endRunForPlayer(plr: Player, reason: string)

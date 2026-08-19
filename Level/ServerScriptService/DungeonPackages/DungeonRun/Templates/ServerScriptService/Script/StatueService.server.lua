@@ -4,6 +4,8 @@ local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local modules = ServerScriptService:WaitForChild("ModuleScript")
+local DungeonLevelContext = require(modules:WaitForChild("DungeonLevelContext"))
+local LevelConfig = DungeonLevelContext.GetConfig()
 local NpcService = require(modules:WaitForChild("NpcService"))
 local RunProgressApi = require(modules:WaitForChild("RunProgressApi"))
 local WorldBounds = require(modules:WaitForChild("WorldBounds"))
@@ -22,9 +24,10 @@ local MIN_MONUMENT_GAP = 110
 
 local MAGNET_DURATION = 10
 local BATTLE_SPAWN_COUNT = 8
-local STATUE_SPAWN_ORDER = { "battle", "magnet", "battle", "magnet", "battle", "magnet" }
+local structurePopulation = LevelConfig.WorldPopulation.Structures
+local STATUE_SPAWN_ORDER = structurePopulation.StatueSpawnOrder
 
-local MONUMENT_COUNT = 3
+local MONUMENT_COUNT = structurePopulation.MonumentCount
 local CHALLENGE_DURATION = 120
 local EXTRA_SPAWN_INTERVAL = 15
 local EXTRA_SPAWN_COUNT = 8

@@ -17,7 +17,9 @@ Levels.List = {
 	{
 		key = "HollowMarsh",
 		instanceName = "HollowMarsh",
+		aliases = { "Level2" },
 		name = "Hollow Marsh",
+		placeId = 86815986698401,
 		description = "A dark swamp filled with black water, twisted branches, and rotting vegetation. Heavy and oppressive atmosphere, great for swamp monsters, poison effects, and slower but more dangerous elite enemies.",
 		highscore = 0,
 		speedrun = "00:00.00",
