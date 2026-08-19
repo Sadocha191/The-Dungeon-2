@@ -19,9 +19,20 @@ Przy rozbieżności między repo i aktywnym Studio:
 ## Główne mapowania
 
 - `Poziom` ↔ `Level/`
+- `level2` ↔ `Level2/`
 - `Cztery szczyty` ↔ `Four Peaks/`
 - `Gildia` ↔ `Guild/`
 - `roblox/` zawiera dodatkowe mirrory i manifesty parity; nie zakładaj automatycznie, że zastępuje aktywne drzewa powyżej.
+
+## Snapshoty dungeon Packages
+
+- Shared runtime jest przechowywany pod `Level*/ServerScriptService/DungeonPackages/<Package>/Templates/<Service>/...`.
+- Te same źródła mogą fizycznie występować w `Level/` i `Level2/`; jest to świadomy mirror dwóch drzew Studio, a nie dwa niezależne forki do utrzymywania.
+- `PackageManifest.lua` opisuje ownership i dependency graph, a `DungeonPackages/MANIFEST.md` przechowuje asset ID, status `PackageLink` i nieskryptowe atrybuty kontenerów.
+- `ServerStorage/DungeonLevel/LevelConfig.lua` jest per Place i nie może zostać zastąpiony configiem z drugiego snapshotu.
+- `Workspace/MANIFEST.md` dokumentuje map contract tam, gdzie terrain/geometria nie jest serializowana do repo.
+- Zmiany shared kodu najpierw wykonuje się w Studio, publikuje do Roblox Package, aktualizuje linked copies i testuje; kopiowanie między folderami repo nie jest deploymentem.
+- Przy porównaniu package parity pomijaj dozwolone różnice `LevelConfig`, place manifestu i mapy. Źródła wewnątrz pięciu shared roots powinny pozostać identyczne.
 
 ## Procedura przed zmianą
 

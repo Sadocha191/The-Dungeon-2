@@ -1,5 +1,49 @@
 # Changelog AI — 2026-08
 
+## 2026-08-19 — Multi-level dungeon runtime and Roblox Packages
+
+### Summary
+
+- Migrated the dungeon runtime from a single Ashen Wastes layout to five explicit package roots: `DungeonShared`, `DungeonMovement`, `DungeonNPC`, `DungeonCombat`, and `DungeonRun`.
+- Published the five roots under Pinecone Industries and recorded package asset IDs, schema/ownership attributes, dependency graph and deterministic bootstrap order.
+- Added per-place `LevelConfig` modules for Ashen Wastes and Hollow Marsh plus a shared `DungeonLevelContext` that validates PlaceId, owns LevelKey and safely resolves mismatched teleport payloads in favor of the destination Place.
+- Removed Ashen-specific encounter content from `EncounterScheduler` and `WaveController`; enemy pools, elite/boss order, run/swarm timing and chest/shrine/statue population now come from LevelConfig.
+- Added Hollow Marsh to the Four Peaks level registry with `PlaceId 86815986698401` and alias `Level2`, then created a full `Level2/` repo snapshot without copying Ashen Wastes map geometry.
+
+### Package architecture and runtime cost
+
+- Package dependency graph is acyclic: Shared; Movement → Shared; NPC → Shared; Combat → Shared+NPC; Run → Shared+NPC+Combat.
+- `DungeonPackageBootstrap` performs one startup installation of 146 source roots, keeps cloned scripts disabled during installation and starts `RunReadyGate` last. It adds no `Heartbeat`, `Stepped`, `RenderStepped`, polling task or persistent write loop.
+- Existing central schedulers and performance contracts remain unchanged, including the single NPC scheduler rather than per-NPC Heartbeats. No new `_G` dependency was added.
+- Shared remote definitions have one owner in `DungeonShared`; public remote names, persistent data shape and TeleportData format remain unchanged.
+
+### Studio synchronization and validation
+
+- `Poziom` fresh Play installed 146 roots/enabled 107 scripts, set `DungeonLevelKey=AshenWastes`, started the run, spawned the configured world population and NPCs, and preserved movement/combat startup.
+- `level2` fresh Play installed the same 146 roots/enabled 107 scripts, set `DungeonLevelKey=HollowMarsh`, started the run on the independent map and spawned/attacked with shared runtime.
+- Four Peaks contract lookup returned both exact PlaceIds, resolved the `Level2` alias to Hollow Marsh and opened the live portal UI showing both dungeon entries.
+- Direct-play fallback passed in both dungeon Places. A real TeleportService hop and return cannot be completed inside Studio and were not represented as verified.
+- Single-client smoke tests passed. A fresh two-client server session was not repeated, so RunMode Multi and party teleport remain a release-gate smoke test despite unchanged payload fields and shared code.
+- Five package assets were successfully published. Poziom has linked instances; Roblox Toolbox/API group indexing still returned an empty/404 result while attaching those same links to level2, so level2 remains on byte-equivalent package-ready roots until the published assets become insertable through `Creations → Group Packages`.
+
+### Repository files and documentation
+
+- Reorganized the `Level/` snapshot under `ServerScriptService/DungeonPackages/*/Templates` and added `ServerStorage/DungeonLevel/LevelConfig.lua`.
+- Added `Level2/` with Hollow Marsh config, shared package contents, early loading adapter and map-contract manifests.
+- Updated `Four Peaks/ReplicatedStorage/ModuleScripts/Levels.lua`, `docs/PROJECT_CODE_GUIDE.md`, `docs/ROBLOX_REPO_SYNC.md`, package manifests and the changelog index.
+- Preserved the user's pre-existing authored-weapon changes as uncommitted modifications at their new package paths and in the Level2 mirror.
+
+### Risks and rollback
+
+- Release must wait for level2 to contain actual `PackageLink` children for all five recorded asset IDs and for a cross-Place package update probe to pass.
+- Because the repo does not serialize full Terrain/object state, the Hollow Marsh map remains Studio-owned and is documented through its World contract manifest.
+- Roll back by restoring the pre-migration package checkpoint in Git, restoring the previous flat Studio roots/config consumers, and reverting the Five Package roots through Roblox package version history. All dungeon Places must use one compatible package set before production servers reopen.
+
+### Checkpoint commits
+
+- `62488b2` — migrate Ashen Wastes runtime into shared dungeon packages.
+- `cdfd173` — add Hollow Marsh dungeon place snapshot.
+
 ## 2026-08-05 — Integration of PR #160 native ground NPC pathfinding
 
 ### Summary

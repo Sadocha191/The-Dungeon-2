@@ -1,9 +1,89 @@
 # The Dungeon 2 - przewodnik po kodzie projektu
 
-Data analizy: 2026-06-21  
+Data analizy: 2026-08-19
 Zakres: repozytorium `E:\Github\The-Dungeon-2` oraz dostępne instancje Roblox Studio przez MCP.
 
 Ten dokument jest mapą czytania i zrozumienia kodu. Nie jest planem refaktoryzacji ani listą zmian do wykonania. Opisuje stan zastany: pliki w repo, zależności między skryptami, przepływy danych, RemoteEvents/RemoteFunctions, konfiguracje oraz miejsca, które są niejasne albo rozjechane między repozytorium a Studio.
+
+## MULTI-LEVEL DUNGEON ARCHITECTURE
+
+### Places i tożsamość poziomu
+
+| Rola | Studio | Repo snapshot | LevelKey | PlaceId |
+| --- | --- | --- | --- | --- |
+| Lobby | `Cztery szczyty` | `Four Peaks/` | — | `88516424167732` |
+| Dungeon 1 | `Poziom` | `Level/` | `AshenWastes` | `113361902471683` |
+| Dungeon 2 | `level2` | `Level2/` | `HollowMarsh` | `86815986698401` |
+
+`Four Peaks/ReplicatedStorage/ModuleScripts/Levels.lua` jest właścicielem mapowania używanego przez portal. Każdy dungeon ma niezależny `ServerStorage.DungeonLevel.LevelConfig`. Wspólny `DungeonLevelContext` waliduje `PlaceId`, udostępnia bieżący config i jest jedynym źródłem `LevelKey` dla runtime. Przy Direct Play używany jest config bieżącego Place. Jeżeli `TeleportData.LevelKey` wskazuje inny poziom, serwer loguje ostrzeżenie i wybiera config miejsca; payload klienta nie może zmienić tożsamości Place.
+
+### Shared Roblox Packages
+
+Każdy dungeon używa pięciu korzeni pod `ServerScriptService.DungeonPackages`. Kanoniczne assety należą do grupy Pinecone Industries.
+
+| Package | Asset ID | Odpowiedzialność | Zależności |
+| --- | --- | --- | --- |
+| `DungeonShared` | `89030882431384` | level context, profile/shared server utilities, definicje remotes, wspólne replicated definitions i error reporting | brak |
+| `DungeonMovement` | `126430943030265` | movement config, sprint/momentum/air control, slide, glide/dash oraz prezentacja ruchu | `DungeonShared` |
+| `DungeonNPC` | `125092214609252` | registry/lifecycle, centralne schedulery ruchu, navigation, targeting/combat, replication i enemy templates | `DungeonShared` |
+| `DungeonCombat` | `89104851528052` | bronie, spelle, projectiles, combat stats i prezentacja combat | `DungeonShared`, `DungeonNPC` |
+| `DungeonRun` | `129190342132983` | run readiness/lifecycle, encounters, progress, dropy, chest/shrine/statue, boss portal i return flow | `DungeonShared`, `DungeonNPC`, `DungeonCombat` |
+
+Graf jest acykliczny. `DungeonShared.DungeonPackageBootstrap` instaluje `Templates` w kolejności Shared → NPC → Combat → Movement → Run, wyłącza klonowane skrypty na czas instalacji i uruchamia `RunReadyGate` jako ostatni. To jednorazowa praca startowa O(liczba package roots + descendants); migracja nie dodaje pętli runtime. `ReplicatedFirst.LoadingBootstrap` pozostaje cienkim adapterem per Place, ponieważ musi wystartować przed serwerowym bootstrapem.
+
+`DungeonShared` jest właścicielem drzewa wspólnych remotes oraz `PauseState`/`RunStarted`. Pozostałe packages są konsumentami tych samych nazw i nie mają własnych alternatywnych drzew remotes. Publiczne nazwy i format `TeleportData` pozostają bez zmian.
+
+W repo aktywne źródła znajdują się wewnątrz:
+
+```text
+Level/ServerScriptService/DungeonPackages/<Package>/Templates/<Service>/...
+Level2/ServerScriptService/DungeonPackages/<Package>/Templates/<Service>/...
+```
+
+Starsze tabele ścieżek w dalszej części tego dokumentu opisują historyczny płaski układ; dla live runtime pierwszeństwo mają package paths i manifesty `Level*/ServerScriptService/DungeonPackages/MANIFEST.md`.
+
+### Level-specific config i World contract
+
+LevelConfig przechowuje wyłącznie content/tuning miejsca:
+
+- `LevelKey` i `PlaceId`,
+- enemy pools, kolejność minibossów i boss,
+- limit runu, elite/swarm timing,
+- liczby chestów i shrine'ów,
+- kolejność statue oraz liczbę monumentów,
+- wymagane i opcjonalne tagi mapy oraz nazwy folderów runtime.
+
+Mapa, Terrain, Lighting, dekoracje, tagged regions i unikalne assety środowiska nie należą do shared packages. Mapa musi udostępnić powierzchnię Terrain albo tag `NpcWalkable`; opcjonalne tagi to `NpcCrawlable`, `NpcNoFlyZone` i `NpcAirNode`. Runtime tworzy i posiada `Enemies`, `Drops`, `Chests`, `Shrines` oraz `Statues`; map designer nie powinien dostarczać konkurencyjnych authored folderów o tych nazwach.
+
+### Teleport i return flow
+
+1. Lobby rozwiązuje wpis z `Levels.lua`, waliduje Solo/Multi i party, zapisuje profil, po czym wysyła zachowany format `TeleportData` z `LevelKey`, `RunMode`, `PartyId` i loadoutem.
+2. Place docelowy waliduje własny `LevelConfig`; `ReceiveTeleportLoadout` używa `DungeonLevelContext.ResolveTeleportLevelKey` i ustawia atrybuty gracza.
+3. Package bootstrap instaluje runtime, a `RunReadyGate` uruchamia świat dopiero po gotowości serwera i klientów.
+4. `ReturnToLobby` kończy run, wykonuje save barrier i teleportuje do Four Peaks. Ten sam kod działa dla Ashen Wastes i Hollow Marsh.
+
+### HOW TO ADD A NEW DUNGEON LEVEL
+
+1. Utwórz nowy Roblox Place i niezależną mapę.
+2. Wstaw pięć tych samych linked Packages do `ServerScriptService.DungeonPackages` przez Toolbox → Creations → Group Packages.
+3. Dodaj `ServerStorage.DungeonLevel.LevelConfig` z nowym `LevelKey`, `PlaceId`, contentem i tuningiem.
+4. Rozszerz mapowanie `PLACE_ID_TO_LEVEL_KEY` w `DungeonLevelContext`, opublikuj `DungeonShared` i zaktualizuj linked copies.
+5. Zapewnij World contract mapy i pozostaw `ReplicatedFirst.LoadingBootstrap` jako cienki adapter.
+6. Dodaj wpis z `placeId` i aliasami do Four Peaks `Levels.lua`.
+7. Przetestuj Direct Play, Solo, Multi, lobby → dungeon, return oraz mismatch payloadu.
+8. Zapisz/publish Place i odwzoruj realne drzewo w nowym folderze snapshotu repo.
+
+### HOW TO UPDATE SHARED DUNGEON CODE
+
+Przykład zmiany movementu:
+
+1. Edytuj linked root `DungeonMovement` w jednym dungeon Place.
+2. Wykonaj compile check i playtest w tym Place.
+3. Użyj `Publish to Package` dla `DungeonMovement`.
+4. W każdym pozostałym dungeon Place wybierz linked root i użyj `Get Latest Package`/update; nie kopiuj ręcznie źródeł ani nie twórz forka.
+5. Wykonaj smoke test reprezentatywnych Places, w tym respawn oraz Solo/Multi.
+6. Opublikuj zmienione Places.
+7. Dopiero potem zsynchronizuj oba snapshoty repo i manifest wersji.
 
 ## 1. Ogólny opis projektu
 
