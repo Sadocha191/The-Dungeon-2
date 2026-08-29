@@ -1,5 +1,5 @@
 -- Central tuning pass for the CITO gameplay fixes.
--- Keeps run-balance overrides in one small place instead of duplicating magic values.
+-- Keeps run-balance overrides in one place instead of duplicating magic values.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,17 +7,22 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local shared = ReplicatedStorage:FindFirstChild("ModuleScripts") or ReplicatedStorage:WaitForChild("ModuleScripts")
 local ChestItemConfig = require(shared:WaitForChild("Items"):WaitForChild("ChestItemConfig"))
-local NpcNavigationConfig = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("NpcNavigationConfig"))
+local moduleRoot = ServerScriptService:WaitForChild("ModuleScript")
+local NpcNavigationConfig = require(moduleRoot:WaitForChild("NpcNavigationConfig"))
+local NpcService = require(moduleRoot:WaitForChild("NpcService"))
+local RunProgressApi = require(moduleRoot:WaitForChild("RunProgressApi"))
+local ChestItemService = require(moduleRoot:WaitForChild("Items"):WaitForChild("ChestItemService"))
+local PauseState = ReplicatedStorage:WaitForChild("PauseState")
 
--- Better item rarity distribution. This materially shortens bad-luck streaks even before hard pity.
+-- Better base rarity distribution plus hard bad-luck protection below.
 ChestItemConfig.RarityWeights.Common = 50
 ChestItemConfig.RarityWeights.Uncommon = 28
 ChestItemConfig.RarityWeights.Rare = 14
 ChestItemConfig.RarityWeights.Epic = 6
 ChestItemConfig.RarityWeights.Legendary = 2
 
--- The item config applies rarity scaling during module construction, so clamp the final
--- gameplay values here. PickupRange uses the legacy /8 bridge in ChestItemService.
+-- ChestItemConfig applies rarity scaling while constructing the item table. Clamp the
+-- final modifiers consumed by RunStatsService. PickupRange uses the existing /8 bridge.
 for _, rarity in ipairs(ChestItemConfig.RarityOrder) do
 	for _, item in ipairs(ChestItemConfig.GetItemsForRarity(rarity)) do
 		if item.Modifiers then
@@ -29,12 +34,12 @@ for _, rarity in ipairs(ChestItemConfig.RarityOrder) do
 			if pickup and pickup > 0 then
 				item.Modifiers.PickupRange = math.min(pickup, 8)
 			end
+		end
 	end
 end
 
--- Normal ground mobs should behave like a swarm: direct pursuit first, without
--- expensive queued PathfindingService jobs. Existing local ground/surface probes still
--- keep feet on the nearest continuous layer, so bridges/overhangs do not become roofs.
+-- Megabonk-like swarm movement: ground mobs stay on direct pursuit/local surface
+-- handling and do not queue PathfindingService work. Flying profiles stay untouched.
 NpcNavigationConfig.Scheduler.MaxConcurrentPaths = 0
 NpcNavigationConfig.Scheduler.MaxPathStartsPerSecond = 0
 NpcNavigationConfig.Scheduler.MaxPendingPaths = 0
@@ -46,6 +51,71 @@ for _, profileName in ipairs({ "GroundSmall", "GroundLarge" }) do
 	profile.RepathCooldown = math.huge
 end
 
+-- Early XP is intentionally accelerated, then converges back to the authored curve.
+-- Using awarded base XP makes this work for both solo and party progression without
+-- reaching into ProgressService's private run tables.
+local rawXpThisRun = {}
+RunProgressApi.Wrap("AwardPlayer", function(original)
+	return function(player: Player, xp: number, coins: number)
+		local rawXp = math.max(0, tonumber(xp) or 0)
+		local totalBefore = rawXpThisRun[player] or 0
+		local multiplier = 1
+		if totalBefore < 180 then
+			multiplier = 1.50
+		elseif totalBefore < 400 then
+			multiplier = 1.30
+		elseif totalBefore < 650 then
+			multiplier = 1.15
+		end
+		rawXpThisRun[player] = totalBefore + rawXp
+		return original(player, math.floor(rawXp * multiplier + 0.5), coins)
+	end
+end)
+
+-- Hard pity. Re-rolling through the original function preserves stack-limit filtering.
+local rarityRank = { Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5 }
+local pity = {}
+local originalRollReward = ChestItemService.RollReward
+ChestItemService.RollReward = function(player: Player)
+	local counters = pity[player] or { rare = 0, epic = 0, legendary = 0 }
+	pity[player] = counters
+	local requiredRank = 0
+	if counters.legendary >= 14 then
+		requiredRank = 5
+	elseif counters.epic >= 7 then
+		requiredRank = 4
+	elseif counters.rare >= 3 then
+		requiredRank = 3
+	end
+
+	local definition, detail = originalRollReward(player)
+	if requiredRank > 0 then
+		for _ = 1, 40 do
+			if detail and (rarityRank[detail.Rarity] or 1) >= requiredRank then
+				break
+			end
+			definition, detail = originalRollReward(player)
+		end
+	end
+
+	local rank = detail and (rarityRank[detail.Rarity] or 1) or 1
+	counters.rare = rank >= 3 and 0 or (counters.rare + 1)
+	counters.epic = rank >= 4 and 0 or (counters.epic + 1)
+	counters.legendary = rank >= 5 and 0 or (counters.legendary + 1)
+	return definition, detail
+end
+
+-- WeaponCombat currently asks NpcService for hard-coded type ranges. Increase only calls
+-- originating from WeaponCombat so NPC targeting/spells do not inherit the range buff.
+local originalGetNearestEnemy = NpcService.GetNearestEnemy
+NpcService.GetNearestEnemy = function(fromPosition: Vector3, maxRange: number, ...)
+	local source = debug.info(2, "s")
+	if type(source) == "string" and string.find(source, "WeaponCombat", 1, true) then
+		maxRange = (tonumber(maxRange) or 0) * 1.18
+	end
+	return originalGetNearestEnemy(fromPosition, maxRange, ...)
+end
+
 local function updateEarlyChestDiscount(player: Player)
 	local opened = math.max(0, math.floor(tonumber(player:GetAttribute("ChestOpenedCount")) or 0))
 	local targetMultiplier
@@ -54,7 +124,7 @@ local function updateEarlyChestDiscount(player: Player)
 	elseif opened == 1 then
 		targetMultiplier = 0.75 -- 80 -> 60
 	elseif opened == 2 then
-		targetMultiplier = 0.90 -- 105 -> 95
+		targetMultiplier = 0.90 -- 105 -> about 95
 	else
 		targetMultiplier = 1
 	end
@@ -64,9 +134,8 @@ end
 local function syncUnlockedSpellPool(player: Player)
 	local unlocked = player:GetAttribute("UnlockedSpellsCSV")
 	if typeof(unlocked) == "string" then
-		-- ProgressService historically prioritizes SpellLoadoutCSV. Mirroring the complete
-		-- unlocked set removes the functional loadout restriction while remaining compatible
-		-- with mixed/older teleport payloads.
+		-- ProgressService prioritizes SpellLoadoutCSV. Mirroring the complete unlocked set
+		-- removes the functional loadout restriction and remains compatible with old payloads.
 		player:SetAttribute("SpellLoadoutCSV", unlocked)
 	end
 end
@@ -86,10 +155,64 @@ local function applyCharacterJump(character: Model)
 	end
 end
 
+-- Protect chest reward ownership from another modal clearing the shared BoolValue.
+-- This fixes chest -> level-up -> choose spell: choosing the spell can no longer resume
+-- mobs while the chest reward is still unresolved.
+local chestPending = {}
+local originalOpenReward = ChestItemService.OpenReward
+local originalClaimReward = ChestItemService.ClaimReward
+local originalResetPlayer = ChestItemService.ResetPlayer
+
+local function anyChestPending(): boolean
+	for player in pairs(chestPending) do
+		if player.Parent == Players then
+			return true
+		end
+	end
+	return false
+end
+
+ChestItemService.OpenReward = function(player: Player, context)
+	local definition, detail = originalOpenReward(player, context)
+	if definition and detail then
+		chestPending[player] = true
+		player:SetAttribute("ChestRewardPending", true)
+		PauseState.Value = true
+	end
+	return definition, detail
+end
+
+ChestItemService.ClaimReward = function(player: Player, token)
+	local ok = originalClaimReward(player, token)
+	if ok then
+		chestPending[player] = nil
+		player:SetAttribute("ChestRewardPending", false)
+	end
+	return ok
+end
+
+ChestItemService.ResetPlayer = function(player: Player, ...)
+	chestPending[player] = nil
+	player:SetAttribute("ChestRewardPending", false)
+	return originalResetPlayer(player, ...)
+end
+
+PauseState.Changed:Connect(function(isPaused)
+	if not isPaused and anyChestPending() then
+		-- Defer prevents re-entrant Value writes from fighting the source that just released.
+		task.defer(function()
+			if anyChestPending() and not PauseState.Value then
+				PauseState.Value = true
+			end
+		end)
+	end
+end)
+
 local function setupPlayer(player: Player)
 	updateEarlyChestDiscount(player)
 	syncUnlockedSpellPool(player)
 	clampLifesteal(player)
+	player:SetAttribute("ChestRewardPending", false)
 
 	player:GetAttributeChangedSignal("ChestOpenedCount"):Connect(function()
 		updateEarlyChestDiscount(player)
@@ -109,6 +232,11 @@ local function setupPlayer(player: Player)
 end
 
 Players.PlayerAdded:Connect(setupPlayer)
+Players.PlayerRemoving:Connect(function(player)
+	rawXpThisRun[player] = nil
+	pity[player] = nil
+	chestPending[player] = nil
+end)
 for _, player in ipairs(Players:GetPlayers()) do
 	setupPlayer(player)
 end
