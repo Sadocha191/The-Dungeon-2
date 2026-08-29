@@ -16,7 +16,7 @@ MobConfig.Mobs = {
 	},
 	Bat = {
 		hp = 34,
-		speed = 14.0,
+		speed = 20.0,
 		attackRange = 4,
 		attackCooldown = 1.45,
 		damage = 7,
@@ -42,6 +42,7 @@ MobConfig.Mobs = {
 		coins = 2,
 		facingYawDegrees = -90,
 		movementProfile = "GroundSmall",
+		combatBehavior = "LeapAttack",
 		resistanceProfile = "Neutral",
 	},
 	Cauldron = {

@@ -43,6 +43,7 @@ NpcMovementSystemResolver.MovementTags = {
 NpcMovementSystemResolver.CombatTags = {
 	NpcCombat_DiveAttack = "DiveAttack",
 	NpcCombat_LeapExplode = "LeapExplode",
+	NpcCombat_LeapAttack = "LeapAttack",
 }
 
 local warnedModels = setmetatable({}, { __mode = "k" })
@@ -76,6 +77,8 @@ local MOVEMENT_BEHAVIOR_ALIASES = {
 local COMBAT_BEHAVIOR_ALIASES = {
 	diveattack = "DiveAttack",
 	phantomdive = "DiveAttack",
+	leapattack = "LeapAttack",
+	jumpattack = "LeapAttack",
 	leapexplode = "LeapExplode",
 	explodingleap = "LeapExplode",
 }

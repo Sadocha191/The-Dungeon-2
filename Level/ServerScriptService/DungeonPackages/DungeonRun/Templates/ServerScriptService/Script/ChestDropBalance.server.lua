@@ -1,6 +1,5 @@
 -- ChestDropBalance.server.lua
--- Rebalances the active chest item service and guarantees a Legendary reward
--- after four consecutive non-Legendary chest item rolls.
+-- Owns chest rarity weights and tiered bad-luck protection.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13,83 +12,107 @@ local ChestItemService = require(
 )
 local RunStarted = ReplicatedStorage:WaitForChild("RunStarted")
 
-local PITY_MISSES = 4
 local BALANCED_WEIGHTS = {
-	Common = 48,
+	Common = 50,
 	Uncommon = 28,
-	Rare = 15,
-	Epic = 8,
-	Legendary = 1,
+	Rare = 14,
+	Epic = 6,
+	Legendary = 2,
+}
+local RARITY_RANK = {
+	Common = 1,
+	Uncommon = 2,
+	Rare = 3,
+	Epic = 4,
+	Legendary = 5,
+}
+local PITY_THRESHOLDS = {
+	Rare = 3,
+	Epic = 7,
+	Legendary = 14,
 }
 
-local legendaryMissesByPlayer = {}
+local pityByPlayer = {}
 local originalRollReward = ChestItemService.RollReward
 
 for rarity, weight in pairs(BALANCED_WEIGHTS) do
 	ChestItemConfig.RarityWeights[rarity] = weight
 end
 
-local function forceLegendaryRoll(player)
-	local weights = ChestItemConfig.RarityWeights
-	local previousWeights = {}
+local function requiredPityRank(counters): number
+	if counters.legendary >= PITY_THRESHOLDS.Legendary then
+		return RARITY_RANK.Legendary
+	end
+	if counters.epic >= PITY_THRESHOLDS.Epic then
+		return RARITY_RANK.Epic
+	end
+	if counters.rare >= PITY_THRESHOLDS.Rare then
+		return RARITY_RANK.Rare
+	end
+	return 0
+end
 
-	for _, rarity in ipairs(ChestItemConfig.RarityOrder) do
-		previousWeights[rarity] = weights[rarity]
-		weights[rarity] = rarity == "Legendary" and 1 or 0
+local function rollWithPity(player, requiredRank)
+	if requiredRank <= 0 then
+		return originalRollReward(player)
 	end
 
-	local ok, rewardDefinition, rewardDetail = pcall(originalRollReward, player)
+	local weights = ChestItemConfig.RarityWeights
+	local previousWeights = {}
+	for _, rarity in ipairs(ChestItemConfig.RarityOrder) do
+		previousWeights[rarity] = weights[rarity]
+		if (RARITY_RANK[rarity] or 1) < requiredRank then
+			weights[rarity] = 0
+		end
+	end
 
+	local result = table.pack(pcall(originalRollReward, player))
 	for _, rarity in ipairs(ChestItemConfig.RarityOrder) do
 		weights[rarity] = previousWeights[rarity]
 	end
 
-	if not ok then
-		error(rewardDefinition, 0)
+	if not result[1] then
+		error(result[2], 0)
 	end
-
-	return rewardDefinition, rewardDetail
+	return result[2], result[3]
 end
 
 function ChestItemService.RollReward(player)
-	local misses = legendaryMissesByPlayer[player] or 0
-	local shouldForceLegendary = misses >= PITY_MISSES
+	local counters = pityByPlayer[player] or {
+		rare = 0,
+		epic = 0,
+		legendary = 0,
+	}
+	pityByPlayer[player] = counters
 
-	local rewardDefinition, rewardDetail
-	if shouldForceLegendary then
-		rewardDefinition, rewardDetail = forceLegendaryRoll(player)
-	else
-		rewardDefinition, rewardDetail = originalRollReward(player)
-	end
+	local requiredRank = requiredPityRank(counters)
+	local definition, detail = rollWithPity(player, requiredRank)
+	local rank = detail and (RARITY_RANK[detail.Rarity] or 1) or 1
 
-	if not rewardDetail then
-		return rewardDefinition, rewardDetail
-	end
+	counters.rare = rank >= RARITY_RANK.Rare and 0 or (counters.rare + 1)
+	counters.epic = rank >= RARITY_RANK.Epic and 0 or (counters.epic + 1)
+	counters.legendary = rank >= RARITY_RANK.Legendary and 0 or (counters.legendary + 1)
 
-	local resolvedRarity = tostring(rewardDetail.Rarity or "")
-	if resolvedRarity == "Legendary" then
-		legendaryMissesByPlayer[player] = 0
-		if shouldForceLegendary then
-			print(string.format("[ChestDropBalance] Legendary pity triggered for %s", player.Name))
+	if detail then
+		detail.PityTriggered = requiredRank > 0 and rank >= requiredRank
+		if detail.PityTriggered then
+			print(string.format(
+				"[ChestDropBalance] %s pity triggered for %s",
+				tostring(detail.Rarity),
+				player.Name
+			))
 		end
-	elseif shouldForceLegendary then
-		-- The player has exhausted all available Legendary stacks. Reset the pity
-		-- instead of forcing the highest remaining rarity on every later chest.
-		legendaryMissesByPlayer[player] = 0
-	else
-		legendaryMissesByPlayer[player] = misses + 1
 	end
 
-	rewardDetail.PityTriggered = shouldForceLegendary and resolvedRarity == "Legendary"
-	return rewardDefinition, rewardDetail
+	return definition, detail
 end
 
 Players.PlayerRemoving:Connect(function(player)
-	legendaryMissesByPlayer[player] = nil
+	pityByPlayer[player] = nil
 end)
 
 RunStarted.Changed:Connect(function()
-	table.clear(legendaryMissesByPlayer)
+	table.clear(pityByPlayer)
 end)
 
-print("[ChestDropBalance] Enabled improved rarity weights and 5-chest Legendary pity")
+print("[ChestDropBalance] Enabled PR #161 rarity weights and tiered pity")

@@ -1,5 +1,54 @@
 # Changelog AI — 2026-08
 
+## 2026-08-29 — Integration of PR #161 gameplay balance and pause fixes
+
+### Summary
+
+- Merged the seven commits from PR #161 onto the package-based `main` and mapped the old flat `Level/` paths to the active `DungeonMovement`, `DungeonNPC`, and `DungeonRun` templates in both `Level/` and `Level2/`.
+- Reduced slide/air-jump momentum, increased Bat speed, added the non-explosive Goblin `LeapAttack`, enabled early-run XP/chest discounts, unlocked-spell mirroring, lifesteal/pickup clamps, the weapon-range bonus, and nested chest pause ownership.
+- Added the missing `LeapAttack` aliases/tag to `NpcMovementSystemResolver`; without this integration fix, `MobConfig.combatBehavior = "LeapAttack"` resolved to `nil` and the PR behavior never ran.
+- Consolidated rarity weights and tiered pity into the existing `ChestDropBalance` owner instead of stacking two `RollReward` overrides. The final hard pity guarantees Rare/Epic/Legendary after at most 3/7/14 misses while respecting the service's existing stack-limit fallback.
+- Kept the three package template `Script` objects disabled in their linked roots; `DungeonPackageBootstrap` enables only installed runtime clones.
+
+### Repository files
+
+- Updated both `Level*/ServerScriptService/DungeonPackages/DungeonMovement/Templates/ReplicatedStorage/ModuleScripts/MovementConfig.lua` mirrors.
+- Added both `Level*/ServerScriptService/DungeonPackages/DungeonMovement/Templates/StarterPlayer/StarterCharacterScripts/Health.server.lua` mirrors.
+- Added `LeapAttackBehavior.lua` and updated `MobConfig.lua`, `NpcCombatBehaviorService.lua`, and `NpcMovementSystemResolver.lua` in both `DungeonNPC` mirrors.
+- Added `CitoGameplayBalance.server.lua` and updated `ChestDropBalance.server.lua` in both `DungeonRun` mirrors.
+- Updated this monthly changelog; unrelated authored-weapon and changelog work present before the merge remained outside the integration index.
+
+### Studio synchronization and validation
+
+- `Level` package sources matched the repository by normalized length and rolling checksum for all eight touched runtime files; `CitoGameplayBalance` and `Health` remained disabled in the template roots.
+- Fresh Play installed 149 package roots and enabled 109 runtime scripts. `ChestService`, `ProgressService`, `SpellService`, authored weapons, world preparation, and the loading gate completed without a PR-specific error.
+- A controlled resolver/behavior probe returned `CombatBehavior=LeapAttack`, `Valid=true`, `handled=true`, phase `Leap`, and actual movement during the first central NPC step.
+- A 60-roll service probe observed maximum below-threshold streaks of exactly Rare 3, Epic 7, and Legendary 14 after replacing probabilistic 40-reroll pity with a deterministic eligible-rarity roll.
+- A controlled chest probe opened a pending reward, forced `PauseState=false`, confirmed it was reasserted while the reward remained pending, then confirmed `ResetPlayer` cleared both the pending attribute and pause.
+- With `PauseState=true`, a damaged Humanoid stayed at the same health for 2.25 seconds, confirming the replacement `Health` script blocked default regeneration during modal pause.
+- The connected player received `ChestCostMult=0.64`, `ChestRewardPending=false`, and the runtime installed all three new scripts. `git diff --check` passed.
+
+### Runtime cost and cleanup
+
+- No new `Heartbeat`, `Stepped`, `RenderStepped`, polling loop, remote, persistent-data field, DataStore key, or `TeleportData` change was added.
+- `LeapAttack` runs inside the existing central NPC movement step at 12 Hz and adds O(1) arithmetic/state per Goblin; it creates no per-NPC connection and its state is cleared by the existing combat-behavior cleanup path.
+- Ground path starts/concurrency/pending capacity are set to zero for this balance mode, so ground NPCs use existing direct pursuit/local surface handling without `PathfindingService` jobs.
+- Pity performs one reward roll plus five small rarity-table passes only when a threshold is active; it no longer performs up to 41 rolls. Pity, raw XP, and chest-pending tables clear on run/player lifecycle events.
+- Balance updates are event-driven: one shared `PauseState.Changed` listener and per-player attribute/character listeners. Player-keyed runtime state is removed on `PlayerRemoving`.
+
+### Not verified and risks
+
+- `level2` Studio was not connected, so its repository mirror was parity-checked against `Level`, but the linked packages were not published/get-latest tested in the Hollow Marsh place during this task.
+- The movement numbers and Bat speed were source-verified and startup-tested, but controller feel and a natural authored Goblin spawn/attack were not manually played through; the Goblin behavior itself was validated with a controlled server probe.
+- The weapon range bonus identifies calls by the `WeaponCombat` source name through `debug.info`; moving or renaming that caller requires updating the adapter.
+- A real two-client chest/level-up overlap, target-scale MicroProfiler run, and production DataStore session were not performed. Studio used the existing non-persistent fallback after a profile lease warning.
+- Existing unrelated output remains from `Hybrid Terrain Hex Generator:16`; no new PR-specific stack appeared.
+
+### Rollback
+
+- Revert the PR #161 integration merge, restore the prior `ChestDropBalance` source, remove the three new template scripts, and restore the previous movement/NPC config and resolver sources in both repository mirrors.
+- Restore the same eight prior sources in `Level` Studio. If shared packages are published later, roll back the `DungeonMovement`, `DungeonNPC`, and `DungeonRun` package versions together and update every linked dungeon place to the same compatible set.
+
 ## 2026-08-19 — Multi-level dungeon runtime and Roblox Packages
 
 ### Summary

@@ -1,11 +1,13 @@
 local DiveAttackBehavior = require(script.Parent:WaitForChild("DiveAttackBehavior"))
 local LeapExplodeBehavior = require(script.Parent:WaitForChild("LeapExplodeBehavior"))
+local LeapAttackBehavior = require(script.Parent:WaitForChild("LeapAttackBehavior"))
 
 local NpcCombatBehaviorService = {}
 
 local BEHAVIORS = {
 	DiveAttack = DiveAttackBehavior,
 	LeapExplode = LeapExplodeBehavior,
+	LeapAttack = LeapAttackBehavior,
 }
 
 local function resolveBehavior(npc: any): any
