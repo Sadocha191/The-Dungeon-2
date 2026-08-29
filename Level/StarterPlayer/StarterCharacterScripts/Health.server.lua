@@ -1,0 +1,4 @@
+-- Intentionally replaces Roblox's default Health regeneration script.
+-- Run healing/regen is server-authoritative elsewhere (for example ShrineService),
+-- where PauseState is respected. Keeping this script present prevents default
+-- Humanoid regeneration from healing the player while modal run UI is open.
