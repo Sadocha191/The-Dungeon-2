@@ -18,6 +18,7 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-08-30** — Integracja PR #163: 26 bazowych czarów, 14 fuzji, authored VFX i centralna walidacja 120 pocisków
 - **2026-08-19** — Multi-level dungeon runtime: pięć Roblox Packages, LevelConfig, Hollow Marsh i snapshot Level2
 - **2026-08-05** — Integracja PR #160: natywne trasy naziemnych NPC, bezpieczny handoff kolejki i walidacja 100 NPC
 - **2026-08-01** — Integracja PR #158: mocne bonusy chest itemów bez zależności od kolejności startu

@@ -55,7 +55,14 @@ local pauseAccum = 0
 local pauseStart = nil
 local state = {}
 local doomBoundEnemies = setmetatable({}, { __mode = "k" })
+local nextDoomBindAt = 0
 local random = Random.new()
+
+local DOOM_BIND_INTERVAL = 0.2
+
+local function weakKeyTable()
+	return setmetatable({}, { __mode = "k" })
+end
 
 local function isPaused() return PauseState.Value == true end
 
@@ -158,8 +165,11 @@ SpellEffects.Configure({
 
 local function shouldSpawnImpact(plr, spellId, enemy)
 	local s = getState(plr)
-	s.impact[spellId] = s.impact[spellId] or {}
 	local bucket = s.impact[spellId]
+	if not bucket then
+		bucket = weakKeyTable()
+		s.impact[spellId] = bucket
+	end
 	local now = spellClock()
 	if now < (bucket[enemy] or 0) then return false end
 	bucket[enemy] = now + 0.16
@@ -327,7 +337,7 @@ end
 local function runOrbit(plr, spellId, stats, hrp, dt)
 	local s = getState(plr)
 	local bucket = s.orbit[spellId]
-	if not bucket then bucket={t=0,lastHit={}}; s.orbit[spellId]=bucket end
+	if not bucket then bucket={t=0,lastHit=weakKeyTable()}; s.orbit[spellId]=bucket end
 	local count = math.max(1, stats.count or stats.baseCount or 1)
 	local radius = stats.radius > 0 and stats.radius or stats.baseRadius or 5.5
 	local orbitSpeed = stats.orbitSpeed or 2.6
@@ -486,7 +496,9 @@ local function runPillar(plr,spellId,stats,hrp)
 	end)
 end
 
-local function bindDoomDeathCallbacks()
+local function bindDoomDeathCallbacks(now)
+	if now < nextDoomBindAt then return end
+	nextDoomBindAt = now + DOOM_BIND_INTERVAL
 	for _,enemy in ipairs(getAllEnemies()) do
 		if not doomBoundEnemies[enemy] then
 			doomBoundEnemies[enemy]=true
@@ -510,7 +522,7 @@ end
 local function runGlobal(plr,spellId,stats,hrp)
 	local s,now=getState(plr),spellClock(); if now<(s.cds[spellId] or 0) then return end
 	if spellId=="Doom" then
-		bindDoomDeathCallbacks()
+		bindDoomDeathCallbacks(now)
 		if s.doomEnergy < (stats.energyRequired or 16) then return end
 		s.doomEnergy=math.max(0,s.doomEnergy-(stats.energyRequired or 16))
 		s.cds[spellId]=now+((stats.cooldown or 14)*getCooldownMult(plr))
@@ -529,6 +541,10 @@ local function runGlobal(plr,spellId,stats,hrp)
 	SpellVisuals.Broadcast("nova",{pos=hrp.Position,radius=32,stats=SpellVisuals.ExtractStats(stats)})
 	task.spawn(function()
 		while spellClock()<endAt and isPlayerRunActive(plr) do
+			if isPaused() then
+				task.wait(0.1)
+				continue
+			end
 			for _,enemy in ipairs(getAllEnemies()) do
 				local ep=getEnemyPosition(enemy); local ignoreShadow=stats.features and stats.features.shadowsIgnore
 				if ep and (ignoreShadow or isSunExposed(ep,enemy)) then hitEnemy(plr,enemy,stats.damage*tickRate,stats,ep,ep) end

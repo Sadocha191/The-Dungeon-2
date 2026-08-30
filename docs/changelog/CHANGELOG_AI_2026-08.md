@@ -1,5 +1,33 @@
 # Changelog AI — 2026-08
 
+## 2026-08-30 — Integration of PR #163 documented spell roster
+
+### Summary and architecture
+
+- Merged PR #163 (`feat/documented-spell-roster`) onto `main`, replacing the prototype dungeon roster with 26 base spells, 14 documented fusions and level-20 scaling in the shared `Level`/`Level2` combat package templates.
+- Added server-authoritative homing projectiles and impact AoE through the existing central `SpellProjectiles` scheduler, plus authored FireBall, Tornado and Gates of Babilon VFX dispatched over the existing `SpellVFXEvent` remote to one client `RenderStepped` renderer.
+- Preserved remote names, persistent-data shape and teleport format. Legacy spell-ID mappings remain in the dungeon definitions for the supported prototype IDs.
+- Integration hardening limits Doom death-binding discovery to 5 Hz globally instead of scanning all NPC every Heartbeat, makes long-lived impact/orbit enemy caches weak-keyed, and prevents Sun Penalty self-damage while the run is paused.
+
+### Files and Studio synchronization
+
+- Updated mirrored `SpellDefinitions.lua`, `SpellProjectiles.lua`, `SpellService.lua` and added `AuthoredSpellVFXClient.lua` under both `Level/` and `Level2/` package templates.
+- Synchronized the four active `DungeonCombat` package-template scripts in the connected `Level` Studio. Normalized source checks confirmed the active templates match the repository, and all four active sources passed `loadstring` parsing.
+- The spell data contract probe reported 26 base spells, 14 combos, 40 ordered spells, 52 shop entries, maximum magic level 8, no physical spells and no invalid definitions/combo references.
+
+### Validation, runtime cost and cleanup
+
+- Fresh `Level` Play loaded the documented roster successfully. FireBall produced authored projectile/impact payloads with `FireballVFX`/`FireballVFXImpact`; Tornado produced authored moving-zone payloads with `TornadoVFX`; Gates of Babilon produced cast/projectile/impact payloads with `GilgameshMain`, `GilProjectile` and `GilHitVFX`.
+- A controlled scheduler test created 120 simultaneous AirBullet projectiles. The shared projectile count reached 120, all 120 client events arrived, and the active count returned to zero after range cleanup without a spell/VFX error.
+- Runtime loops remain centralized: one existing server spell `Heartbeat`, one projectile `Heartbeat` that connects only while projectiles exist and disconnects when idle, and one client authored-VFX `RenderStepped`. Doom NPC discovery is capped at 5 Hz. Bounded duration/tick tasks stop on duration, run termination or projectile cleanup; no per-NPC/per-projectile frame connection or new `_G` dependency was added.
+- Final Output contained no PR-specific error. The pre-existing unrelated `Hybrid Terrain Hex Generator:16` toolbar/plugin-context error remained.
+
+### Not verified, risks and rollback
+
+- The connected `Level2` Studio place and a real multi-client session were not available for playtest; `Level2` was validated by exact mirrored-source hash parity and compile checks only. All 40 spells were data-validated, but only representative projectile, moving-zone and Gates authored-VFX paths received live gameplay probes.
+- The lobby keeps its older spell definitions; the dungeon retains explicit legacy mappings only for supported prototype IDs. Saved loadouts containing other historical IDs should be covered by a separate cross-place compatibility audit before removing any legacy data.
+- Roll back by reverting the PR #163 merge and this integration commit, then restoring the four prior active `DungeonCombat` package-template scripts in `Level` Studio. No DataStore migration or persistent-data rollback is required.
+
 ## 2026-08-30 — NPC lifecycle and post-swarm spawn regression fix
 
 ### Root causes and behavior
