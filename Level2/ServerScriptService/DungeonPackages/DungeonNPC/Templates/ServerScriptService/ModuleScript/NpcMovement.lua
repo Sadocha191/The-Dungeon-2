@@ -129,11 +129,7 @@ local function translateModel(model: Model, delta: Vector3)
 	if delta.Magnitude <= 1e-5 then
 		return
 	end
-	for _, descendant in ipairs(model:GetDescendants()) do
-		if descendant:IsA("BasePart") then
-			descendant.CFrame += delta
-		end
-	end
+	model:PivotTo(model:GetPivot() + delta)
 end
 
 local function isBlockingObstacle(inst: Instance?): boolean
@@ -305,7 +301,15 @@ function NpcMovement.BeginSpawnEmergence(model: Model, root: BasePart, groundOff
 end
 
 function NpcMovement.MoveModelToRoot(npc: any)
-	translateModel(npc.model, npc.position - npc.root.Position)
+	local delta = npc.position - npc.root.Position
+	if delta.Magnitude <= 1e-5 then
+		return
+	end
+	if npc.model:GetAttribute("NpcServerProxy") == true then
+		npc.root.CFrame += delta
+		return
+	end
+	translateModel(npc.model, delta)
 end
 
 function NpcMovement.GroundAdjustedPosition(npc: any, pos: Vector3, now: number, dt: number): Vector3

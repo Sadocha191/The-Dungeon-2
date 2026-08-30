@@ -63,9 +63,47 @@ local function ensureRemoteEvent(name: string): RemoteEvent
 	return ev
 end
 
+local function ensureRemoteFunction(name: string): RemoteFunction
+	local remote = remotes:FindFirstChild(name)
+	if remote and remote:IsA("RemoteFunction") then
+		return remote
+	end
+	if remote then
+		remote:Destroy()
+	end
+	remote = Instance.new("RemoteFunction")
+	remote.Name = name
+	remote.Parent = remotes
+	return remote
+end
+
+local function ensureMotionRemote(name: string)
+	local existing = remotes:FindFirstChild(name)
+	if existing and (existing:IsA("UnreliableRemoteEvent") or existing:IsA("RemoteEvent")) then
+		return existing
+	end
+	if existing then
+		existing:Destroy()
+	end
+
+	local ok, event = pcall(function()
+		return Instance.new("UnreliableRemoteEvent")
+	end)
+	if not ok or not event then
+		event = Instance.new("RemoteEvent")
+	end
+	event.Name = name
+	event.Parent = remotes
+	return event
+end
+
 local batchEvent = ensureRemoteEvent(NpcShared.RemoteName)
+local motionEvent = ensureMotionRemote(NpcShared.MotionRemoteName)
 local syncRequestEvent = ensureRemoteEvent(NpcShared.SyncRequestRemoteName)
 local damageIndicatorEvent = ensureRemoteEvent("DamageIndicatorEvent")
+if RunService:IsStudio() then
+	ensureRemoteFunction(NpcShared.DebugSnapshotRemoteName)
+end
 
 local pauseState = ReplicatedStorage:FindFirstChild("PauseState")
 if not pauseState then
@@ -127,6 +165,7 @@ type NpcRecord = {
 	model: Model,
 	root: BasePart,
 	mobType: string,
+	displayName: string,
 	enemyRank: string,
 	resistanceProfile: string,
 	maxHealth: number,
@@ -192,6 +231,7 @@ type NpcRecord = {
 local NpcService = {}
 
 local NORMAL_DESPAWN_DISTANCE = 100
+local nearestQueryScratch = {}
 local NPC_FORMATION_MOVEMENT_CONFIG = NpcTargeting.FormationMovementConfig
 local flat = NpcMovement.Flat
 local safeUnit = NpcMovement.SafeUnit
@@ -205,7 +245,6 @@ local clearRuntimeAttributes = NpcLifecycle.ClearRuntimeAttributes
 local writeStateAttributes = NpcLifecycle.WriteStateAttributes
 local writeHealthAttributes = NpcLifecycle.WriteHealthAttributes
 local setState = NpcLifecycle.SetState
-local lifecycleUnregisterNpc = NpcLifecycle.Unregister
 local lifecycleKillNpc = NpcLifecycle.Kill
 local lifecycleDespawnNpcRecord = NpcLifecycle.Despawn
 local getCurrentSpeed = NpcLifecycle.GetCurrentSpeed
@@ -213,11 +252,6 @@ local getCurrentSpeed = NpcLifecycle.GetCurrentSpeed
 local function cleanupNavigation(npc: NpcRecord)
 	NpcMovementSystemController.Cleanup(npc)
 	NpcCombatBehaviorService.Cleanup(npc)
-end
-
-local function unregisterNpc(npc: NpcRecord, addTombstone: boolean?)
-	cleanupNavigation(npc)
-	lifecycleUnregisterNpc(npc, addTombstone)
 end
 
 local function killNpc(npc: NpcRecord, context: {[string]: any})
@@ -382,7 +416,7 @@ local function updateNpc(
 		return
 	end
 	if not npc.model.Parent or not npc.root.Parent then
-		unregisterNpc(npc, true)
+		despawnNpcRecord(npc)
 		return
 	end
 
@@ -562,11 +596,11 @@ local function updateNpc(
 end
 
 local function sendBatchToPlayer(player: Player, fullSnapshot: boolean?, requestId: number?)
-	NpcReplication.SendBatchToPlayer(batchEvent, player, fullSnapshot, requestId, NpcRegistry.Pairs)
+	NpcReplication.SendFullToPlayer(batchEvent, motionEvent, player, requestId, NpcRegistry.Pairs)
 end
 
 local function broadcastBatch()
-	NpcReplication.BroadcastBatch(batchEvent, NpcRegistry.Pairs, NpcRegistry.Tombstones, NpcRegistry.ClearTombstones)
+	NpcReplication.BroadcastReliable(batchEvent, NpcRegistry.Pairs, NpcRegistry.Tombstones, NpcRegistry.ClearTombstones)
 end
 
 function NpcService.GetRoot(target: any): BasePart?
@@ -649,7 +683,14 @@ function NpcService.GetNearestEnemy(fromPos: Vector3, maxRange: number): (Model?
 	local bestDist = searchRange
 	local bestEffectiveDist = math.huge
 	local bestPriority = -math.huge
-	for _, npc in NpcRegistry.Pairs() do
+	local candidates = searchRange < math.huge and NpcRegistry.QueryRadius(fromPos, searchRange, nearestQueryScratch) or nearestQueryScratch
+	if searchRange == math.huge then
+		table.clear(candidates)
+		for _, npc in NpcRegistry.Pairs() do
+			table.insert(candidates, npc)
+		end
+	end
+	for _, npc in ipairs(candidates) do
 		if NpcTargeting.IsTargetable(npc) then
 			local dist = (npc.position - fromPos).Magnitude
 			if dist <= searchRange then
@@ -671,7 +712,7 @@ end
 
 function NpcService.GetEnemiesInRadius(fromPos: Vector3, radius: number): {Model}
 	local hits = {}
-	for _, npc in NpcRegistry.Pairs() do
+	for _, npc in ipairs(NpcRegistry.QueryRadius(fromPos, radius)) do
 		if NpcTargeting.IsTargetable(npc) then
 			local dist = (npc.position - fromPos).Magnitude
 			if dist <= radius then
@@ -815,8 +856,11 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		return nil
 	end
 
-	stripLegacyNpcScripts(model)
-	ensureAnimationController(model)
+	local isServerProxy = model:GetAttribute("NpcServerProxy") == true
+	if not isServerProxy then
+		stripLegacyNpcScripts(model)
+		ensureAnimationController(model)
+	end
 
 	if model.PrimaryPart ~= root then
 		model.PrimaryPart = root
@@ -827,25 +871,26 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 	root.CanTouch = false
 	root.CanQuery = false
 
-	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
-		humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
-		humanoid.NameDisplayDistance = 0
-		humanoid.HealthDisplayDistance = 0
-	end
-
-	for _, descendant in ipairs(model:GetDescendants()) do
-		if descendant:IsA("BasePart") then
-			descendant.Anchored = true
-			descendant.CanCollide = false
-			descendant.CanTouch = false
-			descendant.CanQuery = false
-			descendant.Massless = true
+	if not isServerProxy then
+		local humanoid = model:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+			humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+			humanoid.NameDisplayDistance = 0
+			humanoid.HealthDisplayDistance = 0
 		end
-	end
 
-	repairDetachedVisualParts(model, root)
+		for _, descendant in ipairs(model:GetDescendants()) do
+			if descendant:IsA("BasePart") then
+				descendant.Anchored = true
+				descendant.CanCollide = false
+				descendant.CanTouch = false
+				descendant.CanQuery = false
+				descendant.Massless = true
+			end
+		end
+		repairDetachedVisualParts(model, root)
+	end
 
 	local npcId = NpcRegistry.NextId()
 	local mobType = tostring((config and config.mobType) or model.Name)
@@ -890,6 +935,7 @@ function NpcService.Register(model: Model, config: NpcConfig?): string?
 		model = model,
 		root = root,
 		mobType = mobType,
+		displayName = tostring(model:GetAttribute("DisplayName") or mobType),
 		enemyRank = enemyRank,
 		resistanceProfile = resistanceProfile,
 		maxHealth = maxHealth,
@@ -1016,7 +1062,70 @@ function NpcService.SetPosition(target: any, pos: Vector3, lookDir: Vector3?)
 	npc.velocity = Vector3.zero
 	NpcMovementSystemController.Invalidate(npc, "external_set_position")
 	moveNpcModelToRoot(npc)
+	NpcRegistry.UpdateSpatial(npc)
 	writeStateAttributes(npc)
+end
+
+function NpcService.GetLifecycleSnapshot(): {[string]: any}
+	local authoritativeAlive = 0
+	local registeredDead = 0
+	local registeredMissingModel = 0
+	local registeredServerProxies = 0
+	local navigationRecords = 0
+	local statusEffectRecords = 0
+	for _, npc in NpcRegistry.Pairs() do
+		if npc.dead then
+			registeredDead += 1
+		elseif npc.model.Parent then
+			authoritativeAlive += 1
+		end
+		if not npc.model.Parent then
+			registeredMissingModel += 1
+		elseif npc.model:GetAttribute("NpcServerProxy") == true then
+			registeredServerProxies += 1
+		end
+		if npc.navigation ~= nil then
+			navigationRecords += 1
+		end
+		if npc.slowEnd > 0 or npc.freezeEnd > 0 or npc.damageTakenEnd > 0 then
+			statusEffectRecords += 1
+		end
+	end
+
+	local registry = NpcRegistry.GetLifecycleMetrics()
+	local lifecycle = NpcLifecycle.GetMetrics()
+	local navigation = NpcMovementSystemController.GetMetrics()
+	local replication = NpcReplication.GetMetrics()
+	return {
+		authoritativeAlive = authoritativeAlive,
+		registryRecords = registry.registryRecords,
+		registryModelRecords = registry.modelRecords,
+		registrySpatialRecords = registry.spatialRecords,
+		registeredDead = registeredDead,
+		registeredMissingModel = registeredMissingModel,
+		registeredServerProxies = registeredServerProxies,
+		navigationRecords = navigationRecords,
+		statusEffectRecords = statusEffectRecords,
+		pendingNavigationPaths = navigation.ground and navigation.ground.pendingPaths or 0,
+		activeNavigationPaths = navigation.ground and navigation.ground.activePaths or 0,
+		pendingTombstones = registry.pendingTombstones,
+		reliableTrackedIds = replication.reliableTrackedIds,
+		motionTrackedIds = replication.motionTrackedIds,
+		totalSpawns = registry.totalSpawns,
+		totalDeaths = lifecycle.totalDeaths,
+		totalUnregisters = registry.totalUnregisters,
+		totalDespawns = lifecycle.totalDespawns,
+		duplicateUnregisterAttempts = registry.duplicateUnregisterAttempts + lifecycle.duplicateUnregisterAttempts,
+		invariantChecks = lifecycle.invariantChecks,
+		invariantFailures = lifecycle.invariantFailures,
+		deathCallbackFailures = lifecycle.deathCallbackFailures,
+	}
+end
+
+function NpcService.FlushReplicationForDebug()
+	if RunService:IsStudio() then
+		broadcastBatch()
+	end
 end
 
 local navigationStartedAt = os.clock()
@@ -1051,6 +1160,8 @@ function NpcService.GetNavigationMetrics(): {[string]: any}
 		movementSystems = movementSystems,
 		combat = combat,
 		combatBehaviors = combatBehaviors,
+		spatial = NpcRegistry.GetSpatialMetrics(),
+		replication = NpcReplication.GetMetrics(),
 	}
 end
 
@@ -1086,7 +1197,12 @@ syncRequestEvent.OnServerEvent:Connect(function(player: Player, requestId: numbe
 	sendBatchToPlayer(player, true, tonumber(requestId))
 end)
 
+Players.PlayerRemoving:Connect(function(player: Player)
+	NpcReplication.RemovePlayer(player)
+end)
+
 local batchAccumulator = 0
+local motionAccumulator = 0
 local movementAccumulator = 1 / NpcNavigationConfig.Scheduler.MovementHz
 local targetingAccumulator = 1 / NpcNavigationConfig.Scheduler.TargetingHz
 local formationAccumulator = 1 / NpcNavigationConfig.Scheduler.FormationHz
@@ -1100,6 +1216,7 @@ RunService.Heartbeat:Connect(function(dt)
 	formationAccumulator += dt
 	movementAccumulator += dt
 	batchAccumulator += dt
+	motionAccumulator += dt
 
 	local targetingInterval = 1 / NpcNavigationConfig.Scheduler.TargetingHz
 	if targetingAccumulator >= targetingInterval then
@@ -1121,6 +1238,7 @@ RunService.Heartbeat:Connect(function(dt)
 
 	local movementInterval = 1 / NpcNavigationConfig.Scheduler.MovementHz
 	if movementAccumulator >= movementInterval then
+		debug.profilebegin("NpcSimulation.Tick")
 		local movementDt = math.min(movementAccumulator, movementInterval * 2)
 		movementAccumulator %= movementInterval
 		local navigationPaused = pauseState.Value
@@ -1136,12 +1254,21 @@ RunService.Heartbeat:Connect(function(dt)
 		local tickStartedAt = os.clock()
 		for _, npc in NpcRegistry.Pairs() do
 			updateNpc(npc, movementDt, cachedAlivePlayers, now, cachedEngagementSlots, spatialGrid)
+			if NpcRegistry.Contains(npc) then
+				NpcRegistry.UpdateSpatial(npc)
+			end
 		end
 		NpcMovementSystemController.StepScheduler(os.clock())
 		local tickDuration = os.clock() - tickStartedAt
 		movementTickCount += 1
 		movementTickTotal += tickDuration
 		movementTickMax = math.max(movementTickMax, tickDuration)
+		debug.profileend()
+	end
+
+	if motionAccumulator >= NpcShared.MotionRate then
+		motionAccumulator %= NpcShared.MotionRate
+		NpcReplication.BroadcastMotion(motionEvent, NpcRegistry.Pairs)
 	end
 
 	if batchAccumulator >= NpcShared.BatchRate then

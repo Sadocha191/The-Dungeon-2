@@ -1,5 +1,97 @@
 # Changelog AI — 2026-08
 
+## 2026-08-30 — NPC lifecycle and post-swarm spawn regression fix
+
+### Root causes and behavior
+
+- The apparent 13-minute spawn stall was not a dead-record leak. The second configured swarm starts at `12:00`, runs for 60 seconds, and raises the hard population cap from 100 to 120. At `13:00` the cap returned immediately to 100 while the extra living `RunSwarm` records remained authoritative, so every ambient spawn hit `alive >= current cap` until enough of that encounter population died.
+- `WaveController` now retires only the excess living Normal NPCs whose `SpawnSource` is `RunSwarm` when the swarm-end event fires. This is bounded encounter cleanup, not a periodic system reset; it preserves `MAX_LIVING_ENEMIES`, spawn rate and all non-swarm/important enemies.
+- A second proxy regression was found by the long test: `NpcProxyFactory` copied internal package/import attributes such as `RBX_ReimportId`. Ordinary scripts cannot write these attributes, so affected authored templates threw during proxy creation. Reserved `RBX_*` attributes are now excluded while gameplay attributes and tags remain copied.
+- Natural death previously set `dead=true` before callbacks, so the live population query stopped counting the NPC, but actual registry removal and proxy destruction occurred only after all reward/encounter callbacks. Death now performs `Dead -> navigation/combat cleanup -> Unregister/tombstone -> destroy proxy -> callbacks`, ensuring a yielding/failing callback cannot retain authority, a registry entry or a server proxy.
+- Reliable client death/despawn records now call the existing pool `Release()` directly in the event handler. The removed 1.15-second hold no longer plays a death animation on the active rig; release stops/rewinds all cached tracks, clears transient VFX/sounds/state and makes the visual immediately reusable.
+
+### Diagnostics and invariants
+
+- Added on-demand Studio lifecycle diagnostics through the existing `WaveDebugApi`, `_G.DebugDumpNpcLifecycle()`, `;debug npclifecycle`, and the Studio-only `NpcLifecycleDebugSnapshot` control/snapshot remote. One snapshot reports authoritative alive, all registry indices, server proxies, Wave population counter, base/current cap, spawn debt/pending budget/block reason, encounter state, rank counts, client visuals/free pool, navigation/status/pending replication state and lifetime spawn/death/unregister/despawn totals.
+- Added `;debug npctest [cycles]` / `_G.DebugRunNpcLifecycleTest(cycles)` plus status hooks. The test uses the real proxy/register and `DamageIndicatorService -> NpcService.ApplyDamage` paths, alternates weapon/spell metadata, and separately covers Normal, Flying, Elite, MiniBoss, Boss, a yielding death callback, explicit despawn, debug clear, swarm-end overflow cleanup, immediate client release and respawn after complete cleanup.
+- Studio invariant checks verify every successful unregister removes the ID from `npcById`, `npcByModel` and the spatial grid exactly once. Metrics expose duplicate unregister attempts, invariant failures and callback failures. Ground-navigation cleanup also removes queued path requests immediately; active native path jobs remain generation-guarded until Roblox returns them.
+- `NpcReplication` debug metrics now include retained reliable IDs and all per-player motion-due IDs, making pending replication retention visible without per-frame Output logging.
+
+### Validation
+
+- Fresh `Level` Studio startup parsed and loaded the package runtime successfully. The only Output error remained the pre-existing unrelated `Hybrid Terrain Hex Generator:16` toolbar/plugin-context error.
+- The final natural lifecycle run passed 3000 spawn/death cycles with an exact delta of `3000 spawns / 3000 deaths / 3000 unregisters / 0 despawns`. The long phase ended with zero alive records and no registry/proxy residue.
+- Including the separate class/cleanup cases, the final test snapshot was `spawn=3030`, `death=3008`, `unregister=3030`, `despawn=22`; `spawn - death - despawn = 0` matched registry/alive/proxy counts. It recorded 3030 successful invariant checks, zero invariant failures, zero duplicate unregister attempts and zero death-callback failures.
+- The client visual probe changed from `present=true, visual=true, active=1` before death to `present=false, visual=false, active=0, free=160` immediately after the reliable death flush.
+- A separate scheduler simulation ran through `21:00` with natural churn and both swarm transitions. It produced 3290 spawns total, including 1200 after `13:00` and 150 after `20:00`, while preserving its population invariant.
+- After the destructive test restored auto-spawning, the real runtime repopulated to 22 NPC and reported `alive=registry=server proxies=active visuals=22`, with 138 free visuals. This confirmed spawn resumes after all lifecycle cleanup paths.
+- All 14 touched shared sources have identical SHA-256 hashes in `Level/` and `Level2/`. The active `Level` package templates were synchronized and playtested. `git diff --check` passed (line-ending warnings only).
+
+### Runtime cost, risks and rollback
+
+- No new production `Heartbeat`, `Stepped` or `RenderStepped` loop was added. Swarm cleanup scans/sorts at most the encounter population only on swarm-end events (twice in the current 15-minute schedule); navigation queue cleanup scans the bounded pending queue only while removing an NPC. Snapshots and the bounded 21-minute scheduler simulation run only on explicit Studio debug requests.
+- Existing death callbacks were audited to consume the captured death context position/model metadata. Future callbacks must not expect `NpcService.GetPosition(deadModel)` to resolve after authoritative death; they should use `ctx.position`.
+- The Studio-only snapshot remote accepts only debug actions in Studio and does not exist in published runtime. No persistent-data shape, DataStore key, TeleportData format, balance cap or production spawn interval changed.
+- Roll back by restoring the prior lifecycle/registry/service/navigation/replication/presentation/shared/scheduler/wave/debug sources and the prior `NpcProxyFactory` in both mirrors, then restoring the matching active `Level` package sources. Reverting swarm cleanup alone restores the 13:00 cap-transition stall; reverting immediate client release restores the 1.15-second visual hold.
+
+## 2026-08-30 — Client-owned pooled NPC presentation
+
+### Summary
+
+- Rebuilt the active dungeon NPC path for a target of 100–120 simultaneous enemies: the server now spawns one transparent anchored root proxy per NPC, while each client owns the full animated visual rig.
+- Added a prewarmed, per-rank/per-type visual pool with a target capacity of 160. Pooled rigs remain parented under `workspace.NpcVisuals`, and normal spawn/death/despawn reuses them instead of cloning and destroying skinned models during combat.
+- Split the existing NPC protocol into reliable descriptor/state/health/lifecycle deltas on `NpcBatchEvent` and compact position/direction/velocity updates on the new `NpcMotionEvent` `UnreliableRemoteEvent` (with a `RemoteEvent` fallback).
+- Added client interpolation, distance/visibility/importance presentation LOD, server motion LOD, a 12-stud server spatial grid for radius/nearest queries, and MicroProfiler/attribute metrics for presentation, pooling, LOD and replication.
+- Preserved the existing authoritative NPC service API and server ownership of AI, targeting, damage, status effects, navigation, boss abilities and gameplay validation. Existing callers still receive a server `Model`; that model is now the lightweight proxy.
+
+### Architecture and lifecycle
+
+- `WaveController` resolves grounding from the authored rank template, then `NpcProxyFactory` creates a model containing exactly one non-queryable `HumanoidRootPart`. All authored template attributes and tags are retained so existing Dive/Leap/movement/combat tuning remains available to server behaviors.
+- `NpcVisualPool` clones only while prewarming or when an undersized type bucket must grow. It strips legacy scripts, configures parts, creates the animation controller/animator, discovers animation variants and loads idle/run/attack/death tracks once per visual.
+- Acquire restores NPC identity and state; release stops and rewinds tracks, disables/clears VFX, stops sounds, removes transient descendants and the old `NpcId`, and parks the still-parented rig below the world.
+- Death destroys the server proxy immediately but sends a reliable non-despawn tombstone so the client can retain the death visual for 1.15 seconds. Explicit despawn releases immediately.
+- The client keeps a 100 ms interpolation buffer with at most 120 ms extrapolation. Critical/near visuals update at 60 Hz, mid at 24 Hz, far at 10 Hz and culled at 4 Hz; classification runs at 4 Hz. Bosses/minibosses and NPCs within 35 studs remain critical.
+- Culled rigs have tracks stopped, local transparency applied and their model parked. Returning to a visible LOD forces an immediate pose/animation refresh.
+- Goblin attack tilt moved into the single presentation owner; the former competing CombatFeedback render-step pivot was removed. BossBar and CombatFeedback consume descriptor/tombstone data without replicated model references.
+
+### Runtime loops, cost and cleanup
+
+- No per-NPC `Heartbeat`, `Stepped` or `RenderStepped` was added. The server retains its one central `Heartbeat`: movement 12 Hz, targeting 3 Hz, formation 2 Hz, reliable deltas 10 Hz and motion scheduling up to 12 Hz with per-player 12/6/3 Hz distance LOD.
+- The client has one central NPC `RenderStepped`; prewarm creates at most three visuals per frame while the loading token is held and the queue is empty during normal play. Metrics publish once per second without Output spam.
+- Motion packets are capped at 14 records to stay bounded for unreliable transport. Per-player due tables remove dead IDs and are dropped on `PlayerRemoving`.
+- Nearest/radius queries use the shared spatial grid. The hot nearest-target path reuses a scratch candidate table instead of allocating one for every weapon/projectile query.
+- The pool owns all visual state and the presentation table removes dead/despawned entries. No new `_G` dependency, persistent-data field, DataStore key or teleport format was introduced.
+
+### Validation and benchmarks
+
+- All 13 changed package sources in active `Level` Studio matched repository sources by normalized length and rolling checksum and passed `loadstring` parsing.
+- Final fresh Play installed 151 roots/enabled 109 scripts. It produced 24 server proxy models with exactly 24 total parts and zero invalid proxies; the client reported 24 active + 136 inactive visuals, capacity 160, zero pool growth, zero visuals created during the run, zero stale inactive IDs and completed prewarm.
+- The final smoke reported presentation around 0.29 ms average / 0.83 ms maximum, 14.73 motion packets/s and 138.99 motion records/s. Loading completed in 7.87 seconds; repeated prewarm runs completed in approximately 6.34–7.21 seconds.
+- Natural baseline at 24 NPC: whole frame 12.5007 ms average / 14.0013 ms p95 / 15.9085 ms max; `NpcPresentation` 0.8458 / 1.2026 / 1.8148 ms.
+- Natural post-change capture at 22 NPC: whole frame 12.5047 / 14.0280 / 15.0853 ms; `NpcPresentation` 0.2295 / 0.4872 / 0.8325 ms, a 72.9% average presentation reduction versus baseline.
+- Controlled 100-proxy/presentation capture: whole frame 12.6767 / 13.7974 / 14.9599 ms; presentation 0.7807 / 1.6063 / 1.9557 ms. Pool capacity stayed 160 with no runtime creation.
+- Controlled 120-proxy/presentation capture: presentation 0.9555 / 1.8952 / 2.4239 ms and `SceneUpdater` 1.0624 / 1.3853 / 1.7767 ms. No `FastCluster::updateEntity` or `FastCluster::updateGeometry` sample appeared in that capture.
+- The same 120-object random world had whole-frame 16.7715 / 30.1897 / 34.1887 ms because of unrelated scene/world-generation work; parking 56 culled rigs reduced same-scene frame p95 to 22.76 ms, which motivated the permanent cull stop/park behavior.
+- A controlled lifecycle probe applied 15 deaths and five immediate despawns (100 to 80 active visuals), then spawned 20 new IDs back to 100. The same capacity was reused with zero pool growth/creation; release averaged about 0.082 ms and peaked around 0.134 ms.
+- Final Output had no new NPC error. The existing `Hybrid Terrain Hex Generator:16` toolbar error and missing optional telemetry configuration notices remain unrelated.
+
+### Files and Studio synchronization
+
+- Added `NpcVisualPool.lua` and `NpcProxyFactory.lua`; updated `NpcShared`, `NpcRegistry`, `NpcReplication`, `NpcLifecycle`, `NpcMovement`, `NpcService`, `NpcPresentation`, `CombatFeedback`, `BossBar`, `WaveController` and `PerfHudClient`.
+- Mirrored shared package source changes under both `Level/` and `Level2/`. The active `Level` package templates were synchronized and playtested in Studio.
+
+### Not verified and risks
+
+- The 100/120 captures intentionally stress the real proxy, replication, pooling, interpolation, animation and presentation path, but extra controlled NPCs did not run the complete AI/targeting/navigation behavior. A natural full-120-AI multiplayer run remains a release benchmark.
+- The random dungeon generator changes scene size between sessions, so whole-frame comparisons at 120 are confounded by chests/world content. Use the dedicated `NpcSimulation.*`, `NpcReplication.*`, `NpcPresentation.*` and `NpcVisualPool.*` scopes alongside SceneUpdater/FastCluster scopes.
+- A real multi-client session and the connected Hollow Marsh Studio were not repeated. `Level2` has normalized repo parity, but shared packages were not published/get-latest across Places in this task.
+- A type/rank bucket that exceeds its prewarm allocation can still grow deliberately; `PoolGrowths` and `VisualsCreatedDuringRun` expose that event. The current Level distribution fits the 160-visual target in the tested scenarios.
+
+### Rollback
+
+- Restore the previous NPC Shared/Registry/Replication/Lifecycle/Movement/Service/Presentation sources, CombatFeedback, BossBar, WaveController and PerfHudClient in both package mirrors; remove `NpcVisualPool`, `NpcProxyFactory` and `NpcMotionEvent`.
+- Restore the same prior package-template sources in `Level` Studio. If the shared packages are published later, roll back NPC/Combat/Run package versions together in every linked dungeon Place.
+
 ## 2026-08-29 — Integration of PR #161 gameplay balance and pause fixes
 
 ### Summary
@@ -240,6 +332,45 @@
 - Revert the integration follow-up commit first, then revert the merge commits for PR #157, PR #156, and PR #155 in reverse order.
 - In `Level` Studio, restore the previous eight existing module sources and delete `DiveAttackBehavior` plus `NpcExternalPositioning` when rolling back all three PRs.
 - PR #155 can be rolled back independently by restoring only `ChestItemConfig`; PR #156 by restoring `EncounterScheduler` and `RunSpawnConfig`; PR #157 by restoring its five existing NPC modules and deleting its two new modules.
+
+## 2026-08-01 — Authored weapon models in floating animation
+
+### Summary
+
+- Removed runtime creation of primitive fallback Tools from `WeaponSetup`; missing authored assets now produce a warning instead of a metal `Part` placeholder.
+- `WeaponService` now builds one normalized index of concrete authored `Tool`/`Model` templates and resolves straight/typographic apostrophes to the same weapon ID.
+- Removed the category-folder fallback that could wrap multiple weapons into one Tool. The existing `WeaponClient` continues to clone and animate the complete equipped Tool without changing combat authority or the `WeaponSwingVFX` contract.
+
+### Repository files
+
+- Updated `Level/ServerScriptService/Script/WeaponSetup.lua`.
+- Updated `Level/ServerScriptService/ModuleScript/WeaponService.lua`.
+
+### Studio synchronization and validation
+
+- Synchronized both scripts to the active `Level` Studio place with exact source parity.
+- Before the fix, `Reaper's Crescent` resolved to a generated Tool with only 2 descendants. After the fix it resolved to the authored Scythe Tool with 50 descendants; its client visual retained 42 descendants, the authored mesh, and Trails after legacy scripts were stripped.
+- A controlled server-confirmed slash moved the full authored model, enabled one Trail during the slash, spawned the impact effect, and returned with all Trails disabled.
+- Character respawn rebuilt the same 50-descendant Tool and 42-descendant visual while leaving the Tool in Backpack instead of the character.
+- All 12 configured weapon IDs resolved to authored templates, `WeaponSetup` reported `12 missing: 0`, no root-level placeholder Tool was created, and all 5 legacy scripts in the equipped Scythe remained disabled.
+- Level startup completed with the existing unrelated `Hybrid Terrain Hex Generator:16` plugin-context error and a shared-asset preload timeout; no weapon-specific error appeared.
+- `git diff --check` passed.
+
+### Runtime cost and cleanup
+
+- No `Heartbeat`, `RenderStepped`, polling loop, remote, or persistent-data change was added. The existing single local weapon-animation `RenderStepped` remains unchanged.
+- Template discovery is O(template descendants) once when `WeaponService` loads; each later equip lookup is O(1). Missing assets fail explicitly instead of allocating placeholder geometry.
+- Existing visual cleanup still destroys the clone and disconnects the single render connection on weapon replacement or respawn.
+
+### Not verified and risks
+
+- `Reaper's Crescent` was fully animated and respawn-tested. All other configured weapons were resolution-checked but were not each manually animated in this pass.
+- An actually missing authored template now leaves that loadout slot without a Tool and emits a warning; this is intentional and makes asset omissions visible instead of silently displaying a fake weapon.
+- No target-scale MicroProfiler or real two-client session was repeated because the template-selection change is server-local and does not change network payloads.
+
+### Rollback
+
+- Restore the previous `WeaponSetup.lua` and `WeaponService.lua` sources in repo and `Level` Studio. This re-enables primitive placeholder creation and category-folder fallback behavior.
 
 ## 2026-08-01 — Integration of open PRs #149–#154
 

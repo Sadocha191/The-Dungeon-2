@@ -43,6 +43,7 @@ local metrics = {
 	traversalStarts = 0,
 	traversalCompletions = 0,
 	traversalFailures = 0,
+	cancelledQueuedPaths = 0,
 
 	-- Kept for existing metrics consumers. Route planning no longer performs
 	-- custom long-range direct probes or custom local obstacle traversal.
@@ -870,6 +871,14 @@ end
 
 function NpcGroundNavigation.Cleanup(npc)
 	NpcGroundNavigation.Invalidate(npc, "cleanup")
+	for index = #requestQueue, 1, -1 do
+		local request = requestQueue[index]
+		if request.npc == npc then
+			table.remove(requestQueue, index)
+			clearQueuedRequest(request)
+			metrics.cancelledQueuedPaths += 1
+		end
+	end
 	npc.navigation = nil
 	npc.unreachableSince = nil
 end

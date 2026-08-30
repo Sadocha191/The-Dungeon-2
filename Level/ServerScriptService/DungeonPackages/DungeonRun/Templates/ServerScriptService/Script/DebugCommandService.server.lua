@@ -48,6 +48,7 @@ local spawnStressMode = ensureValue("BoolValue", "SpawnStressMode", true)
 local spawnBurstSize = ensureValue("IntValue", "SpawnBurstSize", 3)
 local spawnIntervalScale = ensureValue("NumberValue", "SpawnIntervalScale", 0.55)
 local maxAliveScale = ensureValue("NumberValue", "MaxAliveScale", 2.6)
+ensureValue("BoolValue", "NpcLifecycleInvariantChecks", true)
 
 local function log(player: Player, message: string)
 	print(("[DebugCommand][%s] %s"):format(player.Name, message))
@@ -118,6 +119,9 @@ local HELP_LINES = {
 	";debug burst <count>",
 	";debug interval <scale>",
 	";debug maxalive <scale>",
+	";debug npclifecycle",
+	";debug npctest [cycles]",
+	";debug npcteststatus",
 	";debug errorconfig",
 	";debug errorreport [message]",
 }
@@ -193,6 +197,59 @@ local function handleCommand(player: Player, message: string)
 
 	if command == "status" then
 		reportStatus(player)
+		return
+	end
+
+	if command == "npclifecycle" then
+		if type(_G.DebugDumpNpcLifecycle) ~= "function" then
+			log(player, "NPC lifecycle diagnostics are not ready yet.")
+			return
+		end
+		local ok, snapshot = pcall(_G.DebugDumpNpcLifecycle)
+		if not ok then
+			log(player, "NPC lifecycle snapshot failed: " .. tostring(snapshot))
+			return
+		end
+		log(player, string.format(
+			"NPC lifecycle: alive=%s registry=%s proxies=%s cap=%s/%s spawn/death/unregister/despawn=%s/%s/%s/%s",
+			tostring(snapshot.authoritativeAlive), tostring(snapshot.registryRecords), tostring(snapshot.serverProxies),
+			tostring(snapshot.currentMaxLivingEnemies), tostring(snapshot.baseMaxLivingEnemies),
+			tostring(snapshot.totalSpawns), tostring(snapshot.totalDeaths),
+			tostring(snapshot.totalUnregisters), tostring(snapshot.totalDespawns)
+		))
+		return
+	end
+
+	if command == "npctest" then
+		if type(_G.DebugRunNpcLifecycleTest) ~= "function" then
+			log(player, "NPC lifecycle test is not ready yet.")
+			return
+		end
+		local cycles = parsePositiveInt(args[2]) or 1000
+		local ok, started = pcall(_G.DebugRunNpcLifecycleTest, cycles)
+		if not ok then
+			log(player, "NPC lifecycle test failed to start: " .. tostring(started))
+			return
+		end
+		log(player, started and ("NPC lifecycle test started: " .. cycles .. " cycles") or "NPC lifecycle test is already running.")
+		return
+	end
+
+	if command == "npcteststatus" then
+		if type(_G.DebugGetNpcLifecycleTestReport) ~= "function" then
+			log(player, "NPC lifecycle test status is not ready yet.")
+			return
+		end
+		local ok, running, report = pcall(_G.DebugGetNpcLifecycleTestReport)
+		if not ok then
+			log(player, "NPC lifecycle status failed: " .. tostring(running))
+		elseif running then
+			log(player, "NPC lifecycle test is running.")
+		elseif typeof(report) == "table" then
+			log(player, string.format("NPC lifecycle test complete: ok=%s cycles=%s errors=%d", tostring(report.ok), tostring(report.cycles), #(report.errors or {})))
+		else
+			log(player, "No NPC lifecycle test report yet.")
+		end
 		return
 	end
 

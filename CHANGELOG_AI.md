@@ -22,6 +22,7 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 - **2026-08-05** — Integracja PR #160: natywne trasy naziemnych NPC, bezpieczny handoff kolejki i walidacja 100 NPC
 - **2026-08-01** — Integracja PR #158: mocne bonusy chest itemów bez zależności od kolejności startu
 - **2026-08-01** — Integracja PR-ów #155–#157: chest items, post-miniboss spawning oraz boss/Bat combat
+- **2026-08-01** — Poziom: animacja unoszącej się broni korzysta z authored modeli zamiast runtime placeholderów
 - **2026-08-01** — Integracja otwartych PR-ów #149–#154 do Studio `Level`/`Four Peaks` i `main`
 - **2026-07-28** — Poziom PR #150 configured authored enemy movement animations and chest clone cleanup
 - **2026-07-27** — Finalna integracja 11 PR-ów, pełna synchronizacja Four Peaks/Level i walidacja wieloklientowa

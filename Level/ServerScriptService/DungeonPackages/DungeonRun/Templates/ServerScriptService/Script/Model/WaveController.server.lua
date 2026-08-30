@@ -68,10 +68,12 @@ local function requireServerModule(name: string)
 end
 local AbilityExecutor = requireServerModule("AbilityExecutor")
 local EncounterScheduler = requireServerModule("EncounterScheduler")
+local NpcLifecycleDiagnostics = requireServerModule("NpcLifecycleDiagnostics")
 local RunPortalController = requireServerModule("RunPortalController")
 local DungeonLevelContext = requireServerModule("DungeonLevelContext")
 local LevelConfig = DungeonLevelContext.GetConfig()
 local NpcService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("NpcService"))
+local NpcProxyFactory = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("NpcProxyFactory"))
 local PlayerData = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PlayerData"))
 local PickupToastService = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("PickupToastService"))
 local RunSpawnConfig = require(ServerScriptService:WaitForChild("ModuleScript"):WaitForChild("RunSpawnConfig"))
@@ -404,6 +406,21 @@ local function inBounds(bounds, x, z, margin)
     return x >= (bounds.minX + margin) and x <= (bounds.maxX - margin) and z >= (bounds.minZ + margin) and z <= (bounds.maxZ - margin)
 end
 
+local mobGroundingCache = setmetatable({}, { __mode = "k" })
+
+local function getMobGrounding(mob: Model?, spawnConfig)
+	if not mob then
+		return WorldBounds.BuildMobGrounding(nil, spawnConfig)
+	end
+	local cached = mobGroundingCache[mob]
+	if cached then
+		return cached
+	end
+	cached = WorldBounds.BuildMobGrounding(mob, spawnConfig)
+	mobGroundingCache[mob] = cached
+	return cached
+end
+
 local function pickSpawnCFrame(anchorPos: Vector3?, mob: Model?, spawnConfig): CFrame?
     local anchor = anchorPos
     if not anchor then
@@ -417,7 +434,7 @@ local function pickSpawnCFrame(anchorPos: Vector3?, mob: Model?, spawnConfig): C
 	local bounds = getSpawnBounds()
 	local BOUNDS_MARGIN = 6
 	local extraIgnore = mob and { mob } or nil
-	local grounding = WorldBounds.BuildMobGrounding(mob, spawnConfig)
+	local grounding = getMobGrounding(mob, spawnConfig)
 
 	local function fallbackGroundPoint(): Vector3?
 		local point = WorldBounds.FindNearbyTerrainPoint(anchor, {
@@ -609,6 +626,12 @@ local function getAverageRunLevel(): number
 end
 
 local encounterScheduler
+local waveSpawnDiagnostics = {
+	pendingSpawnCount = 0,
+	lastSpawnBlockedReason = nil,
+	lastSpawnAt = nil,
+	totalSwarmOverflowDespawns = 0,
+}
 
 local function getRunPressure(elapsedSeconds: number)
 	local avgRunLevel = getAverageRunLevel()
@@ -919,27 +942,13 @@ local function spawnRankedMob(mobName: string, enemyRank: string, spawnAnchorPos
 		return nil
 	end
 
-	local mob = template:Clone()
-	mob.Name = mobName
-	local collectionService = game:GetService("CollectionService")
-	for _, tag in ipairs(collectionService:GetTags(template)) do
-		if string.sub(tag, 1, 18) == "NpcMovementSystem_"
-			or string.sub(tag, 1, 8) == "NpcMove_"
-			or string.sub(tag, 1, 10) == "NpcCombat_" then
-			collectionService:AddTag(mob, tag)
-		end
-	end
-	cleanupTemplateScripts(mob)
-	setMobGroup(mob)
-	mob:SetAttribute("SpawnSource", spawnSource or enemyRank)
-
-	local cf = pickSpawnCFrame(spawnAnchorPos, mob, cfg)
+	local cf = pickSpawnCFrame(spawnAnchorPos, template, cfg)
 	if not cf then
-		mob:Destroy()
 		return nil
 	end
+	local mob = NpcProxyFactory.Create(template, cf, mobName)
+	mob:SetAttribute("SpawnSource", spawnSource or enemyRank)
 	mob.Parent = ENEMIES_FOLDER
-	mob:PivotTo(cf)
 
 	local hpMult, dmgMult, speedMult, cooldownMult = timeScaleMult(require(ServerScriptService.ModuleScript.RunProgressApi).GetRunSeconds())
 	local rankMult = RANK_STAT_MULTIPLIERS[enemyRank] or RANK_STAT_MULTIPLIERS.Normal
@@ -1397,6 +1406,38 @@ encounterScheduler = EncounterScheduler.new({
 	eliteOrder = eliteOrder,
 })
 
+local function cleanupSwarmOverflow(targetCap: number): number
+	local overflow = math.max(0, activeEnemiesCount() - math.max(0, math.floor(targetCap)))
+	if overflow <= 0 then
+		return 0
+	end
+
+	local candidates = {}
+	for _, enemy in ipairs(ENEMIES_FOLDER:GetChildren()) do
+		if enemy:IsA("Model")
+			and enemy:GetAttribute("SpawnSource") == "RunSwarm"
+			and enemy:GetAttribute("EnemyRank") == "Normal"
+			and NpcService.IsAlive(enemy)
+		then
+			table.insert(candidates, enemy)
+		end
+	end
+	table.sort(candidates, function(a, b)
+		return (tonumber(a:GetAttribute("NpcId")) or 0) > (tonumber(b:GetAttribute("NpcId")) or 0)
+	end)
+
+	local removed = 0
+	for _, enemy in ipairs(candidates) do
+		if removed >= overflow then
+			break
+		end
+		NpcService.Despawn(enemy)
+		removed += 1
+	end
+	waveSpawnDiagnostics.totalSwarmOverflowDespawns += removed
+	return removed
+end
+
 local nextEliteAt = ELITE_FIRST_SPAWN_SECONDS
 local function getEliteTemplateNames(): {string}
 	local names = {}
@@ -1570,16 +1611,10 @@ spawnBossNearPortal = function()
 		return false
 	end
 
-	local mob = tpl:Clone()
-	mob.Name = "Boss_" .. bossName
-	cleanupTemplateScripts(mob)
-	setMobGroup(mob)
 	local bossConfig = ENEMY_CONFIGS[bossName]
-	mob:SetAttribute("SpawnSource", "Boss")
-	mob.Parent = ENEMIES_FOLDER
 
 	local desiredBossFrame = base.CFrame * CFrame.new(0, 0, -18)
-	local bossIgnore = { mob }
+	local bossIgnore = {}
 	local bossGroundPoint = nil
 	local bossHit = raycastGround(desiredBossFrame.Position, bossIgnore)
 	if bossHit and bossHit.Position and slopeDeg(bossHit.Normal) <= MAX_GROUND_SLOPE_DEG then
@@ -1607,12 +1642,18 @@ spawnBossNearPortal = function()
 	end
 	if not bossGroundPoint then
 		warn("[Portal] Could not find grounded boss spawn point near portal")
-		mob:Destroy()
 		return false
 	end
 
-	local bossGrounding = WorldBounds.BuildMobGrounding(mob, bossConfig)
-	mob:PivotTo(WorldBounds.CFrameFromGround(bossGroundPoint, bossGrounding, WorldBounds.CFrameRotationOnly(base.CFrame)))
+	local bossGrounding = getMobGrounding(tpl, bossConfig)
+	local bossPivot = WorldBounds.CFrameFromGround(
+		bossGroundPoint,
+		bossGrounding,
+		WorldBounds.CFrameRotationOnly(base.CFrame)
+	)
+	local mob = NpcProxyFactory.Create(tpl, bossPivot, "Boss_" .. bossName)
+	mob:SetAttribute("SpawnSource", "Boss")
+	mob.Parent = ENEMIES_FOLDER
 
 	local bossStats = getBossCombatStatsForCurrentRun()
 	local registered = registerMobModel(mob, bossName, {
@@ -1709,8 +1750,31 @@ local function resolveDebugSpawnName(mobName: string?, enemyRank: string): strin
 		local fallback = EliteFolder:FindFirstChildWhichIsA("Model")
 		return fallback and fallback.Name or nil
 	end
+	if enemyRank == "Boss" then
+		local fallback = BossFolder:FindFirstChildWhichIsA("Model")
+		return fallback and fallback.Name or nil
+	end
 	local pool = getPool(elapsed())
 	return pickWeighted(pool)
+end
+
+local function resolveLifecycleTestType(enemyRank: string, movementMode: string?): string?
+	local folder = RANK_FOLDERS[enemyRank]
+	if not folder then
+		return nil
+	end
+	local fallback = nil
+	for _, child in ipairs(folder:GetChildren()) do
+		if child:IsA("Model") and ENEMY_CONFIGS[child.Name] then
+			fallback = fallback or child.Name
+			local config = ENEMY_CONFIGS[child.Name]
+			local resolvedMode = tostring(config.movementMode or (config.canFly and "Flying") or "Ground")
+			if movementMode == nil or resolvedMode == movementMode then
+				return child.Name
+			end
+		end
+	end
+	return movementMode == nil and fallback or nil
 end
 
 local function debugForceSpawn(mobName: string?, enemyRank: string, count: number?): {Model}
@@ -1771,7 +1835,151 @@ local function debugForceBossSpawn()
 	return bossModel
 end
 
+local function captureClientLifecycleSnapshot(requestedNpcId: string?): {[string]: any}?
+	local player = Players:GetPlayers()[1]
+	local remote = RemotesFolder:FindFirstChild("NpcLifecycleDebugSnapshot")
+	if not player or not remote or not remote:IsA("RemoteFunction") then
+		return nil
+	end
+	local ok, result = pcall(function()
+		return remote:InvokeClient(player, requestedNpcId)
+	end)
+	return ok and typeof(result) == "table" and result or nil
+end
+
+local function activeEncounterName(): string
+	local importantKind = getActiveImportantEncounter()
+	if importantKind then
+		return importantKind
+	end
+	if isSwarmActiveAt(elapsed()) then
+		return "swarm"
+	end
+	return "ambient"
+end
+
+local function buildLifecycleSnapshot(clientSnapshot: {[string]: any}?): {[string]: any}
+	return NpcLifecycleDiagnostics.BuildSnapshot({
+		npcService = NpcService,
+		enemiesFolder = ENEMIES_FOLDER,
+		scheduler = encounterScheduler,
+		elapsed = elapsed,
+		baseMaxLivingEnemies = MAX_LIVING_ENEMIES,
+		currentMaxLivingEnemies = getMaxLivingEnemyCap,
+		waveDiagnostics = waveSpawnDiagnostics,
+		clientSnapshot = clientSnapshot,
+		activeEncounter = activeEncounterName,
+		activeCounts = {
+			normal = activeNormalEnemiesCount,
+			elite = activeEliteEnemiesCount,
+			miniBoss = activeMiniBossEnemiesCount,
+			boss = activeBossEnemiesCount,
+		},
+	})
+end
+
+local lifecycleTestRunning = false
+local lastLifecycleTestReport = nil
+local function debugDumpNpcLifecycle(): {[string]: any}
+	local snapshot = buildLifecycleSnapshot(captureClientLifecycleSnapshot(nil))
+	print("[NpcLifecycleSnapshot] " .. NpcLifecycleDiagnostics.FormatSnapshot(snapshot))
+	return snapshot
+end
+
+
+local function debugRunNpcLifecycleTest(cycles: number?): boolean
+	if lifecycleTestRunning then
+		return false
+	end
+	lifecycleTestRunning = true
+	lastLifecycleTestReport = nil
+	task.spawn(function()
+		local previousAutoSpawns = areAutoMobSpawnsEnabled()
+		setDebugBool("AutoMobSpawnsEnabled", false)
+		local ok, reportOrError = pcall(function()
+			return NpcLifecycleDiagnostics.RunLongTest({
+				npcService = NpcService,
+				applyDamage = function(target, amount: number, meta)
+					return requireServerModule("DamageIndicatorService").ApplyDamage(target, amount, meta)
+				end,
+				spawn = function(rank: string, mobName: string?, source: string)
+					local resolvedName = mobName or resolveLifecycleTestType(rank)
+					return resolvedName and spawnRankedMob(resolvedName, rank, nil, source, nil) or nil
+				end,
+				resolveType = resolveLifecycleTestType,
+				clear = debugClearEnemies,
+				cleanupSwarmOverflow = cleanupSwarmOverflow,
+				createScheduler = function()
+					return EncounterScheduler.new({
+						runTimeLimit = RUN_TIME_LIMIT,
+						eliteIntervalSeconds = MINIBOSS_INTERVAL_SECONDS,
+						maxLivingEnemies = MAX_LIVING_ENEMIES,
+						enemyPools = LEVEL_ENEMY_CONFIG.Pools,
+						levelSpawnBands = LEVEL_SPAWN_BANDS,
+						overtimeSpawnConfig = OVERTIME_SPAWN_CONFIG,
+						swarmSpawnConfig = SWARM_SPAWN_CONFIG,
+						importantEncounterSpawnConfig = IMPORTANT_ENCOUNTER_SPAWN_CONFIG,
+						spawnLimitConfig = spawnLimitConfig,
+						swarmEventTimes = SWARM_EVENT_TIMES,
+						swarmDuration = SWARM_DURATION,
+						eliteOrder = eliteOrder,
+					})
+				end,
+				dump = function()
+					return buildLifecycleSnapshot(nil)
+				end,
+				captureClient = captureClientLifecycleSnapshot,
+			}, cycles)
+		end)
+		setDebugBool("AutoMobSpawnsEnabled", previousAutoSpawns)
+		lifecycleTestRunning = false
+		if not ok then
+			lastLifecycleTestReport = { ok = false, errors = { tostring(reportOrError) } }
+			warn("[NpcLifecycleTest] crashed:", reportOrError)
+			return
+		end
+		lastLifecycleTestReport = reportOrError
+		print(string.format(
+			"[NpcLifecycleTest] ok=%s cycles=%d duration=%.2fs longTotals=%d/%d/%d/%d after13=%d after20=%d errors=%d",
+			tostring(reportOrError.ok),
+			reportOrError.cycles,
+			reportOrError.durationSeconds,
+			reportOrError.longPhase.totalSpawns,
+			reportOrError.longPhase.totalDeaths,
+			reportOrError.longPhase.totalUnregisters,
+			reportOrError.longPhase.totalDespawns,
+			reportOrError.schedulerSimulation.spawnsAfterThirteenMinutes,
+			reportOrError.schedulerSimulation.spawnsAfterTwentyMinutes,
+			#reportOrError.errors
+		))
+		for _, testError in ipairs(reportOrError.errors) do
+			warn("[NpcLifecycleTest]", testError)
+		end
+		print("[NpcLifecycleTest] final " .. NpcLifecycleDiagnostics.FormatSnapshot(reportOrError.final))
+	end)
+	return true
+end
+
 if RunService:IsStudio() then
+	local lifecycleDebugRemote = RemotesFolder:FindFirstChild("NpcLifecycleDebugSnapshot")
+	if lifecycleDebugRemote and lifecycleDebugRemote:IsA("RemoteFunction") then
+		lifecycleDebugRemote.OnServerInvoke = function(_player: Player, action: string, payload: any)
+			if action == "dump" then
+				local clientSnapshot = typeof(payload) == "table" and payload or nil
+				local snapshot = buildLifecycleSnapshot(clientSnapshot)
+				print("[NpcLifecycleSnapshot] " .. NpcLifecycleDiagnostics.FormatSnapshot(snapshot))
+				return snapshot
+			end
+			if action == "runTest" then
+				return debugRunNpcLifecycleTest(tonumber(payload))
+			end
+			if action == "testStatus" then
+				return lifecycleTestRunning, lastLifecycleTestReport
+			end
+			return nil
+		end
+	end
+
 	requireServerModule("WaveDebugApi").Register({
 		areAutoMobSpawnsEnabled = areAutoMobSpawnsEnabled,
 		setAutoMobSpawnsEnabled = function(enabled: boolean)
@@ -1788,6 +1996,11 @@ if RunService:IsStudio() then
 		end,
 		forceBossSpawn = debugForceBossSpawn,
 		clearEnemies = debugClearEnemies,
+		dumpNpcLifecycle = debugDumpNpcLifecycle,
+		runNpcLifecycleTest = debugRunNpcLifecycleTest,
+		getNpcLifecycleTestReport = function()
+			return lifecycleTestRunning, lastLifecycleTestReport
+		end,
 	})
 end
 
@@ -1899,6 +2112,9 @@ RunService.Heartbeat:Connect(function(dt)
 	local miniBossEncounterActive = activeMiniBossEnemiesCount() > 0
 	local swarmStep = encounterScheduler:StepSwarm(t, miniBossEncounterActive)
 	for _, event in ipairs(swarmStep.events) do
+		if event.type == "swarmEnd" then
+			cleanupSwarmOverflow(getMaxLivingEnemyCap(t))
+		end
 		broadcast(event)
 	end
 	if swarmStep.suppressAmbientNormals then
@@ -1919,16 +2135,20 @@ RunService.Heartbeat:Connect(function(dt)
 		burstSize = stressBurstSize,
 		intervalScale = stressIntervalScale,
 	}, encounterKind)
+	waveSpawnDiagnostics.pendingSpawnCount = normalPlan.scheduledSpawnBudget + normalPlan.catchupBudget
 
 	if normalPlan.pausedForElite then
+		waveSpawnDiagnostics.lastSpawnBlockedReason = "miniBossEncounter"
 		return
 	end
 
 	local scheduledSpawnBudget = normalPlan.scheduledSpawnBudget
 	local catchupBudget = normalPlan.catchupBudget
 	if scheduledSpawnBudget <= 0 and catchupBudget <= 0 then
+		waveSpawnDiagnostics.pendingSpawnCount = 0
 		return
 	end
+	waveSpawnDiagnostics.lastSpawnBlockedReason = nil
 
 	local maxAlive = encounterScheduler:DesiredMaxAlive(t, avgRunLevel, stressMaxAliveScale, encounterKind)
 	local aliveNow = activeEnemiesCount()
@@ -1941,8 +2161,14 @@ RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 	local pool = getPool(t)
+	local spawnedThisStep = 0
 	for _ = 1, (scheduledSpawnBudget + catchupBudget) do
-		if aliveNow >= getMaxLivingEnemyCap(t) or normalAliveNow >= maxAlive then
+		if aliveNow >= getMaxLivingEnemyCap(t) then
+			waveSpawnDiagnostics.lastSpawnBlockedReason = "populationCap"
+			break
+		end
+		if normalAliveNow >= maxAlive then
+			waveSpawnDiagnostics.lastSpawnBlockedReason = "desiredNormalCap"
 			break
 		end
 
@@ -1952,13 +2178,21 @@ RunService.Heartbeat:Connect(function(dt)
 		if spawnedMob then
 			aliveNow += 1
 			normalAliveNow += 1
+			spawnedThisStep += 1
+			waveSpawnDiagnostics.lastSpawnAt = t
 			if scheduledSpawnBudget > 0 then
 				scheduledSpawnBudget -= 1
 			elseif catchupBudget > 0 then
 				catchupBudget -= 1
 				encounterScheduler:RecordNormalSpawned("catchup")
 			end
+		else
+			waveSpawnDiagnostics.lastSpawnBlockedReason = "spawnPositionOrTemplate"
 		end
+	end
+	waveSpawnDiagnostics.pendingSpawnCount = scheduledSpawnBudget + catchupBudget
+	if spawnedThisStep > 0 and waveSpawnDiagnostics.pendingSpawnCount <= 0 then
+		waveSpawnDiagnostics.lastSpawnBlockedReason = nil
 	end
 end)
 

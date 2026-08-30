@@ -1,6 +1,5 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 
 local localPlayer = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -15,9 +14,6 @@ local NpcShared = require(moduleFolder:WaitForChild("NpcShared"))
 local VfxTemplatePlayer = require(moduleFolder:WaitForChild("VfxTemplatePlayer"))
 
 local GOBLIN_TYPE = "Goblin"
-local GOBLIN_TILT_DURATION = 0.38
-local GOBLIN_TILT_DEGREES = 28
-local GOBLIN_TILT_BIND_NAME = "GoblinForwardAttackTilt"
 local GOBLIN_EXPLOSION_EMIT_COUNTS = {
 	Default = 6,
 	Boom = 2,
@@ -38,7 +34,6 @@ local GOBLIN_EXPLOSION_EMIT_COUNTS = {
 }
 
 local goblins = {}
-local attackingGoblins = {}
 local npcBatchConnection = nil
 local playerHitVfxConnection = nil
 
@@ -48,40 +43,7 @@ local function resolveAnimationTemplate(name)
 	return animations and animations:FindFirstChild(name) or nil
 end
 
-local function cframesApproximatelyEqual(first, second)
-	local delta = first:ToObjectSpace(second)
-	local _, angle = delta:ToAxisAngle()
-	return delta.Position.Magnitude <= 1e-4 and math.abs(angle) <= 1e-4
-end
-
-local function removeAppliedTilt(entry)
-	local model = entry.model
-	if not model or not model.Parent or not entry.lastTilt or not entry.lastPivotAfter then
-		entry.lastTilt = nil
-		entry.lastPivotAfter = nil
-		return
-	end
-
-	local ok, currentPivot = pcall(function()
-		return model:GetPivot()
-	end)
-	if ok and cframesApproximatelyEqual(currentPivot, entry.lastPivotAfter) then
-		pcall(function()
-			model:PivotTo(currentPivot * entry.lastTilt:Inverse())
-		end)
-	end
-
-	entry.lastTilt = nil
-	entry.lastPivotAfter = nil
-end
-
 local function cleanupGoblin(id)
-	local entry = goblins[id]
-	if not entry then
-		return
-	end
-	removeAppliedTilt(entry)
-	attackingGoblins[id] = nil
 	goblins[id] = nil
 end
 
@@ -92,13 +54,7 @@ local function playGoblinExplosion(entry, position)
 		return
 	end
 
-	local scale = 1
-	if entry.model then
-		local configuredScale = entry.model:GetAttribute("NpcVisualScale")
-		if typeof(configuredScale) == "number" and configuredScale > 0 then
-			scale = configuredScale
-		end
-	end
+	local scale = math.max(0.1, tonumber(entry.visualScale) or 1)
 
 	local visualPosition = position + Vector3.new(0, 0.75 * math.clamp(scale, 1, 2), 0)
 	VfxTemplatePlayer.Play(template, CFrame.new(visualPosition), {
@@ -147,8 +103,8 @@ npcBatchConnection = npcBatchEvent.OnClientEvent:Connect(function(payload)
 		if seen then
 			seen[id] = true
 		end
-		if typeof(item.model) == "Instance" and item.model:IsA("Model") then
-			entry.model = item.model
+		if typeof(item.visual) == "table" and typeof(item.visual.visualScale) == "number" then
+			entry.visualScale = item.visual.visualScale
 		end
 		if typeof(item.pos) == "Vector3" then
 			entry.lastPosition = item.pos
@@ -161,15 +117,6 @@ npcBatchConnection = npcBatchEvent.OnClientEvent:Connect(function(payload)
 		local wasDead = entry.dead == true
 		entry.dead = item.dead == true
 		entry.despawned = item.despawned == true
-		local isActiveAttacker = not entry.dead
-			and not entry.despawned
-			and entry.state == NpcShared.States.Attacking
-		if isActiveAttacker then
-			attackingGoblins[id] = entry
-		elseif attackingGoblins[id] then
-			attackingGoblins[id] = nil
-			removeAppliedTilt(entry)
-		end
 		if not fullSnapshot
 			and not wasDead
 			and entry.dead
@@ -191,50 +138,6 @@ npcBatchConnection = npcBatchEvent.OnClientEvent:Connect(function(payload)
 			if not seen[id] then
 				cleanupGoblin(id)
 			end
-		end
-	end
-end)
-
-RunService:BindToRenderStep(GOBLIN_TILT_BIND_NAME, Enum.RenderPriority.Last.Value, function()
-	local now = os.clock()
-	for id, entry in pairs(attackingGoblins) do
-		local model = entry.model
-		if not model or not model.Parent or entry.despawned then
-			cleanupGoblin(id)
-			continue
-		end
-
-		local shouldTilt = not entry.dead
-			and entry.state == NpcShared.States.Attacking
-		if not shouldTilt then
-			attackingGoblins[id] = nil
-			removeAppliedTilt(entry)
-			continue
-		end
-
-		local ok, baseline = pcall(function()
-			return model:GetPivot()
-		end)
-		if not ok then
-			continue
-		end
-
-		if entry.lastTilt and entry.lastPivotAfter and cframesApproximatelyEqual(baseline, entry.lastPivotAfter) then
-			baseline = baseline * entry.lastTilt:Inverse()
-		end
-
-		local elapsed = math.max(0, now - (entry.stateChangedAt or now))
-		local alpha = math.clamp(elapsed / GOBLIN_TILT_DURATION, 0, 1)
-		local tiltWeight = math.sin(alpha * math.pi)
-		local tilt = CFrame.Angles(math.rad(-GOBLIN_TILT_DEGREES * tiltWeight), 0, 0)
-		local tiltedPivot = baseline * tilt
-
-		local pivoted = pcall(function()
-			model:PivotTo(tiltedPivot)
-		end)
-		if pivoted then
-			entry.lastTilt = tilt
-			entry.lastPivotAfter = tiltedPivot
 		end
 	end
 end)
@@ -276,7 +179,6 @@ script.Destroying:Connect(function()
 		playerHitVfxConnection:Disconnect()
 		playerHitVfxConnection = nil
 	end
-	RunService:UnbindFromRenderStep(GOBLIN_TILT_BIND_NAME)
 	for id in pairs(goblins) do
 		cleanupGoblin(id)
 	end

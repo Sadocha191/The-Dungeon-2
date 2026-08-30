@@ -2,7 +2,32 @@ local NpcShared = {}
 
 NpcShared.RemoteName = "NpcBatchEvent"
 NpcShared.SyncRequestRemoteName = "NpcSyncRequest"
+NpcShared.MotionRemoteName = "NpcMotionEvent"
+NpcShared.DebugSnapshotRemoteName = "NpcLifecycleDebugSnapshot"
+NpcShared.ProtocolVersion = 2
 NpcShared.BatchRate = 0.1
+NpcShared.MotionRate = 1 / 12
+NpcShared.PoolTargetCapacity = 160
+
+NpcShared.MotionLod = table.freeze({
+	NearDistance = 70,
+	MidDistance = 140,
+	NearHz = 12,
+	MidHz = 6,
+	FarHz = 3,
+	ImportantHz = 12,
+})
+
+NpcShared.PresentationLod = table.freeze({
+	CriticalDistance = 35,
+	NearDistance = 70,
+	MidDistance = 140,
+	NearHz = 60,
+	MidHz = 24,
+	FarHz = 10,
+	CulledHz = 4,
+	ClassificationInterval = 0.25,
+})
 
 NpcShared.States = table.freeze({
 	Spawn = "Spawn",

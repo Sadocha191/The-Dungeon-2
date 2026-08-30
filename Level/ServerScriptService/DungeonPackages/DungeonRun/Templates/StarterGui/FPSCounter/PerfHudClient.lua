@@ -102,6 +102,11 @@ local function resetSamplingWindow()
 end
 
 local function countNpcModels(): number
+	local metrics = workspace:FindFirstChild("NpcPresentationMetrics")
+	local activeVisuals = metrics and metrics:GetAttribute("ActiveVisuals")
+	if typeof(activeVisuals) == "number" then
+		return math.max(0, math.floor(activeVisuals))
+	end
 	local folder = workspace:FindFirstChild("Enemies")
 	if not folder then
 		return 0

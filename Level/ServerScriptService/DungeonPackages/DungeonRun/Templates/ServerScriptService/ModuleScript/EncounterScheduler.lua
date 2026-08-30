@@ -412,4 +412,28 @@ function EncounterScheduler:RecordNormalSpawned(kind: string?)
 	end
 end
 
+function EncounterScheduler:GetDebugSnapshot(t: number): {[string]: any}
+	local currentTime = math.max(0, tonumber(t) or 0)
+	local swarm = self.swarmState
+	local normal = self.normalSpawnState
+	local elite = self:GetEliteProgress()
+	return {
+		spawnDebt = normal.debt,
+		catchupAccumulator = normal.catchupAccumulator,
+		catchupRate = normal.catchupRate,
+		nextNormalSpawnAt = normal.nextAt,
+		nextNormalSpawnIn = math.max(0, normal.nextAt - currentTime),
+		swarmActive = self:IsSwarmActiveAt(currentTime),
+		swarmIndex = swarm.index,
+		swarmNextAt = swarm.nextAt,
+		swarmActiveUntil = swarm.activeUntil,
+		swarmQueuedDuration = swarm.queuedDuration,
+		elitePending = self:GetPendingElite(currentTime),
+		eliteDefeated = elite.defeated,
+		eliteTotal = elite.total,
+		eliteNextAt = elite.nextAt,
+		currentMaxLivingEnemies = self:GetMaxLivingEnemyCap(currentTime),
+	}
+end
+
 return EncounterScheduler

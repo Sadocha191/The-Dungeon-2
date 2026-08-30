@@ -10,6 +10,9 @@ local DEBUG_GLOBALS = {
 	"DebugForceMiniBossSpawn",
 	"DebugForceBossSpawn",
 	"DebugClearEnemies",
+	"DebugDumpNpcLifecycle",
+	"DebugRunNpcLifecycleTest",
+	"DebugGetNpcLifecycleTestReport",
 }
 
 function WaveDebugApi.Register(api)
@@ -22,6 +25,9 @@ function WaveDebugApi.Register(api)
 	_G.DebugForceMiniBossSpawn = api.forceMiniBossSpawn
 	_G.DebugForceBossSpawn = api.forceBossSpawn
 	_G.DebugClearEnemies = api.clearEnemies
+	_G.DebugDumpNpcLifecycle = api.dumpNpcLifecycle
+	_G.DebugRunNpcLifecycleTest = api.runNpcLifecycleTest
+	_G.DebugGetNpcLifecycleTestReport = api.getNpcLifecycleTestReport
 end
 
 function WaveDebugApi.Unregister()

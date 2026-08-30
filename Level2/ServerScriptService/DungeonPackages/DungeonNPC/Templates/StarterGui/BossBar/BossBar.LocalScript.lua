@@ -50,7 +50,6 @@ local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
 
 local NpcShared = require(moduleFolder:WaitForChild("NpcShared"))
-local ATTR = NpcShared.Attributes
 
 local BOSSBAR_VISIBLE_POSITION = UDim2.new(0.5, 0, 0.103, 0)
 local BOSSBAR_HIDDEN_POSITION = UDim2.new(0.5, 0, -0.12, 0)
@@ -58,7 +57,6 @@ local BOSSBAR_TWEEN_INFO = TweenInfo.new(0.32, Enum.EasingStyle.Quad, Enum.Easin
 local BOSSBAR_MIN_CROP_SCALE = 0.018
 local BOSSBAR_MAX_CROP_SCALE = 0.968
 local BOSSBAR_CROP_SMOOTH_SPEED = 14
-local TARGET_TIMEOUT = math.max(0.5, (NpcShared.BatchRate or 0.1) * 8)
 
 local trackedTargets = {}
 local activeTargetId = nil
@@ -76,15 +74,7 @@ local function formatDisplayName(rawName: any): string
 end
 
 local function resolveDisplayName(target): string
-	local model = target and target.model
-	if not model then
-		return "Enemy"
-	end
-
-	local rawName = model:GetAttribute("DisplayName")
-		or model:GetAttribute(ATTR.MobType)
-		or model:GetAttribute(ATTR.Type)
-		or model.Name
+	local rawName = target and (target.displayName or target.type) or "Enemy"
 	return formatDisplayName(rawName)
 end
 
@@ -180,34 +170,15 @@ local function playVisibilityTween(shouldShow: boolean)
 	tween:Play()
 end
 
-local function resolveFlags(model: Model?, existing)
-	local isBoss = false
-	local isMiniBoss = false
-
-	if model then
-		isBoss = model:GetAttribute(ATTR.IsBoss) == true or string.sub(model.Name, 1, 5) == "Boss_"
-		isMiniBoss = model:GetAttribute(ATTR.IsMiniBoss) == true
-	end
-
-	if existing then
-		if not isBoss then
-			isBoss = existing.isBoss == true
-		end
-		if not isMiniBoss then
-			isMiniBoss = existing.isMiniBoss == true
-		end
-	end
-
+local function resolveFlags(item, existing)
+	local rank = tostring(item.rank or (existing and existing.rank) or "")
+	local isBoss = item.isBoss == true or rank == "Boss" or (existing and existing.isBoss == true)
+	local isMiniBoss = item.isMiniBoss == true or rank == "MiniBoss" or (existing and existing.isMiniBoss == true)
 	return isMiniBoss, isBoss
 end
 
 local function isValidTarget(target, now: number): boolean
 	if not target then
-		return false
-	end
-
-	local model = target.model
-	if not model or not model.Parent then
 		return false
 	end
 
@@ -223,10 +194,6 @@ local function isValidTarget(target, now: number): boolean
 		return false
 	end
 
-	if (now - (target.lastSeen or 0)) > TARGET_TIMEOUT then
-		return false
-	end
-
 	local hp, maxHp = resolveHealth(target)
 	return maxHp > 0 and hp > 0
 end
@@ -238,7 +205,7 @@ local function resolveActiveTarget(now: number)
 
 	for id, target in pairs(trackedTargets) do
 		if not isValidTarget(target, now) then
-			if (now - (target.lastSeen or 0)) > TARGET_TIMEOUT or target.dead == true or target.despawned == true then
+			if target.dead == true or target.despawned == true then
 				trackedTargets[id] = nil
 			end
 			continue
@@ -306,13 +273,7 @@ batchEvent.OnClientEvent:Connect(function(payload)
 
 		local id = tostring(item.id)
 		local existing = trackedTargets[id]
-		local model = existing and existing.model or nil
-
-		if typeof(item.model) == "Instance" and item.model:IsA("Model") then
-			model = item.model
-		end
-
-		local isMiniBoss, isBoss = resolveFlags(model, existing)
+		local isMiniBoss, isBoss = resolveFlags(item, existing)
 		if seen then
 			seen[id] = true
 		end
@@ -326,9 +287,11 @@ batchEvent.OnClientEvent:Connect(function(payload)
 			id = id,
 		}
 
-		target.model = model
 		target.isMiniBoss = isMiniBoss
 		target.isBoss = isBoss
+		target.rank = item.rank or target.rank
+		target.type = item.type or target.type
+		target.displayName = item.displayName or target.displayName
 		target.state = typeof(item.state) == "string" and item.state or target.state
 		target.hp = typeof(item.hp) == "number" and item.hp or target.hp
 		target.maxHp = typeof(item.maxHp) == "number" and item.maxHp or target.maxHp

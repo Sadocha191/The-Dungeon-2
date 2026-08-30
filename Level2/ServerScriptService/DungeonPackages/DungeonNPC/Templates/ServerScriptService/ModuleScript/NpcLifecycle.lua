@@ -1,4 +1,5 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local sharedModuleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
@@ -19,6 +20,14 @@ local NpcLifecycle = {}
 
 local ATTR = NpcShared.Attributes
 local STATE = NpcShared.States
+local lifecycleMetrics = {
+	totalDeaths = 0,
+	totalDespawns = 0,
+	invariantChecks = 0,
+	invariantFailures = 0,
+	deathCallbackFailures = 0,
+	duplicateUnregisterAttempts = 0,
+}
 
 local RUNTIME_ATTRIBUTE_NAMES = {
 	ATTR.State,
@@ -72,8 +81,12 @@ end
 local function queueTombstone(npc: any, despawned: boolean)
 	NpcRegistry.QueueTombstone({
 		id = npc.id,
-		model = npc.model,
 		type = npc.mobType,
+		rank = npc.enemyRank,
+		displayName = npc.displayName or npc.mobType,
+		isElite = npc.isElite == true,
+		isMiniBoss = npc.isMiniBoss == true,
+		isBoss = npc.isBoss == true,
 		pos = npc.position,
 		dir = npc.look,
 		vel = npc.velocity,
@@ -87,21 +100,56 @@ local function queueTombstone(npc: any, despawned: boolean)
 	})
 end
 
+local function invariantChecksEnabled(): boolean
+	if not RunService:IsStudio() then
+		return false
+	end
+	local folder = ReplicatedStorage:FindFirstChild("DebugSettings")
+	local flag = folder and folder:FindFirstChild("NpcLifecycleInvariantChecks")
+	return flag == nil or (flag:IsA("BoolValue") and flag.Value == true)
+end
+
+local function validateRemoved(npc: any)
+	if not invariantChecksEnabled() then
+		return
+	end
+	lifecycleMetrics.invariantChecks += 1
+	local ok, failures = NpcRegistry.ValidateRemoved(npc)
+	if ok then
+		return
+	end
+	lifecycleMetrics.invariantFailures += 1
+	warn(string.format(
+		"[NpcLifecycle] Cleanup invariant failed for NPC %s: %s",
+		tostring(npc.id),
+		table.concat(failures, ", ")
+	))
+end
+
+local function destroyModel(npc: any)
+	if npc.model.Parent then
+		npc.model:Destroy()
+	end
+end
+
 function NpcLifecycle.Unregister(npc: any, despawned: boolean?): boolean
 	if not NpcRegistry.Contains(npc) then
+		lifecycleMetrics.duplicateUnregisterAttempts += 1
 		return false
 	end
 
-	NpcRegistry.Remove(npc)
+	local removed = NpcRegistry.Remove(npc)
+	if not removed then
+		return false
+	end
 	queueTombstone(npc, despawned == true)
+	validateRemoved(npc)
 	return true
 end
 
 function NpcLifecycle.DestroyNow(npc: any, despawned: boolean)
 	NpcLifecycle.Unregister(npc, despawned)
-	if npc.model.Parent then
-		npc.model:Destroy()
-	end
+	destroyModel(npc)
 end
 
 function NpcLifecycle.Kill(npc: any, context: {[string]: any}?)
@@ -123,15 +171,26 @@ function NpcLifecycle.Kill(npc: any, context: {[string]: any}?)
 	npc.attackUntil = 0
 	NpcLifecycle.SetState(npc, STATE.Dead)
 	NpcLifecycle.WriteHealthAttributes(npc)
+	npc.lifecycleState = "Dead"
+	lifecycleMetrics.totalDeaths += 1
 	deathContext.position = npc.position
 	deathContext.model = npc.model
 	deathContext.npcId = npc.id
 
-	for _, callback in ipairs(npc.deathCallbacks) do
-		pcall(callback, npc, deathContext)
-	end
+	-- Release authority and destroy the proxy before reward/encounter callbacks.
+	-- A yielding or failing callback cannot retain a population slot anymore.
+	local callbacks = table.clone(npc.deathCallbacks)
+	table.clear(npc.deathCallbacks)
+	NpcLifecycle.Unregister(npc, false)
+	destroyModel(npc)
 
-	NpcLifecycle.DestroyNow(npc, true)
+	for _, callback in ipairs(callbacks) do
+		local ok, callbackError = pcall(callback, npc, deathContext)
+		if not ok then
+			lifecycleMetrics.deathCallbackFailures += 1
+			warn("[NpcLifecycle] Death callback failed:", callbackError)
+		end
+	end
 end
 
 function NpcLifecycle.Despawn(npc: any)
@@ -143,9 +202,15 @@ function NpcLifecycle.Despawn(npc: any)
 		npc.attackUntil = 0
 		NpcLifecycle.SetState(npc, STATE.Despawned)
 		NpcLifecycle.WriteHealthAttributes(npc)
+		npc.lifecycleState = "Dead"
+		lifecycleMetrics.totalDespawns += 1
 	end
 
 	NpcLifecycle.DestroyNow(npc, true)
+end
+
+function NpcLifecycle.GetMetrics()
+	return table.clone(lifecycleMetrics)
 end
 
 function NpcLifecycle.GetCurrentSpeed(npc: any, now: number): number

@@ -260,51 +260,33 @@ local function normalizeName(name: string): string
 	return normalized:lower()
 end
 
-local function findTemplateByName(weaponId: string): Instance?
-	local normalizedTarget = normalizeName(weaponId)
-	for _, inst in ipairs(WeaponTemplates:GetDescendants()) do
-		if normalizeName(inst.Name) == normalizedTarget then
-			return inst
+local templatesByName: {[string]: Instance} = {}
+for _, instance in ipairs(WeaponTemplates:GetDescendants()) do
+	if instance:IsA("Tool") or instance:IsA("Model") then
+		local key = normalizeName(instance.Name)
+		local existing = templatesByName[key]
+		if not existing or (instance:IsA("Tool") and not existing:IsA("Tool")) then
+			templatesByName[key] = instance
 		end
 	end
-	return nil
+end
+
+local function findTemplateByName(weaponId: string): Instance?
+	return templatesByName[normalizeName(weaponId)]
 end
 
 local function cloneTemplate(weaponId: string): Tool?
-	local template = WeaponTemplates:FindFirstChild(weaponId) or findTemplateByName(weaponId)
+	local template = findTemplateByName(weaponId)
 	if not template then
 		local def = getWeaponConfig(weaponId)
-		local weaponType = def and def.weaponType or nil
-		if weaponType then
-			template = WeaponTemplates:FindFirstChild(weaponType) or findTemplateByName(weaponType)
+		local authoredName = def and def.name or nil
+		if typeof(authoredName) == "string" then
+			template = findTemplateByName(authoredName)
 		end
 	end
 	if not template then
-		local lowered = normalizeName(weaponId)
-		local fallbackId
-		if string.find(lowered, "sword") then
-			fallbackId = "Sword"
-		elseif string.find(lowered, "halberd") then
-			fallbackId = "Halberd"
-		elseif string.find(lowered, "scythe") then
-			fallbackId = "Scythe"
-		elseif string.find(lowered, "bow") then
-			fallbackId = "Bow"
-		elseif string.find(lowered, "pistol") then
-			fallbackId = "Pistol"
-		elseif string.find(lowered, "staff") then
-			fallbackId = "Staff"
-		elseif string.find(lowered, "wand") then
-			fallbackId = "Wand"
-		end
-
-		if fallbackId then
-			template = WeaponTemplates:FindFirstChild(fallbackId) or findTemplateByName(fallbackId)
-		end
-		if not template then
-			warn("[WeaponService] Missing weapon template:", weaponId)
-			return nil
-		end
+		warn("[WeaponService] Missing authored weapon template:", weaponId)
+		return nil
 	end
 
 	local clone = template:Clone()

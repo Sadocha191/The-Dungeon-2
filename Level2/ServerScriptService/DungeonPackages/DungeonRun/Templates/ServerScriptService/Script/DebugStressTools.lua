@@ -36,6 +36,7 @@ ensureValue("IntValue", "SpawnBurstSize", 3)
 ensureValue("NumberValue", "SpawnIntervalScale", 0.55)
 ensureValue("NumberValue", "MaxAliveScale", 2.6)
 ensureValue("BoolValue", "PerfHudEnabled", true)
+ensureValue("BoolValue", "NpcLifecycleInvariantChecks", true)
 
 local function syncHumanoidState(humanoid: Humanoid)
 	pcall(function()

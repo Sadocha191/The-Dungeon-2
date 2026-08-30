@@ -1,924 +1,602 @@
--- codex test
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
-local Debris = game:GetService("Debris")
 
 local localPlayer = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
-local batchEvent = remotes:WaitForChild("NpcBatchEvent")
-local syncRequestEvent = remotes:WaitForChild("NpcSyncRequest")
-
 local moduleFolder = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:FindFirstChild("ModuleScript")
 	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
 	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
 
 local NpcShared = require(moduleFolder:WaitForChild("NpcShared"))
+local NpcVisualPool = require(moduleFolder:WaitForChild("NpcVisualPool"))
 local LoadingOverlay = require(moduleFolder:WaitForChild("ClientLoadingOverlay"))
 
-local ATTR = NpcShared.Attributes
-local LOOPED_BY_STATE = {
-	idle = true,
-	run = true,
-	attack = false,
-	death = false,
-}
+local reliableEvent = remotes:WaitForChild(NpcShared.RemoteName)
+local motionEvent = remotes:WaitForChild(NpcShared.MotionRemoteName)
+local syncRequestEvent = remotes:WaitForChild(NpcShared.SyncRequestRemoteName)
+local pool = NpcVisualPool.new({ assets = ReplicatedStorage:WaitForChild("Assets") })
 
-local PRIORITY_BY_STATE = {
-	idle = Enum.AnimationPriority.Core,
-	run = Enum.AnimationPriority.Movement,
-	attack = Enum.AnimationPriority.Action,
-	death = Enum.AnimationPriority.Action4,
-}
-
-local SEARCH_NAMES = {
-	idle = { "idle" },
-	run = { "run", "walk" },
-	attack = { "attack", "toolslash", "toollunge" },
-	death = { "death", "dead", "died" },
-}
-
-local CONFIGURED_ANIMATION_ATTRIBUTE_BY_STATE = {
-	idle = "NpcIdleAnimationId",
-	run = "NpcRunAnimationId",
-	attack = "NpcAttackAnimationId",
-	death = "NpcDeathAnimationId",
-}
-
+local INTERPOLATION_DELAY = 0.10
+local MAX_EXTRAPOLATION = 0.12
+local CULL_DISTANCE = 240
 local presentations = {}
-local pendingTrackBuilds = {}
-local currentSyncRequestId = 0
+local requestId = 0
 local syncOverlayToken = nil
-local RUN_ANIM_START_SPEED = 1.5
-local RUN_ANIM_STOP_SPEED = 0.75
-local RUN_ANIM_HOLD_TIME = 0.18
-local PROCEDURAL_VISUAL_ATTR = "NpcLightweight"
-local VISUAL_SCALE_ATTR = "NpcVisualScale"
-local FACING_YAW_ATTR = "NpcFacingYawDegrees"
-local PROCEDURAL_IDLE_SWAY_SPEED = 1.8
-local PROCEDURAL_MOVE_BOUNCE_SPEED = 8
-local SPAWN_RISE_DURATION = 0.65
-local SPAWN_RISE_DEPTH = 5.75
-local SPAWN_DUST_DURATION = 0.55
-local SHOW_NPC_NAMEPLATES = false
-local NAME_COLOR_NORMAL = Color3.fromRGB(242, 246, 252)
-local NAME_COLOR_ELITE = Color3.fromRGB(255, 171, 102)
-local NAME_COLOR_BOSS = Color3.fromRGB(255, 214, 128)
+local syncFullReceived = false
+local syncPrewarmTotal = 0
+local networkStartedAt = os.clock()
+local reliablePackets = 0
+local reliableRecords = 0
+local motionPackets = 0
+local motionRecords = 0
+local metricsAccumulator = 0
+local classifyAccumulator = NpcShared.PresentationLod.ClassificationInterval
+local frameSamples = 0
+local frameSeconds = 0
+local frameMaximum = 0
+local lodCounts = { Critical = 0, Near = 0, Mid = 0, Far = 0, Culled = 0 }
 
-local function flatDir(v: Vector3?): Vector3
-	if typeof(v) ~= "Vector3" then
-		return Vector3.new(0, 0, -1)
+local debugSnapshotConnection = nil
+local function bindDebugSnapshotRemote(remote: Instance)
+	if not RunService:IsStudio() or not remote:IsA("RemoteFunction") then
+		return
 	end
-	local xz = Vector3.new(v.X, 0, v.Z)
-	if xz.Magnitude <= 1e-4 then
-		return Vector3.new(0, 0, -1)
+	remote.OnClientInvoke = function(requestedNpcId: string?)
+		local poolMetrics = pool:GetMetrics()
+		local presentationCount = 0
+		local presentationsWithVisual = 0
+		for _, entry in pairs(presentations) do
+			presentationCount += 1
+			if entry.record then
+				presentationsWithVisual += 1
+			end
+		end
+		local requestedEntry = requestedNpcId and presentations[tostring(requestedNpcId)] or nil
+		return {
+			activeVisuals = poolMetrics.active,
+			freeVisuals = poolMetrics.inactive,
+			poolCapacity = poolMetrics.capacity,
+			presentationRecords = presentationCount,
+			presentationsWithVisual = presentationsWithVisual,
+			requestedNpcPresent = requestedEntry ~= nil,
+			requestedNpcHasVisual = requestedEntry ~= nil and requestedEntry.record ~= nil,
+		}
 	end
-	return xz.Unit
+	if debugSnapshotConnection then
+		debugSnapshotConnection:Disconnect()
+		debugSnapshotConnection = nil
+	end
 end
 
-local function flatSpeed(v: Vector3?): number
-	if typeof(v) ~= "Vector3" then
+if RunService:IsStudio() then
+	local existingDebugRemote = remotes:FindFirstChild(NpcShared.DebugSnapshotRemoteName)
+	if existingDebugRemote then
+		bindDebugSnapshotRemote(existingDebugRemote)
+	else
+		debugSnapshotConnection = remotes.ChildAdded:Connect(function(child)
+			if child.Name == NpcShared.DebugSnapshotRemoteName then
+				bindDebugSnapshotRemote(child)
+			end
+		end)
+	end
+end
+
+local metricsFolder = workspace:FindFirstChild("NpcPresentationMetrics")
+if not metricsFolder then
+	metricsFolder = Instance.new("Folder")
+	metricsFolder.Name = "NpcPresentationMetrics"
+	metricsFolder.Parent = workspace
+end
+
+local spawnFx = {}
+for index = 1, 16 do
+	local part = Instance.new("Part")
+	part.Name = "NpcSpawnFx_" .. index
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.CastShadow = false
+	part.Material = Enum.Material.Ground
+	part.Color = Color3.fromRGB(98, 75, 52)
+	part.Transparency = 1
+	part.Size = Vector3.new(0.1, 0.06, 0.1)
+	part.CFrame = CFrame.new(0, -12000 - index, 0)
+	part.Parent = pool.visualFolder
+	spawnFx[index] = { part = part, active = false, startedAt = 0, scale = 1 }
+end
+
+local function flatSpeed(value: Vector3?): number
+	if typeof(value) ~= "Vector3" then
 		return 0
 	end
-
-	return math.sqrt((v.X * v.X) + (v.Z * v.Z))
+	return math.sqrt(value.X * value.X + value.Z * value.Z)
 end
 
-local function surfaceUp(v: Vector3?): Vector3
-	if typeof(v) == "Vector3" and v.Magnitude > 1e-4 then
-		return v.Unit
+local function safeDirection(value: Vector3?, fallback: Vector3?): Vector3
+	if typeof(value) == "Vector3" and value.Magnitude > 1e-4 then
+		return value.Unit
 	end
-	return Vector3.yAxis
+	if typeof(fallback) == "Vector3" and fallback.Magnitude > 1e-4 then
+		return fallback.Unit
+	end
+	return Vector3.new(0, 0, -1)
 end
 
-local function movementDir(v: Vector3?, movementMode: string?, surfaceNormal: Vector3?): Vector3
+local function movementDirection(value: Vector3?, movementMode: string?, surfaceNormal: Vector3?): Vector3
+	local direction = safeDirection(value, Vector3.new(0, 0, -1))
 	if movementMode == "Surface" then
-		local up = surfaceUp(surfaceNormal)
-		local source = typeof(v) == "Vector3" and v or Vector3.new(0, 0, -1)
-		local tangent = source - up * source:Dot(up)
+		local up = safeDirection(surfaceNormal, Vector3.yAxis)
+		local tangent = direction - up * direction:Dot(up)
 		if tangent.Magnitude <= 1e-4 then
-			local fallback = math.abs(up:Dot(Vector3.zAxis)) < 0.95 and Vector3.zAxis or Vector3.xAxis
-			tangent = fallback - up * fallback:Dot(up)
+			local axis = math.abs(up:Dot(Vector3.zAxis)) < 0.95 and Vector3.zAxis or Vector3.xAxis
+			tangent = axis - up * axis:Dot(up)
 		end
 		return tangent.Unit
 	end
 	if movementMode ~= "Flying" then
-		return flatDir(v)
+		return safeDirection(Vector3.new(direction.X, 0, direction.Z), Vector3.new(0, 0, -1))
 	end
-	if typeof(v) ~= "Vector3" or v.Magnitude <= 1e-4 then
-		return Vector3.new(0, 0, -1)
-	end
-	return v.Unit
+	return direction
 end
 
-local function movementSpeed(v: Vector3?, movementMode: string?): number
-	if (movementMode == "Flying" or movementMode == "Surface") and typeof(v) == "Vector3" then
-		return v.Magnitude
-	end
-	return flatSpeed(v)
-end
-
-local function resolveRoot(model: Model): BasePart?
-	local root = model:FindFirstChild("HumanoidRootPart")
-	if root and root:IsA("BasePart") then
-		return root
-	end
-	local primary = model.PrimaryPart
-	if primary and primary:IsA("BasePart") then
-		return primary
-	end
-	return model:FindFirstChildWhichIsA("BasePart", true)
-end
-
-local function getVisualScale(entry): number
-	local model = entry and entry.model
-	local scale = model and model:GetAttribute(VISUAL_SCALE_ATTR)
-	if typeof(scale) == "number" and scale > 0 then
-		return scale
-	end
-	return 1
-end
-
-local function playSpawnGroundFx(pos: Vector3, scale: number)
-	if typeof(pos) ~= "Vector3" then
+local function setModelVisible(record, visible: boolean)
+	if record.visible == visible then
 		return
 	end
-
-	local sizeScale = math.clamp(tonumber(scale) or 1, 1, 3.5)
-	local dust = Instance.new("Part")
-	dust.Name = "NpcSpawnGroundFx"
-	dust.Anchored = true
-	dust.CanCollide = false
-	dust.CanTouch = false
-	dust.CanQuery = false
-	dust.CastShadow = false
-	dust.Material = Enum.Material.Ground
-	dust.Color = Color3.fromRGB(98, 75, 52)
-	dust.Transparency = 0.32
-	dust.Size = Vector3.new(2.8 * sizeScale, 0.08, 2.8 * sizeScale)
-	dust.CFrame = CFrame.new(pos + Vector3.new(0, 0.05, 0))
-	dust.Parent = workspace
-
-	local tween = TweenService:Create(dust, TweenInfo.new(SPAWN_DUST_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Size = Vector3.new(5.5 * sizeScale, 0.08, 5.5 * sizeScale),
-		Transparency = 1,
-	})
-	tween:Play()
-	Debris:AddItem(dust, SPAWN_DUST_DURATION + 0.15)
-end
-
-local function startSpawnRise(entry, pos: Vector3)
-	entry.spawnRiseStart = os.clock()
-	entry.spawnRiseDepth = SPAWN_RISE_DEPTH * math.clamp(getVisualScale(entry), 1, 3.5)
-	playSpawnGroundFx(pos, getVisualScale(entry))
-end
-
-local function getSpawnRiseOffset(entry, now: number): Vector3
-	local startTime = entry and entry.spawnRiseStart
-	if type(startTime) ~= "number" then
-		return Vector3.zero
-	end
-
-	local alpha = math.clamp((now - startTime) / SPAWN_RISE_DURATION, 0, 1)
-	if alpha >= 1 then
-		entry.spawnRiseStart = nil
-		entry.spawnRiseDepth = nil
-		return Vector3.zero
-	end
-
-	local eased = 1 - ((1 - alpha) * (1 - alpha) * (1 - alpha))
-	local depth = tonumber(entry.spawnRiseDepth) or SPAWN_RISE_DEPTH
-	return Vector3.new(0, -depth * (1 - eased), 0)
-end
-
-local function formatDisplayName(rawName: any): string
-	local text = tostring(rawName or "Enemy")
-	text = string.gsub(text, "_", " ")
-	text = string.gsub(text, "(%l)(%u)", "%1 %2")
-	return text
-end
-
-local function resolveDisplayName(entry): string
-	local model = entry and entry.model
-	if not model then
-		return "Enemy"
-	end
-
-	local rawName = model:GetAttribute("DisplayName")
-		or model:GetAttribute(ATTR.MobType)
-		or model:GetAttribute(ATTR.Type)
-		or model.Name
-	return formatDisplayName(rawName)
-end
-
-local function resolveNameColor(entry): Color3
-	local model = entry and entry.model
-	if model and model:GetAttribute(ATTR.IsBoss) == true then
-		return NAME_COLOR_BOSS
-	end
-	if model and model:GetAttribute(ATTR.IsElite) == true then
-		return NAME_COLOR_ELITE
-	end
-	return NAME_COLOR_NORMAL
-end
-
-local function updateNameplateAppearance(entry)
-	local gui = entry and entry.healthbar
-	if not gui then
-		return
-	end
-
-	local scale = getVisualScale(entry)
-	gui.Size = UDim2.fromOffset(math.floor(148 + math.min(28, math.max(0, scale - 1) * 14)), 36)
-	gui.StudsOffset = Vector3.new(0, 2 + (scale * 1.2), 0)
-
-	if entry.nameLabel then
-		entry.nameLabel.Text = resolveDisplayName(entry)
-		entry.nameLabel.TextColor3 = resolveNameColor(entry)
-	end
-end
-
-local function computeRootToPivot(model: Model, root: BasePart): CFrame?
-	local ok, pivot = pcall(function()
-		return model:GetPivot()
-	end)
-	if not ok then
-		return nil
-	end
-	return root.CFrame:ToObjectSpace(pivot)
-end
-
-local function getFacingYawOffset(model: Model): CFrame
-	local yawDegrees = model:GetAttribute(FACING_YAW_ATTR)
-	if typeof(yawDegrees) ~= "number" or math.abs(yawDegrees) <= 1e-4 then
-		return CFrame.identity
-	end
-	return CFrame.Angles(0, math.rad(yawDegrees), 0)
-end
-
-local function isProceduralVisualModel(model: Model?): boolean
-	return model ~= nil and model:GetAttribute(PROCEDURAL_VISUAL_ATTR) == true
-end
-
-local function buildProceduralPose(entry, now: number): CFrame
-	local motion = math.max(0, tonumber(entry.animMotionSpeed) or 0)
-	if entry.state == NpcShared.States.Attacking then
-		local pulse = math.sin(now * 16)
-		return CFrame.new(0, 0.1 + math.abs(pulse) * 0.08, 0) * CFrame.Angles(math.rad(-10), 0, math.rad(pulse * 3))
-	end
-	if entry.animMoving == true or motion >= RUN_ANIM_STOP_SPEED then
-		local amp = math.clamp(motion / 18, 0.25, 1)
-		local bounce = math.abs(math.sin(now * PROCEDURAL_MOVE_BOUNCE_SPEED))
-		local roll = math.sin(now * (PROCEDURAL_MOVE_BOUNCE_SPEED * 0.5))
-		return CFrame.new(0, bounce * 0.22 * amp, 0) * CFrame.Angles(math.rad(-8 * amp), 0, math.rad(roll * 4 * amp))
-	end
-	local sway = math.sin(now * PROCEDURAL_IDLE_SWAY_SPEED)
-	return CFrame.new(0, math.abs(sway) * 0.05, 0) * CFrame.Angles(0, 0, math.rad(sway * 2.5))
-end
-
-local function refreshRigBinding(entry)
-	local model = entry.model
-	if not model then
-		return nil
-	end
-
-	local root = resolveRoot(model)
-	if not root then
-		return nil
-	end
-
-	if entry.boundRoot ~= root or not entry.rootToPivot then
-		entry.boundRoot = root
-		local rootToPivot = computeRootToPivot(model, root)
-		if rootToPivot then
-			entry.rootToPivot = getFacingYawOffset(model) * rootToPivot
-		else
-			entry.rootToPivot = nil
+	debug.profilebegin("NpcPresentation.CullTransition")
+	record.visible = visible
+	for _, descendant in ipairs(record.model:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.LocalTransparencyModifier = visible and 0 or 1
 		end
 	end
-
-	return root
-end
-
-local function ensureAnimator(model: Model): Animator?
-	local controller = model:FindFirstChildOfClass("AnimationController")
-	if not controller then
-		controller = Instance.new("AnimationController")
-		controller.Name = "AnimationController"
-		controller.Parent = model
-	end
-	local animator = controller:FindFirstChildOfClass("Animator")
-	if not animator then
-		animator = Instance.new("Animator")
-		animator.Parent = controller
-	end
-	return animator
-end
-
-local function resolveWeight(animation: Animation): number
-	local weightValue = animation:FindFirstChild("Weight")
-	if weightValue and (weightValue:IsA("NumberValue") or weightValue:IsA("IntValue")) then
-		return math.max(0, tonumber(weightValue.Value) or 1)
-	end
-	return 1
-end
-
-local function animationMatchesProbe(animation: Animation, probe: string): boolean
-	local lowerProbe = string.lower(probe)
-	local animationName = string.lower(animation.Name)
-	if animationName == lowerProbe or string.sub(animationName, 1, #lowerProbe) == lowerProbe then
-		return true
-	end
-
-	local parent = animation.Parent
-	while parent and not parent:IsA("Model") do
-		if string.lower(parent.Name) == lowerProbe then
-			return true
-		end
-		parent = parent.Parent
-	end
-
-	return false
-end
-
-local function collectAnimations(model: Model, stateName: string): {Animation}
-	local list = {}
-	local seen = {}
-	local names = SEARCH_NAMES[stateName] or { stateName }
-	local configuredAttribute = CONFIGURED_ANIMATION_ATTRIBUTE_BY_STATE[stateName]
-	local configuredId = configuredAttribute and model:GetAttribute(configuredAttribute) or nil
-	if typeof(configuredId) == "number" then
-		configuredId = tostring(math.floor(configuredId))
-	end
-	if typeof(configuredId) == "string" and configuredId ~= "" then
-		if string.match(configuredId, "^%d+$") then
-			configuredId = "rbxassetid://" .. configuredId
-		end
-		local configuredAnimation = Instance.new("Animation")
-		configuredAnimation.Name = "Configured_" .. stateName
-		configuredAnimation.AnimationId = configuredId
-		table.insert(list, configuredAnimation)
-	end
-
-	for _, descendant in ipairs(model:GetDescendants()) do
-		if descendant:IsA("Animation") then
-			for _, probe in ipairs(names) do
-				if animationMatchesProbe(descendant, probe) then
-					if not seen[descendant] then
-						seen[descendant] = true
-						table.insert(list, descendant)
-					end
-					break
-				end
-			end
-		end
-	end
-
-	return list
-end
-
-local function buildTracks(entry)
-	if entry.animBuilt then
-		return
-	end
-	entry.animQueued = false
-	entry.animBuilt = true
-	entry.animTracks = {}
-
-	local model = entry.model
-	if not model then
-		return
-	end
-	if isProceduralVisualModel(model) then
-		return
-	end
-	local animator = ensureAnimator(model)
-	if not animator then
-		return
-	end
-
-	for stateName, _ in pairs(SEARCH_NAMES) do
-		local entries = {}
-		for _, animation in ipairs(collectAnimations(model, stateName)) do
-			local ok, track = pcall(function()
-				return animator:LoadAnimation(animation)
+	if not visible then
+		if record.currentTrack then
+			pcall(function()
+				record.currentTrack:Stop(0.05)
 			end)
-			if ok and track then
-				track.Looped = LOOPED_BY_STATE[stateName] == true
-				track.Priority = PRIORITY_BY_STATE[stateName] or Enum.AnimationPriority.Core
-				table.insert(entries, {
-					track = track,
-					weight = resolveWeight(animation),
-				})
+		end
+		record.currentTrack = nil
+		record.currentAnimationState = nil
+		record.currentAnimationToken = nil
+		record.model:PivotTo(CFrame.new(0, -14000 - record.index * 18, 0))
+	end
+	debug.profileend()
+end
+
+local function playSpawnFx(position: Vector3, scale: number?)
+	local selected = spawnFx[1]
+	for _, candidate in ipairs(spawnFx) do
+		if not candidate.active then
+			selected = candidate
+			break
+		end
+		if candidate.startedAt < selected.startedAt then
+			selected = candidate
+		end
+	end
+	selected.active = true
+	selected.startedAt = os.clock()
+	selected.scale = math.clamp(tonumber(scale) or 1, 0.8, 3.5)
+	selected.part.CFrame = CFrame.new(position + Vector3.new(0, 0.04, 0))
+end
+
+local function updateSpawnFx(now: number)
+	for _, effect in ipairs(spawnFx) do
+		if effect.active then
+			local alpha = (now - effect.startedAt) / 0.55
+			if alpha >= 1 then
+				effect.active = false
+				effect.part.Transparency = 1
+				effect.part.CFrame = CFrame.new(0, -12000, 0)
+			else
+				local size = (2.2 + alpha * 2.8) * effect.scale
+				effect.part.Size = Vector3.new(size, 0.06, size)
+				effect.part.Transparency = 0.45 + alpha * 0.55
 			end
 		end
-		entry.animTracks[stateName] = entries
 	end
 end
 
-local function queueTrackBuild(entry)
-	if entry.animBuilt or entry.animQueued or not entry.model then
-		return
-	end
-	if isProceduralVisualModel(entry.model) then
-		entry.animBuilt = true
-		entry.animTracks = {}
-		return
-	end
-
-	entry.animQueued = true
-	pendingTrackBuilds[#pendingTrackBuilds + 1] = entry
-end
-
-local function chooseTrack(entry, stateName: string)
-	local variants = entry.animTracks and entry.animTracks[stateName]
-	if not variants or #variants == 0 then
-		return nil
-	end
-	if #variants == 1 then
-		return variants[1].track
-	end
-
-	local total = 0
-	for _, variant in ipairs(variants) do
-		total += math.max(0, variant.weight)
-	end
-	if total <= 0 then
-		return variants[1].track
-	end
-
-	local roll = math.random() * total
-	local acc = 0
-	for _, variant in ipairs(variants) do
-		acc += math.max(0, variant.weight)
-		if roll <= acc then
-			return variant.track
-		end
-	end
-	return variants[#variants].track
-end
-
-local function stopAnimation(entry, fadeTime: number?)
-	if entry.currentTrack then
-		pcall(function()
-			entry.currentTrack:Stop(fadeTime or 0.1)
-		end)
-	end
-	entry.currentTrack = nil
-	entry.currentAnimState = nil
-end
-
-local function updateAnimationMotion(entry, dt: number, now: number)
-	local renderPos = entry.renderPos
-	if typeof(renderPos) ~= "Vector3" then
-		return
-	end
-
-	local previousPos = entry.lastRenderPos or renderPos
-	local displayedSpeed = 0
-	if typeof(previousPos) == "Vector3" and dt > 1e-4 then
-		displayedSpeed = movementSpeed(renderPos - previousPos, entry.movementMode) / dt
-	end
-
-	local targetSpeed = math.max(displayedSpeed, movementSpeed(entry.velocity, entry.movementMode))
-	if entry.animMotionSpeed == nil then
-		entry.animMotionSpeed = targetSpeed
-	else
-		entry.animMotionSpeed += (targetSpeed - entry.animMotionSpeed) * math.clamp(dt * 10, 0, 1)
-	end
-
-	local threshold = entry.animMoving and RUN_ANIM_STOP_SPEED or RUN_ANIM_START_SPEED
-	if (entry.animMotionSpeed or 0) >= threshold then
-		entry.animMoving = true
-		entry.lastMoveAt = now
-	elseif entry.animMoving and (now - (entry.lastMoveAt or 0)) > RUN_ANIM_HOLD_TIME then
-		entry.animMoving = false
-	end
-
-	entry.lastRenderPos = renderPos
-end
-
-local function resolveAnimationState(entry): string
-	if entry.dead or NpcShared.IsDeadState(entry.state) then
-		return "death"
-	end
-	if entry.state == NpcShared.States.Attacking then
-		return "attack"
-	end
-	if entry.animMoving == true then
-		return "run"
-	end
-	return "idle"
-end
-
-local function playAnimation(entry)
-	if not entry.animBuilt then
-		queueTrackBuild(entry)
-		return
-	end
-
-	local animState = resolveAnimationState(entry)
-	if animState == "death" and entry.currentAnimState == "death" then
-		return
-	end
-	if entry.currentAnimState == animState and entry.currentTrack and entry.currentTrack.IsPlaying then
-		return
-	end
-
-	local nextTrack = chooseTrack(entry, animState)
-	if not nextTrack then
-		return
-	end
-
-	if entry.currentTrack and entry.currentTrack ~= nextTrack then
-		pcall(function()
-			entry.currentTrack:Stop(0.1)
-		end)
-	end
-
-	nextTrack.Looped = LOOPED_BY_STATE[animState] == true
-	if not nextTrack.IsPlaying then
-		pcall(function()
-			nextTrack:Play(0.1, 1, 1)
-		end)
-	end
-
-	entry.currentTrack = nextTrack
-	entry.currentAnimState = animState
-end
-
-local function ensureHealthbar(entry)
-	if not SHOW_NPC_NAMEPLATES then
-		return nil
-	end
-	if entry.healthbar then
-		return entry.healthbar
-	end
-	if not entry.model then
-		return nil
-	end
-
-	local root = resolveRoot(entry.model)
-	if not root then
-		return nil
-	end
-
-	local gui = Instance.new("BillboardGui")
-	gui.Name = "NpcHealthbarClient"
-	gui.Size = UDim2.fromOffset(148, 36)
-	gui.StudsOffset = Vector3.new(0, 3.2, 0)
-	gui.AlwaysOnTop = true
-	gui.LightInfluence = 0
-	gui.MaxDistance = 140
-	gui.Adornee = root
-	gui.Parent = entry.model
-
-	local nameLabel = Instance.new("TextLabel")
-	nameLabel.Name = "Name"
-	nameLabel.BackgroundTransparency = 1
-	nameLabel.Size = UDim2.new(1, 0, 0, 16)
-	nameLabel.Font = Enum.Font.GothamBold
-	nameLabel.TextSize = 13
-	nameLabel.TextStrokeTransparency = 0.55
-	nameLabel.Text = resolveDisplayName(entry)
-	nameLabel.Parent = gui
-
-	local bg = Instance.new("Frame")
-	bg.Name = "Bar"
-	bg.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
-	bg.BackgroundTransparency = 0.2
-	bg.BorderSizePixel = 0
-	bg.Position = UDim2.new(0, 8, 0, 22)
-	bg.Size = UDim2.new(1, -16, 0, 10)
-	bg.Parent = gui
-
-	local fill = Instance.new("Frame")
-	fill.Name = "Fill"
-	fill.BackgroundColor3 = Color3.fromRGB(84, 214, 124)
-	fill.BorderSizePixel = 0
-	fill.Size = UDim2.fromScale(1, 1)
-	fill.Parent = bg
-
-	local bgCorner = Instance.new("UICorner")
-	bgCorner.CornerRadius = UDim.new(0, 4)
-	bgCorner.Parent = bg
-
-	local fillCorner = Instance.new("UICorner")
-	fillCorner.CornerRadius = UDim.new(0, 4)
-	fillCorner.Parent = fill
-
-	entry.healthbar = gui
-	entry.nameLabel = nameLabel
-	entry.healthFill = fill
-	updateNameplateAppearance(entry)
-	return gui
-end
-
-local function updateHealthbar(entry)
-	local gui = ensureHealthbar(entry)
-	if not gui or not entry.healthFill then
-		return
-	end
-
-	local maxHp = math.max(1, tonumber(entry.maxHp) or 1)
-	local hp = math.max(0, tonumber(entry.hp) or 0)
-	entry.healthFill.Size = UDim2.fromScale(math.clamp(hp / maxHp, 0, 1), 1)
-	updateNameplateAppearance(entry)
-	gui.Enabled = not entry.dead and entry.spawnRiseStart == nil
-end
-
-local function cleanupEntry(id: string)
+local function releaseEntry(id: string)
 	local entry = presentations[id]
 	if not entry then
 		return
 	end
-	stopAnimation(entry, 0)
-	if entry.healthbar then
-		pcall(function()
-			entry.healthbar:Destroy()
-		end)
-	end
-	if entry.animTracks then
-		for _, variants in pairs(entry.animTracks) do
-			for _, variant in ipairs(variants) do
-				pcall(function()
-					variant.track:Destroy()
-				end)
-			end
-		end
+	if entry.record then
+		pool:Release(entry.record)
+		entry.record = nil
 	end
 	presentations[id] = nil
 end
 
-local function ensureEntry(id: string)
+local function getOrCreateEntry(id: string)
 	local entry = presentations[id]
 	if entry then
 		return entry
 	end
 	entry = {
 		id = id,
-		state = NpcShared.States.Idle,
-		targetPos = nil,
-		renderPos = nil,
-		targetDir = Vector3.new(0, 0, -1),
-		renderDir = Vector3.new(0, 0, -1),
-		velocity = Vector3.zero,
-		movementMode = "Ground",
-		movementProfile = "GroundSmall",
-		movementSystem = "Legacy",
-		movementBehavior = "GroundWalker",
-		combatBehavior = nil,
-		surfaceNormal = Vector3.yAxis,
-		renderSurfaceNormal = Vector3.yAxis,
-		hp = 0,
-		maxHp = 1,
+		state = NpcShared.States.Spawn,
+		stateChangedAt = os.clock(),
 		dead = false,
 		despawned = false,
-		lastSeen = os.clock(),
-		rootToPivot = nil,
-		boundRoot = nil,
-		animQueued = false,
-		lastRenderPos = nil,
-		animMotionSpeed = 0,
-		animMoving = false,
-		lastMoveAt = 0,
+		lod = "Near",
+		nextVisualAt = 0,
+		retryAcquireAt = 0,
 	}
 	presentations[id] = entry
 	return entry
 end
 
-local finishSyncGate
-
-local function beginSyncGate()
-	currentSyncRequestId += 1
-	local requestId = currentSyncRequestId
-	if syncOverlayToken then
-		LoadingOverlay.Update(syncOverlayToken, {
-			title = "Synchronizing...",
-			message = "Waiting for full enemy sync from server",
-			progress = nil,
-		})
-	else
-		syncOverlayToken = LoadingOverlay.Acquire({
-			title = "Synchronizing...",
-			message = "Waiting for full enemy sync from server",
-			progress = nil,
-		})
+local function writeVisualAttributes(entry)
+	local model = entry.record and entry.record.model
+	if not model then
+		return
 	end
+	model:SetAttribute("NpcState", entry.state)
+	model:SetAttribute("State", entry.state)
+	model:SetAttribute("NpcHealth", entry.hp)
+	model:SetAttribute("Health", entry.hp)
+	model:SetAttribute("NpcMaxHealth", entry.maxHp)
+	model:SetAttribute("MaxHealth", entry.maxHp)
+	model:SetAttribute("NpcDead", entry.dead)
+	model:SetAttribute("IsDead", entry.dead)
+end
 
-	task.delay(12, function()
-		if requestId == currentSyncRequestId and syncOverlayToken then
-			warn("[NpcPresentation] Full NPC sync timed out; releasing loading overlay")
-			finishSyncGate(requestId)
+local function ensureVisual(entry, now: number)
+	if entry.record or not entry.visual or entry.despawned or now < entry.retryAcquireAt then
+		return
+	end
+	local record = pool:Acquire(entry.visual, entry.id)
+	if not record then
+		entry.retryAcquireAt = now + 1
+		return
+	end
+	entry.record = record
+	setModelVisible(record, entry.lod ~= "Culled")
+	writeVisualAttributes(entry)
+	if entry.showSpawnFx and entry.nextMotion and typeof(entry.nextMotion.pos) == "Vector3" then
+		playSpawnFx(entry.nextMotion.pos, entry.visual.visualScale)
+		entry.showSpawnFx = false
+	end
+end
+
+local function updateReliableEntry(entry, item, isFull: boolean)
+	if typeof(item.visual) == "table" then
+		entry.visual = item.visual
+	end
+	entry.type = item.type or entry.type
+	entry.rank = item.rank or entry.rank
+	entry.displayName = item.displayName or entry.displayName
+	entry.isElite = item.isElite == true
+	entry.isMiniBoss = item.isMiniBoss == true
+	entry.isBoss = item.isBoss == true
+	entry.movementMode = item.movementMode or entry.movementMode
+	entry.movementProfile = item.movementProfile or entry.movementProfile
+	entry.speed = tonumber(item.speed) or entry.speed or 0
+	entry.hp = tonumber(item.hp) or entry.hp
+	entry.maxHp = tonumber(item.maxHp) or entry.maxHp
+	local nextState = tostring(item.state or entry.state)
+	if nextState ~= entry.state then
+		entry.state = nextState
+		entry.stateChangedAt = os.clock()
+	end
+	entry.dead = item.dead == true
+	entry.despawned = item.despawned == true
+	if item.spawn == true and not isFull then
+		entry.showSpawnFx = true
+	end
+	if entry.despawned or entry.dead then
+		releaseEntry(entry.id)
+		return
+	end
+	writeVisualAttributes(entry)
+end
+
+reliableEvent.OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" or typeof(payload.items) ~= "table" then
+		return
+	end
+	reliablePackets += 1
+	reliableRecords += #payload.items
+	local full = payload.full == true
+	local seen = full and {} or nil
+	if typeof(payload.prewarmPlan) == "table" then
+		pool:QueuePrewarm(payload.prewarmPlan)
+		syncPrewarmTotal = 0
+		for _, descriptor in ipairs(payload.prewarmPlan) do
+			syncPrewarmTotal += math.max(0, math.floor(tonumber(descriptor.count) or 0))
 		end
-	end)
-
-	syncRequestEvent:FireServer(requestId)
-	return requestId
-end
-
-finishSyncGate = function(requestId: number?)
-	if requestId and requestId ~= currentSyncRequestId then
-		return
 	end
-
-	if not syncOverlayToken then
-		return
-	end
-
-	LoadingOverlay.Release(syncOverlayToken)
-	syncOverlayToken = nil
-end
-
-batchEvent.OnClientEvent:Connect(function(payload)
-	if typeof(payload) ~= "table" then
-		return
-	end
-
-	local items = payload.items
-	if typeof(items) ~= "table" then
-		return
-	end
-
-	local fullSnapshot = payload.full == true
-	local seen = fullSnapshot and {} or nil
-	local now = os.clock()
-	for _, item in ipairs(items) do
-		if typeof(item) == "table" and item.id ~= nil then
-			local id = tostring(item.id)
-			local isNew = presentations[id] == nil
-			local entry = ensureEntry(id)
-			if typeof(item.movementMode) == "string" then
-				entry.movementMode = item.movementMode
-			end
-			if typeof(item.movementProfile) == "string" then
-				entry.movementProfile = item.movementProfile
-			end
-			if typeof(item.movementSystem) == "string" then
-				entry.movementSystem = item.movementSystem
-			end
-			if typeof(item.movementBehavior) == "string" then
-				entry.movementBehavior = item.movementBehavior
-			end
-			if typeof(item.combatBehavior) == "string" then
-				entry.combatBehavior = item.combatBehavior
-			end
-			if typeof(item.surfaceNormal) == "Vector3" then
-				entry.surfaceNormal = surfaceUp(item.surfaceNormal)
-				if fullSnapshot or not entry.renderSurfaceNormal then
-					entry.renderSurfaceNormal = entry.surfaceNormal
-				end
-			end
+	for _, item in ipairs(payload.items) do
+		local id = tostring(item.id or "")
+		if id ~= "" then
 			if seen then
 				seen[id] = true
 			end
-			local spawnFxPos = nil
-			local serverSpawnFxPos = nil
-			if typeof(item.model) == "Instance" and item.model:IsA("Model") then
-				entry.model = item.model
-				refreshRigBinding(entry)
-				queueTrackBuild(entry)
-			end
-			if typeof(item.spawnSurfacePos) == "Vector3" then
-				serverSpawnFxPos = item.spawnSurfacePos
-			end
-			if typeof(item.pos) == "Vector3" then
-				entry.targetPos = item.pos
-				spawnFxPos = item.pos
-				if fullSnapshot or not entry.renderPos then
-					entry.renderPos = item.pos
-				end
-			end
-			if typeof(item.dir) == "Vector3" then
-				entry.targetDir = movementDir(item.dir, entry.movementMode, entry.surfaceNormal)
-				if fullSnapshot or not entry.renderDir then
-					entry.renderDir = entry.targetDir
-				end
-			end
-			if typeof(item.vel) == "Vector3" then
-				entry.velocity = item.vel
-			end
-			if typeof(item.state) == "string" then
-				entry.state = item.state
-			end
-			if typeof(item.hp) == "number" then
-				entry.hp = item.hp
-			end
-			if typeof(item.maxHp) == "number" then
-				entry.maxHp = item.maxHp
-			end
-			entry.dead = item.dead == true
-			entry.despawned = item.despawned == true
-			entry.lastSeen = now
-			if entry.model and not entry.model:GetAttribute(ATTR.Id) then
-				entry.model:SetAttribute(ATTR.Id, id)
-			end
-			if isNew and fullSnapshot ~= true and not entry.dead and not entry.despawned and spawnFxPos then
-				if serverSpawnFxPos then
-					entry.spawnRiseStart = nil
-					entry.spawnRiseDepth = nil
-					playSpawnGroundFx(serverSpawnFxPos, getVisualScale(entry))
-				else
-					startSpawnRise(entry, spawnFxPos)
-				end
-			end
+			local entry = getOrCreateEntry(id)
+			updateReliableEntry(entry, item, full)
 		end
 	end
-
 	if seen then
 		for id in pairs(presentations) do
 			if not seen[id] then
-				cleanupEntry(id)
+				releaseEntry(id)
+			end
+		end
+		if tonumber(payload.requestId) == requestId then
+			syncFullReceived = true
+		end
+	end
+end)
+
+motionEvent.OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" or typeof(payload.items) ~= "table" then
+		return
+	end
+	motionPackets += 1
+	motionRecords += #payload.items
+	local serverTime = tonumber(payload.serverTime) or workspace:GetServerTimeNow()
+	for _, item in ipairs(payload.items) do
+		local id = tostring(item.id or item[1] or "")
+		local position = item.pos or item[2]
+		local direction = item.dir or item[3]
+		local velocity = item.vel or item[4]
+		local normal = item.surfaceNormal or item[5]
+		if id ~= "" and typeof(position) == "Vector3" then
+			local entry = presentations[id]
+			if not entry then
+				continue
+			end
+			entry.previousMotion = entry.nextMotion
+			entry.nextMotion = {
+				time = serverTime,
+				pos = position,
+				dir = safeDirection(direction, entry.nextMotion and entry.nextMotion.dir),
+				vel = typeof(velocity) == "Vector3" and velocity or Vector3.zero,
+				surfaceNormal = safeDirection(normal, Vector3.yAxis),
+			}
+			if not entry.previousMotion then
+				entry.previousMotion = entry.nextMotion
 			end
 		end
 	end
-
-	if fullSnapshot then
-		finishSyncGate(tonumber(payload.requestId))
-	end
 end)
 
-RunService.RenderStepped:Connect(function(dt)
-	local now = os.clock()
+local function sampleMotion(entry, renderTime: number)
+	local nextMotion = entry.nextMotion
+	if not nextMotion then
+		return nil
+	end
+	local previous = entry.previousMotion or nextMotion
+	local interval = nextMotion.time - previous.time
+	if interval > 1e-4 and renderTime <= nextMotion.time then
+		local alpha = math.clamp((renderTime - previous.time) / interval, 0, 1)
+		return {
+			pos = previous.pos:Lerp(nextMotion.pos, alpha),
+			dir = safeDirection(previous.dir:Lerp(nextMotion.dir, alpha), nextMotion.dir),
+			vel = previous.vel:Lerp(nextMotion.vel, alpha),
+			surfaceNormal = safeDirection(previous.surfaceNormal:Lerp(nextMotion.surfaceNormal, alpha), Vector3.yAxis),
+		}
+	end
+	local extrapolation = math.clamp(renderTime - nextMotion.time, 0, MAX_EXTRAPOLATION)
+	return {
+		pos = nextMotion.pos + nextMotion.vel * extrapolation,
+		dir = safeDirection(nextMotion.vel, nextMotion.dir),
+		vel = nextMotion.vel,
+		surfaceNormal = nextMotion.surfaceNormal,
+	}
+end
 
-	local buildsLeft = 3
-	while buildsLeft > 0 and #pendingTrackBuilds > 0 do
-		local index = #pendingTrackBuilds
-		local entry = pendingTrackBuilds[index]
-		pendingTrackBuilds[index] = nil
-		if entry and presentations[entry.id] == entry and entry.model and entry.model.Parent then
-			buildTracks(entry)
-		elseif entry then
-			entry.animQueued = false
+local function classify(entry, camera)
+	local motion = entry.nextMotion
+	if not motion or not camera then
+		return "Culled"
+	end
+	local distance = (motion.pos - camera.CFrame.Position).Magnitude
+	local _, onScreen = camera:WorldToViewportPoint(motion.pos)
+	if entry.isBoss or entry.isMiniBoss or distance <= NpcShared.PresentationLod.CriticalDistance then
+		return "Critical"
+	end
+	if not onScreen or distance > CULL_DISTANCE then
+		return "Culled"
+	end
+	if distance <= NpcShared.PresentationLod.NearDistance then
+		return "Near"
+	end
+	if distance <= NpcShared.PresentationLod.MidDistance then
+		return "Mid"
+	end
+	return "Far"
+end
+
+local function lodHz(lod: string): number
+	if lod == "Critical" or lod == "Near" then
+		return NpcShared.PresentationLod.NearHz
+	end
+	if lod == "Mid" then
+		return NpcShared.PresentationLod.MidHz
+	end
+	if lod == "Far" then
+		return NpcShared.PresentationLod.FarHz
+	end
+	return NpcShared.PresentationLod.CulledHz
+end
+
+local function animationState(entry, motion): string
+	if entry.dead then
+		return "death"
+	end
+	if entry.state == NpcShared.States.Attacking then
+		return "attack"
+	end
+	local speed = entry.movementMode == "Flying" and motion.vel.Magnitude or flatSpeed(motion.vel)
+	return speed > 0.75 and "run" or "idle"
+end
+
+local function poseFor(entry, motion, now: number): CFrame
+	local pose = CFrame.identity
+	local model = entry.record and entry.record.model
+	if model and model:GetAttribute("NpcLightweight") == true and not entry.dead then
+		local speed = flatSpeed(motion.vel)
+		local moving = speed > 0.75
+		local phase = tonumber(entry.id) or 0
+		local bob = math.sin(now * (moving and 8 or 1.8) + phase) * (moving and 0.10 or 0.035)
+		pose = CFrame.new(0, bob, 0) * CFrame.Angles(0, 0, math.sin(now * 1.8 + phase) * 0.025)
+	end
+	if entry.type == "Goblin" and entry.state == NpcShared.States.Attacking and not entry.dead then
+		local alpha = math.clamp((now - entry.stateChangedAt) / 0.38, 0, 1)
+		pose *= CFrame.Angles(0, 0, math.sin(alpha * math.pi) * math.rad(28))
+	end
+	return pose
+end
+
+local function updatePresentation(entry, now: number, renderTime: number)
+	if syncOverlayToken and not pool:IsPrewarmComplete() then
+		return
+	end
+	ensureVisual(entry, now)
+	local record = entry.record
+	if record and entry.showSpawnFx and entry.nextMotion then
+		playSpawnFx(entry.nextMotion.pos, entry.visual and entry.visual.visualScale)
+		entry.showSpawnFx = false
+	end
+	if not record or now < entry.nextVisualAt then
+		return
+	end
+	entry.nextVisualAt = now + 1 / lodHz(entry.lod)
+	if entry.lod == "Culled" then
+		return
+	end
+	local motion = sampleMotion(entry, renderTime)
+	if not motion then
+		return
+	end
+	local up = entry.movementMode == "Surface" and motion.surfaceNormal or Vector3.yAxis
+	local forward = movementDirection(motion.vel.Magnitude > 0.2 and motion.vel or motion.dir, entry.movementMode, up)
+	if math.abs(forward:Dot(up)) > 0.98 then
+		up = Vector3.xAxis
+	end
+	local rootFrame = CFrame.lookAt(motion.pos, motion.pos + forward, up)
+	record.model:PivotTo(rootFrame * poseFor(entry, motion, now) * record.rootToPivot)
+	local stateName = animationState(entry, motion)
+	pool:PlayAnimation(record, stateName, entry.stateChangedAt)
+	if stateName == "run" and record.currentTrack then
+		pcall(function()
+			record.currentTrack:AdjustSpeed(math.clamp(flatSpeed(motion.vel) / math.max(1, entry.speed), 0.6, 1.8))
+		end)
+	end
+end
+
+local function publishMetrics()
+	local poolMetrics = pool:GetMetrics()
+	local elapsed = math.max(0.001, os.clock() - networkStartedAt)
+	metricsFolder:SetAttribute("ActiveVisuals", poolMetrics.active)
+	metricsFolder:SetAttribute("PoolCapacity", poolMetrics.capacity)
+	metricsFolder:SetAttribute("PooledInactive", poolMetrics.inactive)
+	metricsFolder:SetAttribute("PoolGrowths", poolMetrics.growths)
+	metricsFolder:SetAttribute("VisualsCreated", poolMetrics.created)
+	metricsFolder:SetAttribute("VisualsCreatedDuringRun", poolMetrics.createdDuringRun)
+	metricsFolder:SetAttribute("PrewarmRemaining", poolMetrics.prewarmRemaining)
+	metricsFolder:SetAttribute("AcquireAverageMs", poolMetrics.averageAcquireMs)
+	metricsFolder:SetAttribute("AcquireMaximumMs", poolMetrics.maximumAcquireMs)
+	metricsFolder:SetAttribute("ReleaseAverageMs", poolMetrics.averageReleaseMs)
+	metricsFolder:SetAttribute("ReleaseMaximumMs", poolMetrics.maximumReleaseMs)
+	metricsFolder:SetAttribute("ReliablePacketsPerSecond", reliablePackets / elapsed)
+	metricsFolder:SetAttribute("ReliableRecordsPerSecond", reliableRecords / elapsed)
+	metricsFolder:SetAttribute("MotionPacketsPerSecond", motionPackets / elapsed)
+	metricsFolder:SetAttribute("MotionRecordsPerSecond", motionRecords / elapsed)
+	metricsFolder:SetAttribute("PresentationAverageMs", frameSamples > 0 and frameSeconds / frameSamples * 1000 or 0)
+	metricsFolder:SetAttribute("PresentationMaximumMs", frameMaximum * 1000)
+	for lod, count in pairs(lodCounts) do
+		metricsFolder:SetAttribute("Lod" .. lod, count)
+	end
+	frameSamples = 0
+	frameSeconds = 0
+	frameMaximum = 0
+end
+
+RunService.RenderStepped:Connect(function(dt)
+	local frameStartedAt = os.clock()
+	debug.profilebegin("NpcPresentation.Frame")
+	local now = os.clock()
+	local renderTime = workspace:GetServerTimeNow() - INTERPOLATION_DELAY
+	pool:StepPrewarm(syncOverlayToken and 3 or 1)
+	updateSpawnFx(now)
+
+	classifyAccumulator += dt
+	if classifyAccumulator >= NpcShared.PresentationLod.ClassificationInterval then
+		debug.profilebegin("NpcPresentation.Classify")
+		classifyAccumulator %= NpcShared.PresentationLod.ClassificationInterval
+		for lod in pairs(lodCounts) do
+			lodCounts[lod] = 0
 		end
-		buildsLeft -= 1
+		local camera = workspace.CurrentCamera
+		for _, entry in pairs(presentations) do
+			local nextLod = classify(entry, camera)
+			if nextLod ~= entry.lod then
+				entry.lod = nextLod
+				entry.nextVisualAt = 0
+			end
+			lodCounts[entry.lod] += 1
+			if entry.record then
+				setModelVisible(entry.record, entry.lod ~= "Culled")
+			end
+		end
+		debug.profileend()
 	end
 
 	for id, entry in pairs(presentations) do
-		local model = entry.model
-		if model and not model.Parent then
-			cleanupEntry(id)
-			continue
-		end
-		if (entry.despawned and not model) or (now - entry.lastSeen) > 2 then
-			cleanupEntry(id)
-			continue
-		end
-		if not model or not model.Parent then
-			continue
-		end
-		if not entry.targetPos then
-			continue
-		end
-
-		local goalPos = entry.targetPos
-		if typeof(entry.velocity) == "Vector3" and not entry.dead then
-			goalPos += entry.velocity * 0.05
-		end
-		local goalDir = movementDir(entry.targetDir or entry.velocity, entry.movementMode, entry.surfaceNormal)
-		if typeof(entry.velocity) == "Vector3" and entry.velocity.Magnitude > 0.2 then
-			goalDir = movementDir(entry.velocity, entry.movementMode, entry.surfaceNormal)
-		end
-
-		entry.renderPos = entry.renderPos and entry.renderPos:Lerp(goalPos, math.clamp(dt * 12, 0, 1)) or goalPos
-		if entry.movementMode == "Surface" then
-			entry.renderSurfaceNormal = surfaceUp(
-				entry.renderSurfaceNormal and entry.renderSurfaceNormal:Lerp(entry.surfaceNormal, math.clamp(dt * 12, 0, 1))
-					or entry.surfaceNormal
-			)
-		end
-		entry.renderDir = entry.renderDir and entry.renderDir:Lerp(goalDir, math.clamp(dt * 14, 0, 1)) or goalDir
-		entry.renderDir = movementDir(entry.renderDir, entry.movementMode, entry.renderSurfaceNormal)
-
-		updateAnimationMotion(entry, dt, now)
-		refreshRigBinding(entry)
-		local displayPos = entry.renderPos + getSpawnRiseOffset(entry, now)
-		local up = entry.movementMode == "Surface"
-			and surfaceUp(entry.renderSurfaceNormal)
-			or (math.abs(entry.renderDir:Dot(Vector3.yAxis)) > 0.98 and Vector3.xAxis or Vector3.yAxis)
-		local forward = movementDir(entry.renderDir, entry.movementMode, up)
-		local rootFrame = CFrame.lookAt(displayPos, displayPos + forward, up)
-		if isProceduralVisualModel(model) then
-			rootFrame = rootFrame * buildProceduralPose(entry, now)
-		end
-		if entry.rootToPivot then
-			model:PivotTo(rootFrame * entry.rootToPivot)
-		else
-			model:PivotTo(rootFrame)
-		end
-		updateHealthbar(entry)
-		playAnimation(entry)
+		updatePresentation(entry, now, renderTime)
 	end
+
+	if syncOverlayToken and syncFullReceived then
+		local poolMetrics = pool:GetMetrics()
+		local complete = poolMetrics.prewarmRemaining == 0
+		local progress = syncPrewarmTotal > 0
+			and math.clamp(1 - poolMetrics.prewarmRemaining / syncPrewarmTotal, 0, 1)
+			or 1
+		LoadingOverlay.Update(syncOverlayToken, {
+			title = "Preparing enemies",
+			message = string.format("NPC visual pool: %d / %d", syncPrewarmTotal - poolMetrics.prewarmRemaining, syncPrewarmTotal),
+			progress = progress,
+		})
+		if complete then
+			LoadingOverlay.Release(syncOverlayToken)
+			syncOverlayToken = nil
+		end
+	end
+
+	metricsAccumulator += dt
+	local frameDuration = os.clock() - frameStartedAt
+	frameSamples += 1
+	frameSeconds += frameDuration
+	frameMaximum = math.max(frameMaximum, frameDuration)
+	if metricsAccumulator >= 1 then
+		metricsAccumulator %= 1
+		publishMetrics()
+	end
+	debug.profileend()
 end)
 
 local function requestFullSync()
-	beginSyncGate()
+	requestId += 1
+	syncFullReceived = false
+	syncPrewarmTotal = 0
+	if syncOverlayToken then
+		LoadingOverlay.Release(syncOverlayToken)
+	end
+	syncOverlayToken = LoadingOverlay.Acquire({
+		title = "Preparing enemies",
+		message = "Synchronizing NPC state",
+		progress = 0,
+	})
+	syncRequestEvent:FireServer(requestId)
 end
 
 requestFullSync()
-localPlayer.CharacterAdded:Connect(function()
-	requestFullSync()
-end)
-
+localPlayer.CharacterAdded:Connect(requestFullSync)
