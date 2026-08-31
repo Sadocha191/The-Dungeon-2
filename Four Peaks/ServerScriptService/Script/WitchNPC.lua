@@ -140,6 +140,13 @@ end
 prompt.Triggered:Connect(function(plr)
 	local data = PlayerData and PlayerData.Get and PlayerData.Get(plr) or nil
 
+	if _G.Spells_SanitizeUnlocked then
+		pcall(function()
+			_G.Spells_SanitizeUnlocked(plr)
+		end)
+		data = PlayerData and PlayerData.Get and PlayerData.Get(plr) or data
+	end
+
 	if data and data.spellbookUnlocked ~= true and _G.Spells_GrantStarterBook then
 		pcall(function()
 			_G.Spells_GrantStarterBook(plr)

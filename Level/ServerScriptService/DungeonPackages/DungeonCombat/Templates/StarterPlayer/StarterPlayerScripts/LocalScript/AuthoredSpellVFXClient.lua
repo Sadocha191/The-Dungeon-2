@@ -1,6 +1,8 @@
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local localPlayer = Players.LocalPlayer
 local moduleFolder = ReplicatedStorage:WaitForChild("ModuleScripts")
 local VfxTemplatePlayer = require(moduleFolder:WaitForChild("VfxTemplatePlayer"))
 local SpellVFXEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("SpellVFXEvent")
@@ -45,6 +47,40 @@ end
 local function getTargetPosition(target)
 	local root = resolveTargetRoot(target)
 	return root and root.Position or nil
+end
+
+local function createGroundRaycastParams()
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local excluded = {}
+	local character = localPlayer and localPlayer.Character
+	if character then
+		table.insert(excluded, character)
+	end
+	local enemies = workspace:FindFirstChild("Enemies")
+	if enemies then
+		table.insert(excluded, enemies)
+	end
+	local npcVisuals = workspace:FindFirstChild("NpcVisuals")
+	if npcVisuals then
+		table.insert(excluded, npcVisuals)
+	end
+	local clientVfx = workspace:FindFirstChild("ClientVFX")
+	if clientVfx then
+		table.insert(excluded, clientVfx)
+	end
+	params.FilterDescendantsInstances = excluded
+	return params
+end
+
+local function projectToGround(position, params)
+	if typeof(position) ~= "Vector3" then return position end
+	local result = workspace:Raycast(
+		position + Vector3.new(0, 50, 0),
+		Vector3.new(0, -180, 0),
+		params
+	)
+	return result and result.Position or position
 end
 
 local function setWorldCFrame(instance, cframe)
@@ -130,6 +166,8 @@ local function spawnMovingZone(payload)
 	direction = Vector3.new(direction.X, 0, direction.Z)
 	if direction.Magnitude <= 0.01 then direction = Vector3.new(0, 0, -1) else direction = direction.Unit end
 	local duration = math.max(0.1, tonumber(payload.duration) or 4)
+	local groundParams = createGroundRaycastParams()
+	startPos = projectToGround(startPos, groundParams)
 	local clone = playTemplate(payload.assetName, CFrame.lookAt(startPos, startPos + direction), duration, nil, payload.scale)
 	if not clone then return end
 
@@ -141,6 +179,7 @@ local function spawnMovingZone(payload)
 		endTime = workspace:GetServerTimeNow() + duration,
 		target = payload.target,
 		followTarget = payload.followTarget == true,
+		groundParams = groundParams,
 	})
 end
 
@@ -207,7 +246,8 @@ RunService.RenderStepped:Connect(function(dt)
 				if desired.Magnitude > 0.01 then zone.direction = desired.Unit end
 			end
 		end
-		zone.position += zone.direction * zone.speed * dt
+		local nextPosition = zone.position + zone.direction * zone.speed * dt
+		zone.position = projectToGround(nextPosition, zone.groundParams)
 		setWorldCFrame(zone.instance, CFrame.lookAt(zone.position, zone.position + zone.direction))
 	end
 end)

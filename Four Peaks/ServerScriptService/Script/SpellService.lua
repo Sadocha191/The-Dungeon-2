@@ -44,10 +44,80 @@ local function getPlayerData(plr)
 	return PlayerData.Get(plr)
 end
 
-local function getUnlockedTable(plr)
+local function sanitizeUnlockedSpells(data)
+	local raw = typeof(data.spellsUnlocked) == "table" and data.spellsUnlocked or {}
+	local cleaned = {}
+	local changed = typeof(data.spellsUnlocked) ~= "table"
+
+	for rawId, unlocked in pairs(raw) do
+		if unlocked == true and typeof(rawId) == "string" and rawId ~= "" then
+			local normalizedId = SpellDefs.NormalizeProductId and SpellDefs.NormalizeProductId(rawId) or rawId
+			local product = SpellDefs.GetProduct and SpellDefs.GetProduct(normalizedId) or nil
+			if product then
+				cleaned[product.id] = true
+				if product.id ~= rawId then
+					changed = true
+				end
+			else
+				changed = true
+			end
+		elseif unlocked ~= nil then
+			changed = true
+		end
+	end
+
+	-- Existing accounts that already opened the spellbook should receive the
+	-- current starter set after the roster migration, just like a fresh account.
+	if data.spellbookUnlocked == true then
+		for _, starterId in ipairs(SpellDefs.BASE_STARTER or {}) do
+			local product = SpellDefs.GetProduct and SpellDefs.GetProduct(starterId) or nil
+			if product and cleaned[product.id] ~= true then
+				cleaned[product.id] = true
+				changed = true
+			end
+		end
+	end
+
+	for id in pairs(cleaned) do
+		if raw[id] ~= true then
+			changed = true
+			break
+		end
+	end
+
+	data.spellsUnlocked = cleaned
+
+	-- The current spell system no longer has a pre-run spell loadout. Clear old
+	-- saved selections once so stale prototype spell ids cannot keep resurfacing.
+	if typeof(data.spellLoadout) == "table" and #data.spellLoadout > 0 then
+		data.spellLoadout = {}
+		changed = true
+	end
+	if data.spellLoadoutConfigured == true then
+		data.spellLoadoutConfigured = false
+		changed = true
+	end
+
+	return cleaned, changed
+end
+
+local function sanitizePlayerSpells(plr, saveNow)
+	if not plr or plr.Parent ~= Players then
+		return {}
+	end
 	local data = getPlayerData(plr)
-	data.spellsUnlocked = data.spellsUnlocked or {}
-	return data.spellsUnlocked
+	local unlocked, changed = sanitizeUnlockedSpells(data)
+	if changed then
+		PlayerData.MarkDirty(plr)
+		if saveNow then
+			PlayerData.Save(plr, false)
+		end
+	end
+	return unlocked
+end
+
+local function getUnlockedTable(plr)
+	return sanitizePlayerSpells(plr, false)
 end
 
 local function buildShopPayload(plr)
@@ -101,7 +171,12 @@ end
 
 local function grantStarterSpellbook(plr)
 	local data = getPlayerData(plr)
+	local _, migrated = sanitizeUnlockedSpells(data)
 	if data.spellbookUnlocked == true then
+		if migrated then
+			PlayerData.MarkDirty(plr)
+			PlayerData.Save(plr, false)
+		end
 		return
 	end
 
@@ -141,6 +216,7 @@ WitchShopEvent.OnServerEvent:Connect(function(plr, payload)
 	end
 
 	local data = getPlayerData(plr)
+	sanitizeUnlockedSpells(data)
 	if plr:GetAttribute("TutorialComplete") ~= true then
 		WitchShopEvent:FireClient(plr, { type = "INFO", message = "Finish the tutorial first." })
 		return
@@ -151,8 +227,6 @@ WitchShopEvent.OnServerEvent:Connect(function(plr, payload)
 			type = "OPEN",
 			souls = tonumber(data.souls) or 0,
 			spells = buildShopPayload(plr),
-			loadout = PlayerData.ResolveSpellLoadout and PlayerData.ResolveSpellLoadout(plr) or {},
-			maxLoadoutSlots = SpellDefs.GetLoadoutLimit(),
 		})
 		return
 	end
@@ -161,12 +235,14 @@ WitchShopEvent.OnServerEvent:Connect(function(plr, payload)
 		return
 	end
 
-	local productId = tostring(payload.id or "")
-	local product = SpellDefs.GetProduct(productId)
+	local requestedId = tostring(payload.id or "")
+	local normalizedId = SpellDefs.NormalizeProductId and SpellDefs.NormalizeProductId(requestedId) or requestedId
+	local product = SpellDefs.GetProduct(normalizedId)
 	if not product then
 		WitchShopEvent:FireClient(plr, { type = "ERROR", message = "Unknown spell offer." })
 		return
 	end
+	local productId = product.id
 
 	data.spellsUnlocked = data.spellsUnlocked or {}
 	if data.spellsUnlocked[productId] == true then
@@ -207,9 +283,25 @@ _G.Spells_OpenChoice = function()
 end
 
 _G.Spells_GrantStarterBook = grantStarterSpellbook
+_G.Spells_SanitizeUnlocked = function(plr)
+	return sanitizePlayerSpells(plr, false)
+end
 
 _G.Spells_ResetRun = function(plr)
 	resetSpellAttrs(plr)
+end
+
+local function migratePlayer(plr)
+	task.defer(function()
+		if plr.Parent == Players then
+			sanitizePlayerSpells(plr, true)
+		end
+	end)
+end
+
+Players.PlayerAdded:Connect(migratePlayer)
+for _, plr in ipairs(Players:GetPlayers()) do
+	migratePlayer(plr)
 end
 
 Players.PlayerRemoving:Connect(function() end)
