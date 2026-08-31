@@ -14,6 +14,36 @@ Pracuj jak developer utrzymujący długoterminowy projekt, a nie jak generator j
 3. Jeżeli Studio lub MCP nie działa, napisz to krótko i kontynuuj na podstawie repo.
 4. Używaj MCP do konkretnych inspekcji, synchronizacji i testów. Nie skanuj całej gry bez potrzeby.
 5. Sprawdź `git status` i nie nadpisuj niezwiązanych zmian użytkownika.
+6. Przeczytaj `docs/AI_WORK_QUEUE.md` oraz `docs/CODEX_TASK_STATE.md` przed rozpoczęciem większej implementacji lub wznowieniem przerwanego zadania.
+
+## Koordynacja ChatGPT ↔ Codex
+
+GitHub jest trwałą warstwą przekazywania stanu między ChatGPT i Codexem. Roblox Studio pozostaje źródłem prawdy dla aktywnego runtime i aktualnych instancji, gdy repo jest rozjechane ze Studio.
+
+- `docs/AI_WORK_QUEUE.md` — krótka wspólna kolejka: co jest aktywne, zablokowane, gotowe do review i do zrobienia.
+- `docs/CODEX_TASK_STATE.md` — pełny checkpoint jednego bieżącego większego zadania Codexa.
+- PR i jego diff — źródło prawdy dla zmian już zsynchronizowanych z GitHubem.
+- Live Studio — źródło prawdy dla faktycznie aktywnych obiektów, ścieżek, Output i testów.
+
+Dla większego zadania Codex musi:
+
+1. przed implementacją sprawdzić, czy w `AI_WORK_QUEUE.md` nie istnieje kolidujące `IN_PROGRESS` albo `PAUSED`,
+2. ustawić lub zaktualizować `CODEX_TASK_STATE.md`,
+3. po każdym istotnym etapie zapisać krótki checkpoint,
+4. przed końcem sesji, wyczerpaniem limitu albo świadomym przerwaniem pracy koniecznie zapisać:
+   - co zostało wykonane,
+   - co jest w toku,
+   - co pozostało,
+   - zmienione pliki i obiekty Studio,
+   - wykonane testy,
+   - znane problemy i blokery,
+   - dokładny następny krok,
+   - branch / PR / ostatni commit, jeżeli istnieją,
+5. nie oznaczać zadania jako `DONE`, dopóki nie przeszło wymaganej walidacji.
+
+Jeżeli sesja Codexa ma lokalne zmiany, których nie ma jeszcze na GitHubie, nie odtwarzaj ich z pamięci ani z opisu PR. Najpierw porównaj `git status`, lokalny HEAD i branch z PR, a potem zaktualizuj checkpoint.
+
+ChatGPT może wykonywać live audyt Studio, analizę, review PR/diff i dopisywać nowe pozycje do kolejki. Nie powinien jednak równolegle implementować zmian w zakresie aktywnego zadania Codexa bez wyraźnej decyzji użytkownika.
 
 ## Dokumenty do czytania
 
