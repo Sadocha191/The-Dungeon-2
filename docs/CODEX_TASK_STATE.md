@@ -26,6 +26,7 @@ Ten plik jest trwałym checkpointem bieżącego dużego zadania Codexa. Ma umoż
 - Branch: `fix/lobby-documented-spells`
 - Ostatni znany head PR: `5753cc192b9aec7307c0246b10712247f8335540`
 - PR pozostaje otwarty.
+- Mergeability trzeba ponownie sprawdzić przy wznowieniu, ponieważ `main` może zmienić się niezależnie od brancha Codexa.
 
 **Ważne:** aktywna sesja Codexa może zawierać dodatkową pracę, której nie ma jeszcze na GitHubie. Przy wznowieniu Codex ma najpierw porównać `git status`, lokalny HEAD i PR, a dopiero potem zaktualizować ten checkpoint.
 
@@ -37,7 +38,7 @@ Ten plik jest trwałym checkpointem bieżącego dużego zadania Codexa. Ma umoż
 
 ### Stan według ostatniego PR
 
-- Zmiany są zapisane na branchu i PR jest mergeable.
+- Zmiany są zapisane na branchu i PR pozostaje otwarty.
 - W PR opisano implementację lobby spells, NPC sanitizer oraz terrain-following Tornado.
 - Nadal wymagane są testy w Roblox Studio wymienione niżej.
 - Nie zakładać, że opis PR zawiera całą pracę z ostatniej sesji Codexa.
@@ -54,10 +55,11 @@ Ten plik jest trwałym checkpointem bieżącego dużego zadania Codexa. Ma umoż
 
 1. Otworzyć istniejącą sesję/task Codexa.
 2. Sprawdzić `git status`, aktualny branch i lokalny HEAD.
-3. Porównać lokalny stan z PR `#164`.
+3. Porównać lokalny stan z PR `#164` oraz aktualnym `main`.
 4. Uzupełnić sekcje `Completed`, `In progress`, `Still to do`, `Files changed`, `Studio changes`, `Tests` poniżej na podstawie faktycznej sesji, nie na podstawie domysłu.
-5. Dokończyć zadanie i wykonać Studio checks.
-6. Ustawić `READY_FOR_REVIEW`, dopiero gdy implementacja jest kompletna i testy są wykonane.
+5. Jeżeli branch wymaga aktualizacji względem `main`, wykonać ją bez utraty lokalnych zmian i ponownie sprawdzić diff.
+6. Dokończyć zadanie i wykonać Studio checks.
+7. Ustawić `READY_FOR_REVIEW`, dopiero gdy implementacja jest kompletna i testy są wykonane.
 
 ## Checkpoint roboczy Codexa
 
@@ -71,7 +73,7 @@ Ten plik jest trwałym checkpointem bieżącego dużego zadania Codexa. Ma umoż
 
 ### Still to do
 
-- Zweryfikować stan lokalnej sesji względem PR `#164`.
+- Zweryfikować stan lokalnej sesji względem PR `#164` i aktualnego `main`.
 - Wykonać wymagane testy Studio.
 - Wykonać finalny review i synchronizację repo/Studio zgodnie z zakresem zadania.
 
@@ -91,7 +93,8 @@ Ten plik jest trwałym checkpointem bieżącego dużego zadania Codexa. Ma umoż
 
 - Limit Codexa.
 - Możliwa różnica między stanem sesji lokalnej a ostatnim pushem do PR.
+- `main` może być nowszy niż base brancha; sprawdzić mergeability/rebase przy wznowieniu.
 
 ### Exact next step
 
-- Reconcile local Codex task state with PR `#164`, then update this file before further implementation.
+- Reconcile local Codex task state with PR `#164` and current `main`, then update this file before further implementation.
