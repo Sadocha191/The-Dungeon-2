@@ -66,6 +66,18 @@ local function sanitizeUnlockedSpells(data)
 		end
 	end
 
+	-- Existing accounts that already opened the spellbook should receive the
+	-- current starter set after the roster migration, just like a fresh account.
+	if data.spellbookUnlocked == true then
+		for _, starterId in ipairs(SpellDefs.BASE_STARTER or {}) do
+			local product = SpellDefs.GetProduct and SpellDefs.GetProduct(starterId) or nil
+			if product and cleaned[product.id] ~= true then
+				cleaned[product.id] = true
+				changed = true
+			end
+		end
+	end
+
 	for id in pairs(cleaned) do
 		if raw[id] ~= true then
 			changed = true
