@@ -79,6 +79,15 @@ local function cleanSpellView()
 				legacyPanel.Visible = false
 				legacyPanel.Size = UDim2.new(1, 0, 0, 0)
 			end
+		elseif descendant:IsA("TextButton") then
+			local text = trim(descendant.Text)
+			if string.match(text, "^Status:") then
+				descendant.Visible = false
+			elseif text == "Sort: Equipped" then
+				-- With no equipped spell state every entry ties on the old default
+				-- comparator, which falls back to name. Label that behavior honestly.
+				descendant.Text = "Sort: Name"
+			end
 		end
 	end
 
