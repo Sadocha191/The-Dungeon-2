@@ -13,28 +13,53 @@ status: active
 
 Indeks głównych krain i poziomów, do których gracz wyrusza z [[Wiki/Miejsca/Four Peaks|Four Peaks]].
 
-## Obecne definicje poziomów
+## Aktualna kolejność głównych poziomów
 
-W projekcie występują obecnie następujące definicje regionów:
+Na ten moment główna kampania ma następującą kolejność leveli:
 
-- **Ashen Wastes**
-- **Hollow Marsh**
-- **Blightmoor**
-- **Shattered Highlands**
-- **Dreadwood**
+1. **Goblin Lands**
+2. **Desert of Madness**
+3. **Frostbite Valley**
+4. **Hellfire Depths**
+5. **Fields of Ruin**
 
-Nazwy, finalne biome'y, kolejność oraz warstwa lore mogą zmieniać się wraz z rozwojem projektu.
+Lista będzie później rozwijana o kolejne poziomy. Docelowo kampania ma składać się z większej liczby regionów prowadzących gracza coraz bliżej zamku [[Wiki/Postacie/Krol Zla|Króla Zła]].
 
 ## Rola w grze
 
-Regiony są miejscem właściwych runów survivors. Gracz opuszcza lobby, trafia do wrogiego biomu, walczy z narastającą presją przeciwników, eksploruje, zbiera nagrody i materiały, a następnie wraca z progresją do Four Peaks.
+Regiony są miejscem właściwych runów survivors. Gracz opuszcza lobby, trafia do wrogiego biomu, walczy z narastającą presją przeciwników, eksploruje, zbiera nagrody i materiały, a następnie wraca z progresją do [[Wiki/Miejsca/Four Peaks|Four Peaks]].
 
-## Powiązanie z główną fabułą
+Każdy główny level ma własną tematykę, przeciwników, lokacje i finałowego bossa.
 
-Na ten moment nie ma ustalonego przypisania konkretnych regionów do [[Wiki/Frakcje/Generalowie Krola Zla|Generałów Króla Zła]] ani dokładnej trasy prowadzącej fabularnie od Four Peaks do zamku [[Wiki/Postacie/Krol Zla|Króla Zła]].
+## Generałowie jako bossowie głównych leveli
 
-> [!idea] Generałowie jako kotwice fabularne regionów
-> Poszczególne regiony mogą w przyszłości zostać powiązane z generałami pokazanymi w prologu. Dzięki temu kolejne poziomy nie byłyby wyłącznie nowymi biomami, ale etapami długiej drogi do Króla Zła. Konkretne przypisania pozostają do decyzji.
+Każdy główny level kończy się walką z jednym z [[Wiki/Frakcje/Generalowie Krola Zla|Generałów Króla Zła]]. Generał jest najważniejszym bossem danego regionu i stanowi fabularny krok na drodze do Króla Zła.
+
+Dzięki temu kampania ma czytelną strukturę:
+
+**Four Peaks → kolejny region → Generał Króla Zła → powrót i progresja → następny region**
+
+Generałowie są tymi samymi postaciami lub istotami, które pojawiają się wcześniej w [[Wiki/Fabula/Prolog - Upadek Legendarnego Bohatera|prologu]]. Tam Legendarny Bohater pokonuje ich bez większego wysiłku. W głównej kampanii każdy z nich jest pełnoprawnym, wymagającym bossem dla właściwego gracza.
+
+To pozwala bezpośrednio pokazywać wzrost mocy postaci gracza. Z czasem pokonuje ona kolejnych dowódców, których wcześniej mogła oglądać wyłącznie z perspektywy absurdalnie silnego Legendarnego Bohatera.
+
+## Aktualne levele i bossowie
+
+| # | Level | Finałowy boss |
+|---|---|---|
+| 1 | Goblin Lands | Generał Króla Zła — do ustalenia |
+| 2 | Desert of Madness | Generał Króla Zła — do ustalenia |
+| 3 | Frostbite Valley | Generał Króla Zła — do ustalenia |
+| 4 | Hellfire Depths | Generał Króla Zła — do ustalenia |
+| 5 | Fields of Ruin | Generał Króla Zła — do ustalenia |
+
+Imiona, wygląd, moce i dokładna relacja poszczególnych generałów z ich regionami nie są jeszcze ustalone.
+
+## Droga do finału
+
+Pokonywanie generałów stopniowo osłabia siły Króla Zła i prowadzi gracza przez kolejne części świata. Docelowo, po przejściu wielu leveli i pokonaniu jego najważniejszych dowódców, gracz dociera do zamku Króla Zła.
+
+Tam rozpoczyna się [[Wiki/Fabula/Final - Powrot Legendarnego Bohatera|finał historii]], w którym ostatnią przeszkodą przed samym Królem Zła okazuje się pozbawione duszy ciało [[Wiki/Postacie/Legendarny Bohater|Legendarnego Bohatera]].
 
 ## Powiązane strony
 
@@ -42,3 +67,4 @@ Na ten moment nie ma ustalonego przypisania konkretnych regionów do [[Wiki/Frak
 - [[Wiki/Fabula/Prolog - Upadek Legendarnego Bohatera|Prolog]]
 - [[Wiki/Frakcje/Generalowie Krola Zla|Generałowie Króla Zła]]
 - [[Wiki/Postacie/Krol Zla|Król Zła]]
+- [[Wiki/Fabula/Final - Powrot Legendarnego Bohatera|Finał]]
