@@ -8,6 +8,7 @@ tags:
   - postac
   - antagonista
   - prolog
+  - final
 status: concept
 ---
 
@@ -43,11 +44,45 @@ Forma ma reprezentować skrajną, niemal niewyobrażalną grozę i potęgę. W p
 
 Po tym przebłysku Król Zła rzuca spell, który natychmiast zabija Legendarnego Bohatera.
 
+## Próba przejęcia bohatera
+
+Po zwycięstwie Król Zła nie chciał zmarnować ogromnego potencjału Legendarnego Bohatera. Próbował podporządkować go swojej woli i wykorzystać jako własnego sługę — potencjalnie generała potężniejszego od pozostałych.
+
+Nie zdołał jednak przejąć jego świadomości.
+
+Siła woli bohatera była tak wielka, że nawet Król Zła nie potrafił zmusić jego duszy do posłuszeństwa. Aby wykorzystać jego ciało, musiał więc całkowicie usunąć z niego duszę, świadomość, nadzieję, osobowość i własną wolę.
+
+Król Zła zachował tylko puste ciało i jego możliwości bojowe. Od tego momentu może poruszać nim jak kukiełką.
+
+Jest to ważny element charakterystyki antagonisty: potrafił zniszczyć Legendarnego Bohatera, ale **nie był w stanie go złamać**.
+
+## Bodyguard
+
+Przez wieki ciało Legendarnego Bohatera pozostaje pod kontrolą Króla Zła.
+
+W [[Wiki/Fabula/Final - Powrot Legendarnego Bohatera|finale]] zostaje ujawnione jako jego bodyguard i przedostatni boss głównej historii. Właściwy gracz musi najpierw pokonać pozostałość po dawnej legendzie, zanim dostanie możliwość bezpośredniego starcia z Królem Zła.
+
+## Ostateczne starcie
+
+Finalna walka z Królem Zła jest wielofazowa.
+
+### Ludzka forma
+
+Pierwsza faza odbywa się w eleganckiej ludzkiej postaci znanej z prologu.
+
+Najważniejszym payoffem jest to, że właściwy gracz w końcu potrafi naprawdę go zranić. Pasek HP, którego Legendarny Bohater nie był w stanie poruszyć, zaczyna spadać.
+
+### Demoniczna forma
+
+Po przełamaniu ludzkiej postaci Król Zła ujawnia pełną demoniczną formę.
+
+Jest to prawdziwa wersja sylwetki, której cień został pokazany na moment w prologu. Dopiero w finale gracz widzi ją w całości i musi się z nią zmierzyć.
+
 ## Funkcja w historii
 
 Król Zła ustanawia ostateczny punkt odniesienia dla siły w świecie gry. Prolog najpierw pokazuje bohatera jako absolutnie dominującą postać, a dopiero potem pokazuje antagonistę, dla którego nawet taka siła nie stanowi realnego zagrożenia.
 
-Właściwa postać gracza rozpoczyna swoją drogę ze świadomością legendy o kimś, kto kiedyś próbował go pokonać i poległ.
+Cała późniejsza progresja gracza prowadzi do odwrócenia tej sceny: powrotu pod zamek, pokonania pozostałości poprzedniego bohatera i zmuszenia Króla Zła do pokazania pełnej mocy.
 
 ## Nieustalone
 
@@ -59,4 +94,6 @@ Właściwa postać gracza rozpoczyna swoją drogę ze świadomością legendy o 
 - natura jego mocy,
 - nazwa i mechanika spella użytego do zabicia bohatera,
 - relacja z generałami,
-- historia jego zamku i królestwa.
+- dokładna natura mocy pozwalającej kontrolować ciało Legendarnego Bohatera,
+- historia jego zamku i królestwa,
+- dokładna liczba i mechaniki faz finałowej walki.
