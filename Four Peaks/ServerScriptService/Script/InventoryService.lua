@@ -17,7 +17,6 @@ local replicatedModules = ReplicatedStorage:FindFirstChild("ModuleScripts")
 	or ReplicatedStorage:WaitForChild("ModuleScripts", 5)
 	or ReplicatedStorage:WaitForChild("ModuleScript", 5)
 local WeaponConfigs = require(replicatedModules:WaitForChild("WeaponConfigs"))
-local SpellDefs = require(replicatedModules:WaitForChild("SpellDefinitions"))
 
 local function findWeaponCatalog(): ModuleScript?
 	local direct = ServerScriptService:FindFirstChild("WeaponCatalog", true)
@@ -134,7 +133,7 @@ local function findWeaponName(player: Player): string?
 	if starterGear then
 		for _, instance in ipairs(starterGear:GetChildren()) do
 			if isWeaponTool(instance) then return instance.Name end
-		end
+			end
 	end
 	return nil
 end
@@ -259,79 +258,6 @@ local function hasInstance(player: Player, instanceId: string): boolean
 	return PlayerStateStore.GetWeaponInstance(player, instanceId) ~= nil
 end
 
-local function getPayloadSpellProductId(payload: any): string?
-	local raw = payload.productId or payload.id or payload.spellId
-	local productId = SpellDefs.NormalizeLoadoutProductId(raw)
-	if typeof(productId) == "string" and productId ~= "" then return productId end
-	return nil
-end
-
-local function saveSpellLoadout(player: Player, nextLoadout: {any})
-	local validated = {}
-	if PlayerData.SetSpellLoadout then validated = PlayerData.SetSpellLoadout(player, nextLoadout) end
-	if PlayerStateStore.SetSpellLoadout then PlayerStateStore.SetSpellLoadout(player, validated) end
-	return validated
-end
-
-local function handleSpellLoadoutAction(player: Player, payload: any): boolean
-	local actionType = tostring(payload.type or "")
-	if actionType ~= "spellLoadoutEquip"
-		and actionType ~= "spellLoadoutUnequip"
-		and actionType ~= "spellLoadoutMove"
-		and actionType ~= "spellLoadoutSet"
-	then
-		return false
-	end
-
-	local data = PlayerData.Get(player)
-	data.spellsUnlocked = data.spellsUnlocked or {}
-	local current = PlayerData.ResolveSpellLoadout and PlayerData.ResolveSpellLoadout(player)
-		or (PlayerData.GetSpellLoadout and PlayerData.GetSpellLoadout(player))
-		or {}
-	local nextLoadout = {}
-	for _, productId in ipairs(current) do table.insert(nextLoadout, productId) end
-
-	if actionType == "spellLoadoutSet" then
-		saveSpellLoadout(player, payload.loadout or {})
-		return true
-	end
-
-	local productId = getPayloadSpellProductId(payload)
-	local product = productId and SpellDefs.GetProduct(productId) or nil
-	if not product or data.spellsUnlocked[productId] ~= true then return true end
-
-	if actionType == "spellLoadoutEquip" then
-		local familySeen = {}
-		for _, existingId in ipairs(nextLoadout) do
-			local existingProduct = SpellDefs.GetProduct(existingId)
-			if existingProduct then familySeen[existingProduct.familyId] = true end
-		end
-		if not familySeen[product.familyId] then table.insert(nextLoadout, productId) end
-	elseif actionType == "spellLoadoutUnequip" then
-		local filtered = {}
-		for _, existingId in ipairs(nextLoadout) do
-			if existingId ~= productId then table.insert(filtered, existingId) end
-		end
-		nextLoadout = filtered
-	elseif actionType == "spellLoadoutMove" then
-		local direction = math.clamp(math.floor(tonumber(payload.direction) or 0), -1, 1)
-		if direction ~= 0 then
-			for index, existingId in ipairs(nextLoadout) do
-				if existingId == productId then
-					local target = math.clamp(index + direction, 1, #nextLoadout)
-					if target ~= index then
-						nextLoadout[index], nextLoadout[target] = nextLoadout[target], nextLoadout[index]
-					end
-					break
-				end
-			end
-		end
-	end
-
-	saveSpellLoadout(player, nextLoadout)
-	return true
-end
-
 InventoryAction.OnServerEvent:Connect(function(player: Player, payload: any)
 	if typeof(payload) ~= "table" then return end
 	local actionType = tostring(payload.type or "")
@@ -340,16 +266,16 @@ InventoryAction.OnServerEvent:Connect(function(player: Player, payload: any)
 		return
 	end
 
+	-- Spell loadouts were removed. Ignore requests from stale clients instead of
+	-- writing the legacy fields back into the player profile.
+	if string.sub(actionType, 1, 12) == "spellLoadout" then
+		return
+	end
+
 	local allowed = beginMutation(player)
 	if not allowed then return end
 
 	local callOk, callError = pcall(function()
-		if handleSpellLoadoutAction(player, payload) then
-			confirmMutation(player, "inventory_spell_loadout")
-			sendInventory(player)
-			return
-		end
-
 		local instanceId = tostring(payload.id or "")
 		if instanceId == "" then return end
 		local state = PlayerStateStore.Get(player) or PlayerStateStore.Load(player)

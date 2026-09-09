@@ -11,6 +11,11 @@ local NpcService = require(npcServiceModule)
 local SpellTargeting = {}
 
 local WORLD_HIT_PADDING = 0.1
+local COLLISION_RADIUS_BY_RANK = {
+	Elite = 4.25,
+	MiniBoss = 6,
+	Boss = 8,
+}
 
 local function addIgnoreInstance(ignore, instance)
 	if instance then
@@ -57,6 +62,26 @@ function SpellTargeting.GetEnemyPosition(model)
 	end
 	local root = SpellTargeting.GetEnemyRoot(model)
 	return root and root.Position or nil
+end
+
+function SpellTargeting.GetEnemyCollisionRadius(model, fallbackRadius)
+	local fallback = math.max(0.1, tonumber(fallbackRadius) or 3.3)
+	if typeof(model) ~= "Instance" then
+		return fallback
+	end
+
+	local authored = tonumber(model:GetAttribute("SpellHitRadius"))
+	if authored then
+		return math.max(fallback, authored)
+	end
+
+	local rank = tostring(model:GetAttribute("EnemyRank") or "Normal")
+	local rankRadius = COLLISION_RADIUS_BY_RANK[rank]
+	if not rankRadius then
+		return fallback
+	end
+	local visualScale = math.max(0.1, tonumber(model:GetAttribute("NpcVisualScale")) or 1)
+	return math.max(fallback, rankRadius * visualScale)
 end
 
 function SpellTargeting.HasLineOfSight(pos, model)

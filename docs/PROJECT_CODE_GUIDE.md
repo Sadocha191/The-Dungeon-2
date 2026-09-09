@@ -467,7 +467,7 @@ W aktywnej instancji Studio `Poziom` w `ReplicatedStorage.Remotes` potwierdzono:
 | `PartyUpgradePicked` | Client -> Server | Klient wysyła; handler wymaga dalszego sprawdzenia | Multiplayer upgrade UI | Wybór upgrade'u w party; po stronie serwera nie był jednoznaczny w szybkim skanie. |
 | `PartyXPUpdate` | Server -> Client | `ProgressService.lua`/party progress | Party HUD | XP party. |
 | `DamageIndicatorEvent` | Server -> Client | `NpcService.lua` | `DamageIndicators.lua` | Liczby obrażeń. |
-| `SpellVFXEvent` | Server -> Client | `SpellService.lua` | `SpellVFXClient.lua` | Efekty spellów. |
+| `SpellVFXEvent` | Server -> Client | `SpellService.lua` | `SpellVFXClient.lua`, `AuthoredSpellVFXClient.lua` | Generyczne i authored VFX spellów; authored cast/projectile/impact/moving-zone oraz zakończenie pocisku po autorytatywnym trafieniu. |
 | `ClientReady` | Client -> Server | `RunReadyGate.server.lua` | `LoadingClient.lua` | Klient gotowy do startu. |
 | `WeaponSwingVFX` | Server -> Client | `WeaponCombat.server.lua` | `WeaponClient.lua`, `WeaponVFX.lua` | Serwer wysyła `attackerUserId`, `weaponId`, `element`, `pos` i `lookAt`; każdy klient pokazuje lekki impact VFX, a tylko klient wskazanego atakującego animuje własną unoszącą się broń. |
 | `ReportClientError` | Client -> Server | `ErrorBootstrap`/reporter | `ClientErrorReporter.lua` | Raport błędu klienta. |

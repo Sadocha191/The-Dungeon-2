@@ -482,7 +482,8 @@ local function updatePresentation(entry, now: number, renderTime: number)
 		up = Vector3.xAxis
 	end
 	local rootFrame = CFrame.lookAt(motion.pos, motion.pos + forward, up)
-	record.model:PivotTo(rootFrame * poseFor(entry, motion, now) * record.rootToPivot)
+	local rootMotion = record.rootMotionBone and record.rootMotionBone.Transform or CFrame.identity
+	record.model:PivotTo(rootFrame * poseFor(entry, motion, now) * rootMotion * record.rootToPivot)
 	local stateName = animationState(entry, motion)
 	pool:PlayAnimation(record, stateName, entry.stateChangedAt)
 	if stateName == "run" and record.currentTrack then

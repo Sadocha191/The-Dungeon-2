@@ -10,6 +10,7 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Archiwa
 
+- [`2026-09`](docs/changelog/CHANGELOG_AI_2026-09.md)
 - [`2026-08`](docs/changelog/CHANGELOG_AI_2026-08.md)
 - [`2026-07`](docs/changelog/CHANGELOG_AI_2026-07.md)
 - [`2026-07 — player data safety`](docs/changelog/CHANGELOG_AI_2026-07_PLAYER_DATA_SAFETY.md)
@@ -18,6 +19,9 @@ Ten plik jest lekkim indeksem. Pełne wpisy znajdują się w plikach miesięczny
 
 ## Ostatnie wpisy z importowanej historii
 
+- **2026-09-01** — LightningVFX oraz sekwencyjne, przywiązane do gracza Gates of Babilon z poprawionym trafianiem bossów
+- **2026-08-31** — Naprawa wiązania animacji pooled NPC i adapter root-motion dla authored rigu Slime
+- **2026-08-31** — Integracja PR #164: lobby documented spells, sanitizacja assetów NPC i Tornado podążające po terenie
 - **2026-08-30** — Integracja PR #163: 26 bazowych czarów, 14 fuzji, authored VFX i centralna walidacja 120 pocisków
 - **2026-08-19** — Multi-level dungeon runtime: pięć Roblox Packages, LevelConfig, Hollow Marsh i snapshot Level2
 - **2026-08-05** — Integracja PR #160: natywne trasy naziemnych NPC, bezpieczny handoff kolejki i walidacja 100 NPC

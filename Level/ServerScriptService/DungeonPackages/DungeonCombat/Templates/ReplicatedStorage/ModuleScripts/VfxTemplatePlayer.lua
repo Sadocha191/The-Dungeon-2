@@ -69,7 +69,6 @@ local function placeClone(clone, worldCFrame, anchorTo)
 		clone.CFrame = worldCFrame
 
 		if anchorTo and anchorTo:IsA("BasePart") then
-			clone.CFrame = anchorTo.CFrame
 			weldPartToAnchor(clone, anchorTo)
 		else
 			clone.Anchored = true

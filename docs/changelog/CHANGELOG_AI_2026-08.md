@@ -1,5 +1,82 @@
 # Changelog AI — 2026-08
 
+## 2026-08-31 — Client NPC animation binding and Slime rig bridge
+
+### Root causes and changes
+
+- `NpcVisualPool` loaded every `AnimationTrack` while the cloned rig was still detached from the DataModel. Roblox returned tracks, but they remained at `Length=0` and never bound to the rig joints after the model was parented later.
+- Pooled visuals are now named, parked below the world and parented under `workspace.NpcVisuals` before `Animator:LoadAnimation()` runs. Track discovery, state selection, priorities, looping and pool reuse remain unchanged.
+- The authored Slime clip has a second content defect: its only dynamic channel targets `slime 2 > Armature > Bone`, while the template contained `RootPart > Bone` and its visible MeshParts are connected outside that bone branch. The pool now restores the missing `Armature` bridge once when a Slime visual is created, and the existing presentation update applies the animated bone transform as root motion to the visible model.
+- Updated the shared `NpcVisualPool` and `NpcPresentation` package templates in both `Level/` and `Level2/`, and synchronized the active `Level` Studio template sources.
+
+### Validation
+
+- A controlled A/B test on the same Golem rig reproduced the bug: loading before parenting produced `Length=0` and zero moving joints; parenting before loading produced `Length=1.633` and 19 moving joints.
+- A fresh `Level` Play reported 11 playing active-NPC tracks, all 11 with positive lengths and zero length-zero tracks. Active Slimes received the bridge and their authored bone transform cycled between approximately `-3.5` and `+3.3` degrees during the sample.
+- A regression probe through the real `NpcVisualPool` API loaded and played authored clips for Slime, Goblin, Golem, Ent, Bat, Cauldron, Stump and Ent_Fat. Their lengths were `0.650`, `0.580`, `1.633`, `1.967`, `1.160`, `1.180`, `0.653` and `1.475` seconds; each rig reported changing animation bones.
+- Both modified active `Level` Studio sources passed `loadstring`. `NpcVisualPool` matched the repository by normalized length and rolling checksum; `NpcPresentation` matched after ignoring Studio's one additional trailing newline.
+- No new NPC error appeared in Output. The existing unrelated `Hybrid Terrain Hex Generator:16` toolbar/plugin-context error remained.
+
+### Runtime loops, cost and cleanup
+
+- No `Heartbeat`, `Stepped`, `RenderStepped`, task or event connection was added. The fix uses the existing staggered pool prewarm and the existing single client NPC `RenderStepped` owner.
+- Parenting occurs once per visual creation, before its tracks are loaded. The Slime-only runtime addition is one bone-transform read and one `CFrame` multiplication inside an update that already performs one `PivotTo`; it adds no second model write or per-NPC connection.
+- Release continues to stop and rewind cached tracks, clear transient VFX/sounds and park the rig. No remote, persistent-data field, DataStore key, teleport format or `_G` dependency changed.
+
+### Not verified, risks and rollback
+
+- `Normal/Grzyb` and `Elite/Grzyb` contain no authored `Animation`, animation ID, bones or Motor6Ds, so there is no source animation for the runtime to play. Adding a real Grzyb animation remains an authored-content task rather than a safe code fallback.
+- A target-scale MicroProfiler capture and real multi-client session were not repeated. The change does not add a loop or increase the number of model writes, and the regression probe covered all eight templates that currently contain or configure authored animation data.
+- `Level2` Studio was not connected; its two package sources have exact repository parity with `Level` but still require package publication/Get Latest in Hollow Marsh.
+- Roll back by restoring the prior `NpcVisualPool.lua` and `NpcPresentation.client.lua` in both mirrors and the matching active `Level` Studio sources. This restores the previous length-zero pooled tracks and removes the Slime root-motion bridge; no saved data or authored asset is changed.
+
+## 2026-08-31 — Integration of PR #164 lobby spells, NPC asset sanitation and grounded Tornado VFX
+
+### Summary and architecture
+
+- Applied PR #164 (`fix/lobby-documented-spells`) to local `main`. `Four Peaks` now uses the same documented spell catalog as the two dungeon package mirrors: 26 base spells, 14 fusions, 40 ordered spell definitions and 52 shop products.
+- The lobby migration normalizes unlocked product IDs, removes unknown prototype IDs, grants the current five starter products to accounts that already opened the spellbook and clears the retired pre-run spell-loadout selection. It changes no DataStore name, profile schema key or teleport payload; dungeon entry continues to build the default runtime spell set from unlocked products.
+- Removed the lobby's loadout mutation handlers and presentation while preserving the spell collection, shop and codex data. Stale `spellLoadout*` client actions are ignored without entering the economy mutation/save path.
+- Added `NpcAssetSanitizer` to both `DungeonNPC` package mirrors. One shared module owns artifact removal/profiling, while one server and one client bootstrap watch the bounded enemy-template category tree.
+- Extended the existing authored-spell VFX renderer so Tornado moving zones project their spawn and each movement step to the ground. `RaycastParams` is allocated once per moving zone and reused.
+- Integration hardening removed the PR's new `_G.Spells_SanitizeUnlocked` dependency and its optional callers. `SpellService` remains the single migration owner through `PlayerAdded` plus an existing-player pass; existing legacy spell hooks were not refactored in this integration.
+
+### Repository files and Studio synchronization
+
+- Updated five `Four Peaks` sources: `SpellDefinitions`, `InventoryService`, `InventorySnapshot`, `SpellService` and `InventorySpellTabReference`. The PR's only `WitchNPC` delta was the removed `_G` caller, so its final source remains identical to the pre-PR version.
+- Updated `AuthoredSpellVFXClient` in both `Level/` and `Level2/` `DungeonCombat` mirrors.
+- Added the shared `NpcAssetSanitizer` module plus server/client bootstrap scripts to both `Level/` and `Level2/` `DungeonNPC` mirrors.
+- Synchronized all five changed lobby sources to connected Studio `Four Peaks`, revalidated unchanged `WitchNPC`, and synchronized all four affected package-template sources to connected Studio `Level`. Normalized source parity matched the repository for all nine changed scripts plus `WitchNPC`.
+- The new `Level` package template server/client scripts are disabled in the linked template tree and carry their destination metadata; `DungeonPackageBootstrap` enables only installed runtime clones.
+- A connected `Level2` Studio was unavailable, so its repo sources were verified by exact Git blob parity with `Level` but were not published/get-latest synchronized to Hollow Marsh.
+
+### Validation
+
+- `loadstring` compile checks passed for all ten synchronized Studio sources. `git diff --check` passed for the PR diff before changelog integration.
+- The lobby spell contract probe returned 26 base spells, 14 combos, 40 ordered spells, 52 shop products, five starters and zero invalid combo/result references.
+- An isolated sanitizer probe removed an editor-artifact folder plus a keyframe sequence, retained the gameplay part, marked the model and treated a second pass as a no-op.
+- `Four Peaks` smoke loaded the new catalog on the client. The test profile contained nine valid and zero invalid unlocked products after migration, with an empty retired loadout and `spellLoadoutConfigured=false`. The Spells tab showed no visible equipped-loadout panel, Equip/Unequip/Move controls or slot badges.
+- `Level` smoke installed 156 package roots and enabled 112 runtime scripts. Both sanitizer runtimes loaded; all 11 replicated enemy models were marked sanitized. No removable editor container was present in those active templates, while Studio-only profiling reported the six expected high-`CFrameValue` assets.
+- A controlled authored Tornado event created `TornadoVFXRuntime`; after movement its pivot matched the terrain raycast hit with `groundError=0`.
+- No PR-specific error appeared. Existing unrelated output remained from `Hybrid Terrain Hex Generator:16` in `Level` and the `BlacksmithUI` wait for `PassiveDesc` in `Four Peaks`.
+
+### Runtime loops, cost and cleanup
+
+- No new `Heartbeat`, `Stepped` or `RenderStepped` connection was added. The existing single authored-VFX `RenderStepped` now performs one reused-params ground raycast per active moving zone per frame; expired or destroyed zones are removed by the existing reverse iteration.
+- Sanitization performs one `GetDescendants()` pass per newly observed NPC template and then marks the model idempotently. It uses one `ChildAdded` connection per bounded category plus one on the enemy root on each side; those connections and the watched-category tables share the place/client lifetime and do not scale with spawned NPCs.
+- Studio-only heavy-asset profiling adds a second one-time descendant pass per NPC type; production returns before that profiling scan.
+- Lobby spell migration uses one bounded deferred task per joining/existing player, O(unlocked product IDs), and saves only when normalization, starter grant or legacy-loadout cleanup changes the profile.
+- Inventory spell cleanup is event-driven. A deferred, deduplicated GUI scan runs only when the Spells tab is active and the authored inventory hierarchy changes; it adds no polling or frame loop.
+- No per-NPC frame connection, new remote, new DataStore key, new `TeleportData` field or new `_G` dependency was added.
+
+### Not verified, risks and rollback
+
+- A real two-client session, production DataStore session, target-scale MicroProfiler capture and natural long-run Tornado cast were not repeated. The VFX path was validated with a controlled event in one client.
+- Hollow Marsh (`Level2`) was not connected, so package publication and `Get Latest Package` there remain release steps despite exact repo mirror parity.
+- Profile sanitation intentionally discards unknown historical spell product IDs and clears the retired saved loadout. Reverting code does not reconstruct values already removed from a saved profile; restoration would require a prior DataStore version/backup. The current unlocked products remain intact.
+- The six heavy NPC warnings expose authored `CFrameValue` payloads but do not delete them unless they are inside a recognized editor-artifact container. Further asset reduction should be an authored-content cleanup, not an expanded runtime deletion heuristic.
+- Roll back code by restoring the 13 finally changed PR files to the pre-PR state, removing the six new sanitizer files and restoring the nine changed Studio sources. Remove the three new `Level` package-template objects. If packages are published later, roll back `DungeonNPC`/`DungeonCombat` versions together in every dungeon Place.
+
 ## 2026-08-30 — Integration of PR #163 documented spell roster
 
 ### Summary and architecture

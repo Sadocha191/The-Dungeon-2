@@ -1,14 +1,18 @@
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local localPlayer = Players.LocalPlayer
 local moduleFolder = ReplicatedStorage:WaitForChild("ModuleScripts")
 local VfxTemplatePlayer = require(moduleFolder:WaitForChild("VfxTemplatePlayer"))
 local SpellVFXEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("SpellVFXEvent")
 local PauseState = ReplicatedStorage:FindFirstChild("PauseState") or ReplicatedStorage:WaitForChild("PauseState", 5)
 
 local activeProjectiles = {}
+local activeProjectilesById = {}
 local activeMovingZones = {}
 local warnedMissingAssets = {}
+local targetVisualCache = setmetatable({}, { __mode = "k" })
 
 local function isPaused()
 	return PauseState ~= nil and PauseState.Value == true
@@ -30,7 +34,7 @@ local function resolveTemplate(name)
 	return template
 end
 
-local function resolveTargetRoot(target)
+local function resolveInstanceRoot(target)
 	if typeof(target) ~= "Instance" or not target.Parent then return nil end
 	if target:IsA("BasePart") then return target end
 	if target:IsA("Model") then
@@ -42,9 +46,75 @@ local function resolveTargetRoot(target)
 	return nil
 end
 
+local function resolveNpcVisualRoot(target)
+	if typeof(target) ~= "Instance" then return nil end
+	local sourceModel = target:IsA("Model") and target or target:FindFirstAncestorOfClass("Model")
+	local npcId = sourceModel and sourceModel:GetAttribute("NpcId")
+	if npcId == nil then return nil end
+
+	local cached = targetVisualCache[target]
+	if cached and cached.visual and cached.visual.Parent
+		and cached.visual:GetAttribute("NpcId") == npcId
+		and cached.root and cached.root.Parent
+	then
+		return cached.root
+	end
+
+	local visualFolder = workspace:FindFirstChild("NpcVisuals")
+	if not visualFolder then return nil end
+	for _, visual in ipairs(visualFolder:GetChildren()) do
+		if visual:IsA("Model") and visual:GetAttribute("NpcId") == npcId then
+			local root = resolveInstanceRoot(visual)
+			if root then
+				targetVisualCache[target] = { visual = visual, root = root }
+				return root
+			end
+		end
+	end
+	return nil
+end
+
+local function resolveTargetRoot(target)
+	return resolveNpcVisualRoot(target) or resolveInstanceRoot(target)
+end
+
 local function getTargetPosition(target)
 	local root = resolveTargetRoot(target)
 	return root and root.Position or nil
+end
+
+local function createGroundRaycastParams()
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local excluded = {}
+	local character = localPlayer and localPlayer.Character
+	if character then
+		table.insert(excluded, character)
+	end
+	local enemies = workspace:FindFirstChild("Enemies")
+	if enemies then
+		table.insert(excluded, enemies)
+	end
+	local npcVisuals = workspace:FindFirstChild("NpcVisuals")
+	if npcVisuals then
+		table.insert(excluded, npcVisuals)
+	end
+	local clientVfx = workspace:FindFirstChild("ClientVFX")
+	if clientVfx then
+		table.insert(excluded, clientVfx)
+	end
+	params.FilterDescendantsInstances = excluded
+	return params
+end
+
+local function projectToGround(position, params)
+	if typeof(position) ~= "Vector3" then return position end
+	local result = workspace:Raycast(
+		position + Vector3.new(0, 50, 0),
+		Vector3.new(0, -180, 0),
+		params
+	)
+	return result and result.Position or position
 end
 
 local function setWorldCFrame(instance, cframe)
@@ -81,7 +151,8 @@ end
 local function spawnAuthoredCast(payload)
 	local cframe = payload.cframe
 	if typeof(cframe) ~= "CFrame" then return end
-	playTemplate(payload.assetName, cframe, payload.duration or 0.45, nil, payload.scale)
+	local anchor = payload.lockToAnchor == true and resolveTargetRoot(payload.anchor) or nil
+	playTemplate(payload.assetName, cframe, payload.duration or 0.45, anchor, payload.scale)
 end
 
 local function spawnAuthoredImpact(payload)
@@ -109,7 +180,8 @@ local function spawnAuthoredProjectile(payload)
 	local clone = playTemplate(payload.assetName, CFrame.lookAt(position, position + direction), life, nil, payload.scale)
 	if not clone then return end
 
-	table.insert(activeProjectiles, {
+	local projectile = {
+		projectileId = payload.projectileId,
 		instance = clone,
 		position = position,
 		direction = direction,
@@ -119,7 +191,22 @@ local function spawnAuthoredProjectile(payload)
 		target = payload.target,
 		homing = payload.homing == true,
 		homingTurnRate = math.max(0.1, tonumber(payload.homingTurnRate) or 8),
-	})
+	}
+	table.insert(activeProjectiles, projectile)
+	if projectile.projectileId ~= nil then
+		activeProjectilesById[projectile.projectileId] = projectile
+	end
+end
+
+local function endAuthoredProjectile(payload)
+	local projectileId = payload.projectileId
+	local projectile = projectileId ~= nil and activeProjectilesById[projectileId] or nil
+	if not projectile then return end
+	activeProjectilesById[projectileId] = nil
+	projectile.ended = true
+	if projectile.instance and projectile.instance.Parent then
+		projectile.instance:Destroy()
+	end
 end
 
 local function spawnMovingZone(payload)
@@ -130,6 +217,8 @@ local function spawnMovingZone(payload)
 	direction = Vector3.new(direction.X, 0, direction.Z)
 	if direction.Magnitude <= 0.01 then direction = Vector3.new(0, 0, -1) else direction = direction.Unit end
 	local duration = math.max(0.1, tonumber(payload.duration) or 4)
+	local groundParams = createGroundRaycastParams()
+	startPos = projectToGround(startPos, groundParams)
 	local clone = playTemplate(payload.assetName, CFrame.lookAt(startPos, startPos + direction), duration, nil, payload.scale)
 	if not clone then return end
 
@@ -141,6 +230,7 @@ local function spawnMovingZone(payload)
 		endTime = workspace:GetServerTimeNow() + duration,
 		target = payload.target,
 		followTarget = payload.followTarget == true,
+		groundParams = groundParams,
 	})
 end
 
@@ -153,6 +243,8 @@ SpellVFXEvent.OnClientEvent:Connect(function(arg1)
 		spawnAuthoredImpact(arg1)
 	elseif action == "authoredProjectile" then
 		spawnAuthoredProjectile(arg1)
+	elseif action == "authoredProjectileEnd" then
+		endAuthoredProjectile(arg1)
 	elseif action == "authoredMovingZone" then
 		spawnMovingZone(arg1)
 	end
@@ -163,7 +255,8 @@ RunService.RenderStepped:Connect(function(dt)
 
 	for index = #activeProjectiles, 1, -1 do
 		local projectile = activeProjectiles[index]
-		if not projectile.instance or not projectile.instance.Parent then
+		if projectile.ended or not projectile.instance or not projectile.instance.Parent then
+			if projectile.projectileId ~= nil then activeProjectilesById[projectile.projectileId] = nil end
 			table.remove(activeProjectiles, index)
 			continue
 		end
@@ -185,6 +278,7 @@ RunService.RenderStepped:Connect(function(dt)
 		projectile.traveled += step
 		if projectile.traveled >= projectile.range then
 			projectile.instance:Destroy()
+			if projectile.projectileId ~= nil then activeProjectilesById[projectile.projectileId] = nil end
 			table.remove(activeProjectiles, index)
 			continue
 		end
@@ -207,7 +301,8 @@ RunService.RenderStepped:Connect(function(dt)
 				if desired.Magnitude > 0.01 then zone.direction = desired.Unit end
 			end
 		end
-		zone.position += zone.direction * zone.speed * dt
+		local nextPosition = zone.position + zone.direction * zone.speed * dt
+		zone.position = projectToGround(nextPosition, zone.groundParams)
 		setWorldCFrame(zone.instance, CFrame.lookAt(zone.position, zone.position + zone.direction))
 	end
 end)

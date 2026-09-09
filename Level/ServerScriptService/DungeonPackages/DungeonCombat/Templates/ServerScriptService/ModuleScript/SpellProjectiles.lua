@@ -7,11 +7,14 @@ local SpellProjectiles = {}
 local callbacks = nil
 local activeProjectiles = {}
 local heartbeatConnection = nil
+local nextProjectileId = 0
 
 local REQUIRED_CALLBACKS = {
 	"broadcastProjectile",
+	"broadcastProjectileEnd",
 	"extractVisualStats",
 	"getEnemiesInRadius",
+	"getEnemyCollisionRadius",
 	"getEnemyPosition",
 	"getNearestEnemy",
 	"hitEnemy",
@@ -63,31 +66,53 @@ local function applyProjectileHit(projectile, enemy)
 end
 
 local function stepProjectile(projectile, dt)
-	if not callbacks.isPlayerRunActive(projectile.player) then return false end
+	if not callbacks.isPlayerRunActive(projectile.player) then return false, "inactive" end
 	if callbacks.isPaused() then return true end
 
 	local remainingDistance = projectile.range - projectile.traveled
-	if remainingDistance <= 1e-4 then return false end
+	if remainingDistance <= 1e-4 then return false, "range" end
 
 	updateHomingDirection(projectile, dt)
 	local step = math.min(projectile.speed * dt, remainingDistance)
+	local previousPos = projectile.pos
 	projectile.traveled += step
 	projectile.pos += projectile.dir * step
+
+	local target = projectile.target
+	local targetPos = target and callbacks.getEnemyPosition(target)
+	if target and targetPos and not projectile.hit[target]
+		and SpellTargeting.DistancePointToSegment(targetPos, previousPos, projectile.pos) <= projectile.targetCollisionRadius
+	then
+		applyProjectileHit(projectile, target)
+		if projectile.remainingPierce <= 0 then return false, "hit" end
+		projectile.remainingPierce -= 1
+	end
 
 	local enemy = callbacks.getNearestEnemy(projectile.pos, projectile.collisionRadius)
 	local enemyPos = enemy and callbacks.getEnemyPosition(enemy)
 	if enemy and enemyPos and (enemyPos - projectile.pos).Magnitude <= projectile.collisionRadius and not projectile.hit[enemy] then
 		applyProjectileHit(projectile, enemy)
-		if projectile.remainingPierce <= 0 then return false end
+		if projectile.remainingPierce <= 0 then return false, "hit" end
 		projectile.remainingPierce -= 1
 	end
 
-	return projectile.traveled + 1e-4 < projectile.range
+	if projectile.traveled + 1e-4 >= projectile.range then return false, "range" end
+	return true
 end
 
 local function stepProjectiles(dt)
 	for index = #activeProjectiles, 1, -1 do
-		if not stepProjectile(activeProjectiles[index], dt) then table.remove(activeProjectiles, index) end
+		local projectile = activeProjectiles[index]
+		local keep, reason = stepProjectile(projectile, dt)
+		if not keep then
+			callbacks.broadcastProjectileEnd({
+				projectileId = projectile.projectileId,
+				pos = projectile.pos,
+				reason = reason,
+				stats = projectile.stats,
+			})
+			table.remove(activeProjectiles, index)
+		end
 	end
 	stopLoopIfIdle()
 end
@@ -117,7 +142,12 @@ function SpellProjectiles.Fire(config)
 	if unobstructedRange <= 0.05 then return end
 
 	local stats = config.stats or {}
+	local collisionRadius = math.max(0.1, tonumber(stats.collisionRadius) or 3.3)
+	local targetCollisionRadius = config.target and callbacks.getEnemyCollisionRadius(config.target, collisionRadius) or collisionRadius
+	nextProjectileId += 1
+	local projectileId = nextProjectileId
 	callbacks.broadcastProjectile({
+		projectileId = projectileId,
 		origin = origin,
 		dir = direction,
 		speed = speed,
@@ -126,10 +156,12 @@ function SpellProjectiles.Fire(config)
 		target = config.target,
 		homing = config.homing == true,
 		homingTurnRate = tonumber(config.homingTurnRate) or 8,
+		collisionRadius = targetCollisionRadius,
 		stats = callbacks.extractVisualStats(stats),
 	})
 
 	table.insert(activeProjectiles, {
+		projectileId = projectileId,
 		player = config.player,
 		pos = origin,
 		dir = direction,
@@ -140,7 +172,8 @@ function SpellProjectiles.Fire(config)
 		traveled = 0,
 		remainingPierce = math.max(0, math.floor(config.pierce or 0)),
 		hit = {},
-		collisionRadius = tonumber(stats.collisionRadius) or 3.3,
+		collisionRadius = collisionRadius,
+		targetCollisionRadius = targetCollisionRadius,
 		target = config.target,
 		homing = config.homing == true,
 		homingTurnRate = tonumber(config.homingTurnRate) or 8,

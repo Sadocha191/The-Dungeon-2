@@ -27,6 +27,13 @@ local SEARCH_NAMES = {
 	death = { "death", "dead", "died" },
 }
 
+local ROOT_MOTION_BRIDGE_BY_KEY = {
+	["Normal/Slime"] = {
+		bridgeBoneName = "Armature",
+		animatedBoneName = "Bone",
+	},
+}
+
 local TRANSIENT_CLASSES = {
 	Attachment = true,
 	Beam = true,
@@ -67,6 +74,29 @@ local function resolveRoot(model: Model): BasePart?
 		return model.PrimaryPart
 	end
 	return model:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function prepareRootMotionBridge(model: Model, descriptor): Bone?
+	local bridgeConfig = ROOT_MOTION_BRIDGE_BY_KEY[descriptorKey(descriptor)]
+	if not bridgeConfig then
+		return nil
+	end
+
+	local animatedBone = model:FindFirstChild(bridgeConfig.animatedBoneName, true)
+	if not animatedBone or not animatedBone:IsA("Bone") then
+		return nil
+	end
+
+	local currentParent = animatedBone.Parent
+	if not currentParent or not currentParent:IsA("BasePart") or currentParent:IsA("MeshPart") then
+		return nil
+	end
+
+	local bridgeBone = Instance.new("Bone")
+	bridgeBone.Name = bridgeConfig.bridgeBoneName
+	bridgeBone.Parent = currentParent
+	animatedBone.Parent = bridgeBone
+	return animatedBone
 end
 
 local function ensureAnimator(model: Model): Animator
@@ -328,6 +358,17 @@ function NpcVisualPool:_create(descriptor, prewarming: boolean)
 		return nil
 	end
 	model.PrimaryPart = root
+	local rootMotionBone = prepareRootMotionBridge(model, descriptor)
+
+	-- Animator tracks loaded while the cloned rig is detached from the DataModel
+	-- stay at Length 0 and never bind to its joints. Park and parent the visual
+	-- before loading tracks so prewarmed NPCs receive working AnimationTracks.
+	self.nextVisualIndex += 1
+	local visualIndex = self.nextVisualIndex
+	model.Name = string.format("NpcVisual_%s_%d", tostring(descriptor.type or "Enemy"), visualIndex)
+	model:SetAttribute("NpcPoolActive", false)
+	model:PivotTo(CFrame.new(0, PARK_Y - (visualIndex * PARK_SPACING), 0))
+	model.Parent = self.visualFolder
 
 	local animator = ensureAnimator(model)
 	local configuredFolder = Instance.new("Folder")
@@ -349,15 +390,15 @@ function NpcVisualPool:_create(descriptor, prewarming: boolean)
 		tracksByState[stateName] = variants
 	end
 
-	self.nextVisualIndex += 1
 	local yaw = tonumber(descriptor.facingYawDegrees) or tonumber(model:GetAttribute("NpcFacingYawDegrees")) or 0
 	local rootToPivot = root.CFrame:ToObjectSpace(model:GetPivot())
 	local record = {
-		index = self.nextVisualIndex,
+		index = visualIndex,
 		key = descriptorKey(descriptor),
 		descriptor = descriptor,
 		model = model,
 		root = root,
+		rootMotionBone = rootMotionBone,
 		rootToPivot = CFrame.Angles(0, math.rad(yaw), 0) * rootToPivot,
 		tracksByState = tracksByState,
 		vfxEnabled = {},
@@ -375,9 +416,6 @@ function NpcVisualPool:_create(descriptor, prewarming: boolean)
 		end
 	end
 
-	model.Name = string.format("NpcVisual_%s_%d", tostring(descriptor.type or "Enemy"), record.index)
-	model:SetAttribute("NpcPoolActive", false)
-	model.Parent = self.visualFolder
 	self:_setVfxActive(record, false)
 	self:_park(record)
 

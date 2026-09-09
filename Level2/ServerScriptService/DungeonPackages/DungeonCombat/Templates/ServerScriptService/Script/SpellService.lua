@@ -243,6 +243,16 @@ SpellProjectiles.Configure({
 			SpellVisuals.Broadcast("projectile", payload)
 		end
 	end,
+	broadcastProjectileEnd = function(payload)
+		local spellId = payload.stats and payload.stats.spellId
+		if spellId == "FireBall" or spellId == "GatesOfBabilon" or spellId == "FrozenArsenal" then
+			SpellVisuals.Broadcast("authoredProjectileEnd", {
+				projectileId = payload.projectileId,
+				pos = payload.pos,
+				reason = payload.reason,
+			})
+		end
+	end,
 	extractVisualStats = function(stats)
 		local out = SpellVisuals.ExtractStats(stats)
 		out.impactRadius = stats.impactRadius
@@ -250,6 +260,7 @@ SpellProjectiles.Configure({
 		return out
 	end,
 	getEnemiesInRadius = getEnemiesInRadius,
+	getEnemyCollisionRadius = SpellTargeting.GetEnemyCollisionRadius,
 	getEnemyPosition = getEnemyPosition,
 	getNearestEnemy = getNearestEnemy,
 	hitEnemy = hitEnemy,
@@ -314,23 +325,56 @@ local function runGates(plr, spellId, stats, hrp)
 	local targets = pickPriorityEnemyList(hrp.Position, stats.range or 72, count)
 	if #targets == 0 then return end
 	s.cds[spellId] = now + ((stats.cooldown or 2.5) * getCooldownMult(plr))
+	local windup = math.max(0.05, tonumber(stats.portalWindup) or 0.5)
+	local sequenceDelay = math.max(0, tonumber(stats.portalSequenceDelay) or 0.12)
+	local rotationX = math.rad(tonumber(stats.portalRotationX) or -90)
+	local castAsset = stats.castAsset or "GilgameshMain"
 
 	for index = 1, count do
-		local target = targets[((index - 1) % #targets) + 1]
-		local targetPos = target and getEnemyPosition(target)
-		if targetPos then
-			local angle = random:NextNumber(0, math.pi * 2)
-			local radius = random:NextNumber(0, tonumber(stats.portalRadius) or 5)
-			local castPos = hrp.Position + Vector3.new(math.cos(angle) * radius, tonumber(stats.portalHeight) or 5, math.sin(angle) * radius)
-			local dir = targetPos - castPos
-			if dir.Magnitude > 0.01 then
-				local castCFrame = CFrame.lookAt(castPos, targetPos)
-				SpellVisuals.Broadcast("authoredCast", { cframe=castCFrame, assetName="GilgameshMain", duration=0.45, stats=SpellVisuals.ExtractStats(stats) })
-				task.delay(0.08 + ((index - 1) * 0.04), function()
-					if isPlayerRunActive(plr) and target and enemyAlive(target) then fireProjectile(plr, castPos, target, stats) end
-				end)
+		local assignedTarget = targets[((index - 1) % #targets) + 1]
+		local angle = random:NextNumber(0, math.pi * 2)
+		local radius = random:NextNumber(0, tonumber(stats.portalRadius) or 5)
+		local localOffset = Vector3.new(math.cos(angle) * radius, tonumber(stats.portalHeight) or 5, math.sin(angle) * radius)
+		task.delay((index - 1) * sequenceDelay, function()
+			if not isPlayerRunActive(plr) then return end
+			local currentCharacter = plr.Character
+			local currentHrp = currentCharacter and currentCharacter:FindFirstChild("HumanoidRootPart")
+			if not currentHrp or not currentHrp:IsA("BasePart") then return end
+
+			local target = assignedTarget
+			if not target or not enemyAlive(target) then
+				target = pickPriorityEnemy(currentHrp.Position, stats.range or 72)
 			end
-		end
+			local targetPos = target and getEnemyPosition(target)
+			if not targetPos then return end
+
+			local castPos = currentHrp.CFrame:PointToWorldSpace(localOffset)
+			if (targetPos - castPos).Magnitude <= 0.01 then return end
+			local castCFrame = CFrame.lookAt(castPos, targetPos) * CFrame.Angles(rotationX, 0, 0)
+			local relativeCFrame = currentHrp.CFrame:ToObjectSpace(castCFrame)
+			SpellVisuals.Broadcast("authoredCast", {
+				cframe = castCFrame,
+				anchor = currentHrp,
+				lockToAnchor = true,
+				assetName = castAsset,
+				duration = windup,
+				stats = SpellVisuals.ExtractStats(stats),
+			})
+
+			task.delay(windup, function()
+				if not isPlayerRunActive(plr) then return end
+				local shotCharacter = plr.Character
+				local shotHrp = shotCharacter and shotCharacter:FindFirstChild("HumanoidRootPart")
+				if not shotHrp or not shotHrp:IsA("BasePart") then return end
+				if not target or not enemyAlive(target) then
+					target = pickPriorityEnemy(shotHrp.Position, stats.range or 72)
+				end
+				if target then
+					local shotOrigin = (shotHrp.CFrame * relativeCFrame).Position
+					fireProjectile(plr, shotOrigin, target, stats)
+				end
+			end)
+		end)
 	end
 end
 
@@ -366,7 +410,16 @@ local function runNova(plr, spellId, stats, hrp)
 	end
 	s.cds[spellId]=now+((stats.cooldown or 3)*getCooldownMult(plr))
 	local radius=stats.radius or 8
-	SpellVisuals.Broadcast("nova",{pos=center,effectPos=center+Vector3.new(0,1,0),dir=hrp.CFrame.LookVector,radius=radius,stats=SpellVisuals.ExtractStats(stats)})
+	if typeof(stats.castAsset) == "string" and stats.castAsset ~= "" then
+		SpellVisuals.Broadcast("authoredCast", {
+			cframe = CFrame.new(center),
+			assetName = stats.castAsset,
+			duration = tonumber(stats.castDuration) or 0.35,
+			stats = SpellVisuals.ExtractStats(stats),
+		})
+	else
+		SpellVisuals.Broadcast("nova",{pos=center,effectPos=center+Vector3.new(0,1,0),dir=hrp.CFrame.LookVector,radius=radius,stats=SpellVisuals.ExtractStats(stats)})
+	end
 	local repeats=(stats.features and (stats.features.doubleHit or stats.features.secondStrike or stats.features.secondSpearWave or stats.features.secondSpikeWave)) and 2 or 1
 	for pass=1,repeats do
 		task.delay((pass-1)*0.35,function()
