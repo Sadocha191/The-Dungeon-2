@@ -32,7 +32,7 @@ Sekwencja ma dać graczowi poczucie: **„do takiego poziomu mocy mogę kiedyś 
 
 ### 1. Przed zamkiem
 
-Gracz otrzymuje kontrolę nad Legendarnym Bohhaterem przed ogromnym zamkiem Króla Zła. Wokół trwa bitwa, a w stronę bohatera napływają wielkie liczby przeciwników.
+Gracz otrzymuje kontrolę nad Legendarnym Bohaterem przed ogromnym zamkiem Króla Zła. Wokół trwa bitwa, a w stronę bohatera napływają wielkie liczby przeciwników.
 
 Pierwsza część służy do poznania podstaw sterowania i walki. Bohater jest jednak tak silny, że nauka mechanik odbywa się poprzez dominowanie nad polem bitwy, a nie walkę o przetrwanie.
 
