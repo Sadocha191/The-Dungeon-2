@@ -4,21 +4,17 @@
     "type": "split",
     "children": [
       {
-        "id": "dc1e1e50dadcaf48",
+        "id": "7aca88e85fb966c7",
         "type": "tabs",
         "children": [
           {
-            "id": "748fc0530309de66",
+            "id": "3a30e5b6f5052eea",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "Wiki/Fabula/Prolog - Upadek Legendarnego Bohatera.md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "Prolog - Upadek Legendarnego Bohatera"
+              "type": "graph",
+              "state": {},
+              "icon": "lucide-git-fork",
+              "title": "Podgląd grafu"
             }
           }
         ]
@@ -94,7 +90,6 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "Wiki/Fabula/Prolog - Upadek Legendarnego Bohatera.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,7 +99,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Linki zwrotne do Prolog - Upadek Legendarnego Bohatera"
+              "title": "Linki zwrotne"
             }
           },
           {
@@ -113,12 +108,11 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "Wiki/Fabula/Prolog - Upadek Legendarnego Bohatera.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Łącza wychodzące od Prolog - Upadek Legendarnego Bohatera"
+              "title": "Łącza wychodzące"
             }
           },
           {
@@ -156,13 +150,12 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "Wiki/Fabula/Prolog - Upadek Legendarnego Bohatera.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Konspekt Prolog - Upadek Legendarnego Bohatera"
+              "title": "Konspekt"
             }
           }
         ]
@@ -184,20 +177,23 @@
       "obsidian-git:Open Git source control": false
     }
   },
-  "active": "748fc0530309de66",
+  "active": "3a30e5b6f5052eea",
   "lastOpenFiles": [
-    "Wiki/Fabula/Final - Powrot Legendarnego Bohatera.md",
-    "Wiki/Miejsca/Four Peaks.md",
-    "Wiki/Systemy/Prolog jako tutorial.md",
-    "Wiki/Systemy",
+    "docs/docs/api/Dispatcher.md",
+    "docs/docs/api",
+    "docs/docs",
     "Wiki/START.md",
+    "Wiki/Systemy/Prolog jako tutorial.md",
     "Wiki/Postacie/Legendarny Bohater.md",
     "Wiki/Postacie/Krol Zla.md",
-    "Wiki/Postacie",
     "Wiki/Miejsca/Regiony.md",
-    "Wiki/Miejsca",
+    "Wiki/Miejsca/Four Peaks.md",
     "Wiki/Frakcje/Generalowie Krola Zla.md",
+    "Wiki/Fabula/Final - Powrot Legendarnego Bohatera.md",
     "Wiki/Fabula/Prolog - Upadek Legendarnego Bohatera.md",
+    "Wiki/Systemy",
+    "Wiki/Postacie",
+    "Wiki/Miejsca",
     "Wiki/Frakcje",
     "Wiki/Fabula",
     "Wiki",
