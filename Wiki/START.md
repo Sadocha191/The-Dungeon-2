@@ -17,10 +17,14 @@ Centralny indeks wiedzy projektowej o świecie, fabule i systemach gry. Ten fold
 
 - [[Wiki/Fabula/Prolog - Upadek Legendarnego Bohatera|Prolog — Upadek Legendarnego Bohatera]] — otwarcie gry, tutorial i prezentacja docelowej fantasy mocy gracza.
 
+### Endgame / spoilery
+
+- [[Wiki/Fabula/Final - Powrot Legendarnego Bohatera|Finał — Powrót Legendarnego Bohatera]] — docelowy big reveal, przedostatni boss i wielofazowe starcie z Królem Zła.
+
 ## Postacie
 
-- [[Wiki/Postacie/Legendarny Bohater|Legendarny Bohater]] — postać, którą gracz steruje w prologu.
-- [[Wiki/Postacie/Krol Zla|Król Zła]] — główny antagonista pokazany na końcu prologu.
+- [[Wiki/Postacie/Legendarny Bohater|Legendarny Bohater]] — postać, którą gracz steruje w prologu; jego prawdziwy los jest jednym z głównych revealów endgame'u.
+- [[Wiki/Postacie/Krol Zla|Król Zła]] — główny antagonista pokazany na końcu prologu i finalny boss historii.
 
 ## Frakcje i przeciwnicy
 
